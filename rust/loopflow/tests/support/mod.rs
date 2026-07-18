@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::child_session::ChildProcessGeneration;
 use loopflow::id::WaveId;
 use loopflow::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
 use loopflow::session_context::{
@@ -291,19 +290,6 @@ fn register_task_with_process(
         agent: "codex".to_string(),
         provider: "codex".to_string(),
         provider_session_id: Some("task-pr-project".to_string()),
-        latest_process: Some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "task-pr-project".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("task-pr-project".to_string()),
-            started_at: now,
-            state: loopflow::child_session::ChildLeaseState::Legacy,
-            outcome: None,
-            provenance: None,
-        }),
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -346,19 +332,6 @@ fn register_task_with_process(
         agent: "codex".to_string(),
         provider: "codex".to_string(),
         provider_session_id: None,
-        latest_process: active.then_some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "task-github-cache".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("task-github-cache".to_string()),
-            started_at: now,
-            state: loopflow::child_session::ChildLeaseState::Legacy,
-            outcome: None,
-            provenance: None,
-        }),
         abandon_intent: None,
         created_at: now,
         updated_at: now,

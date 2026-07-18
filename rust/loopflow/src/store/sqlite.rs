@@ -31,6 +31,26 @@ pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
 
+#[cfg(test)]
+impl SqliteStore {
+    pub(crate) fn install_work_placements_draft(&self) {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let installed: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='work_placements')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect work placement draft");
+        if !installed {
+            conn.execute_batch(include_str!(
+                "migrations/drafts/work_placements__be058cd06c7176605dec099930569221.sql"
+            ))
+            .expect("install work placement draft");
+        }
+    }
+}
+
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
     let conn = Connection::open_with_flags(
         path,

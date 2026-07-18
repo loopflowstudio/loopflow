@@ -629,7 +629,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             agent,
             provider,
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -4664,7 +4663,6 @@ async fn _recover_abandoned_task(
         agent: predecessor.agent.clone(),
         provider: predecessor.provider.clone(),
         provider_session_id: None,
-        latest_process: None,
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -4831,7 +4829,7 @@ mod tests {
         verify_task_pr_range_with_authority, CommittedFollowUp, OpenPrDisposition, RotateOptions,
         TaskRecoveryAdoption, TaskWorkspace,
     };
-    use crate::child_session::{ChildBodyOutcome, ChildProcessGeneration, ChildRef};
+    use crate::child_session::ChildRef;
     use crate::engine::git::is_ancestor;
     use crate::id::WaveId;
     use crate::pm::{PmKr, PmProject};
@@ -4864,6 +4862,24 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn install_work_placements(path: &Path) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let installed: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='work_placements')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !installed {
+            connection
+                .execute_batch(include_str!(
+                    "../store/migrations/drafts/work_placements__be058cd06c7176605dec099930569221.sql"
+                ))
+                .unwrap();
+        }
     }
 
     struct TaskLaunchEnv {
@@ -5042,7 +5058,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -5073,8 +5088,6 @@ mod tests {
                 .contains("cannot resolve current lf binary"),
             "launch must resolve the current Home lf, not the LF_CONTROL_BIN pin: {error}"
         );
-        // No generation was reserved: the session never started a process.
-        assert!(session.latest_process.is_none());
     }
 
     fn changed_workspace() -> (tempfile::TempDir, String, TaskSessionId) {
@@ -5107,22 +5120,6 @@ mod tests {
         branch: &str,
         base_commit: &str,
     ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
-        rotation_task_with_lease(repo, branch, base_commit, None).await
-    }
-
-    /// Like `rotation_task`, but optionally seeds a dead lease + status — the
-    /// shape an explicit resume must reconcile before reaping the lease and
-    /// launching a successor. The worktree stays the real `repo.path()`.
-    async fn rotation_task_with_lease(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-        lease: Option<(
-            crate::child_session::ChildLeaseState,
-            TaskSessionStatus,
-            Option<ChildBodyOutcome>,
-        )>,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
         let home = tempfile::tempdir().expect("task home");
         let store = Arc::new(
             open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
@@ -5130,26 +5127,6 @@ mod tests {
                 .expect("open store"),
         );
         let now = OffsetDateTime::now_utc();
-        let lease_seed = lease.map(|(state, status, outcome)| {
-            (
-                status,
-                ChildProcessGeneration {
-                    generation: 1,
-                    pid: None,
-                    process_group_id: None,
-                    // A name no tmux server knows, so the liveness probe reads
-                    // it as dead.
-                    tmux_name: format!("dead-lease-{}", WaveId::new()),
-                    agent: "codex".to_string(),
-                    provider: "codex".to_string(),
-                    provider_session_id: None,
-                    started_at: now - time::Duration::hours(1),
-                    state,
-                    outcome,
-                    provenance: None,
-                },
-            )
-        });
         let wave = Wave::new(
             WaveId::new(),
             "task-pr-rotation".to_string(),
@@ -5177,19 +5154,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: Some("task-pr-rotation".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "task-pr-rotation".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("task-pr-rotation".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -5209,15 +5173,8 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_session_id: project.id.clone(),
-            status: lease_seed
-                .as_ref()
-                .map(|(status, _)| *status)
-                .unwrap_or(TaskSessionStatus::Waiting),
-            status_reason: if lease_seed.is_some() {
-                "recovered from a vanished body".to_string()
-            } else {
-                "first PR settled".to_string()
-            },
+            status: TaskSessionStatus::Waiting,
+            status_reason: "first PR settled".to_string(),
             status_at: now,
             worktree: repo.path().to_path_buf(),
             workspace_slug: "task-pr-proof".to_string(),
@@ -5231,7 +5188,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: lease_seed.map(|(_, process)| process),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -5365,7 +5321,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn merged_task_resume_refuses_before_reserving_a_generation() {
+    async fn merged_task_resume_refuses_before_reserving_a_run() {
         let repo = TestRepo::new();
         let base = repo.head_sha();
         let branch = "jack/no-doomed-resume";
@@ -5374,12 +5330,11 @@ mod tests {
         settle_completing_pr(&store, pr, "merge-1037").await;
         let _env = StoreEnvGuard::new(home.path());
 
-        let before = store
-            .get_task_session(&session.id)
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
-            .expect("read before")
-            .expect("Task exists")
-            .latest_process;
+            .expect("Task Work");
+        let before = store.current_run(&work).await.expect("read Run before");
         let error = resume_task_async(
             &session.launch.issue.identifier,
             None,
@@ -5387,18 +5342,13 @@ mod tests {
         )
         .await
         .expect_err("merged Task has no active PR to resume");
-        let after = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read after")
-            .expect("Task exists")
-            .latest_process;
+        let after = store.current_run(&work).await.expect("read Run after");
 
         assert_eq!(
             error.to_string(),
             "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
         );
-        assert_eq!(after, before, "a refusal must not reserve a generation");
+        assert_eq!(after, before, "a refusal must not reserve a Run");
     }
 
     /// Create a parent Task with a published (not merged) PR, then a child Task
@@ -5491,7 +5441,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -7103,7 +7052,6 @@ mod tests {
         assert_eq!(successor.status, TaskSessionStatus::Waiting);
         assert_eq!(successor.worktree, abandoned.worktree);
         assert_eq!(successor.workspace_slug, abandoned.workspace_slug);
-        assert!(successor.latest_process.is_none());
         assert_eq!(
             successor.lifecycle_phase,
             crate::task::TaskLifecyclePhase::Kickoff
@@ -7168,33 +7116,13 @@ mod tests {
         repo.create_file("first.txt", "first PR\n");
         repo.stage_all();
         repo.commit("first PR");
-        // Seed a dead Active lease so refusal's "leases untouched" is load-bearing:
-        // without the gate, reconcile_process_liveness would reap it.
-        let (_home, store, session, first) = rotation_task_with_lease(
-            &repo,
-            first_branch,
-            &base,
-            Some((
-                crate::child_session::ChildLeaseState::Active,
-                TaskSessionStatus::Waiting,
-                None,
-            )),
-        )
-        .await;
+        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
         settle_pr(&store, first, "merge-unrelated", None).await;
 
         // The worktree is on an unrelated branch — neither settled nor the
         // deterministic next branch.
         repo.create_branch("jack/unrelated");
         let prs_before = store.task_prs(&session.id).await.expect("read PRs");
-        let lease_before = store
-            .get_task_session(&session.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .latest_process
-            .clone()
-            .expect("dead lease seeded");
 
         let err = task_recovery_adoption(&store, &session)
             .await
@@ -7213,18 +7141,13 @@ mod tests {
             "refusal must name the contract, got: {message}"
         );
 
-        // Refusal left the PR sequence, lease, status, and worktree untouched.
+        // Refusal left the PR sequence, status, and worktree untouched.
         assert_eq!(
             store.task_prs(&session.id).await.expect("reread PRs"),
             prs_before,
             "PR sequence untouched"
         );
         let after = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            after.latest_process,
-            Some(lease_before),
-            "dead lease untouched — the gate is what prevents the reap"
-        );
         assert_eq!(after.status, TaskSessionStatus::Waiting, "status untouched");
         assert_eq!(
             git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -7242,8 +7165,7 @@ mod tests {
         repo.create_file("first.txt", "first PR\n");
         repo.stage_all();
         repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
         settle_pr(&store, first, "merge-dirty", None).await;
 
         // Uncommitted follow-up work on the settled branch: the runner's strict
@@ -7278,8 +7200,7 @@ mod tests {
         repo.create_file("first.txt", "first PR\n");
         repo.stage_all();
         repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
         settle_pr(&store, first, "merge-missing", None).await;
 
         // Delete the ref the worktree is checked out on; HEAD dangles off a
@@ -7319,8 +7240,7 @@ mod tests {
         repo.stage_all();
         repo.commit("first PR");
         // rotation_task seeds an active (Working) PR on `branch`.
-        let (_home, store, session, _pr) =
-            rotation_task_with_lease(&repo, branch, &base, None).await;
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
 
         // Dirty ongoing work on the active PR's branch is allowed — recovery
         // must not drop in-progress work.
@@ -7346,8 +7266,7 @@ mod tests {
         repo.create_file("first.txt", "first PR\n");
         repo.stage_all();
         repo.commit("first PR");
-        let (_home, store, session, _pr) =
-            rotation_task_with_lease(&repo, branch, &base, None).await;
+        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
 
         // Drive the worktree into a conflicting rebase: advance main with a
         // conflicting edit, then rebase the branch onto it.
@@ -7395,8 +7314,7 @@ mod tests {
         repo.create_file("first.txt", "first PR\n");
         repo.stage_all();
         repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
         settle_pr(&store, first, "merge-942", Some("follow-up")).await;
 
         // The deterministic next branch the gate must select, read from the
@@ -7439,8 +7357,7 @@ mod tests {
         repo.create_file("first.txt", "first PR\n");
         repo.stage_all();
         repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
+        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
         repo.create_file("wip.txt", "ongoing\n");
 
         // While the PR is active, dirty ongoing work is fine.
@@ -7488,6 +7405,7 @@ mod tests {
                 .await
                 .expect("open store"),
         );
+        install_work_placements(&db_path);
         let now = OffsetDateTime::now_utc();
         let wave = Wave::new(
             WaveId::new(),
@@ -7516,19 +7434,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: Some("completion-gate".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "completion-gate".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("completion-gate".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -7566,7 +7471,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -8101,19 +8005,11 @@ mod tests {
                 if incident_id == &incidents[0].incident.identity
         ));
         assert_eq!(incidents[0].incident.claimed_run_id.as_ref(), Some(&run.id));
-        let persisted = store
-            .get_task_session(&session.id)
+        assert!(store
+            .current_launch_for_run(&run.id)
             .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("ci-fix launch reserves a generation")
-                .generation,
-            1
-        );
+            .expect("read Launch")
+            .is_some());
     }
 
     #[tokio::test]
@@ -8123,27 +8019,56 @@ mod tests {
         let repo = TestRepo::new();
         let (home, store, project, mut session, _pr) =
             parked_gate_task(&repo, "jack/gate-live-idle", Some(CiState::Failing), 0).await;
-        let generation = session.begin_generation("lf-live-idle-control".to_string());
-        let lease = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
-            .expect("reserve live control body")
-            .expect("waiting Task reserves one generation");
-        if let Some(process) = session.latest_process.as_mut() {
-            process.state = crate::child_session::ChildLeaseState::Active;
-        }
+            .expect("Task Work");
+        let (_run, lease) = store
+            .reserve_run(&work, crate::durable::RunTrigger::User)
+            .await
+            .expect("reserve live control Run");
+        store
+            .advance_run(
+                &lease,
+                crate::durable::RunAdvance::LaunchStarting {
+                    route: crate::durable::LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: crate::durable::Containment::Tmux {
+                        name: "lf-live-idle-control".to_string(),
+                    },
+                    cwd: session.worktree.clone(),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .expect("start live control Launch");
+        let launch = store
+            .current_launch(&lease)
+            .await
+            .expect("read live control Launch")
+            .expect("Launch exists");
+        store
+            .advance_run(
+                &lease,
+                crate::durable::RunAdvance::LaunchLive {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("activate live control Launch");
         session.set_status(
             TaskSessionStatus::Running,
             "Project review owns the Gate step; provider turn is idle",
         );
         store
-            .activate_task_process(&session, &lease)
+            .activate_task_process_for_run(&session, &lease)
             .await
             .expect("activate live control body");
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("Task Work");
         let run = store
             .current_run(&work)
             .await
@@ -8192,13 +8117,14 @@ mod tests {
             persisted.status_reason
         );
         assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("control generation remains active")
-                .generation,
-            generation,
-            "supervision must not interrupt or replace the live control body"
+            store
+                .current_launch_for_run(&run.id)
+                .await
+                .expect("read current Launch")
+                .expect("control Launch remains active")
+                .id,
+            launch.id,
+            "supervision must not interrupt or replace the live control Launch"
         );
     }
 
@@ -8218,21 +8144,15 @@ mod tests {
             .await
             .expect("duplicate green supervision");
 
-        let persisted = store
-            .get_task_session(&session.id)
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(persisted.status, TaskSessionStatus::Starting);
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("green Gate relaunch reserves a generation")
-                .generation,
-            1,
-            "the second observation must not reserve another generation"
-        );
+            .expect("Task Work");
+        assert!(store
+            .current_run(&work)
+            .await
+            .expect("read current Run")
+            .is_some());
     }
 
     #[tokio::test]
@@ -8254,8 +8174,16 @@ mod tests {
             .expect("read Task")
             .expect("Task exists");
         assert_eq!(persisted.phase_cursor, 1);
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .expect("Task Work");
         assert!(
-            persisted.latest_process.is_none(),
+            store
+                .current_run(&work)
+                .await
+                .expect("read current Run")
+                .is_none(),
             "green observation cannot reopen an advanced Gate"
         );
     }

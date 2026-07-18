@@ -23,7 +23,7 @@ use crate::child_session::{
 };
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
-use crate::durable::{AttentionRoute, Home, WorkRef, WorkStatus};
+use crate::durable::{AttentionRoute, Containment, Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
@@ -991,10 +991,7 @@ async fn snapshot_task_runtime(
     now: time::OffsetDateTime,
 ) -> Result<TaskRuntimeSnapshot> {
     let process_alive = task.status.is_process_active()
-        && task
-            .latest_process
-            .as_ref()
-            .is_some_and(|process| liveness.is_alive(&process.tmux_name));
+        && child_launch_alive(store, &ChildRef::Task(task.id.clone()), liveness).await?;
     let latest_event_at = store
         .latest_task_event_at(&task.id)
         .await
@@ -1032,10 +1029,7 @@ async fn snapshot_project_runtime(
     now: time::OffsetDateTime,
 ) -> Result<ProjectRuntimeSnapshot> {
     let process_alive = project.status.is_process_active()
-        && project
-            .latest_process
-            .as_ref()
-            .is_some_and(|process| liveness.is_alive(&process.tmux_name));
+        && child_launch_alive(store, &ChildRef::Project(project.id.clone()), liveness).await?;
     let pending_observations = if project.status.is_terminal() {
         store
             .pending_observations(&ObservationRecipient::Project {
@@ -1073,6 +1067,35 @@ async fn snapshot_project_runtime(
         provider: project.provider.clone(),
         process_alive,
         observation: observe(&evidence, DEFAULT_STALL_AFTER),
+    })
+}
+
+async fn child_launch_alive(
+    store: &SharedStore,
+    child: &ChildRef,
+    liveness: &TmuxLiveness,
+) -> Result<bool> {
+    let work = store
+        .work_for_child(child)
+        .await
+        .map_err(|error| anyhow!("failed to resolve child Work: {error}"))?;
+    let Some(run) = store
+        .current_run(&work)
+        .await
+        .map_err(|error| anyhow!("failed to read child Run: {error}"))?
+    else {
+        return Ok(false);
+    };
+    let Some(launch) = store
+        .current_launch_for_run(&run.id)
+        .await
+        .map_err(|error| anyhow!("failed to read child Launch: {error}"))?
+    else {
+        return Ok(false);
+    };
+    Ok(match launch.containment {
+        Containment::Tmux { name } => liveness.is_alive(&name),
+        Containment::ProcessGroup { .. } => true,
     })
 }
 
@@ -2530,7 +2553,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2580,7 +2602,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             observation: crate::task::Observation::NotRequired,
             created_at: now,

@@ -1026,13 +1026,10 @@ mod tests {
         ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
-    use crate::child_session::{
-        BinaryProvenance, ChildBodyOutcome, ChildLeaseState, ChildProcessGeneration, ChildRef,
-        ObservationRecipient,
-    };
+    use crate::child_session::{ChildRef, ObservationRecipient};
     use crate::durable::{
-        AttentionRoute, AuthenticatedRequest, Author, Containment, ContainmentObservation,
-        ControlCtx, FlowPosition, RunAdvance, SendState, StopCause,
+        AttentionRoute, Author, Containment, ContainmentObservation, ControlCtx, FlowPosition,
+        RunAdvance, SendState, StopCause,
     };
     use crate::id::WaveId;
     use crate::profile::EmailAddress;
@@ -1236,7 +1233,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1290,19 +1286,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: Some("thread-project".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "lf-project-test".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("thread-project".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1383,80 +1366,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_legacy_children_register_their_product_launch_before_control() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-
-        let project_work = store
-            .work_for_child(&ChildRef::Project(project.id.clone()))
-            .await
-            .unwrap();
-        let project_run = store.current_run(&project_work).await.unwrap().unwrap();
-        let project_launch = store
-            .sqlite
-            .control_launch_for_run(&project_run.id)
-            .unwrap()
-            .expect("live Project body has a product Launch");
-        assert_eq!(project_launch.state, crate::durable::LaunchState::Live);
-        assert_eq!(
-            project_launch.containment,
-            Containment::Tmux {
-                name: "lf-project-test".to_string()
-            }
-        );
-
-        let mut task = make_task_session(&wave, &project);
-        task.status = TaskSessionStatus::Running;
-        task.latest_process = Some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-test".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread-task".to_string()),
-            started_at: task.created_at,
-            state: ChildLeaseState::Active,
-            outcome: None,
-            provenance: None,
-        });
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        let task_work = store
-            .work_for_child(&ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        let task_run = store.current_run(&task_work).await.unwrap().unwrap();
-        let task_launch = store
-            .sqlite
-            .control_launch_for_run(&task_run.id)
-            .unwrap()
-            .expect("live Task body has a product Launch");
-        assert_eq!(task_launch.state, crate::durable::LaunchState::Live);
-        assert_eq!(
-            task_launch.containment,
-            Containment::Tmux {
-                name: "lf-task-test".to_string()
-            }
-        );
-
-        let request = AuthenticatedRequest::cli();
-        let receipt = store
-            .interrupt(&ControlCtx::User(&request), &task_work, &task_run.id)
-            .await
-            .unwrap();
-        assert_eq!(receipt.launch_id, task_launch.id);
-        assert_eq!(receipt.turn_id, None);
-    }
-    #[tokio::test]
     async fn session_child_reservation_refuses_remote_placement() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
@@ -1466,9 +1375,8 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let mut project = make_project_session(&wave);
         project.status = ProjectSessionStatus::Created;
-        project.latest_process = None;
         store.create_project_session(&project).await.unwrap();
-        let mut task = make_task_session(&wave, &project);
+        let task = make_task_session(&wave, &project);
         store
             .create_task_session(&task, &make_task_pr(&task))
             .await
@@ -1483,7 +1391,6 @@ mod tests {
             .unwrap();
         store.place_work(&work, &remote.id).await.unwrap();
 
-        task.begin_generation("remote-task".to_string());
         let error = store
             .reserve_task_process(&task, TaskSessionStatus::Created)
             .await
@@ -1557,7 +1464,6 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let mut project = make_project_session(&wave);
         project.status = ProjectSessionStatus::Created;
-        project.latest_process = None;
         store.create_project_session(&project).await.unwrap();
         let mut task = make_task_session(&wave, &project);
         store
@@ -1565,13 +1471,11 @@ mod tests {
             .await
             .unwrap();
 
-        project.begin_generation("parent-run".to_string());
         let child_lease = store
             .reserve_project_process(&project, ProjectSessionStatus::Created)
             .await
             .unwrap()
             .unwrap();
-        project.latest_process.as_mut().unwrap().state = ChildLeaseState::Active;
         project.set_status(ProjectSessionStatus::Running, "active");
         store
             .activate_project_process(&project, &child_lease)
@@ -1586,13 +1490,11 @@ mod tests {
             .await
             .unwrap();
 
-        task.begin_generation("child-run".to_string());
         let task_child_lease = store
             .reserve_task_process(&task, TaskSessionStatus::Created)
             .await
             .unwrap()
             .unwrap();
-        task.latest_process.as_mut().unwrap().state = ChildLeaseState::Active;
         task.set_status(TaskSessionStatus::Running, "active");
         store
             .activate_task_process(&task, &task_child_lease)
@@ -1611,7 +1513,7 @@ mod tests {
         assert_eq!(
             launch.containment,
             Containment::Tmux {
-                name: "child-run".to_string()
+                name: format!("test-task-{}", task.id)
             }
         );
         let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
@@ -1957,17 +1859,11 @@ mod tests {
         let mut running = task.clone();
         running.set_status(TaskSessionStatus::Waiting, "CI incident is runnable");
         store.update_task_session(&running).await.unwrap();
-        running.begin_generation("ci-incident-run".to_string());
         let lease = store
             .reserve_task_process(&running, TaskSessionStatus::Waiting)
             .await
             .unwrap()
             .unwrap();
-        running
-            .latest_process
-            .as_mut()
-            .expect("reserved process")
-            .state = ChildLeaseState::Active;
         running.set_status(TaskSessionStatus::Running, "repairing CI");
         store.activate_task_process(&running, &lease).await.unwrap();
         let run = store.current_run(&work).await.unwrap().unwrap();
@@ -2065,252 +1961,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_session_provenance_round_trips_through_insert() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-
-        let mut task = make_task_session(&wave, &project);
-        task.latest_process = Some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-prov".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Reserved,
-            outcome: None,
-            provenance: Some(BinaryProvenance {
-                version: "0.12.0".to_string(),
-                provenance: "release".to_string(),
-                source_identity: "release".to_string(),
-            }),
-        });
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
-        let provenance = persisted
-            .latest_process
-            .as_ref()
-            .and_then(|process| process.provenance.as_ref())
-            .expect("provenance survived insert");
-        assert_eq!(provenance.version, "0.12.0");
-        assert_eq!(provenance.provenance, "release");
-        assert_eq!(provenance.source_identity, "release");
-    }
-
-    #[tokio::test]
-    async fn task_session_provenance_survives_reserve_and_activate() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-
-        // Create without a generation, then begin one and record provenance the
-        // way the launcher does. The reserve write must persist provenance.
-        let mut task = make_task_session(&wave, &project);
-        task.set_status(TaskSessionStatus::Waiting, "ready");
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        task.begin_generation("lf-task-prov".to_string());
-        if let Some(process) = task.latest_process.as_mut() {
-            process.provenance = Some(BinaryProvenance {
-                version: "0.12.1".to_string(),
-                provenance: "development".to_string(),
-                source_identity: "loopflow-deadbeef".to_string(),
-            });
-        }
-        let lease = store
-            .reserve_task_process(&task, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        let reserved = store.get_task_session(&task.id).await.unwrap().unwrap();
-        let provenance = reserved
-            .latest_process
-            .as_ref()
-            .and_then(|process| process.provenance.as_ref())
-            .expect("provenance survived reserve");
-        assert_eq!(provenance.version, "0.12.1");
-        assert_eq!(provenance.source_identity, "loopflow-deadbeef");
-
-        // Activation re-writes the generation through the lease update; the
-        // immutable provenance must survive unchanged.
-        if let Some(process) = &mut task.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        task.set_status(TaskSessionStatus::Running, "active");
-        store.activate_task_process(&task, &lease).await.unwrap();
-        let active = store.get_task_session(&task.id).await.unwrap().unwrap();
-        let provenance = active
-            .latest_process
-            .as_ref()
-            .and_then(|process| process.provenance.as_ref())
-            .expect("provenance survived activate");
-        assert_eq!(provenance.version, "0.12.1");
-        assert_eq!(provenance.provenance, "development");
-        assert_eq!(provenance.source_identity, "loopflow-deadbeef");
-    }
-    #[tokio::test]
-    async fn project_session_provenance_round_trips_through_insert() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-
-        let mut project = make_project_session(&wave);
-        project.latest_process = Some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-project-prov".to_string(),
-            agent: "claude".to_string(),
-            provider: "claude".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Reserved,
-            outcome: None,
-            provenance: Some(BinaryProvenance {
-                version: "0.12.0".to_string(),
-                provenance: "release".to_string(),
-                source_identity: "release".to_string(),
-            }),
-        });
-        store.create_project_session(&project).await.unwrap();
-        let persisted = store
-            .get_project_session(&project.id)
-            .await
-            .unwrap()
-            .unwrap();
-        let provenance = persisted
-            .latest_process
-            .as_ref()
-            .and_then(|process| process.provenance.as_ref())
-            .expect("provenance survived insert");
-        assert_eq!(provenance.version, "0.12.0");
-        assert_eq!(provenance.provenance, "release");
-    }
-
-    #[tokio::test]
-    async fn project_session_provenance_survives_reserve_and_activate() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-
-        let mut project = make_project_session(&wave);
-        project.status = ProjectSessionStatus::Created;
-        project.status_reason = "ready".to_string();
-        project.latest_process = None;
-        store.create_project_session(&project).await.unwrap();
-        project.begin_generation("lf-project-prov".to_string());
-        if let Some(process) = project.latest_process.as_mut() {
-            process.provenance = Some(BinaryProvenance {
-                version: "0.12.1".to_string(),
-                provenance: "development".to_string(),
-                source_identity: "loopflow-cafe".to_string(),
-            });
-        }
-        let lease = store
-            .reserve_project_process(&project, ProjectSessionStatus::Created)
-            .await
-            .unwrap()
-            .unwrap();
-        let reserved = store
-            .get_project_session(&project.id)
-            .await
-            .unwrap()
-            .unwrap();
-        let provenance = reserved
-            .latest_process
-            .as_ref()
-            .and_then(|process| process.provenance.as_ref())
-            .expect("provenance survived reserve");
-        assert_eq!(provenance.version, "0.12.1");
-        assert_eq!(provenance.source_identity, "loopflow-cafe");
-
-        if let Some(process) = &mut project.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        project.set_status(ProjectSessionStatus::Running, "active");
-        store
-            .activate_project_process(&project, &lease)
-            .await
-            .unwrap();
-        let active = store
-            .get_project_session(&project.id)
-            .await
-            .unwrap()
-            .unwrap();
-        let provenance = active
-            .latest_process
-            .as_ref()
-            .and_then(|process| process.provenance.as_ref())
-            .expect("provenance survived activate");
-        assert_eq!(provenance.version, "0.12.1");
-        assert_eq!(provenance.source_identity, "loopflow-cafe");
-    }
-
-    #[tokio::test]
-    async fn session_generation_without_provenance_round_trips_as_none() {
-        // A generation recorded before this field existed deserializes with
-        // provenance `None`, so old sessions remain readable without a backfill.
-        let dir = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-        let mut task = make_task_session(&wave, &project);
-        task.latest_process = Some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-legacy".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Reserved,
-            outcome: None,
-            provenance: None,
-        });
-        store
-            .create_task_session(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        let persisted = store.get_task_session(&task.id).await.unwrap().unwrap();
-        let process = persisted
-            .latest_process
-            .as_ref()
-            .expect("generation survived");
-        assert_eq!(process.generation, 1);
-        assert_eq!(process.tmux_name, "lf-task-legacy");
-        assert!(process.provenance.is_none());
-    }
-
-    #[tokio::test]
     async fn task_phase_epoch_allows_resets_and_rejects_stale_positions() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -2328,15 +1978,11 @@ mod tests {
             .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        task.begin_generation("task-lifecycle".to_string());
         let lease = store
             .reserve_task_process(&task, TaskSessionStatus::Waiting)
             .await
             .unwrap()
             .unwrap();
-        if let Some(process) = &mut task.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
         task.set_status(TaskSessionStatus::Running, "active");
         store.activate_task_process(&task, &lease).await.unwrap();
         let mut stale = task.clone();
@@ -2411,14 +2057,12 @@ mod tests {
 
         let mut predecessor = make_project_session(&wave);
         predecessor.set_status(ProjectSessionStatus::Abandoned, "legacy Session ended");
-        predecessor.latest_process = None;
         predecessor.provider_session_id = None;
         store.create_project_session(&predecessor).await.unwrap();
 
         let mut successor = make_project_session(&wave);
         successor.status = ProjectSessionStatus::Created;
         successor.status_reason = format!("successor to {}", predecessor.id);
-        successor.latest_process = None;
         successor.provider_session_id = None;
         successor.created_at += time::Duration::SECOND;
         successor.updated_at = successor.created_at;
@@ -2473,7 +2117,6 @@ mod tests {
         let mut predecessor = make_project_session(&wave);
         predecessor.status = ProjectSessionStatus::Created;
         predecessor.status_reason = "available for routing".to_string();
-        predecessor.latest_process = None;
         predecessor.provider_session_id = None;
         store.create_project_session(&predecessor).await.unwrap();
         let task = make_task_session(&wave, &predecessor);
@@ -2497,7 +2140,6 @@ mod tests {
         let mut successor = make_project_session(&wave);
         successor.status = ProjectSessionStatus::Created;
         successor.status_reason = format!("successor to {}", predecessor.id);
-        successor.latest_process = None;
         successor.provider_session_id = None;
         successor.created_at += time::Duration::SECOND;
         successor.updated_at = successor.created_at;
@@ -2535,7 +2177,6 @@ mod tests {
         let mut predecessor = make_project_session(&wave);
         predecessor.status = ProjectSessionStatus::Created;
         predecessor.status_reason = "available for observations".to_string();
-        predecessor.latest_process = None;
         predecessor.provider_session_id = None;
         store.create_project_session(&predecessor).await.unwrap();
         let task = make_task_session(&wave, &predecessor);
@@ -2580,7 +2221,6 @@ mod tests {
         let mut successor = make_project_session(&wave);
         successor.status = ProjectSessionStatus::Created;
         successor.status_reason = "successor".to_string();
-        successor.latest_process = None;
         successor.created_at += time::Duration::SECOND;
         successor.updated_at = successor.created_at;
         store.create_project_session(&successor).await.unwrap();
@@ -2600,15 +2240,11 @@ mod tests {
         );
 
         // The successor consumes the observation under its own write lease.
-        successor.begin_generation("successor-consume".to_string());
         let successor_lease = store
             .reserve_project_process(&successor, ProjectSessionStatus::Created)
             .await
             .unwrap()
             .unwrap();
-        if let Some(process) = &mut successor.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
         successor.set_status(ProjectSessionStatus::Running, "consuming chain");
         store
             .activate_project_process(&successor, &successor_lease)
@@ -2726,11 +2362,15 @@ mod tests {
         running.launch.issue.id = LinearIssueId::new("issue-running").unwrap();
         running.launch.issue.identifier = "W2-9".to_string();
         running.worktree = PathBuf::from("/repo.running");
-        running.begin_generation("task-body".to_string());
         store
             .create_task_session(&running, &make_task_pr(&running))
             .await
             .unwrap();
+        store
+            .reserve_task_process(&running, TaskSessionStatus::Created)
+            .await
+            .unwrap()
+            .expect("active Run reserves");
         assert!(store
             .rebind_task_issue_identifier("issue-running", "W2-9", "PRD-9")
             .await
@@ -2856,7 +2496,6 @@ mod tests {
         successor.status = TaskSessionStatus::Waiting;
         successor.status_reason = "recovered; resume to continue".to_string();
         successor.status_at = OffsetDateTime::now_utc();
-        successor.latest_process = None;
         successor.created_at = OffsetDateTime::now_utc();
         successor.updated_at = successor.created_at;
         let created = store
@@ -3434,8 +3073,7 @@ mod tests {
 
         let barrier = Arc::new(tokio::sync::Barrier::new(3));
         let launch = |store: Arc<super::Store>, barrier: Arc<tokio::sync::Barrier>| {
-            let mut candidate = session.clone();
-            candidate.begin_generation("task-race".to_string());
+            let candidate = session.clone();
             tokio::spawn(async move {
                 barrier.wait().await;
                 store
@@ -3454,11 +3092,11 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(leases.len(), 1);
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(persisted.status, TaskSessionStatus::Starting);
-        let process = persisted.latest_process.unwrap();
-        assert_eq!(process.generation, 1);
-        assert_eq!(process.state, ChildLeaseState::Reserved);
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .unwrap();
+        assert!(store.current_run(&work).await.unwrap().is_some());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3474,9 +3112,7 @@ mod tests {
         let mut project = make_project_session(&wave);
         project.status = ProjectSessionStatus::Created;
         project.status_reason = "ready".to_string();
-        project.latest_process = None;
         store.create_project_session(&project).await.unwrap();
-        project.begin_generation("project-reservation".to_string());
 
         let mut task = make_task_session(&wave, &project);
         task.set_status(TaskSessionStatus::Waiting, "ready");
@@ -3484,7 +3120,6 @@ mod tests {
             .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        task.begin_generation("task-reservation".to_string());
 
         let promotion = crate::promotion_lock::acquire_exclusive().unwrap();
         let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -3541,96 +3176,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_process_resume_reserves_each_session_generation_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project_session(&wave);
-        store.create_project_session(&project).await.unwrap();
-
-        let mut session = make_task_session(&wave, &project);
-        session.set_status(TaskSessionStatus::Waiting, "waiting for review");
-        store
-            .create_task_session(&session, &make_task_pr(&session))
-            .await
-            .unwrap();
-
-        let mut first_resume = session.clone();
-        assert_eq!(first_resume.begin_generation("task-one".to_string()), 1);
-        let first_lease = store
-            .reserve_task_process(&first_resume, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .expect("first generation reserves a write lease");
-
-        let mut racing_resume = session.clone();
-        racing_resume.begin_generation("task-one".to_string());
-        assert!(store
-            .reserve_task_process(&racing_resume, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .is_none());
-
-        if let Some(process) = &mut first_resume.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
-        first_resume.set_status(TaskSessionStatus::Running, "active");
-        store
-            .activate_task_process(&first_resume, &first_lease)
-            .await
-            .unwrap();
-        if let Some(process) = &mut first_resume.latest_process {
-            process.state = ChildLeaseState::Finished;
-            process.outcome = Some(ChildBodyOutcome::Interrupted {
-                reason: "test boundary".to_string(),
-            });
-        }
-        first_resume.set_status(TaskSessionStatus::Waiting, "ready again");
-        store
-            .finish_task_process(&first_resume, &first_lease)
-            .await
-            .unwrap();
-
-        let mut stale_resume = session.clone();
-        stale_resume.begin_generation("stale-generation-one".to_string());
-        assert!(store
-            .reserve_task_process(&stale_resume, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .is_none());
-        let mut current_resume = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(current_resume.begin_generation("task-next".to_string()), 2);
-        store
-            .reserve_task_process(&current_resume, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .expect("only the current receipt may advance the generation");
-
-        let mut second = make_task_session(&wave, &project);
-        second.launch.issue.id = LinearIssueId::new("issue-two").unwrap();
-        second.launch.issue.identifier = "INF-124".to_string();
-        second.worktree = PathBuf::from("/repo.inf-124");
-        second.set_status(TaskSessionStatus::Waiting, "waiting for work");
-        store
-            .create_task_session(&second, &make_task_pr(&second))
-            .await
-            .unwrap();
-        second.begin_generation("task-two".to_string());
-        let second_lease = store
-            .reserve_task_process(&second, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .expect("other Session reserves its own write lease");
-        assert_ne!(first_lease.run_token, second_lease.run_token);
-
-        let loaded = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(loaded.status, TaskSessionStatus::Starting);
-        assert_eq!(loaded.latest_process.unwrap().generation, 2);
-    }
-    #[tokio::test]
     async fn terminal_intent_cannot_be_reverted_by_the_current_body() {
         let dir = tempfile::tempdir().unwrap();
         let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -3641,17 +3186,12 @@ mod tests {
         let mut project = make_project_session(&wave);
         project.status = ProjectSessionStatus::Created;
         project.status_reason = "ready".to_string();
-        project.latest_process = None;
         store.create_project_session(&project).await.unwrap();
-        project.begin_generation("project-body".to_string());
         let project_lease = store
             .reserve_project_process(&project, ProjectSessionStatus::Created)
             .await
             .unwrap()
             .unwrap();
-        if let Some(process) = &mut project.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
         project.set_status(ProjectSessionStatus::Running, "active");
         store
             .activate_project_process(&project, &project_lease)
@@ -3676,15 +3216,11 @@ mod tests {
             .create_task_session(&task, &make_task_pr(&task))
             .await
             .unwrap();
-        task.begin_generation("task-body".to_string());
         let task_lease = store
             .reserve_task_process(&task, TaskSessionStatus::Waiting)
             .await
             .unwrap()
             .unwrap();
-        if let Some(process) = &mut task.latest_process {
-            process.state = ChildLeaseState::Active;
-        }
         task.set_status(TaskSessionStatus::Running, "active");
         store
             .activate_task_process(&task, &task_lease)

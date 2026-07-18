@@ -13,8 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildLeaseState,
-    ChildProcessGeneration, ChildRef, ObservationRecipient,
+    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildRef, ObservationRecipient,
 };
 use crate::durable::{Author, RunLease};
 use crate::engine::InteractionPolicy;
@@ -167,7 +166,6 @@ impl SqliteStore {
             ));
         }
         if successor.status != TaskSessionStatus::Waiting
-            || successor.latest_process.is_some()
             || successor.provider_session_id.is_some()
             || successor.abandon_intent.is_some()
         {
@@ -1767,13 +1765,6 @@ fn insert_initial_task(
 }
 
 fn close_task_epoch_if_quiescent(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
-    if !session
-        .latest_process
-        .as_ref()
-        .is_none_or(|process| process.state == ChildLeaseState::Finished)
-    {
-        return Ok(());
-    }
     let state = match session.status {
         TaskSessionStatus::Completed => "done",
         TaskSessionStatus::Abandoned => "abandoned",
@@ -1796,13 +1787,6 @@ fn close_project_epoch_if_quiescent(
     conn: &Connection,
     session: &ProjectSession,
 ) -> StoreResult<()> {
-    if !session
-        .latest_process
-        .as_ref()
-        .is_none_or(|process| process.state == ChildLeaseState::Finished)
-    {
-        return Ok(());
-    }
     let state = match session.status {
         ProjectSessionStatus::Completed => "done",
         ProjectSessionStatus::Abandoned => "abandoned",
@@ -2085,30 +2069,10 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.agent.clone()),
         Box::new(session.provider.clone()),
         Box::new(session.provider_session_id.clone()),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| i64::from(process.generation)),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.pid.map(i64::from)),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.tmux_name.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.started_at.unix_timestamp()),
-        ),
+        Box::new(None::<i64>),
+        Box::new(None::<i64>),
+        Box::new(None::<String>),
+        Box::new(None::<i64>),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
         Box::new(session.launch.pm_snapshot_synced_at),
@@ -2117,10 +2081,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
                 .expect("Task Session PM writeback state must serialize"),
         ),
         Box::new(session.project_session_id.as_str().to_string()),
-        // Legacy lf_bin/db_path/lf_home columns: a Session no longer pins a
-        // binary. Launch resolves the current Home lf; BinaryProvenance on the
-        // generation is the audit record. Written NULL, never read; the columns
-        // are dropped by the earned table rebuild, not this change.
+        // Legacy lf_bin/db_path/lf_home columns are written NULL and never read.
         Box::new(None::<String>),
         Box::new(None::<String>),
         Box::new(None::<String>),
@@ -2147,45 +2108,12 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(i64::from(session.phase_cursor)),
         Box::new(i64::from(session.phase_iteration)),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.process_group_id.map(i64::from)),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.agent.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.provider.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.provider_session_id.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.state.as_str().to_string()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.outcome.as_ref())
-                .map(|outcome| {
-                    serde_json::to_string(outcome).expect("child body outcome must serialize")
-                }),
-        ),
+        Box::new(None::<i64>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
         Box::new(session.lifecycle.kickoff.flow.clone()),
         Box::new(
             session
@@ -2210,15 +2138,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.gate_proposal.as_ref().map(|proposal| {
             serde_json::to_string(proposal).expect("Task gate proposal must serialize")
         })),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.provenance.as_ref())
-                .map(|provenance| {
-                    serde_json::to_string(provenance).expect("child body provenance must serialize")
-                }),
-        ),
+        Box::new(None::<String>),
     ]
 }
 
@@ -2488,38 +2408,6 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
     let status = status_text
         .parse()
         .map_err(|error| invalid_column(10, error))?;
-    let process_generation: Option<i64> = row.get(18)?;
-    let process_started_at: Option<i64> = row.get(21)?;
-    let process = match (process_generation, process_started_at) {
-        (Some(generation), Some(started_at)) => {
-            let state_text: String = row.get(40)?;
-            let outcome_json: Option<String> = row.get(41)?;
-            let provenance_json: Option<String> = row.get(50)?;
-            Some(ChildProcessGeneration {
-                generation: generation as u32,
-                pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
-                process_group_id: row.get::<_, Option<i64>>(36)?.map(|id| id as u32),
-                tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
-                agent: row.get(37)?,
-                provider: row.get(38)?,
-                provider_session_id: row.get(39)?,
-                started_at: crate::store::rows::unix_to_datetime(started_at),
-                state: ChildLeaseState::parse(&state_text)
-                    .map_err(|error| invalid_column(40, error))?,
-                outcome: outcome_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()
-                    .map_err(|error| invalid_column(41, error))?,
-                provenance: provenance_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()
-                    .map_err(|error| invalid_column(50, error))?,
-            })
-        }
-        _ => None,
-    };
-    // Columns 27/28/29 (lf_bin/db_path/lf_home) are legacy dead schema: a
-    // Session no longer pins a binary, so they are not read into domain state.
     let abandon_intent = match (
         row.get::<_, Option<i64>>(30)?,
         row.get::<_, Option<String>>(31)?,
@@ -2595,7 +2483,6 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         agent: row.get(15)?,
         provider: row.get(16)?,
         provider_session_id: row.get(17)?,
-        latest_process: process,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(22)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(23)?),
@@ -2793,36 +2680,13 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         Box::new(session.agent.clone()),
         Box::new(session.provider.clone()),
         Box::new(session.provider_session_id.clone()),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| i64::from(process.generation)),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.pid.map(i64::from)),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.tmux_name.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.started_at.unix_timestamp()),
-        ),
+        Box::new(None::<i64>),
+        Box::new(None::<i64>),
+        Box::new(None::<String>),
+        Box::new(None::<i64>),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
-        // Legacy lf_bin/db_path/lf_home columns: a Session no longer pins a
-        // binary. Launch resolves the current Home lf; BinaryProvenance on the
-        // generation is the audit record. Written NULL, never read; the columns
-        // are dropped by the earned table rebuild, not this change.
+        // Legacy lf_bin/db_path/lf_home columns are written NULL and never read.
         Box::new(None::<String>),
         Box::new(None::<String>),
         Box::new(None::<String>),
@@ -2838,54 +2702,13 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
                 .as_ref()
                 .map(|intent| intent.reason.clone()),
         ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.process_group_id.map(i64::from)),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.agent.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.provider.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.provider_session_id.clone()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .map(|process| process.state.as_str().to_string()),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.outcome.as_ref())
-                .map(|outcome| {
-                    serde_json::to_string(outcome).expect("child body outcome must serialize")
-                }),
-        ),
-        Box::new(
-            session
-                .latest_process
-                .as_ref()
-                .and_then(|process| process.provenance.as_ref())
-                .map(|provenance| {
-                    serde_json::to_string(provenance).expect("child body provenance must serialize")
-                }),
-        ),
+        Box::new(None::<i64>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
+        Box::new(None::<String>),
     ]
 }
 
@@ -2913,38 +2736,6 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
     let status = status_text
         .parse()
         .map_err(|error| invalid_column(7, error))?;
-    let process_generation: Option<i64> = row.get(16)?;
-    let process_started_at: Option<i64> = row.get(19)?;
-    let process = match (process_generation, process_started_at) {
-        (Some(generation), Some(started_at)) => {
-            let state_text: String = row.get(31)?;
-            let outcome_json: Option<String> = row.get(32)?;
-            let provenance_json: Option<String> = row.get(33)?;
-            Some(ChildProcessGeneration {
-                generation: generation as u32,
-                pid: row.get::<_, Option<i64>>(17)?.map(|pid| pid as u32),
-                process_group_id: row.get::<_, Option<i64>>(27)?.map(|id| id as u32),
-                tmux_name: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
-                agent: row.get(28)?,
-                provider: row.get(29)?,
-                provider_session_id: row.get(30)?,
-                started_at: crate::store::rows::unix_to_datetime(started_at),
-                state: ChildLeaseState::parse(&state_text)
-                    .map_err(|error| invalid_column(31, error))?,
-                outcome: outcome_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()
-                    .map_err(|error| invalid_column(32, error))?,
-                provenance: provenance_json
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()
-                    .map_err(|error| invalid_column(33, error))?,
-            })
-        }
-        _ => None,
-    };
-    // Columns 22/23/24 (lf_bin/db_path/lf_home) are legacy dead schema: a
-    // Session no longer pins a binary, so they are not read into domain state.
     let abandon_intent = match (
         row.get::<_, Option<i64>>(25)?,
         row.get::<_, Option<String>>(26)?,
@@ -2976,7 +2767,6 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         agent: row.get(13)?,
         provider: row.get(14)?,
         provider_session_id: row.get(15)?,
-        latest_process: process,
         abandon_intent,
         created_at: crate::store::rows::unix_to_datetime(row.get(20)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(21)?),

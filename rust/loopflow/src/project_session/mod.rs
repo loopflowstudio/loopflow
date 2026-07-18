@@ -10,10 +10,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child_session::{
-    prefixed_uuid_id, AbandonIntent, ChildLeaseState, ChildProcessGeneration, ChildRef,
-    ObservationRecipient,
-};
+use crate::child_session::{prefixed_uuid_id, AbandonIntent, ChildRef, ObservationRecipient};
 use crate::id::WaveId;
 use crate::session_context::ProjectLaunchReceipt;
 use crate::task::{TaskEventKind, TaskSessionId};
@@ -125,10 +122,6 @@ pub struct ProjectSession {
     pub provider: String,
     /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
-    /// Latest launch generation, retained after that process exits. Its
-    /// [`crate::child_session::BinaryProvenance`] is the audit record of which
-    /// lf launched it — a Session no longer pins a binary of its own.
-    pub latest_process: Option<ChildProcessGeneration>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
     /// path may start a process for a Session carrying this.
     pub abandon_intent: Option<AbandonIntent>,
@@ -167,32 +160,6 @@ impl ProjectSession {
         self.status_at = now;
         self.updated_at = now;
     }
-
-    pub fn begin_generation(&mut self, tmux_name: String) -> u32 {
-        let generation = self
-            .latest_process
-            .as_ref()
-            .map_or(1, |process| process.generation + 1);
-        let now = OffsetDateTime::now_utc();
-        self.latest_process = Some(ChildProcessGeneration {
-            generation,
-            pid: None,
-            process_group_id: None,
-            tmux_name,
-            agent: self.agent.clone(),
-            provider: self.provider.clone(),
-            provider_session_id: self.provider_session_id.clone(),
-            started_at: now,
-            state: ChildLeaseState::Reserved,
-            outcome: None,
-            provenance: None,
-        });
-        self.set_status(
-            ProjectSessionStatus::Starting,
-            "project process is starting",
-        );
-        generation
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,9 +168,6 @@ pub enum ProjectEventKind {
     Started,
     BodyHandedOff {
         handoff: crate::child_session::ChildBodyHandoff,
-    },
-    BodyLeaseChanged {
-        process: ChildProcessGeneration,
     },
     StatusChanged {
         from: ProjectSessionStatus,
@@ -230,14 +194,7 @@ pub enum ProjectEventKind {
 
 impl ProjectEventKind {
     pub fn is_wave_observable(&self) -> bool {
-        match self {
-            Self::Started | Self::TaskObserved { .. } => false,
-            Self::BodyLeaseChanged { process } => matches!(
-                process.state,
-                ChildLeaseState::Revoked | ChildLeaseState::Finished
-            ),
-            _ => true,
-        }
+        !matches!(self, Self::Started | Self::TaskObserved { .. })
     }
 }
 
@@ -317,7 +274,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,

@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
@@ -778,9 +776,7 @@ impl SqliteStore {
     /// Route provider/model are known before spawn, but the resume token and the
     /// real process group only exist after the harness starts and can change
     /// mid-Run when a provider hands back a new session id. This is the write
-    /// path `agent_launches` previously lacked — the Session row carried these
-    /// as `provider_session_id` and `latest_process`, which is exactly the
-    /// duplicate ownership being deleted.
+    /// path `agent_launches` previously lacked.
     ///
     /// This records observation only. `RunAdvance::LaunchLive` remains the sole
     /// state transition, so there is never a second way for a Launch to go
@@ -2720,7 +2716,6 @@ pub(crate) fn create_project_spine(
         "UPDATE project_sessions SET epoch_id=?2 WHERE id=?1",
         params![session.id.as_str(), epoch_id.as_str()],
     )?;
-    import_project_run(tx, session)?;
     Ok(())
 }
 
@@ -2795,128 +2790,6 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> 
         "UPDATE task_sessions SET epoch_id=?2 WHERE id=?1",
         params![session.id.as_str(), epoch_id.as_str()],
     )?;
-    import_task_run(tx, session)?;
-    Ok(())
-}
-
-fn import_project_run(tx: &Transaction<'_>, session: &ProjectSession) -> StoreResult<()> {
-    let Some(process) = session.latest_process.as_ref() else {
-        return Ok(());
-    };
-    import_run_for_child(tx, &ChildRef::Project(session.id.clone()), process)
-}
-
-fn import_task_run(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
-    let Some(process) = session.latest_process.as_ref() else {
-        return Ok(());
-    };
-    import_run_for_child(tx, &ChildRef::Task(session.id.clone()), process)
-}
-
-fn import_run_for_child(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    process: &crate::child_session::ChildProcessGeneration,
-) -> StoreResult<()> {
-    use crate::child_session::ChildLeaseState;
-
-    let state = match process.state {
-        ChildLeaseState::Legacy | ChildLeaseState::Active => "active",
-        ChildLeaseState::Reserved => "reserved",
-        ChildLeaseState::Revoked => "stopping",
-        ChildLeaseState::Finished => return Ok(()),
-    };
-    let work = work_for_child_in(tx, target)?;
-    let epoch = current_epoch_in(tx, &work)?;
-    let home_id = reserving_home_in(tx, &work)?;
-    let trigger_json = serde_json::to_string(&RunTrigger::Input {
-        basis: epoch.current_basis,
-    })
-    .expect("run trigger must serialize");
-    // A legacy body never receives product Run authority by derivation. The
-    // imported slot stays fenced until containment is reconciled, and only a
-    // newly reserved Run gets a capability its process can inherit.
-    let lease_hash = crate::durable::RunLeaseToken::new().hash();
-    let run_id = RunId::new();
-    tx.execute(
-        "INSERT INTO runs (
-            id, epoch_id, home_id, state, trigger_json, lease_hash,
-            lease_generation, source_kind, source_id, created_at, ended_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)",
-        params![
-            run_id.as_str(),
-            epoch.id.as_str(),
-            home_id.as_str(),
-            state,
-            trigger_json,
-            lease_hash,
-            i64::from(process.generation),
-            target.target_kind(),
-            target.target_id(),
-            now_unix(),
-        ],
-    )?;
-    insert_child_control_launch(tx, target, &run_id, process, state)?;
-    Ok(())
-}
-
-fn insert_child_control_launch(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    run_id: &RunId,
-    process: &crate::child_session::ChildProcessGeneration,
-    run_state: &str,
-) -> StoreResult<()> {
-    let run = run_by_id_in(tx, run_id)?;
-    let cwd = match target {
-        ChildRef::Project(_) => PathBuf::from(work_labels(tx, &run.work)?.repo),
-        ChildRef::Task(session_id) => PathBuf::from(tx.query_row(
-            "SELECT worktree FROM task_sessions WHERE id=?1",
-            [session_id.as_str()],
-            |row| row.get::<_, String>(0),
-        )?),
-    };
-    let launch = Launch {
-        id: LaunchId::new(),
-        run_id: run.id.clone(),
-        home_id: run.home_id.clone(),
-        route: LaunchRoute {
-            provider: process.provider.clone(),
-            model: None,
-            account_id: None,
-        },
-        cwd,
-        surface: "headless".to_string(),
-        state: match run_state {
-            "reserved" => LaunchState::Starting,
-            "active" => LaunchState::Live,
-            "stopping" => LaunchState::Stopping,
-            _ => {
-                return Err(StoreError::InvalidData(format!(
-                    "legacy child Run cannot register a Launch while {run_state}"
-                )))
-            }
-        },
-        containment: Containment::Tmux {
-            name: process.tmux_name.clone(),
-        },
-        opaque_basis: None,
-        resume_token: process.provider_session_id.clone(),
-        started_at: process.started_at,
-        ended_at: None,
-    };
-    insert_control_launch(tx, &run, &launch)?;
-    if launch.state != LaunchState::Starting {
-        let launch_state = match launch.state {
-            LaunchState::Live => "live",
-            LaunchState::Stopping => "stopping",
-            LaunchState::Starting | LaunchState::Ended => unreachable!("filtered above"),
-        };
-        tx.execute(
-            "UPDATE agent_launches SET launch_state=?2 WHERE id=?1",
-            params![launch.id.as_str(), launch_state],
-        )?;
-    }
     Ok(())
 }
 
@@ -3515,7 +3388,7 @@ mod observe_launch_provider_tests {
 
     /// The provider's resume token and real process group only exist after the
     /// harness starts, and can change mid-Run. This is the write path that
-    /// replaces the Session row's `provider_session_id` / `latest_process`.
+    /// makes Launch the durable owner of provider continuity.
     #[test]
     fn a_running_launch_records_its_provider_continuity() {
         let (dir, store, work) = store_with_wave();

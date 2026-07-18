@@ -601,17 +601,15 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 fn format_child_body(
     agent: &str,
     provider: &str,
-    process: Option<&loopflow::child_session::ChildProcessGeneration>,
+    launch: Option<&loopflow::durable::Launch>,
 ) -> String {
-    process.map_or_else(
+    launch.map_or_else(
         || format!("none; next agent {agent}, provider {provider}"),
-        |process| {
-            let generation = process.generation;
-            let provenance = process.provenance.as_ref().map_or_else(
-                || "binary unknown".to_string(),
-                |provenance| format!("binary {} ({})", provenance.version, provenance.provenance),
-            );
-            format!("generation {generation}; agent {agent}; provider {provider}; {provenance}")
+        |launch| {
+            format!(
+                "launch {}; agent {agent}; provider {}; {:?}",
+                launch.id, launch.route.provider, launch.state
+            )
         },
     )
 }
@@ -662,11 +660,7 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
-        let body = format_child_body(
-            &session.agent,
-            &session.provider,
-            session.latest_process.as_ref(),
-        );
+        let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
             "{}  {}\n  session: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
@@ -778,15 +772,11 @@ fn print_project_session(
     session: &loopflow::project_session::ProjectSession,
     json: bool,
 ) -> anyhow::Result<()> {
+    let snapshot = loopflow::ops::project::project_snapshot(session)?;
     if json {
-        let snapshot = loopflow::ops::project::project_snapshot(session)?;
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let body = format_child_body(
-            &session.agent,
-            &session.provider,
-            session.latest_process.as_ref(),
-        );
+        let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
             "{}  {}\n  session: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             session.launch.project.slug,
@@ -2114,60 +2104,5 @@ mod tests {
         let args = vec!["lf".to_string(), "-l".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-l"]);
-    }
-
-    #[test]
-    fn format_child_body_shows_binary_provenance() {
-        use loopflow::child_session::{BinaryProvenance, ChildLeaseState, ChildProcessGeneration};
-        use time::OffsetDateTime;
-
-        let process = ChildProcessGeneration {
-            generation: 3,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-x".to_string(),
-            agent: "claude".to_string(),
-            provider: "claude".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Active,
-            outcome: None,
-            provenance: Some(BinaryProvenance {
-                version: "0.12.0".to_string(),
-                provenance: "release".to_string(),
-                source_identity: "release".to_string(),
-            }),
-        };
-        let body = super::format_child_body("claude", "claude", Some(&process));
-        assert!(
-            body.contains("generation 3"),
-            "body shows generation: {body}"
-        );
-        assert!(
-            body.contains("binary 0.12.0 (release)"),
-            "body shows binary provenance: {body}"
-        );
-    }
-
-    #[test]
-    fn format_child_body_falls_back_when_provenance_absent() {
-        use loopflow::child_session::{ChildLeaseState, ChildProcessGeneration};
-        use time::OffsetDateTime;
-
-        let process = ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-legacy".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Active,
-            outcome: None,
-            provenance: None,
-        };
-        let body = super::format_child_body("codex", "codex", Some(&process));
-        assert!(body.contains("binary unknown"), "legacy body: {body}");
     }
 }

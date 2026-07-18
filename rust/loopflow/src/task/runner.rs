@@ -2235,13 +2235,12 @@ mod tests {
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
         store.create_project_session(&project).await.unwrap();
-        let mut session = TaskSession {
+        let session = TaskSession {
             id: TaskSessionId::new(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
@@ -2271,7 +2270,6 @@ mod tests {
             agent: provider.to_string(),
             provider: provider.to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2307,8 +2305,6 @@ mod tests {
                 .await
                 .unwrap();
         }
-        session.begin_generation(format!("task-{provider}"));
-        store.update_task_session(&session).await.unwrap();
         let work = store
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
@@ -2334,7 +2330,18 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(matches!(receipt, AdvanceReceipt::Launch(_)));
+        let AdvanceReceipt::Launch(launch) = receipt else {
+            panic!("Launch start returns a Launch receipt");
+        };
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchLive {
+                    launch_id: launch.id,
+                },
+            )
+            .await
+            .unwrap();
         (session, lease)
     }
 
@@ -2354,9 +2361,6 @@ mod tests {
             None,
         )
         .await;
-        if let Some(process) = &mut session.latest_process {
-            process.state = crate::child_session::ChildLeaseState::Active;
-        }
         session.set_status(TaskSessionStatus::Running, "provider active");
         store
             .activate_task_process_for_run(&session, &lease)
@@ -2918,7 +2922,6 @@ mod tests {
             agent: "opencode".to_string(),
             provider: "opencode".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2955,7 +2958,6 @@ mod tests {
             agent: "opencode:glm-5.2".to_string(),
             provider: "opencode".to_string(),
             provider_session_id: Some("provider-session".to_string()),
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -2981,8 +2983,6 @@ mod tests {
             linear_link_error: None,
         };
         store.create_task_session(&session, &pr).await.unwrap();
-        session.begin_generation("lf-task-opencode".to_string());
-        store.update_task_session(&session).await.unwrap();
         let work = store
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
@@ -3008,10 +3008,18 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(matches!(receipt, AdvanceReceipt::Launch(_)));
-        if let Some(process) = &mut session.latest_process {
-            process.state = crate::child_session::ChildLeaseState::Active;
-        }
+        let AdvanceReceipt::Launch(launch) = receipt else {
+            panic!("Launch start returns a Launch receipt");
+        };
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchLive {
+                    launch_id: launch.id,
+                },
+            )
+            .await
+            .unwrap();
         session.set_status(TaskSessionStatus::Running, "provider active");
         store
             .activate_task_process_for_run(&session, &lease)

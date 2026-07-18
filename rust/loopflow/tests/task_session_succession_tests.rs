@@ -41,7 +41,6 @@ fn successor_session(
     session.worktree = PathBuf::from(format!("{}-successor", predecessor.worktree.display()));
     session.workspace_slug = format!("{}-2", predecessor.workspace_slug);
     session.provider_session_id = None;
-    session.latest_process = None;
     session.lifecycle = TaskLifecyclePlan::standard("task");
     session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
     session.phase_epoch = 1;

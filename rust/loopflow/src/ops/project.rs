@@ -215,7 +215,6 @@ pub(crate) fn reserve_project_session(
             agent,
             provider,
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1085,7 +1084,6 @@ fn promotion_session_name(repo: &Path, wave: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::child_session::ChildProcessGeneration;
     use crate::lf::{Cli, Commands};
     use crate::store::{open_store, StorageConfig};
     use clap::Parser;
@@ -1182,7 +1180,6 @@ mod tests {
             agent: "claude".to_string(),
             provider: "claude".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1209,7 +1206,6 @@ mod tests {
                 .contains("cannot resolve current lf binary"),
             "launch must resolve the current Home lf, not the LF_CONTROL_BIN pin: {error}"
         );
-        assert!(session.latest_process.is_none());
     }
 
     #[tokio::test]
@@ -1236,137 +1232,5 @@ mod tests {
             .unwrap();
         assert_eq!(child.parent_wave_id(), Some(parent.id()));
         assert_eq!(child.repo(), tmp.path().display().to_string());
-    }
-
-    /// A non-active Project Session still carrying a dead lease — the shape an
-    /// explicit resume must reconcile before it can reserve a fresh body.
-    async fn project_with_dead_lease(
-        store: &SharedStore,
-        status: ProjectSessionStatus,
-        lease_state: crate::child_session::ChildLeaseState,
-    ) -> ProjectSession {
-        let now = time::OffsetDateTime::now_utc();
-        let wave = Wave::new(WaveId::new(), "recover".to_string(), "/repo".to_string());
-        store.create_wave(&wave).await.expect("create wave");
-        let session = ProjectSession {
-            id: ProjectSessionId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-uuid").expect("project id"),
-                    slug: "developer-efficiency".to_string(),
-                    name: "Developer Efficiency".to_string(),
-                    prompt_context: "Definition:\nKeep local work fast.".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            status,
-            status_reason: "recovered from a vanished body".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread-project".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                // A name no tmux server knows, so the liveness probe reads it dead.
-                tmux_name: "dead-project-lease".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("thread-project".to_string()),
-                started_at: now - time::Duration::hours(1),
-                state: lease_state,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .create_project_session(&session)
-            .await
-            .expect("create project session");
-        session
-    }
-
-    #[tokio::test]
-    async fn resume_revokes_a_dead_legacy_lease_on_a_waiting_project() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
-                .await
-                .unwrap(),
-        );
-        let mut session = project_with_dead_lease(
-            &store,
-            ProjectSessionStatus::Waiting,
-            crate::child_session::ChildLeaseState::Legacy,
-        )
-        .await;
-
-        reconcile_project_liveness(&store, &mut session)
-            .await
-            .expect("reconcile a waiting project with a dead legacy lease");
-
-        // The dead lease is reaped so a resume can reserve a fresh body...
-        assert_eq!(
-            session.latest_process.as_ref().map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        // ...while the Project keeps its Waiting status for the resume that follows.
-        assert_eq!(session.status, ProjectSessionStatus::Waiting);
-
-        let persisted = store
-            .get_project_session(&session.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        assert_eq!(persisted.status, ProjectSessionStatus::Waiting);
-    }
-
-    #[tokio::test]
-    async fn resume_revokes_a_dead_active_lease_on_a_failed_project() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
-                .await
-                .unwrap(),
-        );
-        let mut session = project_with_dead_lease(
-            &store,
-            ProjectSessionStatus::Failed,
-            crate::child_session::ChildLeaseState::Active,
-        )
-        .await;
-
-        reconcile_project_liveness(&store, &mut session)
-            .await
-            .expect("reconcile a failed project with a dead active lease");
-
-        assert_eq!(
-            session.latest_process.as_ref().map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        assert_eq!(session.status, ProjectSessionStatus::Failed);
-
-        let persisted = store
-            .get_project_session(&session.id)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        assert_eq!(persisted.status, ProjectSessionStatus::Failed);
     }
 }

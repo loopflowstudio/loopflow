@@ -1,4 +1,4 @@
-//! Compatibility types for Project and Task process containment.
+//! Compatibility types shared by Project and Task control surfaces.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -66,54 +66,6 @@ pub(crate) use prefixed_uuid_id;
 pub enum ChildSessionDataError {
     #[error("invalid child-session id: {0}")]
     InvalidId(String),
-    #[error("invalid child lease state: {0}")]
-    InvalidLeaseState(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ChildLeaseState {
-    Legacy,
-    Reserved,
-    Active,
-    Revoked,
-    Finished,
-}
-
-impl ChildLeaseState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Legacy => "legacy",
-            Self::Reserved => "reserved",
-            Self::Active => "active",
-            Self::Revoked => "revoked",
-            Self::Finished => "finished",
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, ChildSessionDataError> {
-        match value {
-            "legacy" => Ok(Self::Legacy),
-            "reserved" => Ok(Self::Reserved),
-            "active" => Ok(Self::Active),
-            "revoked" => Ok(Self::Revoked),
-            "finished" => Ok(Self::Finished),
-            value => Err(ChildSessionDataError::InvalidLeaseState(value.to_string())),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ChildBodyOutcome {
-    Completed,
-    Interrupted { reason: String },
-    Failed { reason: String },
-    Lost { reason: String },
-    Superseded { reason: String },
-    LegacyStopped { reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,59 +73,6 @@ pub enum ChildBodyOutcome {
 pub enum ObservationRecipient {
     Wave { wave_id: WaveId },
     Project { session_id: ProjectSessionId },
-}
-
-/// Immutable audit record for the lf binary that launched a process generation.
-/// Provenance says what ran; it never selects what runs next.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BinaryProvenance {
-    pub version: String,
-    pub provenance: String,
-    pub source_identity: String,
-}
-
-impl BinaryProvenance {
-    pub fn current() -> Self {
-        Self {
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            provenance: crate::build_info::provenance().to_string(),
-            source_identity: crate::build_info::source_identity(),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn for_tests() -> Self {
-        Self {
-            version: "0.0.0-test".to_string(),
-            provenance: "development".to_string(),
-            source_identity: "test".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-/// Durable receipt for one child-process write lease. `generation` is the
-/// monotonically increasing fencing token: only the current generation may
-/// act for the Session. The latest receipt stays after the process exits so a
-/// replacement body advances rather than assuming the old body's identity.
-pub struct ChildProcessGeneration {
-    pub generation: u32,
-    pub pid: Option<u32>,
-    /// Group that must be reaped in addition to the outer tmux/PID identity:
-    /// the provider's isolated group when it has one, otherwise the runner's.
-    pub process_group_id: Option<u32>,
-    pub tmux_name: String,
-    pub agent: String,
-    pub provider: String,
-    pub provider_session_id: Option<String>,
-    pub started_at: OffsetDateTime,
-    pub state: ChildLeaseState,
-    pub outcome: Option<ChildBodyOutcome>,
-    /// Immutable binary provenance: which lf actually booted this generation,
-    /// stamped by that process itself at boot. `None` until the generation has
-    /// booted (a reserved-but-never-started generation ran nothing), and for
-    /// generations recorded before this field was added.
-    pub provenance: Option<BinaryProvenance>,
 }
 
 /// Requested replacement of the agent/provider body acting for a durable

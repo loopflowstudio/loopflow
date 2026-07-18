@@ -188,16 +188,6 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn finish_task_process(
-        &self,
-        session: &TaskSession,
-        lease: &RunLease,
-    ) -> StoreResult<()> {
-        self.finish_task_run(session, lease, crate::durable::BoundaryState::Unknown)
-            .await
-    }
-
     pub async fn complete_task_session(
         &self,
         session: &TaskSession,
@@ -232,6 +222,7 @@ impl Store {
         session: &TaskSession,
         expected_status: TaskSessionStatus,
     ) -> StoreResult<Option<TestRunReservation>> {
+        self.sqlite.install_work_placements_draft();
         let current = self.get_task_session(&session.id).await?;
         if current.as_ref().map(|row| row.status) != Some(expected_status) {
             return Ok(None);
@@ -247,24 +238,21 @@ impl Store {
             Ok(reserved) => reserved,
             Err(_) => return Ok(None),
         };
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            super::StoreError::InvalidData("test Task reservation has no process".to_string())
-        })?;
         self.advance_run(
             &lease,
             crate::durable::RunAdvance::LaunchStarting {
                 route: crate::durable::LaunchRoute {
-                    provider: process.provider.clone(),
+                    provider: session.provider.clone(),
                     model: None,
                     account_id: None,
                 },
                 containment: crate::durable::Containment::Tmux {
-                    name: process.tmux_name.clone(),
+                    name: format!("test-task-{}", session.id),
                 },
                 cwd: session.worktree.clone(),
                 surface: "headless".to_string(),
                 opaque: false,
-                resume_token: process.provider_session_id.clone(),
+                resume_token: session.provider_session_id.clone(),
             },
         )
         .await?;
@@ -800,6 +788,7 @@ impl Store {
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
     ) -> StoreResult<Option<TestRunReservation>> {
+        self.sqlite.install_work_placements_draft();
         let current = self.get_project_session(&session.id).await?;
         if current.as_ref().map(|row| row.status) != Some(expected_status) {
             return Ok(None);
@@ -815,24 +804,21 @@ impl Store {
             Ok(reserved) => reserved,
             Err(_) => return Ok(None),
         };
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            super::StoreError::InvalidData("test Project reservation has no process".to_string())
-        })?;
         self.advance_run(
             &lease,
             crate::durable::RunAdvance::LaunchStarting {
                 route: crate::durable::LaunchRoute {
-                    provider: process.provider.clone(),
+                    provider: session.provider.clone(),
                     model: None,
                     account_id: None,
                 },
                 containment: crate::durable::Containment::Tmux {
-                    name: process.tmux_name.clone(),
+                    name: format!("test-project-{}", session.id),
                 },
                 cwd: std::path::PathBuf::from("/tmp/project-test"),
                 surface: "headless".to_string(),
                 opaque: false,
-                resume_token: process.provider_session_id.clone(),
+                resume_token: session.provider_session_id.clone(),
             },
         )
         .await?;

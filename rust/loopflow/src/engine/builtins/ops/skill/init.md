@@ -10,11 +10,12 @@ The launch prompt identifies the reviewer for this exercise.
 
 - **Human reviewer:** ask the setup questions below one at a time.
 - **Parent reviewer:** run the same detection, preserve a valid existing
-  default, and otherwise choose the sole detected agent or the first detected
-  supported harness. Send the exact repo-config change to the Task through the
-  review protocol and verify its reply; do not edit the Task's repository
-  yourself. Never create or modify personal user config without a human—report
-  those choices as deferred. If no agent is installed, return the install
+  override, and otherwise leave `agent` unset when Codex is installed. If Codex
+  is absent, choose the sole detected agent or the first detected supported
+  harness. Send the exact repo-config change to the Task through the review protocol
+  and verify its reply; do not edit the Task's repository yourself.
+  Never create or modify personal user config without a human—report those
+  choices as deferred. If no agent is installed, return the install
   instructions and request changes.
 
 ## Phase 1: Environment check
@@ -47,11 +48,14 @@ User config: ~/.lf/config.yaml (exists)
 
 ## Phase 2: Agent guidance
 
-**Multiple agents found:** Report all. Ask the human reviewer which to default
-to; with a parent reviewer, preserve the valid existing default or choose the
-first detected supported harness.
+**Multiple agents found:** Report all. Codex is Loopflow's implicit default, so
+leave `agent` unset unless the human reviewer explicitly chooses a repo-wide
+override. With a parent reviewer, preserve a valid existing override; otherwise
+leave `agent` unset when Codex is installed, or choose the first detected
+supported harness when it is not.
 
-**One agent found:** Default to it, report the choice.
+**One agent found:** Leave `agent` unset for Codex. Otherwise default to the sole
+installed agent. Report the choice.
 
 **None found:** Show install instructions and stop:
 ```
@@ -74,7 +78,8 @@ properties — never personal preferences like yolo, ide, chrome, or autoprune.
   .lf/config.yaml"
 - With a parent reviewer, direct the Task to create it with the deterministic
   default selected above
-- Create the config with detected agent as default
+- Omit `agent` when using the implicit Codex default; otherwise write the
+  detected or explicitly selected override
 
 **Existing `.lf/config.yaml`:**
 - Compare `supported_harnesses` against detected agents
@@ -85,7 +90,7 @@ properties — never personal preferences like yolo, ide, chrome, or autoprune.
 
 Repo config template:
 ```yaml
-agent: <detected-default>
+# agent: <explicit-repo-override>
 
 supported_harnesses:
   - <detected-agents>
@@ -134,7 +139,8 @@ Platform-aware guidance:
 ```
 Setup complete!
 
-✓ Claude Code (default agent)
+✓ Claude Code
+✓ Codex (implicit default)
 ✓ .lf/config.yaml created
 
 Next:
@@ -150,7 +156,7 @@ Next:
 ```
 Setup complete!
 
-✓ OpenCode (default agent)
+✓ OpenCode (repo override)
 ✓ .lf/config.yaml created
 
 Next:

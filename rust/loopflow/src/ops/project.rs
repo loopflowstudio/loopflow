@@ -157,7 +157,7 @@ pub(crate) fn reserve_project_session(
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let config = load_config_or_default(Some(repo));
-    let agent = config.agent.as_deref().unwrap_or("codex");
+    let agent = config.agent();
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {

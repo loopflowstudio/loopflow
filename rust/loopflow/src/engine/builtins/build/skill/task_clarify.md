@@ -1,6 +1,5 @@
 ---
 description: Turn one Linear Task directive into a computable change design.
-default_agent: codex
 action_style: procedural
 ---
 Clarify the exact Task named by `LF_TASK_SESSION_ID`.

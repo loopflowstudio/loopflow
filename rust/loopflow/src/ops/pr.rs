@@ -242,10 +242,7 @@ pub fn generate_pr_copy(
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = agent_override
-        .map(str::to_string)
-        .or_else(|| config.agent.clone())
-        .unwrap_or_else(|| "claude:opus".to_string());
+    let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {

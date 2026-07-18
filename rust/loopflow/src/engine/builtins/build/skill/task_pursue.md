@@ -1,6 +1,5 @@
 ---
 description: Implement one pass of work toward the task PR.
-default_agent: codex
 action_style: procedural
 ---
 Work the task PR.

@@ -111,7 +111,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         "loaded config"
     );
     trace!(
-        agent = config.agent.as_deref().unwrap_or("claude:opus"),
+        agent = config.agent(),
         ?config.yolo,
         "loaded config"
     );

@@ -252,7 +252,7 @@ fn lf_command() -> std::process::Command {
 
 fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     let configured = crate::engine::load_config_or_default(Some(cwd));
-    let agent = configured.agent.as_deref().unwrap_or("codex");
+    let agent = configured.agent();
     let (harness, model) = crate::engine::parse_agent(agent);
     let mut body = BodyProvenance::for_step(step, cwd);
     body.harness = Some(harness);

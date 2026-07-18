@@ -14,7 +14,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::engine::config::parse_agent;
+use crate::engine::config::{default_agent, parse_agent};
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
@@ -117,6 +117,16 @@ pub struct AgentConfig {
     /// to this path. The caller reads it after the agent exits and forwards
     /// safe directives (e.g. `cd`) to the real directive file.
     pub directive_relay: Option<std::path::PathBuf>,
+}
+
+impl AgentConfig {
+    /// Return the selected agent or Loopflow's compiled default.
+    pub fn agent(&self) -> &str {
+        match self.agent.as_deref() {
+            Some(agent) => agent,
+            None => default_agent(),
+        }
+    }
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -850,7 +860,7 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
 
 pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
     let mut env = process.env.clone();
-    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let agent = launch.agent();
     let (harness, _) = parse_agent(agent);
     match harness.as_str() {
         "gemini" => {
@@ -898,7 +908,7 @@ pub fn build_model_command(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
-    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let agent = launch.agent();
     let (harness, model_variant) = parse_agent(agent);
     let model_variant = model_variant.as_deref();
     match harness.as_str() {
@@ -973,7 +983,7 @@ fn _launch_with_transient_retries(
                 return Ok(result);
             }
         };
-        let (harness, _) = parse_agent(attempt_config.agent.as_deref().unwrap_or("claude:opus"));
+        let (harness, _) = parse_agent(attempt_config.agent());
         let failure = if process.auto {
             result
                 .failure
@@ -1263,7 +1273,7 @@ fn _launch_agent_once(
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
 
     // Harness-specific environment setup.
-    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let agent = launch.agent();
     let (harness, model) = parse_agent(agent);
     let managed_provider = match harness.as_str() {
         "claude" => Some(Provider::Claude),

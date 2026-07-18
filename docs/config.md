@@ -183,17 +183,27 @@ Glob patterns to exclude from file listings.
 
 ---
 
-### Model
+### Agent
 
-Default model for all skills.
+Set the default harness, with an optional model.
 
 | | |
 |---|---|
 | **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then `claude:opus`) |
+| **Default** | unset (resolution falls back to skill defaults, then `codex`) |
+
+```yaml
+agent: codex          # harness default
+# agent: claude:opus  # harness plus model
+```
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
+
+Five built-in skills intentionally default to Claude: `kickoff`,
+`review-design`, `demo`, `code-review`, and `prompt`. Every other unconfigured
+built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
+an explicit override.
 
 Loopflow starts every Codex CLI and Session run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex

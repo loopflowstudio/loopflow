@@ -1,7 +1,6 @@
 ---
 requires: code on branch
 produces: scratch/qa-findings.md
-default_agent: codex
 action_style: procedural
 ---
 Thorough quality assessment of the current branch state.

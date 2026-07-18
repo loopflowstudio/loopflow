@@ -138,10 +138,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = agent_override
-        .map(str::to_string)
-        .or_else(|| config.agent.clone())
-        .unwrap_or_else(|| "claude:haiku".to_string());
+    let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
 
     let launch = AgentConfig {
         task_prompt: prompt,

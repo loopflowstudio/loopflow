@@ -1939,7 +1939,7 @@ fn launch_skill_agent(
         &prepared.config.task_prompt,
         &prepared.deduplicated_docs,
     );
-    let agent = prepared.config.agent.as_deref().unwrap_or("claude:opus");
+    let agent = prepared.config.agent();
     let (provider, model) = crate::engine::parse_agent(agent);
     let capture_context =
         crate::journal::trace_capture_context(repo_root, None, Some(skill_name.to_string()))

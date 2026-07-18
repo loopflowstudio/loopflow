@@ -1,6 +1,5 @@
 ---
 description: Judge Wave evidence and evolve the operating context.
-default_agent: codex
 action_style: procedural
 ---
 Judge what the Wave learned this iteration.

@@ -10,7 +10,7 @@ use crate::engine::worktrees::{
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
-    SkillSyncOptions, Surface,
+    SkillSyncOptions, Surface, DEFAULT_AGENT,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::discover_skill;
@@ -1939,7 +1939,7 @@ fn launch_skill_agent(
         &prepared.config.task_prompt,
         &prepared.deduplicated_docs,
     );
-    let agent = prepared.config.agent.as_deref().unwrap_or("claude:opus");
+    let agent = prepared.config.agent.as_deref().unwrap_or(DEFAULT_AGENT);
     let (provider, model) = crate::engine::parse_agent(agent);
     let capture_context =
         crate::journal::trace_capture_context(repo_root, None, Some(skill_name.to_string()))

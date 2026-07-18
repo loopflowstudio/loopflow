@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::{parse_agent, Config};
+use crate::engine::config::{parse_agent, Config, DEFAULT_AGENT};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
@@ -155,7 +155,7 @@ pub fn prepare_launch_prompt(
                 .as_ref()
                 .and_then(|skill| skill.default_agent.clone())
         })
-        .unwrap_or_else(|| "claude:opus".to_string());
+        .unwrap_or_else(|| DEFAULT_AGENT.to_string());
     validate_agent_policy(&agent)?;
 
     // Keep only system-safe sections (operate/surface/directions) in
@@ -374,6 +374,40 @@ Test skill body.
         .expect("prepare launch prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("gemini:2.5-pro"));
+    }
+
+    #[test]
+    fn unmarked_builtin_skill_defaults_to_codex() {
+        let tmp = tempdir().expect("tempdir");
+        let prepared = prepare_launch_prompt(
+            &Config::default(),
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("implement".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn marked_builtin_skill_keeps_claude_default() {
+        let tmp = tempdir().expect("tempdir");
+        let prepared = prepare_launch_prompt(
+            &Config::default(),
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("kickoff".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.agent.as_deref(), Some("claude"));
     }
 
     #[test]

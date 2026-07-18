@@ -2,7 +2,6 @@
 description: Audit whether a repository tests valuable behavior at the right rigor and cost, then improve its testing workflow, monitoring, and guidance.
 requires: repository with tests or verification workflows
 produces: scratch/testing-audit.md, testing infrastructure and guidance improvements
-default_agent: codex
 action_style: procedural
 ---
 Audit the repository's testing system as an evidence portfolio, not a coverage

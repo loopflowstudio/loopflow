@@ -1,6 +1,5 @@
 ---
 description: Direct the Projects and Tasks that advance the Wave.
-default_agent: codex
 action_style: procedural
 ---
 Pursue the Wave objective from the clarification produced earlier in this

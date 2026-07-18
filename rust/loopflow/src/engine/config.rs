@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::error::LoadError;
 
+/// Agent used when neither the caller, config, nor skill chooses one.
+pub const DEFAULT_AGENT: &str = "codex";
+
 /// Keys that combine lists from global + repo config.
 const ADDITIVE_KEYS: &[&str] = &[
     "docs",

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::child_session::{ChildProcessGeneration, ChildRef};
 use crate::durable::{AuthenticatedRequest, Author, ControlCtx};
-use crate::engine::config::{load_config_or_default, parse_agent};
+use crate::engine::config::{load_config_or_default, parse_agent, DEFAULT_AGENT};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
     resolve_lf_binary, start_lf_session, start_lf_session_with_env, tmux_session_exists,
@@ -157,7 +157,7 @@ pub(crate) fn reserve_project_session(
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let config = load_config_or_default(Some(repo));
-    let agent = config.agent.as_deref().unwrap_or("codex");
+    let agent = config.agent.as_deref().unwrap_or(DEFAULT_AGENT);
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {

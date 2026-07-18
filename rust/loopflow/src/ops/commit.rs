@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::{load_config_or_default, DEFAULT_AGENT};
 use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstream, stage_all};
 
 use crate::ops::error::{OpsError, OpsResult};
@@ -141,7 +141,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     let agent = agent_override
         .map(str::to_string)
         .or_else(|| config.agent.clone())
-        .unwrap_or_else(|| "claude:haiku".to_string());
+        .unwrap_or_else(|| DEFAULT_AGENT.to_string());
 
     let launch = AgentConfig {
         task_prompt: prompt,

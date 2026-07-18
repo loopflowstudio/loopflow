@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::{load_config_or_default, DEFAULT_AGENT};
 use crate::engine::git::{current_branch, get_default_branch, rev_parse};
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
@@ -245,7 +245,7 @@ pub fn generate_pr_copy(
     let agent = agent_override
         .map(str::to_string)
         .or_else(|| config.agent.clone())
-        .unwrap_or_else(|| "claude:opus".to_string());
+        .unwrap_or_else(|| DEFAULT_AGENT.to_string());
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {

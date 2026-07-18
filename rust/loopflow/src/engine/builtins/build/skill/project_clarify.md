@@ -1,6 +1,5 @@
 ---
 description: Keep one Linear Project's definition and KRs computable.
-default_agent: codex
 action_style: procedural
 ---
 Clarify the exact Linear Project named by `LF_PROJECT_SESSION_ID`.

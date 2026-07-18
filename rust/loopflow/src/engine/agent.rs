@@ -14,7 +14,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::engine::config::parse_agent;
+use crate::engine::config::{parse_agent, DEFAULT_AGENT};
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
@@ -850,7 +850,7 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
 
 pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
     let mut env = process.env.clone();
-    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let agent = launch.agent.as_deref().unwrap_or(DEFAULT_AGENT);
     let (harness, _) = parse_agent(agent);
     match harness.as_str() {
         "gemini" => {
@@ -898,7 +898,7 @@ pub fn build_model_command(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Vec<String> {
-    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let agent = launch.agent.as_deref().unwrap_or(DEFAULT_AGENT);
     let (harness, model_variant) = parse_agent(agent);
     let model_variant = model_variant.as_deref();
     match harness.as_str() {
@@ -973,7 +973,7 @@ fn _launch_with_transient_retries(
                 return Ok(result);
             }
         };
-        let (harness, _) = parse_agent(attempt_config.agent.as_deref().unwrap_or("claude:opus"));
+        let (harness, _) = parse_agent(attempt_config.agent.as_deref().unwrap_or(DEFAULT_AGENT));
         let failure = if process.auto {
             result
                 .failure
@@ -1263,7 +1263,7 @@ fn _launch_agent_once(
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
 
     // Harness-specific environment setup.
-    let agent = launch.agent.as_deref().unwrap_or("claude");
+    let agent = launch.agent.as_deref().unwrap_or(DEFAULT_AGENT);
     let (harness, model) = parse_agent(agent);
     let managed_provider = match harness.as_str() {
         "claude" => Some(Provider::Claude),

@@ -1,6 +1,5 @@
 ---
 description: Advance open KRs inline first, filing or looping tasks when needed.
-default_agent: codex
 action_style: procedural
 ---
 Pursue the open KRs.

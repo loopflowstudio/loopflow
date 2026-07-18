@@ -1,6 +1,5 @@
 ---
 description: Judge one Project's KR evidence after pursuit.
-default_agent: codex
 action_style: procedural
 ---
 Judge the exact Project after this pursuit pass.

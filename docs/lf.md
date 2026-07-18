@@ -412,12 +412,12 @@ lf doctor --json                # machine-readable audit
 ```
 
 ```bash
-lf -m codex --account manabot-eng : "fix the tests"   # prefer this account, then route
-lf --account claude=personal --account codex=reserve implement
-lf --only-account codex=reserve review                # no fallback account
+lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route
+lf --account claude=jack@ --account codex=loopflow-eng@ implement
+lf --only-account codex=manabot-eng@ review             # no fallback login
 ```
 
-`--account <email|id>` prefers each matching managed account before its
+`--account <email-prefix>` prefers each matching managed login before its
 provider's normal route. The first preferred attempt bypasses stored health;
 a missing credential continues through the healthy fallback route.
 `--only-account` restricts the invocation and its children to exactly the
@@ -425,7 +425,7 @@ selected provider accounts. Both flags are repeatable and accept
 `claude=<selector>` or `codex=<selector>`. They cannot be combined.
 
 Use the flags for interactive vendor sessions too (`--tui`): logging into a
-managed account with a bare `codex login` creates a second session and evicts
+managed login with a bare `codex login` creates a second session and evicts
 the managed one ("needs re-login"); entering through lf shares one session.
 
 `lf usage` leads with each managed account's subscription state — provider-
@@ -433,7 +433,7 @@ reported plan, session and weekly windows as percent *used*, reset times —
 from stored observations (harness streams report them mid-run) topped up by a
 live poll when older than 15 minutes. `--refresh` polls everything now;
 `--cached` skips polling. A revoked credential shows the fix
-(`lf auth connect <provider>`), not a blank. The spend table below it sums
+(`lf auth connect <provider> <email>`), not a blank. The spend table below it sums
 provider-measured Turn rows; TOTAL is input+output with cache reads their own
 column, and `% TOKENS` is each row's slice of all tokens in the window — a
 distribution across repos, not a subscription measure.

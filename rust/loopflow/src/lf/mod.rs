@@ -43,16 +43,28 @@ pub struct Cli {
     #[arg(short = 'm', long = "model", short_alias = 'M')]
     pub model: Option<String>,
 
-    /// Prefer this managed provider account before the normal route. Repeat to
-    /// select provider-qualified preferences such as `claude=personal`.
-    /// Accounts spend; a profile is only the Chrome venue accounts log in
+    /// Prefer this managed provider login before the normal route. Repeat to
+    /// select provider-qualified preferences such as `claude=jack@`.
+    /// Logins spend; a profile is only the Chrome venue accounts log in
     /// through, so it is never a run-time selector.
-    #[arg(long = "account", conflicts_with = "only_account", global = true)]
+    #[arg(
+        id = "preferred_provider_account",
+        long = "account",
+        value_name = "EMAIL",
+        conflicts_with = "restricted_provider_account",
+        global = true
+    )]
     pub account: Vec<String>,
 
     /// Restrict this invocation and its children to exactly these managed
-    /// provider accounts. Providers without a selection are unavailable.
-    #[arg(long = "only-account", conflicts_with = "account", global = true)]
+    /// provider logins. Providers without a selection are unavailable.
+    #[arg(
+        id = "restricted_provider_account",
+        long = "only-account",
+        value_name = "EMAIL",
+        conflicts_with = "preferred_provider_account",
+        global = true
+    )]
     pub only_account: Vec<String>,
 
     /// Internal SSH compatibility and broker-connectivity probe.
@@ -1434,9 +1446,9 @@ pub enum AuthCommand {
     Disconnect {
         /// Provider name
         provider: String,
-        /// Disconnect one managed OAuth account
+        /// Disconnect one managed OAuth login
         #[arg(long)]
-        account: Option<String>,
+        email: Option<String>,
     },
     /// Store an API key from the provider's environment variable
     Configure {
@@ -1447,18 +1459,18 @@ pub enum AuthCommand {
     Connect {
         /// Provider name
         provider: String,
-        /// Managed account id or login email
-        account: Option<String>,
+        /// Login email or an unambiguous prefix
+        email: Option<String>,
         /// Bootstrap through this Chrome directory, name, or signed-in email
-        #[arg(long, requires = "account")]
+        #[arg(long, requires = "email")]
         chrome_profile: Option<String>,
     },
-    /// Adopt an existing Claude login into a managed account
+    /// Adopt an existing Claude login
     Import {
         provider: String,
-        /// Create or register this isolated OAuth account
+        /// Verified login email
         #[arg(long)]
-        account: String,
+        email: String,
         /// Chrome profile directory, name, or signed-in email
         #[arg(long)]
         chrome_profile: Option<String>,
@@ -1476,7 +1488,8 @@ pub enum AuthCommand {
     /// Record provider-specific account identity, routing, and billing state
     Set {
         provider: String,
-        account: String,
+        /// Login email or an unambiguous prefix
+        email: String,
         #[arg(long)]
         login_email: Option<String>,
         /// automatic, explicit-only, or disabled
@@ -1493,7 +1506,11 @@ pub enum AuthCommand {
         clear_paid_through: bool,
     },
     /// Clear observed utilization and cooldown for an account
-    Reset { provider: String, account: String },
+    Reset {
+        provider: String,
+        /// Login email or an unambiguous prefix
+        email: String,
+    },
     /// External: provider name (so `lf auth linear` works)
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -1522,21 +1539,24 @@ pub enum AuthAccessCommand {
     /// Atomically replace an account's ordered access venues
     Set {
         provider: String,
-        account: String,
+        /// Login email or an unambiguous prefix
+        email: String,
         #[arg(long = "profile", required = true)]
         profiles: Vec<String>,
     },
     /// Append one access venue
     Add {
         provider: String,
-        account: String,
+        /// Login email or an unambiguous prefix
+        email: String,
         #[arg(long = "profile")]
         profile: String,
     },
     /// Remove one access venue
     Rm {
         provider: String,
-        account: String,
+        /// Login email or an unambiguous prefix
+        email: String,
         #[arg(long = "profile")]
         profile: String,
     },
@@ -1724,7 +1744,7 @@ mod tests {
             .expect("connect flow exists");
         assert!(connect
             .get_arguments()
-            .any(|argument| argument.get_id() == "account"));
+            .any(|argument| argument.get_id() == "email"));
         assert!(connect
             .get_arguments()
             .any(|argument| argument.get_long() == Some("chrome-profile")));
@@ -1877,7 +1897,7 @@ mod tests {
             "access",
             "set",
             "claude",
-            "primary",
+            "operator@",
             "--profile",
             "personal",
             "--profile",
@@ -1885,18 +1905,19 @@ mod tests {
         ])
         .expect("parse account access order");
 
+        assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
                 cmd: AuthCommand::Access {
                     cmd: AuthAccessCommand::Set {
                         provider,
-                        account,
+                        email,
                         profiles,
                     }
                 }
             }) if provider == "claude"
-                && account == "primary"
+                && email == "operator@"
                 && profiles == vec!["personal", "engineering"]
         ));
     }
@@ -1908,22 +1929,23 @@ mod tests {
             "auth",
             "connect",
             "claude",
-            "primary",
+            "operator@",
             "--chrome-profile",
             "Profile 9",
         ])
         .expect("parse account connection");
 
+        assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
                 cmd: AuthCommand::Connect {
                     provider,
-                    account: Some(account),
+                    email: Some(email),
                     chrome_profile: Some(chrome_profile),
                 }
             }) if provider == "claude"
-                && account == "primary"
+                && email == "operator@"
                 && chrome_profile == "Profile 9"
         ));
     }
@@ -1935,23 +1957,24 @@ mod tests {
             "auth",
             "import",
             "claude",
-            "--account",
-            "loopflow",
+            "--email",
+            "jack@example.com",
             "--chrome-profile",
             "jack@example.com",
         ])
         .expect("parse existing login import");
 
+        assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
                 cmd: AuthCommand::Import {
                     provider,
-                    account,
+                    email,
                     chrome_profile: Some(chrome_profile),
                 }
             }) if provider == "claude"
-                && account == "loopflow"
+                && email == "jack@example.com"
                 && chrome_profile == "jack@example.com"
         ));
     }
@@ -1963,7 +1986,7 @@ mod tests {
             "auth",
             "set",
             "codex",
-            "loopflow",
+            "loopflow-eng@",
             "--login-email",
             "engineering@example.com",
             "--routing",
@@ -1975,12 +1998,13 @@ mod tests {
         ])
         .expect("parse provider account lifecycle");
 
+        assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
             Some(Commands::Auth {
                 cmd: AuthCommand::Set {
                     provider,
-                    account,
+                    email,
                     login_email: Some(login_email),
                     routing: Some(routing),
                     plan: Some(plan),
@@ -1989,7 +2013,7 @@ mod tests {
                     clear_paid_through: false,
                 }
             }) if provider == "codex"
-                && account == "loopflow"
+                && email == "loopflow-eng@"
                 && login_email == "engineering@example.com"
                 && routing == "automatic"
                 && plan == "max"

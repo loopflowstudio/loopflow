@@ -8,7 +8,9 @@ use crate::lf::{DefaultRouteCommand, ProfileCommand, RouteCommand};
 use crate::profile::{
     resolve_local_chrome_profile, AccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
-use crate::provider_account::{active_account_strain, open_account_store};
+use crate::provider_account::{
+    account_login, active_account_strain, match_account, open_account_store, AccountMatch,
+};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
@@ -134,6 +136,17 @@ async fn create_profile(
 async fn list_profiles(store: &SharedStore) -> Result<()> {
     let profiles = store.list_access_profiles().await?;
     let mappings = store.list_account_access_profiles(None, None).await?;
+    let accounts = store
+        .list_provider_accounts(None)
+        .await?
+        .into_iter()
+        .map(|account| {
+            (
+                (account.provider.clone(), account.account_id.clone()),
+                account,
+            )
+        })
+        .collect::<HashMap<_, _>>();
     for profile in profiles {
         let actual = resolve_local_chrome_profile(&profile.chrome_directory)
             .ok()
@@ -147,10 +160,17 @@ async fn list_profiles(store: &SharedStore) -> Result<()> {
             .iter()
             .filter(|mapping| mapping.profile_id == profile.id)
         {
+            let login = accounts
+                .get(&(
+                    mapping.provider.as_str().to_string(),
+                    mapping.account_id.clone(),
+                ))
+                .map(account_login)
+                .unwrap_or("unknown login");
             println!(
                 "  {}/{} (position {})",
                 mapping.provider,
-                mapping.account_id,
+                login,
                 mapping.position + 1
             );
         }
@@ -248,14 +268,7 @@ async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&st
                 }
                 None => String::new(),
             };
-            println!(
-                "  {}. {:<20} {:<32} {}{}",
-                position + 1,
-                account_id,
-                login,
-                state,
-                demotion
-            );
+            println!("  {}. {:<32} {}{}", position + 1, login, state, demotion);
         }
     }
     Ok(())
@@ -264,36 +277,28 @@ async fn show_routes(store: &SharedStore, repo_root: &Path, raw_repo: Option<&st
 pub(crate) async fn find_provider_account(
     store: &SharedStore,
     provider: Provider,
-    raw_account: &str,
+    raw_email: &str,
 ) -> Result<ProviderAccount> {
     let accounts = store
         .list_provider_accounts(Some(provider.as_str()))
         .await?;
-    let matches = accounts
-        .iter()
-        .filter(|account| {
-            account
-                .account_id
-                .as_str()
-                .eq_ignore_ascii_case(raw_account.trim())
-                || account
-                    .login_email
-                    .as_ref()
-                    .is_some_and(|email| email.as_str().eq_ignore_ascii_case(raw_account.trim()))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [account] => Ok(account.clone()),
-        [] => Err(anyhow!(
-            "managed {} account '{}' does not exist",
+    let candidates = accounts.iter().collect::<Vec<_>>();
+    match match_account(&candidates, raw_email.trim()) {
+        AccountMatch::One(account) => Ok(account.clone()),
+        AccountMatch::None => Err(anyhow!(
+            "managed {} login '{}' does not exist",
             provider,
-            raw_account.trim()
+            raw_email.trim()
         )),
-        [_, ..] => Err(anyhow!(
-            "{} account '{}' is ambiguous; use an account id",
+        AccountMatch::Ambiguous(accounts) => Err(anyhow!(
+            "{} login prefix '{}' is ambiguous: {}",
             provider,
-            raw_account.trim()
+            raw_email.trim(),
+            accounts
+                .iter()
+                .map(|account| account_login(account))
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
     }
 }

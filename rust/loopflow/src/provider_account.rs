@@ -9,6 +9,7 @@ use std::process::Command;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::profile::RouteScope;
@@ -296,8 +297,43 @@ pub(crate) async fn record_rate_limit_signal(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn parse_account_id(value: &str) -> Result<ProviderAccountId, ProviderAccountError> {
     ProviderAccountId::parse(value).map_err(ProviderAccountError::InvalidAccountId)
+}
+
+pub(crate) fn account_id_for_login(login: &crate::profile::EmailAddress) -> ProviderAccountId {
+    let normalized = login.as_str().to_ascii_lowercase();
+    let local = normalized
+        .split_once('@')
+        .map(|(local, _)| local)
+        .unwrap_or("account");
+    let mut stem = String::new();
+    for character in local.chars() {
+        let character = if character.is_ascii_lowercase() || character.is_ascii_digit() {
+            character
+        } else {
+            '-'
+        };
+        if character != '-' || !stem.ends_with('-') {
+            stem.push(character);
+        }
+    }
+    let stem = stem.trim_matches('-');
+    let stem = if stem.is_empty() { "account" } else { stem };
+    let digest = hex::encode(Sha256::digest(normalized.as_bytes()));
+    let maximum_stem_len = 63 - 1 - 12;
+    let stem = &stem[..stem.len().min(maximum_stem_len)];
+    ProviderAccountId::parse(&format!("{stem}-{}", &digest[..12]))
+        .expect("generated account id is path safe and within 63 characters")
+}
+
+pub(crate) fn account_login(account: &ProviderAccount) -> &str {
+    account
+        .login_email
+        .as_ref()
+        .map(crate::profile::EmailAddress::as_str)
+        .unwrap_or_else(|| account.account_id.as_str())
 }
 
 pub(crate) fn account_home_path(
@@ -511,20 +547,24 @@ pub(crate) async fn resolve_provider_account(
 fn account_unavailable_reason(account: &ProviderAccount) -> String {
     let now = now_unix();
     if account.credential_state != CredentialState::Connected {
-        return format!("'{}' credential is missing", account.account_id);
+        return format!("'{}' credential is missing", account_login(account));
     }
     let routing = account.effective_routing_state(time::OffsetDateTime::now_utc().date());
     if routing != RoutingState::Automatic {
-        return format!("'{}' routing is {}", account.account_id, routing.as_str());
+        return format!(
+            "'{}' routing is {}",
+            account_login(account),
+            routing.as_str()
+        );
     }
     if let Some(until) = account.cooldown_until.filter(|until| *until > now) {
         return format!(
             "'{}' cooling{}",
-            account.account_id,
+            account_login(account),
             format_reset_time(until)
         );
     }
-    format!("'{}' is unavailable", account.account_id)
+    format!("'{}' is unavailable", account_login(account))
 }
 
 #[derive(Debug)]
@@ -534,9 +574,9 @@ pub(crate) enum AccountMatch<'a> {
     None,
 }
 
-/// An explicit selector names an account by login email or account id —
-/// exactly, or by any prefix that matches exactly one known account
-/// (`manabot` reaches `manabot-eng`). Matching is case-insensitive.
+/// An explicit selector names an account by login email, exactly or by an
+/// unambiguous prefix. Matching is case-insensitive; internal account ids are
+/// stable storage keys, not a second user-facing identity.
 pub(crate) fn match_account<'a>(
     accounts: &[&'a ProviderAccount],
     selector: &str,
@@ -547,7 +587,6 @@ pub(crate) fn match_account<'a>(
             .login_email
             .as_ref()
             .is_some_and(|email| email.as_str().eq_ignore_ascii_case(selector))
-            || account.account_id.as_str().eq_ignore_ascii_case(selector)
     });
     if let Some(account) = exact {
         return AccountMatch::One(account);
@@ -561,11 +600,7 @@ pub(crate) fn match_account<'a>(
                     .as_str()
                     .to_ascii_lowercase()
                     .starts_with(&selector_lower)
-            }) || account
-                .account_id
-                .as_str()
-                .to_ascii_lowercase()
-                .starts_with(&selector_lower)
+            })
         })
         .collect();
     match prefixed.as_slice() {
@@ -711,7 +746,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_account_selector_matches_exactly_or_by_unique_prefix() {
+    fn explicit_account_selector_matches_email_exactly_or_by_unique_prefix() {
         let temp = tempdir().unwrap();
         let accounts = [
             new_account(
@@ -724,13 +759,13 @@ mod tests {
                 Provider::Codex,
                 parse_account_id("manabot-eng").unwrap(),
                 temp.path().join("manabot-eng"),
-                None,
+                Some(crate::profile::EmailAddress::parse("manabot-eng@loopflow.studio").unwrap()),
             ),
             new_account(
                 Provider::Codex,
                 parse_account_id("manabot-ops").unwrap(),
                 temp.path().join("manabot-ops"),
-                None,
+                Some(crate::profile::EmailAddress::parse("manabot-ops@loopflow.studio").unwrap()),
             ),
         ];
         let accounts = accounts.iter().collect::<Vec<_>>();
@@ -740,20 +775,33 @@ mod tests {
         };
 
         assert_eq!(one("LoopFlow-Eng@loopflow.studio"), "engineering");
-        assert_eq!(one("manabot-eng"), "manabot-eng");
-        // A unique prefix reaches its account; email prefixes count too.
+        // A unique email prefix reaches its account.
         assert_eq!(one("manabot-e"), "manabot-eng");
         assert_eq!(one("loopflow-eng@"), "engineering");
-        // An exact id wins even when it prefixes nothing else and another
-        // account's id shares its prefix.
         assert!(matches!(
             match_account(&accounts, "manabot"),
             AccountMatch::Ambiguous(candidates) if candidates.len() == 2
         ));
         assert!(matches!(
+            match_account(&accounts, "engineering"),
+            AccountMatch::None
+        ));
+        assert!(matches!(
             match_account(&accounts, "nobody@example.com"),
             AccountMatch::None
         ));
+    }
+
+    #[test]
+    fn account_ids_are_derived_from_normalized_login_email() {
+        let jack = crate::profile::EmailAddress::parse("Jack@Loopflow.Studio").unwrap();
+        let jackstah = crate::profile::EmailAddress::parse("jackstah@gmail.com").unwrap();
+
+        assert_eq!(account_id_for_login(&jack).as_str(), "jack-42d1021d3f2d");
+        assert_eq!(
+            account_id_for_login(&jackstah).as_str(),
+            "jackstah-1066ea9c99d1"
+        );
     }
 
     #[test]
@@ -1339,7 +1387,7 @@ mod account_first_tests {
                 .await
                 .unwrap_err()
                 .to_string(),
-            "configured claude route has no eligible account: 'missing' credential is missing"
+            "configured claude route has no eligible account: 'missing@example.com' credential is missing"
         );
     }
 }

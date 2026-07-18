@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, send_outstanding_steers,
-    take_current_input as take_child_input, ChildTarget, CommandStop, PendingInput,
+    take_current_input as take_child_input, CommandStop, PendingInput,
 };
 use crate::child_session::{
     project_write_lease_from_env, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
@@ -289,7 +289,6 @@ async fn run_project_session_inner(
                     .flatten();
                 if let Some(stop) = absorb_run_control(
                     &store,
-                    ChildTarget::Project(&session.id, lease),
                     &run_lease,
                     harness.as_mut(),
                     provider_turn_active,
@@ -309,7 +308,7 @@ async fn run_project_session_inner(
                     if let Some(capture) = &capture {
                         send_outstanding_steers(
                             &store,
-                            ChildTarget::Project(&session.id, lease),
+                            &run_lease,
                             harness.as_mut(),
                             &capture.current_turn_id(),
                             &active_basis,
@@ -792,12 +791,12 @@ async fn handle_attachment(
 }
 
 async fn take_current_input(
-    store: &SharedStore,
-    session: &ProjectSession,
-    lease: &ChildWriteLease,
+    _store: &SharedStore,
+    _session: &ProjectSession,
+    _lease: &ChildWriteLease,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
-    take_child_input(store, ChildTarget::Project(&session.id, lease), pending).await
+    take_child_input(pending).await
 }
 
 struct ProjectOutcome {
@@ -924,18 +923,13 @@ async fn consume_task_observations(
 
 async fn apply_input(
     store: &SharedStore,
-    session: &ProjectSession,
-    lease: &ChildWriteLease,
+    _session: &ProjectSession,
+    _lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
-    apply_child_input(
-        store,
-        ChildTarget::Project(&session.id, lease),
-        harness,
-        input,
-    )
-    .await
+    let run_lease = crate::ops::required_run_lease(store).await?;
+    apply_child_input(store, &run_lease, harness, input).await
 }
 
 async fn set_and_record_status(

@@ -207,6 +207,12 @@ impl SqliteStore {
         Ok(RunLease::new(run.id, run.work, basis, token.clone()))
     }
 
+    pub(crate) fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        validate_run_lease(&conn, lease)?;
+        Ok(())
+    }
+
     pub fn advance_run(
         &self,
         lease: &RunLease,

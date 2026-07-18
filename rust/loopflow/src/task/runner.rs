@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, input_is_current,
-    send_outstanding_steers, ChildTarget, CommandStop, PendingInput,
+    send_outstanding_steers, CommandStop, PendingInput,
 };
 use crate::child_session::{
     task_write_lease_from_env, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
@@ -300,7 +300,6 @@ async fn run_task_session_with(
                     .flatten();
                 if let Some(stop) = absorb_run_control(
                     &store,
-                    ChildTarget::Task(&session.id, lease),
                     run_lease,
                     harness.as_mut(),
                     provider_turn_active,
@@ -352,7 +351,7 @@ async fn run_task_session_with(
                     if let Some(capture) = &capture {
                         send_outstanding_steers(
                             &store,
-                            ChildTarget::Task(&session.id, lease),
+                            run_lease,
                             harness.as_mut(),
                             &capture.current_turn_id(),
                             &active_basis,
@@ -1324,12 +1323,12 @@ fn task_gate_fingerprint(session: &TaskSession) -> Result<String> {
 }
 
 async fn pending_input_is_current(
-    store: &SharedStore,
-    session: &TaskSession,
-    lease: &ChildWriteLease,
+    _store: &SharedStore,
+    _session: &TaskSession,
+    _lease: &ChildWriteLease,
     input: &PendingInput,
 ) -> Result<bool> {
-    input_is_current(store, ChildTarget::Task(&session.id, lease), input).await
+    input_is_current(input).await
 }
 
 async fn apply_next_pending(
@@ -1480,14 +1479,15 @@ async fn record_unhandled_failure(
 
 async fn apply_input(
     store: &SharedStore,
-    session: &TaskSession,
-    lease: &ChildWriteLease,
+    _session: &TaskSession,
+    _lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     text: &str,
 ) -> Result<()> {
+    let run_lease = crate::ops::required_run_lease(store).await?;
     apply_child_input(
         store,
-        ChildTarget::Task(&session.id, lease),
+        &run_lease,
         harness,
         PendingInput::system(text.to_string()),
     )

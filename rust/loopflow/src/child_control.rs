@@ -8,40 +8,9 @@ use std::collections::VecDeque;
 
 use anyhow::Result;
 
-use crate::child_session::{ChildRef, ChildWriteLease};
-use crate::durable::{Basis, BoundarySeed, SendState};
+use crate::durable::{Basis, BoundarySeed, RunLease, SendState};
 use crate::harness::{Harness, SendCurrentOutcome};
-use crate::project_session::ProjectSessionId;
 use crate::store::SharedStore;
-use crate::task::TaskSessionId;
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ChildTarget<'a> {
-    Project(&'a ProjectSessionId, &'a ChildWriteLease),
-    Task(&'a TaskSessionId, &'a ChildWriteLease),
-}
-
-impl<'a> ChildTarget<'a> {
-    fn as_ref(self) -> ChildRef {
-        match self {
-            Self::Project(id, _) => ChildRef::Project(id.clone()),
-            Self::Task(id, _) => ChildRef::Task(id.clone()),
-        }
-    }
-
-    fn lease(self) -> &'a ChildWriteLease {
-        match self {
-            Self::Project(_, lease) | Self::Task(_, lease) => lease,
-        }
-    }
-
-    async fn validate_write_lease(self, store: &SharedStore) -> Result<()> {
-        store
-            .validate_child_write_lease(&self.as_ref(), self.lease())
-            .await?;
-        Ok(())
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct PendingInput {
@@ -63,13 +32,11 @@ pub(crate) enum CommandStop {
 /// Apply direct Run/Work control to the provider boundary owned by this body.
 pub(crate) async fn absorb_run_control(
     store: &SharedStore,
-    target: ChildTarget<'_>,
-    run_lease: &crate::durable::RunLease,
+    run_lease: &RunLease,
     harness: &mut dyn Harness,
     turn_active: bool,
     active_turn_id: Option<&str>,
 ) -> Result<Option<CommandStop>> {
-    target.validate_write_lease(store).await?;
     match store.run_control(run_lease, active_turn_id).await? {
         Some(crate::durable::RunControl::Interrupt) => {
             if turn_active {
@@ -85,18 +52,12 @@ pub(crate) async fn absorb_run_control(
 }
 
 pub(crate) async fn take_current_input(
-    _store: &SharedStore,
-    _target: ChildTarget<'_>,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
     Ok(pending.pop_front())
 }
 
-pub(crate) async fn input_is_current(
-    _store: &SharedStore,
-    _target: ChildTarget<'_>,
-    _input: &PendingInput,
-) -> Result<bool> {
+pub(crate) async fn input_is_current(_input: &PendingInput) -> Result<bool> {
     Ok(true)
 }
 
@@ -106,14 +67,13 @@ pub(crate) async fn input_is_current(
 /// A Send records transport evidence only; it never advances applied Basis.
 pub(crate) async fn send_outstanding_steers(
     store: &SharedStore,
-    target: ChildTarget<'_>,
+    run_lease: &RunLease,
     harness: &mut dyn Harness,
     turn_id: &str,
     active_basis: &Basis,
 ) -> Result<BoundarySeed> {
-    target.validate_write_lease(store).await?;
-    let work = store.work_for_child(&target.as_ref()).await?;
-    let seed = store.boundary_seed(&work).await?;
+    store.validate_run_lease(run_lease).await?;
+    let seed = store.boundary_seed(&run_lease.work).await?;
     for steer in seed
         .steers
         .iter()
@@ -151,10 +111,10 @@ pub(crate) async fn send_outstanding_steers(
 
 pub(crate) async fn apply_input(
     store: &SharedStore,
-    target: ChildTarget<'_>,
+    run_lease: &RunLease,
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
-    target.validate_write_lease(store).await?;
+    store.validate_run_lease(run_lease).await?;
     harness.send_input(&input.text).await
 }

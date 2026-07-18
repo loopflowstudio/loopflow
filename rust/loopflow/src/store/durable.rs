@@ -85,6 +85,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.resolve_run_lease(&token)).await
     }
 
+    pub(crate) async fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
+    }
+
     pub async fn advance_run(
         &self,
         lease: &RunLease,

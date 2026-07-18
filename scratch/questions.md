@@ -49,6 +49,20 @@ Precise resume plan for the next (supervised, non-headless) pass, in order:
 5. Restore the CI claim/preemption focused proofs the deleted 2,767-line suite
    covered (exact-Run claim rejects an overlapping repair Run; stale/land-time
    incidents do not preempt; a parked Review is preempted at most once).
+   **Partly done headless (2026-07-17):** the runtime wake/preempt *gate* now has
+   a focused proof —
+   `task::runner::tests::current_ci_incident_warrants_a_wake_only_for_a_fresh_repairable_failure`
+   pins `current_ci_incident`, the single mint point both the runner's
+   `current_ci_incident_identity` review-preempt check and the idle
+   `arm_ci_fix_wake` arm consult: a fresh repairable failure warrants an
+   incident; green, a stale reading for a past head, and a land-time-only
+   (`scratch-clear`) head warrant nothing; a mixed land-time+real head still
+   warrants it. That closes the "(c) does-not-preempt at integration altitude"
+   gap without a mock-heavy loop drive. Still open and reserved for the
+   supervised cut: the **preempt-*once*** property (`review_preempted` is pure
+   `run_task_child` loop state, cleared on `TurnCompleted`, so proving it needs
+   the loop harness — do not extract the inline gate solely to test it), and the
+   exact-Run claim rejecting an overlapping repair Run at runtime.
 
 This is a live-execution-path replacement of the two most critical runners; a
 partial version is exactly the dual-write checkpoint the design forbids and is

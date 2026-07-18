@@ -2663,6 +2663,108 @@ mod tests {
         );
     }
 
+    /// An open PR on head `headsha` with one CI reading. The `current_ci_incident`
+    /// mint point is the single gate both the runner's review-preempt check
+    /// (`current_ci_incident_identity`, runner.rs) and the idle repair arm
+    /// (`arm_ci_fix_wake`) consult, so proving what it warrants proves what would
+    /// preempt or reserve a repair Run.
+    fn open_pr_with_ci(observation: Option<CiObservation>) -> TaskPr {
+        let now = OffsetDateTime::now_utc();
+        TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: TaskSessionId::new(),
+            sequence: 1,
+            slug: "ship".to_string(),
+            branch: "jack/ship".to_string(),
+            base_commit: "base".to_string(),
+            parent_pr_id: None,
+            publication: Some(PrPublication {
+                requested_at: now,
+                after_merge: AfterMerge::Review,
+                next_slug: None,
+                github: Some(GithubPr {
+                    number: 916,
+                    url: "https://github.com/loopflow/loopflow/pull/916".to_string(),
+                    head_sha: Some("headsha".to_string()),
+                }),
+            }),
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: observation,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn failing_on(head: &str, checks: Vec<crate::task::CiCheck>) -> CiObservation {
+        CiObservation {
+            head_sha: head.to_string(),
+            state: CiState::Failing,
+            failing_checks: checks,
+            observed_at: OffsetDateTime::now_utc(),
+        }
+    }
+
+    /// The runtime wake/preempt gate. A fresh, repairable failure on the current
+    /// head warrants an incident (the runner would preempt a parked Review or arm
+    /// a repair). Green, a stale reading for a past head, and a head red only on a
+    /// land-time precondition all warrant nothing — so neither the review-preempt
+    /// nor the idle repair path fires for them. This is the composed decision the
+    /// runner actually calls; the individual `fresh_ci`/`wake_legal` predicates are
+    /// unit-tested in `task::mod`, but their integration through the mint point was
+    /// only covered by the deleted CI lifecycle suite.
+    #[test]
+    fn current_ci_incident_warrants_a_wake_only_for_a_fresh_repairable_failure() {
+        let real = crate::task::CiCheck {
+            name: "rust-test".to_string(),
+            url: Some("https://ci/rust".to_string()),
+        };
+        let scratch_clear = crate::task::CiCheck {
+            name: "scratch-clear".to_string(),
+            url: None,
+        };
+
+        // A genuine failing required check on the current head: a wake is warranted.
+        let actionable = open_pr_with_ci(Some(failing_on("headsha", vec![real.clone()])));
+        let incident = crate::ops::task::current_ci_incident(&actionable)
+            .expect("a fresh failure warrants a wake");
+        assert_eq!(incident.pr_number, 916);
+        assert_eq!(incident.failed_head_sha, "headsha");
+        assert_eq!(incident.failure_set, vec!["rust-test".to_string()]);
+
+        // Passing: no incident, nothing to preempt for.
+        let green = open_pr_with_ci(Some(CiObservation {
+            head_sha: "headsha".to_string(),
+            state: CiState::Passing,
+            failing_checks: Vec::new(),
+            observed_at: OffsetDateTime::now_utc(),
+        }));
+        assert!(crate::ops::task::current_ci_incident(&green).is_none());
+
+        // Stale: the reading is for a head the PR has already moved past. The
+        // failure is moot and must never wake or preempt.
+        let stale = open_pr_with_ci(Some(failing_on("oldhead", vec![real.clone()])));
+        assert!(crate::ops::task::current_ci_incident(&stale).is_none());
+
+        // Red only on a land-time precondition (`scratch-clear`): a repair turn
+        // could only delete the reviewer's artifact, so the gate refuses the wake
+        // even though the head is genuinely failing. A parked Review is not
+        // preempted for this reading.
+        let land_time_only =
+            open_pr_with_ci(Some(failing_on("headsha", vec![scratch_clear.clone()])));
+        assert!(crate::ops::task::current_ci_incident(&land_time_only).is_none());
+
+        // But a head failing a land-time precondition *and* a real check still
+        // warrants the wake — the mint point must not swallow the actionable
+        // failure just because a land-time one rides alongside it.
+        let mixed = open_pr_with_ci(Some(failing_on("headsha", vec![scratch_clear, real])));
+        assert!(crate::ops::task::current_ci_incident(&mixed).is_some());
+    }
+
     #[tokio::test]
     async fn finish_parked_settles_the_body_without_a_terminal_status() {
         let (store, mut session, lease) = conformance_session("codex").await;

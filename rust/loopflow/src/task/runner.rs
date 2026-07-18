@@ -805,11 +805,15 @@ async fn run_task_session_with(
                                         (Some(start), Some(current)) => start != current,
                                         (Some(_), None) => false,
                                     };
-                                crate::ops::task::decide_open_pr_status(
-                                    pr,
-                                    github_degraded.as_deref(),
-                                    head_advanced,
-                                )
+                                {
+                                    let (disposition, reason) =
+                                        crate::ops::task::decide_open_pr_status(
+                                            pr,
+                                            github_degraded.as_deref(),
+                                            head_advanced,
+                                        );
+                                    (session_status_for(disposition), reason)
+                                }
                             } else {
                                 let next_fingerprint = task_state_fingerprint(&session)?;
                                 if next_fingerprint != state_fingerprint {
@@ -1490,6 +1494,20 @@ async fn apply_input(
     .await
 }
 
+/// Project an open-PR disposition onto the legacy Session status this runner
+/// still records. Every arm is a Wait; the old enum only distinguished whether
+/// a human was needed. This translation lives here, at the boundary, because it
+/// dies with the runner -- the disposition itself is the durable vocabulary.
+fn session_status_for(disposition: crate::ops::task::OpenPrDisposition) -> TaskSessionStatus {
+    use crate::ops::task::OpenPrDisposition;
+    match disposition {
+        OpenPrDisposition::ObservationDegraded | OpenPrDisposition::NeedsDirection => {
+            TaskSessionStatus::Blocked
+        }
+        OpenPrDisposition::AwaitingReview => TaskSessionStatus::Waiting,
+    }
+}
+
 /// Apply a status transition and persist it: set the status, update the row, and
 /// append the paired `StatusChanged` event.
 async fn set_and_record_status(
@@ -1837,9 +1855,9 @@ async fn settle_ci_fix_turn(
                 Observation::Degraded { reason, .. } => Some(reason.as_str()),
                 _ => None,
             };
-            let (settled_status, reason) =
+            let (disposition, reason) =
                 crate::ops::task::decide_open_pr_status(pr, degraded, head_advanced);
-            (settled_status, reason)
+            (session_status_for(disposition), reason)
         }
         Some(_) => (
             TaskSessionStatus::Waiting,

@@ -203,6 +203,33 @@ The Session→Epoch bridge (`epoch_state_for_task/project`,
 `durable.rs:2706/2720`) is category (d) inverted: delete the *mapping*, because
 Run must own that seam directly.
 
+#### The category (d) decoupling pattern (established; apply to the rest)
+
+`decide_open_pr_status` is done and is the template. The move:
+
+1. Give the policy its **own** enum naming the real facts
+   (`OpenPrDisposition::{ObservationDegraded, NeedsDirection, AwaitingReview}`).
+2. Return that from the pure function. Keep the operator-facing reason strings
+   byte-identical — they are asserted and user-visible.
+3. Translate to `TaskSessionStatus` **at the call site inside the doomed
+   runner**, in a clearly-labelled boundary function. That is not a
+   compatibility shim: the translation is deleted along with the runner, while
+   the enum is what survives onto `WaitOn`.
+
+Why it is worth doing before the loops move: the old enum flattened
+"we could not observe CI" and "CI is red and nobody fixed it" into one
+`Blocked`, and those need different operator responses — one waits on a
+capability recovering, the other needs authored direction. Splitting them is a
+behavioral improvement the deletion would otherwise have to invent under
+pressure.
+
+**Do not** apply this to `TaskGateProposal.status` (`task/mod.rs:172`) or
+`store/ci_incidents.rs:16`. Those are *persisted* fields, so changing their type
+is a wire/schema change; they ride the Session row's own deletion in stage 3
+and its draft migration, not a separate type swap. Starting one and not
+finishing it leaves a half-migrated wire type, which is worse than either end
+state.
+
 Stage 1 was far cheaper than estimated: production code branched on
 `evidence.status` in exactly **two** places (`is_terminal()` and `== Abandoned`);
 the other 36 references were test fixtures. The status axis also shrank 8 → 5,

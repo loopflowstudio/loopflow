@@ -2638,18 +2638,43 @@ pub(crate) async fn reconcile_task_pr(
 /// did not happen: block rather than report false progress. `github_degraded`
 /// carries `Observation::Degraded`'s reason and dominates — a turn that ran
 /// blind to GitHub cannot be said to have repaired anything.
+/// What an open PR makes the Task wait for.
+///
+/// This is the durable vocabulary for the triage policy below. It deliberately
+/// does not name a Session status: every arm is a Wait, and the arms differ by
+/// the fact that would end the wait, which is what `WaitOn` records. Keeping
+/// them distinct matters because "we cannot see CI" and "CI is red and nobody
+/// fixed it" need different operator responses even though the old enum
+/// flattened both to `Blocked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpenPrDisposition {
+    /// GitHub observation is degraded, so the PR's real state is unknown.
+    /// Resolved by the capability recovering, not by anyone authoring anything.
+    ObservationDegraded,
+    /// CI is failing and the body did not move the head. Only new authored
+    /// direction or a human review can move this.
+    NeedsDirection,
+    /// The PR is open and healthy; the Task waits on external review or merge.
+    AwaitingReview,
+}
+
+/// Triage an open PR into the exact thing it is waiting for.
+///
+/// Pure policy: evidence in, disposition plus its operator-facing reason out.
+/// Degraded observation dominates a healthy CI reading, because a reading we
+/// could not take is not a passing reading.
 pub(crate) fn decide_open_pr_status(
     pr: &TaskPr,
     github_degraded: Option<&str>,
     head_advanced: bool,
-) -> (TaskSessionStatus, String) {
+) -> (OpenPrDisposition, String) {
     let number = pr
         .github()
         .expect("open Task PR requires a GitHub receipt")
         .number;
     if let Some(reason) = github_degraded {
         return (
-            TaskSessionStatus::Blocked,
+            OpenPrDisposition::ObservationDegraded,
             format!(
                 "ci-fix blocked by github-observation: {reason}. Resume when GitHub recovers; pull request #{number} stays attached."
             ),
@@ -2661,14 +2686,14 @@ pub(crate) fn decide_open_pr_status(
         .is_some_and(|observation| observation.state == CiState::Failing);
     if failing && !head_advanced {
         return (
-            TaskSessionStatus::Blocked,
+            OpenPrDisposition::NeedsDirection,
             format!(
                 "CI failing on pull request #{number}; the Task body did not repair the head. Needs a new directive or human review; pull request #{number} stays attached."
             ),
         );
     }
     (
-        TaskSessionStatus::Waiting,
+        OpenPrDisposition::AwaitingReview,
         format!("pull request #{number} is open for review"),
     )
 }
@@ -5194,7 +5219,7 @@ mod tests {
         require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
         resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
         task_recovery_adoption, task_snapshot, unpublished_work,
-        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions,
+        verify_task_pr_range_with_authority, CommittedFollowUp, OpenPrDisposition, RotateOptions,
         TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
@@ -9396,7 +9421,7 @@ mod tests {
         let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
         let (status, reason) =
             decide_open_pr_status(&pr, Some("GitHub API rate limit exceeded"), false);
-        assert_eq!(status, TaskSessionStatus::Blocked);
+        assert_eq!(status, OpenPrDisposition::ObservationDegraded);
         assert!(reason.contains("github-observation"), "reason: {reason}");
         assert!(reason.contains("rate limit"), "reason: {reason}");
         assert!(reason.contains("#42 stays attached"), "reason: {reason}");
@@ -9408,7 +9433,11 @@ mod tests {
         // Failing — a no-change report, not a healthy PR observation.
         let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
         let (status, reason) = decide_open_pr_status(&pr, None, false);
-        assert_eq!(status, TaskSessionStatus::Blocked);
+        assert_eq!(
+            status,
+            OpenPrDisposition::NeedsDirection,
+            "a red head nobody moved needs authored direction, not a capability wait"
+        );
         assert!(reason.contains("did not repair"), "reason: {reason}");
         assert!(reason.contains("#42 stays attached"), "reason: {reason}");
     }
@@ -9419,7 +9448,7 @@ mod tests {
         // for CI to resolve instead of blocking a genuine attempt.
         let pr = open_pr_with_ci(42, "sha-2", Some(CiState::Failing));
         let (status, reason) = decide_open_pr_status(&pr, None, true);
-        assert_eq!(status, TaskSessionStatus::Waiting);
+        assert_eq!(status, OpenPrDisposition::AwaitingReview);
         assert!(reason.contains("open for review"), "reason: {reason}");
     }
 
@@ -9428,19 +9457,19 @@ mod tests {
         let pending = open_pr_with_ci(42, "sha-1", Some(CiState::Pending));
         assert_eq!(
             decide_open_pr_status(&pending, None, false).0,
-            TaskSessionStatus::Waiting
+            OpenPrDisposition::AwaitingReview
         );
         let passing = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
         assert_eq!(
             decide_open_pr_status(&passing, None, false).0,
-            TaskSessionStatus::Waiting
+            OpenPrDisposition::AwaitingReview
         );
         // No required checks / gh unavailable reads as unknown-healthy, so an
         // env without CI configured is never penalized with a block.
         let unknown = open_pr_with_ci(42, "sha-1", None);
         assert_eq!(
             decide_open_pr_status(&unknown, None, false).0,
-            TaskSessionStatus::Waiting
+            OpenPrDisposition::AwaitingReview
         );
     }
 
@@ -9450,7 +9479,7 @@ mod tests {
         // healthy: the reading may simply be stale.
         let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
         let (status, reason) = decide_open_pr_status(&pr, Some("network unreachable"), true);
-        assert_eq!(status, TaskSessionStatus::Blocked);
+        assert_eq!(status, OpenPrDisposition::ObservationDegraded);
         assert!(reason.contains("github-observation"), "reason: {reason}");
     }
 }

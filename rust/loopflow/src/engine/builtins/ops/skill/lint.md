@@ -3,6 +3,9 @@ produces: passing lint checks
 ---
 Run lint and format checks. Fix failures. If everything passes, stop immediately.
 
+Lint owns formatting and static analysis only. Do not run tests or builds that
+are not required by the lint command itself; gate and CI own them.
+
 ## Workflow
 
 ### 1. Find the project's lint commands

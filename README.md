@@ -88,6 +88,7 @@ lf usage               # subscription state and spend, per account and repo
 
 | Built-in | What it does |
 |----------|--------------|
+| `testing-audit` | Finds low-value tests and redundant verification, then improves the workflow |
 | `token-compress` | Fits a complete artifact to an explicit token budget without truncating it |
 
 ## Docs

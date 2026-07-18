@@ -75,6 +75,7 @@ Build skills — you invoke these, often interactively:
 |------|--------------|
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `research` | Map the territory — architecture, complexity, quality, potential |
+| `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
 | `iterate` | Read research, write design to address it |
 | `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
 | `reduce` | Find simplification opportunities |

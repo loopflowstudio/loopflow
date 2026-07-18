@@ -34,6 +34,16 @@ def _write_fake_macho(path: Path, content: bytes = b"fake-macho") -> None:
     path.chmod(0o755)
 
 
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def _stage_build_artifacts(root: Path) -> None:
     swift_rel = root / "swift" / ".build" / "release"
     swift_rel.mkdir(parents=True)
@@ -279,6 +289,49 @@ def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
     assert f"--cli-target {install_dir / 'lf'}" in command
     assert "--sync-skills" in command
     assert refreshed == ([] if no_pull else [root])
+
+
+def test_refresh_fast_forwards_default_branch_despite_pull_config(tmp_path: Path) -> None:
+    origin = tmp_path / "origin.git"
+    author = tmp_path / "author"
+    checkout = tmp_path / "checkout"
+
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(origin)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "init", "--initial-branch=main", str(author)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _git(author, "config", "user.name", "Loopflow Test")
+    _git(author, "config", "user.email", "test@loopflow.invalid")
+    (author / "version.txt").write_text("one\n")
+    _git(author, "add", "version.txt")
+    _git(author, "commit", "-m", "initial")
+    _git(author, "remote", "add", "origin", str(origin))
+    _git(author, "push", "-u", "origin", "main")
+
+    subprocess.run(
+        ["git", "clone", str(origin), str(checkout)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    _git(checkout, "config", "pull.rebase", "true")
+
+    (author / "version.txt").write_text("two\n")
+    _git(author, "commit", "-am", "update")
+    _git(author, "push")
+
+    install._refresh_default_branch(checkout)
+
+    assert (checkout / "version.txt").read_text() == "two\n"
+    assert _git(checkout, "rev-parse", "HEAD") == _git(author, "rev-parse", "HEAD")
 
 
 def test_local_use_routes_cli_app_bundled_helper_and_skills_through_rust_promotion(

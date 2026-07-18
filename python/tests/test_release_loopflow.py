@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import plistlib
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 SCRIPT_PATH = SCRIPTS_DIR / "release-loopflow.py"
@@ -35,3 +38,31 @@ def test_release_bundle_renames_swift_product_to_bundle_executable(tmp_path: Pat
 
     assert (app_macos_dir / "Loopflow").read_bytes() == b"swift-product"
     assert not (app_macos_dir / "LoopflowMac").exists()
+
+
+def test_release_command_reports_timeout(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def time_out(cmd: list[str], **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr(release_loopflow.subprocess, "run", time_out)
+
+    with pytest.raises(RuntimeError, match="command timed out after 7s"):
+        release_loopflow.run(["slow-command"], timeout=7)
+
+    output = capsys.readouterr().out
+    assert "$ slow-command" in output
+    assert "Timed out after 7s" in output
+
+
+def test_notarization_without_credentials_fails_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert release_loopflow._notarize_dmg(tmp_path / "Loopflow.dmg") == 1
+    assert "Missing notarization credentials" in capsys.readouterr().out

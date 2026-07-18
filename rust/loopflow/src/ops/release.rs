@@ -238,6 +238,41 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Vec<Me
 /// name: `lf release` cuts a tag from local state and never reads that job's
 /// result, so a green CI run is not a gate the release actually holds.
 const MIGRATION_CHECK: &str = "scripts/check_migrations.py";
+const MIGRATION_CANONICALIZE: &str = "scripts/canonicalize_migrations.py";
+
+/// Freeze the accumulated draft migrations into canonical, ordinal-assigned
+/// migrations inside the release worktree.
+///
+/// This is the single publication boundary: it runs after the version bump and
+/// before the commit, so the generated `migrations.rs` and `.sql` files are part
+/// of the release PR and run under real Rust CI before the queue merges and tags.
+/// A target with no canonicalization script (i.e. no migrations) skips this.
+fn canonicalize_migrations(repo: &Path, version: &str) -> OpsResult<()> {
+    let script = repo.join(MIGRATION_CANONICALIZE);
+    if !script.is_file() {
+        return Ok(());
+    }
+
+    // The script is stdlib-only by design, so the release needs no Python
+    // environment — only an interpreter.
+    let output = Command::new("python3")
+        .arg(&script)
+        .arg(version)
+        .current_dir(repo)
+        .output()
+        .map_err(|err| {
+            OpsError::Message(format!("failed to run {MIGRATION_CANONICALIZE}: {err}"))
+        })?;
+
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = detail.trim();
+        return Err(OpsError::Message(format!(
+            "migration canonicalization failed; nothing released\n{detail}"
+        )));
+    }
+    Ok(())
+}
 
 fn verify_migrations(repo: &Path) -> OpsResult<()> {
     let script = repo.join(MIGRATION_CHECK);
@@ -424,6 +459,9 @@ fn prepare_release_in_worktree(
         target_tag(target, version)
     ));
     bump_manifest_versions(wt_path, target, version, progress)?;
+
+    progress.status("Canonicalizing draft migrations...");
+    canonicalize_migrations(wt_path, version)?;
 
     progress.status(&format!(
         "Generating release notes for {}...",
@@ -1721,6 +1759,106 @@ mod tests {
             release_worktree_name(&named, "1.2.3-beta.1"),
             "release-rust-cli-v1-2-3-beta-1"
         );
+    }
+
+    // ======================================================================
+    // canonicalize_migrations (the release cut is the publication authority)
+    // ======================================================================
+
+    fn python3_available() -> bool {
+        Command::new("python3")
+            .arg("--version")
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false)
+    }
+
+    /// The release worktree — not a manual script invocation — turns drafts into
+    /// canonical migrations. This drives the *production* release sequence
+    /// (`prepare_release_in_worktree`), not the `canonicalize_migrations` helper
+    /// directly, so it is sabotage-sensitive: deleting the real canonicalization
+    /// call site makes the drafts never freeze and the asserts below fail. A
+    /// direct helper call cannot catch that regression.
+    ///
+    /// The bare temp worktree has no manifests (so the version bump is a no-op)
+    /// and no repo/wave/store context (so the release-notes stage fails fast,
+    /// with no network). Canonicalization runs before that stage, so the tree is
+    /// already frozen by the time `prepare_release_in_worktree` returns its
+    /// (expected) error — which we ignore and assert on the tree instead.
+    #[test]
+    fn the_release_run_canonicalizes_drafts_into_the_committed_tree() {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/canonicalize_migrations.py");
+        if !script.is_file() || !python3_available() {
+            return;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let migrations = root.join("rust/loopflow/src/store/migrations");
+        let drafts = migrations.join("drafts");
+        fs::create_dir_all(&drafts).unwrap();
+        fs::create_dir_all(root.join("scripts")).unwrap();
+        fs::copy(&script, root.join("scripts/canonicalize_migrations.py")).unwrap();
+        fs::write(
+            migrations.join("0.11.001_initial.sql"),
+            "CREATE TABLE waves (id TEXT);\n",
+        )
+        .unwrap();
+        let registry_rs = root.join("rust/loopflow/src/store/migrations.rs");
+        fs::write(
+            &registry_rs,
+            "const MIGRATIONS: &[Migration] = &[\n    Migration {\n        \
+             id: MigrationId {\n            major: 0,\n            minor: 11,\n            \
+             ordinal: 1,\n        },\n        name: \"initial\",\n        \
+             sql: include_str!(\"migrations/0.11.001_initial.sql\"),\n    },\n];\n",
+        )
+        .unwrap();
+        fs::write(
+            drafts.join("add_wave_colour__deadbeefdeadbeefdeadbeefdeadbeef.sql"),
+            "-- name: add_wave_colour\n-- id: deadbeefdeadbeefdeadbeefdeadbeef\n\
+             -- depends_on: \n\
+             ALTER TABLE waves ADD COLUMN colour TEXT;\n",
+        )
+        .unwrap();
+
+        // A target with no manifests: the version bump is a no-op, canonicalize
+        // runs, then the notes stage fails fast in this contextless worktree.
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: Vec::new(),
+            tag_prefix: "v".to_string(),
+            manifests: Vec::new(),
+            workflow: None,
+        };
+        let _ = prepare_release_in_worktree(
+            root,
+            "0.11.4",
+            "v0.11.3",
+            &[],
+            &target,
+            &crate::ops::progress::NullProgress,
+        );
+
+        // The draft is now a canonical, registered migration.
+        let canonical = migrations.join("0.11.002_add_wave_colour.sql");
+        assert!(canonical.is_file(), "canonical migration not written");
+        assert_eq!(
+            fs::read_to_string(&canonical).unwrap(),
+            "ALTER TABLE waves ADD COLUMN colour TEXT;\n"
+        );
+        let registry = fs::read_to_string(&registry_rs).unwrap();
+        assert!(
+            registry.contains("name: \"add_wave_colour\""),
+            "not registered"
+        );
+        // The draft is consumed.
+        let remaining: Vec<_> = fs::read_dir(&drafts)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".sql"))
+            .collect();
+        assert!(remaining.is_empty(), "draft not consumed");
     }
 
     // ======================================================================

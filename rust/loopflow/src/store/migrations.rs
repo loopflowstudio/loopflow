@@ -1222,8 +1222,8 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, product_schema, validate_set, validate_sqlite,
-        Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, product_schema, validate_foreign_keys,
+        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
     use crate::task::TaskEventKind;
 
@@ -2309,6 +2309,82 @@ mod tests {
             latest_version_sqlite(&conn).unwrap(),
             latest_known_version()
         );
+    }
+
+    /// A durable snapshot of a real store at the 0.10 release, frozen once and
+    /// committed — deliberately *not* derived from the current MIGRATIONS
+    /// registry. A prefix of MIGRATIONS regenerates itself from the same source
+    /// it validates against, so a rewritten early migration would slip past it;
+    /// this frozen fixture diverges and fails instead.
+    const PREVIOUS_RELEASE_FIXTURE: &str = include_str!("tests/fixtures/store_0_10_release.sql");
+
+    /// A real two-generation upgrade: a database frozen at the *previous release*
+    /// (the committed fixture, independent of MIGRATIONS) takes the current
+    /// canonical tail exactly once, reaches the latest known version, and carries
+    /// its live rows and referential integrity across every rebuild in the tail.
+    #[test]
+    fn a_previous_release_database_upgrades_through_the_current_canonical_tail() {
+        let conn = open();
+        conn.execute_batch(PREVIOUS_RELEASE_FIXTURE).unwrap();
+
+        // The fixture starts at the 0.10 generation with live, self-referential
+        // data — a two-generation upgrade, not a from-scratch run.
+        assert_eq!(
+            applied_versions(&conn).unwrap(),
+            vec![
+                "0.10.001_initial".to_string(),
+                "0.10.002_session_execution_context".to_string(),
+            ]
+        );
+        assert!(MIGRATIONS.len() > 2, "need a tail beyond the fixture");
+
+        // The generated tail advances it, and applying it again is a no-op.
+        apply_set(&conn, MIGRATIONS).unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
+        validate_foreign_keys(&conn).unwrap();
+
+        // The previous release's rows — including the parent/child foreign key —
+        // survive the whole tail.
+        let waves: i64 = conn
+            .query_row("SELECT count(*) FROM waves", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(waves, 2, "seeded waves did not survive the upgrade");
+        let child_parent: String = conn
+            .query_row(
+                "SELECT parent_wave_id FROM waves WHERE id = 'wave-child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(child_parent, "wave-root", "foreign key relationship lost");
+        let tokens: i64 = conn
+            .query_row("SELECT count(*) FROM provider_tokens", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            tokens, 1,
+            "seeded provider token did not survive the upgrade"
+        );
+    }
+
+    /// Fresh initialization over the full real registry — a brand-new database
+    /// runs the entire canonical tail from empty to the latest known version.
+    #[test]
+    fn a_fresh_database_initializes_through_the_full_canonical_tail() {
+        let conn = open();
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]

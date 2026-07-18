@@ -219,8 +219,13 @@ DRAFTS = MIGRATIONS + "/drafts"
 
 
 def _draft(repo: Path, name: str, depends_on: str = "", body: str = "SELECT 1;\n") -> None:
+    import hashlib
+
+    token = hashlib.sha256(name.encode()).hexdigest()[:32]
     (repo / DRAFTS).mkdir(parents=True, exist_ok=True)
-    (repo / DRAFTS / f"{name}.sql").write_text(f"-- name: {name}\n-- depends_on: {depends_on}\n{body}")
+    (repo / DRAFTS / f"{name}__{token}.sql").write_text(
+        f"-- name: {name}\n-- id: {token}\n-- depends_on: {depends_on}\n{body}"
+    )
 
 
 def test_a_well_formed_draft_passes(repo: Path):
@@ -268,7 +273,7 @@ def test_a_draft_depending_on_no_draft_fails(repo: Path):
 
     result = check(repo)
     assert result.returncode == 1
-    assert "which is not a draft" in result.stderr
+    assert "neither a draft" in result.stderr
 
 
 def test_a_draft_dependency_cycle_fails(repo: Path):
@@ -290,7 +295,9 @@ def test_a_draft_colliding_with_a_released_name_fails(repo: Path):
 
 def test_a_draft_header_disagreeing_with_its_filename_fails(repo: Path):
     (repo / DRAFTS).mkdir(parents=True)
-    (repo / DRAFTS / "add_wave_colour.sql").write_text("-- name: something_else\n-- depends_on: \n")
+    (repo / DRAFTS / "add_wave_colour__deadbeefdeadbeefdeadbeefdeadbeef.sql").write_text(
+        "-- name: something_else\n-- id: deadbeefdeadbeefdeadbeefdeadbeef\n-- depends_on: \n"
+    )
 
     result = check(repo)
     assert result.returncode == 1
@@ -299,7 +306,9 @@ def test_a_draft_header_disagreeing_with_its_filename_fails(repo: Path):
 
 def test_a_draft_without_a_name_header_fails(repo: Path):
     (repo / DRAFTS).mkdir(parents=True)
-    (repo / DRAFTS / "add_wave_colour.sql").write_text("ALTER TABLE waves ADD colour TEXT;\n")
+    (repo / DRAFTS / "add_wave_colour__deadbeefdeadbeefdeadbeefdeadbeef.sql").write_text(
+        "ALTER TABLE waves ADD colour TEXT;\n"
+    )
 
     result = check(repo)
     assert result.returncode == 1

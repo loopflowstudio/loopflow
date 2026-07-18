@@ -110,7 +110,7 @@ exit 0
     )
 }
 
-fn claude_script() -> &'static str {
+fn agent_script() -> &'static str {
     "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
@@ -514,7 +514,7 @@ fn land_missing_pr_error_includes_branch_name() {
     let _env = EnvGuard::with_home(
         &[
             ("gh", gh_no_pr_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
             ("open", noop_open_script()),
         ],
         Some(home.path()),
@@ -834,7 +834,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
     let _env = EnvGuard::with_home(
         &[
             ("gh", gh_no_pr_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
             ("open", noop_open_script()),
         ],
         Some(home.path()),

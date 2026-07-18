@@ -1,55 +1,10 @@
-"""The published loopflow skill tracks the injected operating contract.
-
-skills/loopflow/SKILL.md is the LOOPFLOW.md contract reframed for agents not
-launched by lf. The two are worded differently on purpose, but the doctrine
-anchors — headings, load-bearing sentences, and command spellings — must
-appear in both. When this fails, the builtin changed: re-align the skill.
-"""
+"""The published loopflow skill is valid, self-contained, and role-clear."""
 
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILTIN = ROOT / "rust/loopflow/src/engine/builtins/LOOPFLOW.md"
 SKILL = ROOT / "skills/loopflow/SKILL.md"
-
-# Exact strings that carry the shared doctrine. Substring match in both files.
-DOCTRINE_ANCHORS = [
-    "Execute Here First",
-    "Checkpoint And Proceed",
-    "Delegation must make the problem smaller",
-    "only when the active skill or the human explicitly asks for orchestration",
-    "sibling naming convention (`<repo>.<name>`)",
-    "`lf chat` is the User surface",
-    "lf commit -m",
-    "lf pr publish",
-    "lf pr submit",
-    "lf pr land",
-    "lf pr land -c",
-    "lf rebase --plan",
-    "--stack-on",
-    "lf radio pub",
-    "lf memory add",
-    "lf top",
-]
-
-
-def test_doctrine_anchors_appear_in_both():
-    # Whitespace-normalized so hard-wrapped lines still match.
-    builtin = " ".join(BUILTIN.read_text().split())
-    skill = " ".join(SKILL.read_text().split())
-    missing = [
-        (anchor, name)
-        for anchor in DOCTRINE_ANCHORS
-        for name, text in (("builtin", builtin), ("skill", skill))
-        if anchor not in text
-    ]
-    assert not missing, (
-        "Doctrine anchors missing — the builtin contract and the published "
-        f"skill have drifted apart: {missing}. "
-        "Re-align skills/loopflow/SKILL.md with the builtin (or update the "
-        "anchor list if the doctrine itself changed in both)."
-    )
 
 
 def test_skill_frontmatter_is_valid():

@@ -909,7 +909,7 @@ async fn run_task_with(
                             }
                         return Ok(());
                     }
-                    ConversationEvent::Error { code, message } => {
+                    ConversationEvent::Error { code, message, .. } => {
                         let reason = format!("{code}: {message}");
                         return fail_and_maybe_relaunch(
                             &store,

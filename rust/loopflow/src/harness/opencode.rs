@@ -10,7 +10,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::chat::types::{ConversationEvent, Lifecycle};
+use crate::chat::types::{ConversationEvent, FailureEvidence, Lifecycle};
 use crate::engine::agent::{register_interrupt_cleanup, AgentConfig};
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -142,6 +142,10 @@ impl OpenCodeHarness {
         let approval = self.approval;
         let reader_base_url = base_url.clone();
         let reader_session_id = provider_session_id.clone();
+        let reader_model = opencode_model(config)
+            .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
+            .or_else(|| config.agent.clone());
+        let stream_started_at = chrono::Utc::now().timestamp_millis();
 
         let sse_task = tokio::spawn(async move {
             let stream_url = format!("{reader_base_url}/event");
@@ -151,25 +155,49 @@ impl OpenCodeHarness {
             let mut response = match request.send().await {
                 Ok(response) => response,
                 Err(err) => {
+                    let evidence = disconnect_evidence(
+                        None,
+                        stream_started_at,
+                        "connection_failed",
+                        Some(&format!("{err}")),
+                    );
                     send_disconnect_error(
                         &event_tx,
                         &shutdown_requested,
                         format!("failed to connect to OpenCode SSE stream: {err}"),
+                        Some(evidence),
                     );
                     return;
                 }
             };
             if let Err(err) = response.error_for_status_ref() {
+                let evidence = disconnect_evidence(
+                    None,
+                    stream_started_at,
+                    "response_error_status",
+                    Some(&format!("{err}")),
+                );
                 send_disconnect_error(
                     &event_tx,
                     &shutdown_requested,
                     format!("OpenCode SSE stream failed: {err}"),
+                    Some(evidence),
                 );
                 return;
             }
 
             let mut parser = SseParser::default();
-            let mut state = opencode_mapping::ReaderState::new(reader_session_id.clone());
+            let mut state = opencode_mapping::ReaderState::new(
+                reader_session_id.clone(),
+                reader_model,
+                "opencode",
+            );
+
+            // Track how the stream ended so the disconnect evidence names the
+            // root cause class: `stream_eof` (clean EOF, chunk == None) vs
+            // `read_error` (transport failure, chunk().await returned Err).
+            let mut disconnect_class = "stream_eof";
+            let mut disconnect_message: Option<String> = None;
 
             loop {
                 if shutdown_requested.load(Ordering::Relaxed) {
@@ -180,6 +208,8 @@ impl OpenCodeHarness {
                     Ok(chunk) => chunk,
                     Err(err) => {
                         tracing::warn!(error = %err, "opencode SSE chunk read failed");
+                        disconnect_class = "read_error";
+                        disconnect_message = Some(format!("{err}"));
                         break;
                     }
                 };
@@ -285,7 +315,13 @@ impl OpenCodeHarness {
             } else {
                 "OpenCode event stream disconnected"
             };
-            send_disconnect_error(&event_tx, &shutdown_requested, reason);
+            let evidence = disconnect_evidence(
+                Some(&state),
+                stream_started_at,
+                disconnect_class,
+                disconnect_message.as_deref(),
+            );
+            send_disconnect_error(&event_tx, &shutdown_requested, reason, Some(evidence));
         });
 
         let stderr_task = spawn_stderr_logger(stderr, "harness::opencode");
@@ -511,6 +547,7 @@ fn send_disconnect_error(
     event_tx: &mpsc::UnboundedSender<ConversationEvent>,
     shutdown_requested: &AtomicBool,
     message: impl Into<String>,
+    evidence: Option<FailureEvidence>,
 ) {
     if shutdown_requested.load(Ordering::Relaxed) {
         return;
@@ -519,7 +556,71 @@ fn send_disconnect_error(
     let _ = event_tx.send(ConversationEvent::Error {
         code: OPENCODE_DISCONNECTED_CODE.to_string(),
         message: message.into(),
+        evidence,
     });
+}
+
+/// Redact credential material from an error string before it enters the
+/// durable evidence channel. Strips `Authorization` header values, `Bearer`
+/// tokens, and common token query parameters. The opencode `/event` URL is
+/// `http://127.0.0.1:<port>/event` (no credentials), but a chained/upstream
+/// error or redirect could carry auth material in its Display.
+pub(crate) fn sanitize_error_message(message: &str) -> String {
+    use regex::Regex;
+    let mut out = message.to_string();
+    // Bearer first so `Authorization: Bearer <token>` is caught by both the
+    // bearer pattern and the authorization-header pattern. The bearer pattern
+    // stops at whitespace or a comma so the trailing comma that delimits the
+    // authorization-header value survives as a stop boundary for the next
+    // pattern — otherwise `Bearer <tok>, token=abc123` lets the authorization
+    // regex eat through `token=abc123` before the param redaction runs.
+    let redactions: [(Regex, &str); 3] = [
+        (
+            Regex::new(r"(?i)bearer\s+[^,\s]+").unwrap(),
+            "bearer [redacted]",
+        ),
+        (
+            Regex::new(r"(?i)authorization:\s*[^\n,]+").unwrap(),
+            "authorization: [redacted]",
+        ),
+        (
+            Regex::new(r"(?i)(token|key|access_token|api_key)=\S+").unwrap(),
+            "$1=[redacted]",
+        ),
+    ];
+    for (re, replacement) in &redactions {
+        out = re.replace_all(&out, *replacement).to_string();
+    }
+    out
+}
+
+/// Build disconnect evidence for the harness's own `/event` SSE stream dropping.
+fn disconnect_evidence(
+    state: Option<&opencode_mapping::ReaderState>,
+    stream_started_at: i64,
+    terminal_error_class: &str,
+    terminal_error_message: Option<&str>,
+) -> FailureEvidence {
+    let stream_ended_at = chrono::Utc::now().timestamp_millis();
+    FailureEvidence {
+        model: state
+            .and_then(opencode_mapping::ReaderState::model)
+            .map(ToString::to_string),
+        provider: state
+            .map(opencode_mapping::ReaderState::provider)
+            .map(ToString::to_string),
+        endpoint_class: Some("harness_event_stream".to_string()),
+        stream_started_at: Some(stream_started_at),
+        stream_ended_at: Some(stream_ended_at),
+        duration_ms: Some(stream_ended_at - stream_started_at),
+        last_event_type: state
+            .and_then(opencode_mapping::ReaderState::last_event_type)
+            .map(ToString::to_string),
+        last_event_seq: state.and_then(opencode_mapping::ReaderState::last_event_seq),
+        terminal_error_class: Some(terminal_error_class.to_string()),
+        terminal_error_message: terminal_error_message.map(sanitize_error_message),
+        provider_output_tokens: None,
+    }
 }
 
 fn allocate_port() -> Result<u16> {
@@ -724,6 +825,35 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn sanitize_error_message_redacts_credentials() {
+        let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \
+                     Authorization: Bearer super-secret-token, token=abc123";
+        let sanitized = sanitize_error_message(input);
+        assert!(
+            !sanitized.contains("sk-secret123"),
+            "api_key leaked: {sanitized}"
+        );
+        assert!(
+            !sanitized.contains("super-secret-token"),
+            "bearer token leaked: {sanitized}"
+        );
+        assert!(
+            !sanitized.contains("abc123"),
+            "token param leaked: {sanitized}"
+        );
+        assert!(sanitized.contains("api_key=[redacted]"));
+        assert!(sanitized.contains("authorization: [redacted]"));
+        assert!(sanitized.contains("token=[redacted]"));
+    }
+
+    #[test]
+    fn sanitize_error_message_preserves_non_credential_text() {
+        let input = "chunk stream ended (reqwest: EOF)";
+        let sanitized = sanitize_error_message(input);
+        assert_eq!(sanitized, input);
+    }
 
     #[test]
     fn build_turn_content_includes_task_prompt_on_first_turn() {
@@ -964,8 +1094,10 @@ mod tests {
             .unwrap();
 
         let (tx, mut rx) = mpsc::unbounded_channel::<ConversationEvent>();
-        let mut state = opencode_mapping::ReaderState::new(SESSION_ID.to_string());
+        let mut state =
+            opencode_mapping::ReaderState::new(SESSION_ID.to_string(), None, "opencode");
         let mut parser = SseParser::default();
+        let stream_started_at = chrono::Utc::now().timestamp_millis();
 
         while let Ok(Some(chunk)) = response.chunk().await {
             for payload in parser.push(&chunk) {
@@ -997,9 +1129,11 @@ mod tests {
         } else {
             "OpenCode event stream disconnected"
         };
+        let evidence = disconnect_evidence(Some(&state), stream_started_at, "stream_eof", None);
         let _ = tx.send(ConversationEvent::Error {
             code: OPENCODE_DISCONNECTED_CODE.to_string(),
             message: reason.to_string(),
+            evidence: Some(evidence),
         });
 
         let mut events = Vec::new();
@@ -1054,6 +1188,56 @@ mod tests {
         );
     }
 
+    /// Pull the evidence off the (single) disconnect Error so each fake-SSE
+    /// case can assert the structured fields name the root cause, not just the
+    /// code. The evidence is the durable receipt a post-mortem reads.
+    fn disconnect_evidence_from(events: &[ConversationEvent]) -> Option<&FailureEvidence> {
+        events.iter().find_map(|event| match event {
+            ConversationEvent::Error { evidence, .. } => evidence.as_ref(),
+            _ => None,
+        })
+    }
+
+    /// Assert the harness-disconnect evidence carries the fields every
+    /// disconnect receipt must name: provider, endpoint class, terminal error
+    /// class, and the last event the stream parsed before it died.
+    fn assert_harness_disconnect_evidence(
+        events: &[ConversationEvent],
+        expected_last_event_type: Option<&str>,
+        expected_last_event_seq: Option<u64>,
+    ) {
+        let evidence = disconnect_evidence_from(events)
+            .unwrap_or_else(|| panic!("disconnect Error carries no evidence; events: {events:?}"));
+        assert_eq!(
+            evidence.provider.as_deref(),
+            Some("opencode"),
+            "evidence must name the provider: {evidence:?}"
+        );
+        assert_eq!(
+            evidence.endpoint_class.as_deref(),
+            Some("harness_event_stream"),
+            "evidence must name the harness endpoint class: {evidence:?}"
+        );
+        assert_eq!(
+            evidence.terminal_error_class.as_deref(),
+            Some("stream_eof"),
+            "fake SSE ends by dropping the socket -> clean stream_eof: {evidence:?}"
+        );
+        assert_eq!(
+            evidence.last_event_type.as_deref(),
+            expected_last_event_type,
+            "evidence last_event_type mismatch: {evidence:?}"
+        );
+        assert_eq!(
+            evidence.last_event_seq, expected_last_event_seq,
+            "evidence last_event_seq mismatch: {evidence:?}"
+        );
+        assert!(
+            evidence.stream_started_at.is_some() && evidence.stream_ended_at.is_some(),
+            "evidence must carry timing: {evidence:?}"
+        );
+    }
+
     #[tokio::test]
     async fn fake_sse_pre_content_disconnect() {
         let events = process_fake_sse(DisconnectCase::PreContent).await;
@@ -1067,6 +1251,8 @@ mod tests {
                 .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. })),
             "pre-content disconnect should not close a turn that never started"
         );
+        // No SSE event parsed before the drop — the receipt must show that.
+        assert_harness_disconnect_evidence(&events, None, None);
     }
 
     #[tokio::test]
@@ -1084,6 +1270,8 @@ mod tests {
             error.is_some_and(|m| m.contains("before the turn")),
             "pre-content disconnect reason, got: {error:?}"
         );
+        // One event (session.status) parsed before the drop.
+        assert_harness_disconnect_evidence(&events, Some("session.status"), Some(0));
     }
 
     #[tokio::test]
@@ -1114,6 +1302,8 @@ mod tests {
                 .any(|e| matches!(e, ConversationEvent::ItemCompleted { .. })),
             "tool should not have completed before the mid-tool disconnect"
         );
+        // Two events parsed; the last was the tool part update.
+        assert_harness_disconnect_evidence(&events, Some("message.part.updated"), Some(1));
     }
 
     #[tokio::test]
@@ -1146,5 +1336,7 @@ mod tests {
             Some(Lifecycle::Failed),
             "turn must close Failed even after a durable completion"
         );
+        // Three events parsed; the last was the tool completion part update.
+        assert_harness_disconnect_evidence(&events, Some("message.part.updated"), Some(2));
     }
 }

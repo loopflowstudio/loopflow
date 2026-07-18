@@ -263,6 +263,7 @@ impl Harness for ClaudeHarness {
                         let _ = events.send(ConversationEvent::Error {
                             code: "provider_rate_limited".to_string(),
                             message: signal.reason,
+                            evidence: None,
                         });
                         saw_turn_completed = true;
                         break;

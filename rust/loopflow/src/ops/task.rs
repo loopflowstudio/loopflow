@@ -360,12 +360,7 @@ fn _refuse_current_human_review(session: &TaskSession, review: Option<&Review>) 
     Ok(())
 }
 
-pub fn task_run(
-    repo: &Path,
-    issue: &str,
-    authority: CallerAuthority,
-    options: TaskLaunchOptions,
-) -> OpsResult<TaskSession> {
+pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSession> {
     let TaskLaunchOptions {
         name,
         flow,
@@ -567,7 +562,6 @@ pub fn task_run(
             snapshot: resolved.snapshot.clone(),
             project: resolved.project.clone(),
         },
-        &authority,
     )?;
     let project_session_id = task_project_session_id(&project_session)?;
     let wave_id = project_session.wave_id.clone();
@@ -786,7 +780,6 @@ pub fn task_start(
     repo: &Path,
     title: String,
     project_id: &str,
-    authority: CallerAuthority,
     options: TaskLaunchOptions,
 ) -> OpsResult<TaskSession> {
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -808,7 +801,7 @@ pub fn task_start(
         &title,
         &marker,
     )?;
-    task_run(&main, &created.item.id, authority, options)
+    task_run(&main, &created.item.id, options)
 }
 
 fn resolve_task_flow(repo: &Path, requested: Option<&str>) -> OpsResult<String> {
@@ -2100,31 +2093,6 @@ pub(crate) async fn reconcile_project_tasks(
         reconcile_task_completion(store, task, None).await?;
         if task.status.is_terminal() {
             continue;
-        }
-        // A merged, complete Task whose final directive was applied but never
-        // incorporated is reconcilable, not recoverable: its work already shipped
-        // in the merged head, so only an explicit Wave/Operator attestation can
-        // settle it. The supervisor must never synthesize that attestation — it
-        // leaves the `Reconcile` recommendation standing rather than relaunching a
-        // body, rotating a PR, or queuing a CI fix. A *durable* attestation was
-        // already consumed by `reconcile_task_completion` above (which clears the
-        // gate and completes the Task), so reaching here means none exists yet.
-        //
-        // Gate on the cheap session-local predicates first — a pending directive
-        // that a body actually ran — so the common loop never pays a `task_prs`
-        // query. Only that rare shape reads PR history, and only to confirm the
-        // settled set is reconcilable: no non-abandoned PR still in flight and the
-        // latest non-abandoned PR merged (any disposition). A later merged Review,
-        // or a trailing abandoned successor, leaves the Reconcile recommendation
-        // standing instead of relaunching a body — suppression never completes.
-        if has_pending_directive(task) && current_directive_applied(store, task).await? {
-            let task_prs = store
-                .task_prs(&task.id)
-                .await
-                .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-            if reconcilable_pr_set(&task_prs) {
-                continue;
-            }
         }
         let no_active_pr = if observed.is_none() {
             store
@@ -3539,13 +3507,8 @@ async fn ensure_working_pr_with_authority(
     // the review gate, not on a follow-up PR. `reconcile_task_completion`
     // advances the Session to `Completed` once the gate closes. Two things
     // independently authorize one more serial PR: follow-up committed past the
-    // merged tip, which the completion gate refuses to settle over, and a pending
-    // directive that still needs a body to incorporate it. An applied-but-
-    // unincorporated directive does *not* — its work already shipped in the merged
-    // head, so it settles by an out-of-band reconciliation attestation, never
-    // another provider turn.
-    let pending_needs_body =
-        has_pending_directive(session) && !current_directive_applied(store, session).await?;
+    // merged tip, which the completion gate refuses to settle over, and a
+    // pending directive, which the successor exists to incorporate.
     if settled
         .publication
         .as_ref()
@@ -3827,77 +3790,61 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
                 session.launch.issue.identifier
             )));
         }
-        settle_completed_session(&store, &mut session, lease.as_ref(), summary).await?;
+        if !is_clean(&session.worktree)
+            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+        {
+            return Err(task_error(
+                "Task worktree has uncommitted changes; publish or explicitly abandon them first",
+            ));
+        }
+        // The completion gate: every active PR must be settled and every required
+        // review approved before the Task can be completed in the PM. Do not
+        // weaken the review gate or infer merge from a green head.
+        let gate = task_completion_gate(&store, &session).await?;
+        if let Some(refusal) = gate.refusal(&session.launch.issue.identifier) {
+            // Nothing has been written. A refusal here — an open review, a
+            // committed follow-up, anything — leaves a discardable successor
+            // active, so the Task keeps its PR and no rotation is provoked.
+            return Err(task_error(refusal));
+        }
+        let from = session.status;
+        session.set_status(TaskSessionStatus::Completed, summary.clone());
+        reconcile_pm_writeback(&store, &mut session, None).await;
+        // Every other condition is now proven, so the rotation's empty artifact
+        // is dropped as part of completing — one transaction that deletes the row
+        // and writes the terminal status together. There is no instant at which
+        // the successor is gone and the Task is not yet terminal, which is the
+        // only state `ensure_working_pr_with_authority` would rotate from.
+        complete_task_session_with_authority(
+            &store,
+            &session,
+            gate.discardable_successor.as_ref(),
+            lease.as_ref(),
+        )
+        .await
+        .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
+        append_task_event_with_authority(
+            &store,
+            &session.id,
+            &TaskEventKind::StatusChanged {
+                from,
+                to: TaskSessionStatus::Completed,
+                reason: session.status_reason.clone(),
+            },
+            lease.as_ref(),
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+        append_task_event_with_authority(
+            &store,
+            &session.id,
+            &TaskEventKind::Completed { summary },
+            lease.as_ref(),
+        )
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
         Ok(session)
     })
-}
-
-/// Drive an inactive Session through the completion gate to `Completed`: the
-/// clean-tree check, the gate, the PM writeback, the terminal transaction, and
-/// the `StatusChanged`/`Completed` events. Shared by `lf task complete` (in-body
-/// or operator) and `lf task reconcile` (out-of-band attestation). The caller
-/// owns everything upstream — reconciling the PR, resolving the lease, and any
-/// gate-clearing side effects (e.g. incorporating a pending directive).
-async fn settle_completed_session(
-    store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
-    summary: String,
-) -> OpsResult<()> {
-    if !is_clean(&session.worktree)
-        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
-    {
-        return Err(task_error(
-            "Task worktree has uncommitted changes; publish or explicitly abandon them first",
-        ));
-    }
-    // The completion gate: every active PR must be settled and every required
-    // review approved before the Task can be completed in the PM. Do not
-    // weaken the review gate or infer merge from a green head.
-    let gate = task_completion_gate(store, session).await?;
-    if let Some(refusal) = gate.refusal(&session.launch.issue.identifier) {
-        // Nothing has been written. A refusal here — an open review, a
-        // committed follow-up, anything — leaves a discardable successor
-        // active, so the Task keeps its PR and no rotation is provoked.
-        return Err(task_error(refusal));
-    }
-    let from = session.status;
-    session.set_status(TaskSessionStatus::Completed, summary.clone());
-    reconcile_pm_writeback(store, session, None).await;
-    // Every other condition is now proven, so the rotation's empty artifact
-    // is dropped as part of completing — one transaction that deletes the row
-    // and writes the terminal status together. There is no instant at which
-    // the successor is gone and the Task is not yet terminal, which is the
-    // only state `ensure_working_pr_with_authority` would rotate from.
-    complete_task_session_with_authority(
-        store,
-        session,
-        gate.discardable_successor.as_ref(),
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
-    append_task_event_with_authority(
-        store,
-        &session.id,
-        &TaskEventKind::StatusChanged {
-            from,
-            to: TaskSessionStatus::Completed,
-            reason: session.status_reason.clone(),
-        },
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(error.to_string()))?;
-    append_task_event_with_authority(
-        store,
-        &session.id,
-        &TaskEventKind::Completed { summary },
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(error.to_string()))?;
-    Ok(())
 }
 
 /// The concise publication-state label carried by a PR's Linear linkage. Derived
@@ -4223,11 +4170,8 @@ pub(crate) async fn task_completion_gate(
     Ok(gate)
 }
 
-/// The newest PR (by sequence) when it is the Task's *completing* merge — i.e.
-/// completion is pending on the gate, not on a future PR. `None` when the newest
-/// PR is not a merged `CompleteTask`, so an older `CompleteTask` behind a later
-/// `Review`/next-PR merge never drives automatic completion. Shares the one
-/// disposition predicate with the reconcile command and supervisor suppression.
+/// True when the Session has a settled merged PR whose `after_merge` is
+/// `CompleteTask` — i.e. completion is pending on the gate, not on a future PR.
 async fn merged_completing_pr(
     store: &SharedStore,
     session: &TaskSession,
@@ -4236,10 +4180,13 @@ async fn merged_completing_pr(
         .task_prs(&session.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-    if !latest_pr_completes_task(&prs) {
-        return Ok(None);
-    }
-    Ok(prs.into_iter().max_by_key(|pr| pr.sequence))
+    Ok(prs.into_iter().find(|pr| {
+        pr.phase() == PrPhase::Merged
+            && pr
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+    }))
 }
 
 /// Complete a Task Session after its gate closed, persisting the merged
@@ -4829,14 +4776,13 @@ pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<TaskSessio
     let issue = issue.to_string();
     block_on_task(async move {
         let store = task_store().await?;
-        _recover_abandoned_task(&store, &issue, &authority, reason).await
+        _recover_abandoned_task(&store, &issue, reason).await
     })
 }
 
 async fn _recover_abandoned_task(
     store: &SharedStore,
     issue: &str,
-    authority: &CallerAuthority,
     reason: Option<String>,
 ) -> OpsResult<TaskSession> {
     let reason = reason
@@ -5684,7 +5630,6 @@ mod tests {
             .latest_process;
         let error = resume_task_async(
             &session.launch.issue.identifier,
-            CallerAuthority::Operator,
             None,
             Some("status recommended Resume".to_string()),
         )
@@ -8004,11 +7949,9 @@ mod tests {
         repo.create_branch(branch);
         let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
 
-        let authority = CallerAuthority::Operator;
-        let error =
-            _recover_abandoned_task(&store, &session.launch.issue.identifier, &authority, None)
-                .await
-                .expect_err("a waiting Task resumes instead of recovering");
+        let error = _recover_abandoned_task(&store, &session.launch.issue.identifier, None)
+            .await
+            .expect_err("a waiting Task resumes instead of recovering");
         assert!(error.to_string().contains("lf task resume"), "{error}");
         assert_eq!(
             store
@@ -8052,7 +7995,6 @@ mod tests {
         let successor = _recover_abandoned_task(
             &store,
             &abandoned.launch.issue.identifier,
-            &CallerAuthority::Operator,
             Some("the work is still valid".to_string()),
         )
         .await
@@ -8082,7 +8024,6 @@ mod tests {
         let repeated = _recover_abandoned_task(
             &store,
             &successor.launch.issue.identifier,
-            &CallerAuthority::Operator,
             Some("the work is still valid".to_string()),
         )
         .await
@@ -8095,7 +8036,6 @@ mod tests {
         let error = _recover_abandoned_task(
             &store,
             &completed.launch.issue.identifier,
-            &CallerAuthority::Operator,
             Some("try again".to_string()),
         )
         .await

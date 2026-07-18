@@ -148,11 +148,11 @@ Current state against the phases below:
    The removed 2,767-line CI suite needs focused proofs for exact Run claim,
    one-shot preemption, non-actionable evidence, and fresh repaired-head
    settlement.
-9. **Main's migration model changes branch hygiene.** Six unpublished
-   canonical migrations on this branch must become dependency-ordered drafts
-   before landing. The landed docs/scripts refer to a Rust `DRAFTS` registry
-   that does not exist, so the cut must resolve how fresh test databases apply
-   drafts without inventing a second durable ledger.
+9. **Main's migration model changes branch hygiene.** Drafts are now file-only
+   release inputs and Rust intentionally does not execute them. This branch's
+   pre-contract `0.11.030`-`0.11.035` tail must remain canonical so fresh
+   private/test databases have the schema the code uses; no second registry is
+   added. The follow-up's new final schema deletion enters as a draft.
 10. **The post-rebase install code reinforces the operational boundary.** All
    global mutations now pass through Rust promotion and its active-Run fence.
    Our semantic conflict resolution is correct: it keeps the complete promotion
@@ -778,9 +778,9 @@ rust/loopflow/tests/task_successor_resolution_tests.rs
 
 ### Drop from the live schema
 
-Keep shipped migration files as history. Consolidate this branch's unpublished
-canonical files into dependency-ordered drafts, with one final control cut that
-copies required facts and drops the old live objects:
+Keep shipped migration files and this branch's already-executable pre-contract
+tail as history. The follow-up authors one dependency-ordered draft whose final
+control cut copies required facts and drops the old live objects:
 
 ```text
 project_sessions lifecycle/process columns

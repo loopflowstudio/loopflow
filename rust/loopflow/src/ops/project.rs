@@ -101,7 +101,6 @@ pub(crate) fn require_registered_wave(wave: &str) -> OpsResult<Wave> {
 pub fn project_run(
     repo: &Path,
     project_id: &str,
-    authority: CallerAuthority,
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let directive = normalize_directive(directive)?;
@@ -141,7 +140,7 @@ pub fn project_run(
 
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let mut session = reserve_project_session(&repo, resolved, &authority, directive)?;
+    let mut session = reserve_project_session(&repo, resolved, directive)?;
     if session.status.is_terminal() || session.status.is_process_active() {
         return Ok(session);
     }
@@ -155,7 +154,6 @@ pub fn project_run(
 pub(crate) fn reserve_project_session(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
-    authority: &CallerAuthority,
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let config = load_config_or_default(Some(repo));
@@ -245,9 +243,8 @@ pub(crate) fn reserve_project_session(
 pub(crate) fn ensure_project_session_for_task(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
-    authority: &CallerAuthority,
 ) -> OpsResult<ProjectSession> {
-    let session = reserve_project_session(repo, resolved, authority, None)?;
+    let session = reserve_project_session(repo, resolved, None)?;
     if session.status.is_terminal() {
         return Err(project_error(format!(
             "cannot start a Task under {}: Project Session {} is {}; create or select an active Project",
@@ -305,7 +302,6 @@ pub fn project_start(
     repo: &Path,
     title: &str,
     wave: Option<&str>,
-    authority: CallerAuthority,
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let main = ensure_clean_main(repo, "Project start")?;
@@ -327,7 +323,7 @@ pub fn project_start(
             project.project.id, project.project.id
         )));
     }
-    project_run(&main, &project.project.id, authority, directive)
+    project_run(&main, &project.project.id, directive)
 }
 
 pub(crate) async fn launch_project_process(

@@ -2339,6 +2339,7 @@ mod frontier_tests {
     use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
     use crate::store::migrations::{
         apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
+        prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use std::path::{Path, PathBuf};
@@ -2416,7 +2417,7 @@ mod frontier_tests {
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
         let installed_frontier = frontier(&path).unwrap();
-        assert_eq!(installed_frontier, "0.11.027_accounts_first");
+        assert_eq!(installed_frontier, prior_known_version());
         assert_ne!(installed_frontier, latest_known_version());
 
         // The candidate is one migration ahead; its ordinary open refuses rather
@@ -2475,7 +2476,7 @@ mod frontier_tests {
         seed_shared_store_at_prior_head(&advanced_path);
         assert_eq!(
             frontier(&advanced_path).as_deref(),
-            Some("0.11.027_accounts_first")
+            Some(prior_known_version().as_str())
         );
         open(&advanced_path, Published, &advanced.home, Authorized).expect("boundary advances");
         assert_eq!(

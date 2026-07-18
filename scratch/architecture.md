@@ -46,8 +46,9 @@ the temporary Task/Project executor.
    Do not begin a partial second execution controller.
 6. State this boundary plainly in architecture and PR copy. “Session” may
    remain internal execution vocabulary; it is no longer a public control API.
-7. Rebase onto current main, resolve the unpublished migration tail without
-   inventing a second registry, run the full gate, and land PR #1073.
+7. Rebase onto current main, preserve the already-executable migration tail
+   without inventing a second draft registry, run the full gate, and prepare
+   PR #1073 to land.
 
 ## Do not add
 

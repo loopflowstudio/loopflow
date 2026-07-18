@@ -483,11 +483,15 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 
 /// Stage a fresh connection one migration behind the binary's known head. The
 /// store-level shared-frontier regressions use it to build a database the running
-/// binary could advance but an ordinary open must leave alone; the resulting
-/// frontier is `MIGRATIONS[len - 2]` (today `0.11.027_accounts_first`).
+/// binary could advance but an ordinary open must leave alone.
 #[cfg(test)]
 pub(crate) fn apply_all_but_head(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_set(conn, &MIGRATIONS[..MIGRATIONS.len() - 1])
+}
+
+#[cfg(test)]
+pub(crate) fn prior_known_version() -> String {
+    MIGRATIONS[MIGRATIONS.len() - 2].version()
 }
 
 /// Whether the old reader — a binary whose head is the prior migration — still
@@ -1673,12 +1677,9 @@ mod tests {
         );
     }
 
-    /// The validation primitive underneath the shared-store gate: with the store
-    /// at the frontier the installed `lf` knows (`0.11.027`) and the candidate one
-    /// migration ahead (`0.11.029`), `validate_sqlite` recognizes the applied
-    /// prefix and pins `pending_shared_migration` to the exact head the ordinary
-    /// store open then refuses on — the frontier never advances, and the old
-    /// reader still recognizes the store.
+    /// The validation primitive underneath the shared-store gate recognizes a
+    /// store one migration behind, names the exact pending head, and never
+    /// advances the frontier the old reader still recognizes.
     #[test]
     fn validate_recognizes_a_shorter_frontier_and_names_the_pending_head() {
         let installed = &MIGRATIONS[..MIGRATIONS.len() - 1];
@@ -1689,7 +1690,13 @@ mod tests {
         // Bring the store to the frontier the installed binary shipped with.
         apply_set(&conn, installed).unwrap();
         let installed_frontier = latest_applied_version_sqlite(&conn).unwrap().unwrap();
-        assert_eq!(installed_frontier, "0.11.027_accounts_first");
+        assert_eq!(
+            installed_frontier,
+            installed
+                .last()
+                .expect("installed set has a head")
+                .version()
+        );
 
         // The candidate is ahead by one migration. `validate_sqlite` runs the
         // full (candidate) set the ordinary runtime trusts and must leave the

@@ -1,79 +1,59 @@
-## Try it!
-
-Inspect the new stable control surfaces:
+## Usage
 
 ```bash
-cargo run -p loopflow --bin lf -- work --help
-cargo run -p loopflow --bin lf -- launch --help
-```
+lf work --help
+lf launch --help
 
-Exercise the Review handshake and both Wave delivery shapes:
-
-```bash
 cargo nextest run -p loopflow only_the_active_parent_run_can_steer_child_work
 cargo nextest run -p loopflow seed_only_wave_services_child_once_without_advancing_background
 cargo nextest run -p loopflow live_wave_preempts_background_for_child_and_preserves_playhead
 ```
 
-Run the complete matrix:
+## Summary
 
-```bash
-uv run python scripts/test.py --all
-cargo nextest run --all --no-fail-fast
-```
-
-Current result: Python, website, Swift, E2E, fmt, clippy, Swift boundaries, and
-the Mac build pass. Rust is 1,814 passed / 1 failed / 2 skipped. The one failure
-is the intentionally unmasked Task/Project controller boundary described under
-**Not included**.
-
-## Intent
-
-Replace overlapping execution and interaction truths with one durable control
-spine: stable Work and Epoch identity, Basis-fenced Steers, exact Run authority,
+Replace overlapping interaction and execution truths with a durable control
+spine: stable Work/Epoch identity, Basis-fenced Steers, exact Run authority,
 provider/process Launches, optional observed Turns, typed Waits, and derived
-Review attention. Provider transports may differ; stale execution, recovery,
-completion, usage, and parent scheduling must not.
+Review attention. Codex may live-send while Claude, OpenCode, and opaque TUIs
+seed another boundary; durable outcome and fencing stay the same.
 
-## Assumptions
+Task and Project still execute through the existing Session controller in this
+landing. Every such body now registers its real process as a Launch under the
+mirrored Run, so Run interrupt and steering never fall back to Session lookup.
+A follow-up Task owns the one-way runner rewrite and Session deletion.
 
-- User authority is constructed only by authenticated external entrypoints;
-  agent entrypoints require one opaque active Run lease and fail closed without
-  it.
-- Provider acceptance proves only that a Send was observed. A later successful
-  boundary Basis proves application.
-- Provider transcripts and resume tokens are optional Launch hints. Durable
-  Work truth, Steers, flow position, workspace, and external evidence are the
-  reconstruction floor.
-- Opaque providers must expose a containable process/tmux boundary and explicit
-  handback; process exit alone is not success.
+## Changes
 
-## Key decisions
+- Delete stored `InteractionReview`, `InteractiveHandoff`, and `ChildCommand`
+  aggregates and their commands, DTOs, stores, and Swift surfaces.
+- Make Steer/Send/Basis authoritative with one opaque Run capability that
+  fails closed when missing, stale, or stopped.
+- Keep Review route open while pending attention parks; re-arm it once on the
+  child's next terminal Turn and advance parent evidence once.
+- Service direct input and oldest child Review before Wave/Project background
+  work, preserving the background playhead for live and seed-only providers.
+- Store root assistant output and normalized usage on Turn; derive monitoring
+  and spend from Run → Launch → Turn.
+- Register new, recovered, and migrated legacy bodies as product Launches and
+  close those Launches when their process boundary ends.
+- Remove retired controls from user docs, built-in skills, smoke tests, and
+  fixtures.
 
-- Deleted stored Review, Handoff, and ChildCommand aggregates rather than
-  adapting them to the new model.
-- Kept Review route separate from the current unanswered `attention_at`, so a
-  parent reply parks attention without ending the interactive interval.
-- Allocated one parent evidence revision when the child's next terminal Turn
-  re-arms attention, making racing parent completion stale.
-- Made Turn the sole additive usage grain and persisted root output for parent
-  reconstruction.
-- Asked the exact active Turn whether it can accept a live Steer; no static
-  provider capability flag or caller-selected delivery policy remains.
-- Refused to restore a Session interrupt fallback just to turn the remaining
-  integration proof green.
+## Rebase decisions
 
-## Not included
+Current main's `task reconcile` repairs orphaned ChildCommands and an
+unincorporated directive completion gate. This branch removes both underlying
+concepts: no ChildCommand can orphan, and Task completion reads Review/Basis
+rather than directive acknowledgement. Keeping the command would recreate a
+deleted compatibility model, so the architecture supersedes it while retaining
+main's Linear attachment, migration release boundary, promotion fence, and PM
+fixes.
 
-This PR is **not ready to submit or land**. Task and Project still run through
-the legacy Session/body generation and `ChildWriteLease` controller. The
-remaining failing test constructs that real split: the mirrored active Run has
-no product Launch, so direct Run interrupt cannot find a boundary. The fix is
-the one-piece shared `reserve | advance | stop` controller cut, followed by
-deleting Session process authority.
+## Follow-up
 
-The same final cut must move unpublished `0.11.029`–`0.11.035` migrations into
-the dependency-ordered draft contract. Rust is currently 122,944 Tokei code
-lines, 1,125 above the acceptance ceiling; deleting the duplicate controller is
-expected to pay that down. OpenCode Task/Project usage normalization and
-credentialed provider recovery drills also remain outside this checkpoint.
+Rewrite Task and Project execution through shared Run `reserve | advance |
+stop`, then delete `ProjectSessionStatus`, `TaskSessionStatus`,
+`ChildWriteLease`, body generations, legacy authority env vars, duplicate
+runners, and Session lifecycle/process schema. That Task also owns keeper
+recovery, the final schema draft, zero Session-controller references, and the
+121,819-line ceiling.

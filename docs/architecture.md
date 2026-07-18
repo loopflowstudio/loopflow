@@ -813,13 +813,16 @@ Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
 9. drop live Session/body/command tables, old readers/writers, DTOs, and parsing;
 10. restart residents and let the keeper reserve current Work.
 
-Shipped migration files remain history. Unpublished changes are
-dependency-ordered drafts; the release cut alone assigns canonical ordinals.
-The architecture branch predates that rule and still carries six unpublished
-canonical files (`one_spend_grain` through `drop_child_commands`). Before
-landing, consolidate the final one-way schema into drafts with explicit
-dependencies rather than preserving intermediate architecture as serial
-history. The live schema retains one implementation.
+Shipped migration files remain history. New unpublished changes are
+dependency-ordered, file-registered drafts; the release cut alone turns them
+into Rust migrations and assigns canonical ordinals. This long-running branch
+already carried an executable six-migration tail (`one_spend_grain` through
+`drop_child_commands`) before that contract landed. Keep that tail canonical:
+Rust deliberately does not compile or apply drafts, so demoting it now would
+make fresh private and test databases omit the schema the branch executes.
+Do not add a second draft registry to bridge the mismatch. The follow-up's
+final one-way Session deletion is new schema work and must enter through the
+file-only draft contract.
 
 ## Implementation frontier
 
@@ -851,8 +854,8 @@ bridge:
 1. replace Project/Task reservation, status, revocation, reaping, settlement,
    and recovery with shared Run reserve/advance/stop;
 2. delete Session/body process authority, env vars, DTOs, and duplicate runners;
-3. consolidate unpublished schema work under main's dependency-ordered draft
-   migration contract, leaving no supported intermediate architecture.
+3. author the final schema deletion under main's dependency-ordered file-only
+   draft contract, leaving no supported intermediate architecture.
 
 The committed checkpoint met the size objective at 121,818 physical / 119,126
 normalized Rust lines. Handshake, Wave-priority, and focused settlement proof
@@ -954,11 +957,10 @@ noun or source of truth:
    migration may preserve unknown lineage but must not invent Epochs.
 7. Decide whether historical Epoch appears in public diagnostic receipts. Work
    remains the control target either way.
-8. Main's draft tooling and docs advertise a Rust `DRAFTS` registry, but the
-   landed runtime has no `DraftMigration` type or registration path. Resolve
-   that release-boundary mismatch without inventing a second durable migration
-   ledger; architecture drafts still need to build fresh test databases before
-   canonicalization.
+8. The architecture branch's pre-draft canonical tail is a one-time exception.
+   Main's current contract is explicit that draft files are release inputs and
+   Rust does not execute them. Do not recreate the removed `DRAFTS` registry;
+   the follow-up authors only its final schema deletion as a draft.
 
 Questions about central orchestration, generic workflow engines, recursive
 Projects, provider-wide steer capability, writable Ack, replacement messages,

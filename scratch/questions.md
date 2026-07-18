@@ -1,10 +1,34 @@
 # Open implementation notes
 
-## Rebase aborted 2026-07-17: a second agent owns this worktree
+## Rebase and migration resolution 2026-07-18
+
+The branch is rebased onto current `origin/main` (`1a3079a94`). The first
+automated rebase collided with the still-running root process; the completed
+manual replay kept main's exclusive promotion boundary, absent-store behavior,
+PM/Linear PR attachment fix, and land-time-only CI routing. It dropped main's
+new caller-authored authority and directive-reconciliation surfaces because
+this architecture has already replaced those public concepts with authenticated
+User entrypoints, exact Run leases, Steer, and Basis.
+
+ENG-113's behavioral bug cannot recur in the new shape: there is no durable
+ChildCommand to orphan, and Task completion no longer waits on a separately
+acknowledged directive cursor. It fences against current Review/Basis instead.
+Do not preserve `lf task reconcile` as a compatibility command; that would
+recreate both deleted truths.
+
+Main's migration contract is now unambiguous: a draft is registered only by its
+file, Rust never sees or applies it, and the release cut creates the canonical
+Rust entries. Moving this branch's existing `0.11.030`-`0.11.035` executable
+tail into drafts would therefore make fresh private/test databases omit required
+tables and columns. Keep that pre-contract tail canonical as a one-time
+exception; do not invent a second registry. The follow-up Session schema drop
+is new work and enters through a file-only draft.
+
+## Superseded rebase attempt 2026-07-17
 
 A rebase of `jack-heart/architecture` onto `origin/main` (`1a3079a94`) was
-started and then backed out. **The blocker is concurrency, not conflict
-difficulty.**
+started and then backed out because a second process was mutating the same
+worktree. The completed 2026-07-18 replay above supersedes this incident note.
 
 `codex exec` (pid 62201, parent `lf` pid 62086, started 20:16, still alive after
 59 minutes) is executing inside `/Users/jack/src/loopflow.architecture` while
@@ -52,10 +76,10 @@ What the rebase learned, for whoever retries it:
 Land the normalized control spine before deleting the Session controller.
 This supersedes the earlier instruction that both cuts must share PR #1073.
 
-The split is valid only after the remaining legacy Task/Project executor
+The split is valid because each remaining legacy Task/Project executor now
 registers its actual provider process as a product Launch under the mirrored
-Run. The current red integration test proves that invariant is missing. Fix the
-Launch registration; do not restore a Session fallback in Run interrupt.
+Run. The formerly red integration test now interrupts that Launch directly;
+there is no Session fallback.
 
 After PR #1073 lands, create and launch one follow-up Task for the Task+Project
 Run-controller rewrite and complete Session deletion. The line-count target,
@@ -159,17 +183,17 @@ This is a live-execution-path replacement of the two most critical runners; a
 partial version is exactly the dual-write checkpoint the design forbids and is
 unsafe to land unsupervised. Do it as one supervised cut, not a headless slice.
 
-## Migration DRAFTS reality (verified 2026-07-17)
+## Superseded migration DRAFTS investigation (2026-07-17)
 
-There is no runtime `DRAFTS` registry. `store/migrations.rs` is a hardcoded
+The 2026-07-18 rebase note above resolves this investigation. There is no
+runtime `DRAFTS` registry. `store/migrations.rs` is a hardcoded
 `Migration { include_str!(...) }` array applied by canonical ordinal;
 `store/migrations/drafts/` holds only a README. This branch's `0.11.029`–`0.11.035`
 are embedded as canonical ordinals in that array (note: `0.11.028` is absent — a
-real ordinal gap to reconcile). Main introduced the drafts release model but never
-landed its Rust side. Reconciling the two — turning `0.11.029`–`0.11.035` into
-dependency-ordered drafts that fresh test DBs can still apply — is coupled to the
-release cut and to step 4 above; do not invent a second durable migration ledger,
-and do not rewrite these ordinals independently of the controller deletion.
+real ordinal gap inherited from main). Current main makes drafts file-only and
+explicitly keeps them out of Rust. The pre-contract executable tail therefore
+stays canonical; the follow-up's new schema deletion uses the file-only release
+path.
 
 - Review route and pending attention are now separate without another table:
   `attention_kind/work` stays for the interactive flow interval while
@@ -215,10 +239,9 @@ and do not rewrite these ordinals independently of the controller deletion.
   tests still need to prove this end to end.
 - The trace-only `LF_RUN_ID` environment variable is renamed `LF_TRACE_ID`, so
   the public Run vocabulary no longer collides with diagnostic lineage.
-- `root_output` was folded into unpublished migration 0.11.031 rather than
-  adding another intermediate ordinal. The complete 0.11.030-0.11.035 branch
-  tail still needs conversion to dependency-ordered drafts at the final schema
-  cut; the missing runtime `DRAFTS` contract remains unresolved.
+- `root_output` was folded into migration 0.11.031 rather than adding another
+  intermediate ordinal. The complete 0.11.030-0.11.035 pre-contract tail stays
+  executable; new migration work uses file-only drafts.
 - Stored Review/Handoff and ChildCommand are gone. The remaining core cut is
   the Wave control lane and deletion of the Project/Task Session-body
   controller.
@@ -226,10 +249,9 @@ and do not rewrite these ordinals independently of the controller deletion.
   inherit one fixed opaque grant, prevent nested widening, and fail closed.
   Run lease validation stays local to SQLite; it does not need another SSH
   broker.
-- Main's draft scripts/docs refer to a Rust `DRAFTS` registry that was not
-  landed. The six unpublished architecture migrations must become drafts, but
-  fresh test databases still need one coherent way to apply them before the
-  release cut. Do not invent a second durable migration ledger.
+- Main's draft scripts/docs now make the file the only registration and Rust
+  never executes drafts. The pre-contract executable tail stays canonical, and
+  no second registry is added.
 - The branch has already exceeded the normalized 12,000-line deletion target.
   Restore focused CI/control behavior tests even if the physical count rises.
 

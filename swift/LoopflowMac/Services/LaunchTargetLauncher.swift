@@ -103,12 +103,21 @@ enum LaunchTargetLauncher {
     /// exact cwd/environment/argv on their declared host instead of probing or
     /// executing the remote path on this Mac.
     static func command(for attach: LaunchSurfaceRecord, home: String? = nil) -> Command {
-        command(
-            cwd: attach.cwd,
-            argv: attach.argv,
-            environment: attach.environment,
-            host: attach.host,
-            home: home
+        guard isRemoteHome(attach.host) else {
+            return Command(cwd: attach.cwd, argv: attach.argv, environment: attach.environment)
+        }
+
+        var remoteTokens = ["env"]
+        for key in attach.environment.keys.sorted() {
+            remoteTokens.append("\(key)=\(attach.environment[key] ?? "")")
+        }
+        remoteTokens.append(contentsOf: attach.argv)
+        let remoteCommand = "cd \(shellQuote(attach.cwd)) && exec "
+            + remoteTokens.map(shellQuote).joined(separator: " ")
+        return Command(
+            cwd: "/",
+            argv: sshArgv(host: attach.host, home: home, remoteCommand: remoteCommand),
+            environment: [:]
         )
     }
 
@@ -122,31 +131,6 @@ enum LaunchTargetLauncher {
                 lfPath, "work", "feedback", attach.work.kind, attach.work.id,
                 "--continue-on-exit",
             ],
-            environment: [:]
-        )
-    }
-
-    private static func command(
-        cwd: String,
-        argv: [String],
-        environment: [String: String],
-        host: String,
-        home: String?
-    ) -> Command {
-        guard isRemoteHome(host) else {
-            return Command(cwd: cwd, argv: argv, environment: environment)
-        }
-
-        var remoteTokens = ["env"]
-        for key in environment.keys.sorted() {
-            remoteTokens.append("\(key)=\(environment[key] ?? "")")
-        }
-        remoteTokens.append(contentsOf: argv)
-        let remoteCommand = "cd \(shellQuote(cwd)) && exec "
-            + remoteTokens.map(shellQuote).joined(separator: " ")
-        return Command(
-            cwd: "/",
-            argv: sshArgv(host: host, home: home, remoteCommand: remoteCommand),
             environment: [:]
         )
     }

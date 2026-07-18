@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
-use std::process::{ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
+use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
@@ -223,41 +223,8 @@ async fn run_exit_guard_async(
         }
     };
     write_guard_reply(&mut output, &FeedbackGuardReply::Ready)?;
-
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    loop {
-        let mut line = String::new();
-        let bytes = input.read_line(&mut line)?;
-        if bytes == 0 || !line.ends_with('\n') {
-            break;
-        }
-        let command = match serde_json::from_str::<FeedbackGuardCommand>(&line) {
-            Ok(command) => command,
-            Err(error) => {
-                if write_guard_reply(
-                    &mut output,
-                    &FeedbackGuardReply::Error {
-                        message: format!("invalid Feedback guard command: {error}"),
-                    },
-                )
-                .is_err()
-                {
-                    break;
-                }
-                continue;
-            }
-        };
-        match command {
-            FeedbackGuardCommand::Cancel => return Ok(()),
-            FeedbackGuardCommand::Continue => {
-                continue_guarded_feedback(&store, &work, &launch_id, &basis).await?;
-                write_guard_reply(&mut output, &FeedbackGuardReply::Continued)?;
-                return Ok(());
-            }
-        }
-    }
-
+    drop(output);
+    io::copy(&mut io::stdin().lock(), &mut io::sink())?;
     continue_guarded_feedback(&store, &work, &launch_id, &basis).await
 }
 
@@ -332,22 +299,14 @@ impl FeedbackExitPolicy {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum FeedbackGuardCommand {
-    Continue,
-    Cancel,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
 enum FeedbackGuardReply {
     Ready,
-    Continued,
     Error { message: String },
 }
 
 struct FeedbackExitGuard {
     input: ChildStdin,
-    output: BufReader<ChildStdout>,
+    child: Child,
 }
 
 impl FeedbackExitGuard {
@@ -383,47 +342,26 @@ impl FeedbackExitGuard {
             .stdout
             .take()
             .ok_or_else(|| anyhow!("Feedback exit guard did not open stdout"))?;
-        let mut guard = Self {
-            input,
-            output: BufReader::new(output),
-        };
-        match guard.read_reply()? {
-            FeedbackGuardReply::Ready => Ok(guard),
-            FeedbackGuardReply::Error { message } => Err(anyhow!(message)),
-            FeedbackGuardReply::Continued => {
-                Err(anyhow!("Feedback exit guard continued before it was ready"))
-            }
-        }
-    }
-
-    fn continue_now(&mut self) -> anyhow::Result<()> {
-        self.write_command(&FeedbackGuardCommand::Continue)?;
-        match self.read_reply()? {
-            FeedbackGuardReply::Continued => Ok(()),
-            FeedbackGuardReply::Error { message } => Err(anyhow!(message)),
-            FeedbackGuardReply::Ready => {
-                Err(anyhow!("Feedback exit guard sent an extra ready reply"))
-            }
-        }
-    }
-
-    fn cancel(&mut self) {
-        let _ = self.write_command(&FeedbackGuardCommand::Cancel);
-    }
-
-    fn write_command(&mut self, command: &FeedbackGuardCommand) -> anyhow::Result<()> {
-        serde_json::to_writer(&mut self.input, command)?;
-        self.input.write_all(b"\n")?;
-        self.input.flush()?;
-        Ok(())
-    }
-
-    fn read_reply(&mut self) -> anyhow::Result<FeedbackGuardReply> {
+        let mut output = BufReader::new(output);
         let mut line = String::new();
-        if self.output.read_line(&mut line)? == 0 {
+        if output.read_line(&mut line)? == 0 {
             return Err(anyhow!("Feedback exit guard exited unexpectedly"));
         }
-        serde_json::from_str(&line).context("parse Feedback exit guard reply")
+        match serde_json::from_str(&line).context("parse Feedback exit guard reply")? {
+            FeedbackGuardReply::Ready => Ok(Self { input, child }),
+            FeedbackGuardReply::Error { message } => Err(anyhow!(message)),
+        }
+    }
+
+    fn continue_now(self) -> anyhow::Result<()> {
+        let Self { input, mut child } = self;
+        drop(input);
+        let status = child.wait().context("wait for Feedback exit guard")?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(anyhow!("Feedback exit guard exited with {status}"))
+        }
     }
 }
 
@@ -442,7 +380,7 @@ async fn run_feedback(
     let item = find_user_feedback(store, work)
         .await?
         .ok_or_else(|| anyhow!("{} {} has no current User Feedback", work.kind(), work.id()))?;
-    let mut guard = if policy == FeedbackExitPolicy::AnyExit {
+    let guard = if policy == FeedbackExitPolicy::AnyExit {
         Some(FeedbackExitGuard::spawn(work, &item.feedback)?)
     } else {
         None
@@ -458,15 +396,13 @@ async fn run_feedback(
     let status = present_feedback(&item.feedback)?;
     let should_continue = policy.continues(status.success());
     if should_continue {
-        if let Some(guard) = &mut guard {
+        if let Some(guard) = guard {
             guard.continue_now()?;
         } else {
             continue_guarded_feedback(store, work, &item.feedback.launch_id, &item.feedback.basis)
                 .await?;
         }
         println!("Continued Feedback.");
-    } else if let Some(guard) = &mut guard {
-        guard.cancel();
     }
     if status.success() {
         Ok(())

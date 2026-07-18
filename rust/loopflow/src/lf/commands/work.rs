@@ -55,6 +55,11 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             json,
         } => {
             let work = parse_work(kind, id)?;
+            if !matches!(work, WorkRef::Wave(_)) {
+                return Err(anyhow!(
+                    "only Wave Work can move until Project and Task execution uses the shared Run supervisor"
+                ));
+            }
             let placement = store.place_work(&work, home_id).await?;
             print_receipt(&WorkReceipt::Placed(placement), *json)?;
         }

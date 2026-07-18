@@ -11,6 +11,7 @@
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,21 @@ use serde::{Deserialize, Serialize};
 /// Set on the remote hop by the router. Its presence means "you are already the
 /// home host; run the command locally" — the single break in the forward loop.
 pub const HOME_ROUTED_ENV: &str = "LF_HOME_ROUTED";
+
+pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> {
+    let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;
+    repo.strip_prefix(&home)
+        .map_err(|_| {
+            format!(
+                "repo {} is outside {}; remote Home routing needs a home-relative path",
+                repo.display(),
+                home.display()
+            )
+        })?
+        .to_str()
+        .map(str::to_string)
+        .ok_or_else(|| format!("repo path {} is not UTF-8", repo.display()))
+}
 
 /// The current transport route to one Home.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -731,9 +731,9 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Move Work to a Home. Refuses while the Work has a live Run.
+    /// Move Wave Work to a Home. Refuses while the Work has a live Run.
     Place {
-        #[arg(value_parser = ["wave", "project", "task"])]
+        #[arg(value_parser = ["wave"])]
         kind: String,
         id: String,
         home_id: crate::durable::HomeId,
@@ -2635,6 +2635,15 @@ mod tests {
                 cmd: WorkCommand::Place { kind, id, json: true, .. }
             }) if kind == "wave" && id == "wave_00000000000000000000000000000001"
         ));
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "place",
+            "task",
+            "task_00000000000000000000000000000001",
+            "home_00000000000000000000000000000001",
+        ])
+        .is_err());
     }
 
     #[test]

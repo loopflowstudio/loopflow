@@ -269,7 +269,7 @@ lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
 lf work continue task task_...                      # advance past current Feedback
-lf work place wave wave_... home_...                 # move idle Work to a Home
+lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 

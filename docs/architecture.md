@@ -692,6 +692,10 @@ Work inherit their parent's current placement once. A move is explicit and is
 refused while the Work has a live Run. Run reservation resolves placement in
 the same transaction and refuses unless it names the local Home, so neither a
 caller nor a process on the wrong machine can select a different authority.
+The current mutation surface moves Wave Work only. Project and Task movement
+opens when their Session runners are replaced by the shared Run supervisor;
+until then their inherited placement is immutable rather than bridged through
+Wave routing.
 
 One machine-local Home resident hosts the existing per-Wave listener tasks.
 `lf start` groups Waves by Home, ensures the local keeper once, and routes

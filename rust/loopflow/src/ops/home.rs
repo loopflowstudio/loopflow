@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use crate::durable::Home;
-use crate::engine::wave_home::{HomeRoute, HomeRuntimeDto, HomeState};
+use crate::engine::wave_home::{resolve_home_relative_repo, HomeRoute, HomeRuntimeDto, HomeState};
 use crate::lf::commands::ssh::{capture_remote_native, SshCaptureError};
 use crate::wave::server::live_endpoint;
 
@@ -40,7 +40,7 @@ async fn probe_local(wave: &str, home: &Home, repo: &Path) -> HomeRuntimeDto {
 }
 
 async fn probe_remote(wave: &str, home: &Home, _route: &HomeRoute, repo: &Path) -> HomeRuntimeDto {
-    let remote_repo = match home_relative_repo(repo) {
+    let remote_repo = match resolve_home_relative_repo(repo) {
         Ok(repo) => repo,
         Err(reason) => return HomeRuntimeDto::new(home, HomeState::Unknown, reason, None),
     };
@@ -121,21 +121,6 @@ fn classify_remote_status(home: &Home, stdout: &str) -> HomeRuntimeDto {
             None,
         ),
     }
-}
-
-fn home_relative_repo(repo: &Path) -> Result<String, String> {
-    let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;
-    repo.strip_prefix(&home)
-        .map_err(|_| {
-            format!(
-                "repo {} is outside {}; remote probing needs a home-relative path",
-                repo.display(),
-                home.display()
-            )
-        })?
-        .to_str()
-        .map(str::to_string)
-        .ok_or_else(|| format!("repo path {} is not UTF-8", repo.display()))
 }
 
 #[cfg(test)]

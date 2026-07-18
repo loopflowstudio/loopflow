@@ -12,7 +12,8 @@ use anyhow::anyhow;
 
 use crate::engine::wave_context::{resolve_managed_wave_name_sync, resolve_run_wave_name};
 use crate::engine::wave_home::{
-    HomeActionDto, HomeRoute, HomeRuntimeDto, HomeState, HOME_ROUTED_ENV,
+    resolve_home_relative_repo, HomeActionDto, HomeRoute, HomeRuntimeDto, HomeState,
+    HOME_ROUTED_ENV,
 };
 use crate::lf::{Commands, HomeCommand};
 use crate::provider_account::lease::AccountSelection;
@@ -169,7 +170,7 @@ async fn resolve_stop_target(name: &str, repo: &Path) -> anyhow::Result<StopTarg
     }
     Ok(StopTarget::Remote {
         home_id: placement.home_id,
-        repo: home_relative_repo(&repo)?,
+        repo: resolve_home_relative_repo(&repo).map_err(anyhow::Error::msg)?,
     })
 }
 
@@ -256,7 +257,7 @@ async fn start_inner(
             }
             continue;
         }
-        let remote_repo = home_relative_repo(&repo)?;
+        let remote_repo = resolve_home_relative_repo(&repo).map_err(anyhow::Error::msg)?;
         let mut cmd = vec!["lf".to_string(), "start".to_string()];
         for (id, name) in waves {
             cmd.push(name.clone());
@@ -298,22 +299,6 @@ fn parse_wave_ids(
         }
     }
     Ok(bindings)
-}
-
-fn home_relative_repo(repo: &Path) -> anyhow::Result<String> {
-    let home =
-        dirs::home_dir().ok_or_else(|| anyhow!("cannot resolve the current home directory"))?;
-    let relative = repo.strip_prefix(&home).map_err(|_| {
-        anyhow!(
-            "repo {} is outside {}; remote Home routing needs a home-relative path",
-            repo.display(),
-            home.display()
-        )
-    })?;
-    relative
-        .to_str()
-        .map(str::to_string)
-        .ok_or_else(|| anyhow!("repo path {} is not UTF-8", repo.display()))
 }
 
 fn validate_expected_home(local: &crate::durable::HomeId) -> anyhow::Result<()> {
@@ -375,9 +360,9 @@ pub fn route(
     if home.route == "local" {
         return None;
     }
-    let remote_repo = match home_relative_repo(Path::new(&wave_repo)) {
+    let remote_repo = match resolve_home_relative_repo(Path::new(&wave_repo)) {
         Ok(repo) => repo,
-        Err(error) => return Some(Err(error)),
+        Err(error) => return Some(Err(anyhow!(error))),
     };
     let route = match HomeRoute::parse(&home.route).filter(HomeRoute::is_remote) {
         Some(route) => route,

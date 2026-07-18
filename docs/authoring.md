@@ -174,7 +174,7 @@ when to design first, what never to touch.
 | `pm.linear_team` | Linear team id owning the Wave's Project and Task prefixes |
 
 Execution placement is durable runtime state, not authored goal intent. Use
-`lf work place <kind> <id> <home-id>`; do not put a hostname or Home in
+`lf work place wave <wave-id> <home-id>`; do not put a hostname or Home in
 `GOAL.md`.
 
 ### Writing KRs

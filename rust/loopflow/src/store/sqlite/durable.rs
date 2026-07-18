@@ -54,7 +54,7 @@ impl SqliteStore {
 
     pub fn local_home(&self) -> StoreResult<Home> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        map_home(&conn, "local")
+        map_local_home(&conn)
     }
 
     pub fn observe_home(&self, home_id: &HomeId, route: &str) -> StoreResult<Home> {
@@ -102,7 +102,7 @@ impl SqliteStore {
         placement_in(&conn, work)
     }
 
-    pub fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
+    pub(crate) fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         current_epoch_in(&tx, work)?;
@@ -1336,10 +1336,10 @@ impl SqliteStore {
     }
 }
 
-fn map_home(conn: &Connection, route: &str) -> StoreResult<Home> {
+fn map_local_home(conn: &Connection) -> StoreResult<Home> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at FROM homes WHERE route=?1",
-        [route],
+        "SELECT id, route, created_at, observed_at FROM homes WHERE route='local'",
+        [],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -1400,7 +1400,7 @@ fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
 
 fn reserving_home_in(conn: &Connection, work: &WorkRef) -> StoreResult<HomeId> {
     let placed = placement_in(conn, work)?.home_id;
-    let local = map_home(conn, "local")?.id;
+    let local = map_local_home(conn)?.id;
     if placed != local {
         return Err(StoreError::InvalidData(format!(
             "cannot reserve {} {} on local Home {local}; it is placed on {placed}",
@@ -1483,7 +1483,7 @@ fn inherit_placement(
     }
     let home_id = match parent {
         Some(parent) => placement_in(tx, parent)?.home_id,
-        None => map_home(tx, "local")?.id,
+        None => map_local_home(tx)?.id,
     };
     write_placement(tx, work, &home_id, placed_at)
 }
@@ -2686,7 +2686,7 @@ pub(crate) fn reserve_run_for_child(
 ) -> StoreResult<crate::durable::RunLeaseToken> {
     let work = work_for_child_in(tx, target)?;
     let epoch = current_epoch_in(tx, &work)?;
-    let home_id = placement_in(tx, &work)?.home_id;
+    let home_id = reserving_home_in(tx, &work)?;
     let default_trigger = RunTrigger::Input {
         basis: epoch.current_basis.clone(),
     };

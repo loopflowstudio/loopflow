@@ -113,14 +113,16 @@ lf start                      # start every Wave in the current repo
 lf stop shipper               # stop only this Wave
 ```
 
-New Project and Task Work inherits its parent's placement once. Move any Work
+New Project and Task Work inherits its parent's placement once. Move Wave Work
 only while it has no live Run:
 
 ```bash
 lf work place wave <wave-id> <home-id>
-lf work place project <project-id> <home-id>
-lf work place task <task-id> <home-id>
 ```
+
+Project and Task movement stays closed while their Session runners remain the
+executor. The shared Run supervisor will open that placement boundary without
+another Session-to-Run routing bridge.
 
 One keeper process per Home serves all placed Waves. Starting or stopping one
 Wave does not create or kill a machine-wide controller and does not disturb

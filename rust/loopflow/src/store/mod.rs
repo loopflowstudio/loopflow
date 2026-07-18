@@ -1537,6 +1537,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_child_reservation_refuses_remote_placement() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let remote = store
+            .observe_home(&crate::durable::HomeId::new(), "ssh://operator@remote-home")
+            .await
+            .unwrap();
+        store.place_work(&work, &remote.id).await.unwrap();
+
+        task.begin_generation("remote-task".to_string());
+        let error = store
+            .reserve_task_process(&task, TaskSessionStatus::Created)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cannot reserve task"));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn steers_are_one_ordered_basis_checked_input_stream() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))

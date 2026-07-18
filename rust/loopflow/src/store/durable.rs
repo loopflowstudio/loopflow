@@ -51,7 +51,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
     }
 
-    pub async fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
+    pub(crate) async fn place_work(
+        &self,
+        work: &WorkRef,
+        home_id: &HomeId,
+    ) -> StoreResult<Placement> {
         let work = work.clone();
         let home_id = home_id.clone();
         run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await

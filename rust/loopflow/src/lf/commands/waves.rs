@@ -1371,6 +1371,7 @@ async fn snapshot_task_detail(
                 pending_directive: crate::ops::task::has_pending_directive(session),
                 directive_applied: crate::ops::task::current_directive_applied(store, session)
                     .await?,
+                reconcilable: crate::ops::task::reconcilable_pr_set(&prs),
                 ci: active.and_then(|pr| pr.fresh_ci()),
                 process_alive: process.alive,
                 predecessor_phase,
@@ -3193,6 +3194,7 @@ mod tests {
             resume_refusal: None,
             pending_directive: false,
             directive_applied: false,
+            reconcilable: false,
             ci: None,
             process_alive: process.alive,
             predecessor_phase: None,
@@ -3260,6 +3262,7 @@ mod tests {
             resume_refusal: None,
             pending_directive: false,
             directive_applied: false,
+            reconcilable: false,
             ci,
             process_alive: process.alive,
             predecessor_phase: None,

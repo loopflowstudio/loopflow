@@ -2206,15 +2206,17 @@ pub(crate) async fn reconcile_project_tasks(
         //
         // Gate on the cheap session-local predicates first — a pending directive
         // that a body actually ran — so the common loop never pays a `task_prs`
-        // query. Only that rare shape reads PR history, and only to confirm (via
-        // the newest PR's disposition, not `any` merged PR) that an older
-        // CompleteTask behind a later Review merge is not being suppressed.
+        // query. Only that rare shape reads PR history, and only to confirm the
+        // settled set is reconcilable: no non-abandoned PR still in flight and the
+        // latest non-abandoned PR merged (any disposition). A later merged Review,
+        // or a trailing abandoned successor, leaves the Reconcile recommendation
+        // standing instead of relaunching a body — suppression never completes.
         if has_pending_directive(task) && current_directive_applied(store, task).await? {
             let task_prs = store
                 .task_prs(&task.id)
                 .await
                 .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-            if latest_pr_completes_task(&task_prs) {
+            if reconcilable_pr_set(&task_prs) {
                 continue;
             }
         }
@@ -3630,12 +3632,14 @@ pub(crate) fn has_pending_directive(session: &TaskSession) -> bool {
 /// Whether the Task's *newest* PR (by sequence) is a merged `CompleteTask` — the
 /// disposition that means the Task is settling, not rotating a serial successor.
 ///
-/// The one definition of "this Task settled on a completing merge", shared by the
-/// supervisor's Reconcile suppression and the `lf task reconcile` command guard
-/// (the action model enforces the same invariant on `latest_pr_after_merge`).
-/// Keying on the newest PR — not `any` merged PR — is load-bearing: an older
-/// `CompleteTask` behind a later `Review`/next-PR merge must not authorize
-/// reconciliation.
+/// The strict predicate for *automatic* completion: the sole input to
+/// `merged_completing_pr` (and thus `advance_completion_after_gate`). Keying on
+/// the newest PR — not `any` merged PR — is load-bearing: an older `CompleteTask`
+/// behind a later `Review`/next-PR merge must never auto-complete the Task.
+///
+/// Reconciliation is looser and uses [`reconcilable_pr_set`] instead — an
+/// out-of-band attestation backed by a live Linear-complete read can trust the
+/// whole settled PR set, where the machine cannot.
 pub(crate) fn latest_pr_completes_task(prs: &[TaskPr]) -> bool {
     prs.iter().max_by_key(|pr| pr.sequence).is_some_and(|pr| {
         pr.phase() == PrPhase::Merged
@@ -3644,6 +3648,36 @@ pub(crate) fn latest_pr_completes_task(prs: &[TaskPr]) -> bool {
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
     })
+}
+
+/// Whether the Task's settled PR set permits *reconciliation* — a broader,
+/// attestation-gated predicate than [`latest_pr_completes_task`].
+///
+/// Automatic completion stays strict (newest PR a merged `CompleteTask`). But an
+/// out-of-band `lf task reconcile`, backed by an explicit Wave/Operator
+/// attestation and a live Linear-complete observation, trusts the settled set
+/// instead. The directive's three clauses, in one place:
+///
+/// 1. *Ignore abandoned unpublished successor rows* — select the **latest
+///    non-abandoned PR** by sequence, so a rotated successor that never became a
+///    real PR (and any other abandoned row) never hides the real settled merge.
+/// 2. *Require no active or unmerged non-abandoned PR* — nothing still in flight
+///    (a non-abandoned PR that has not merged is Working/Publishing/Open).
+/// 3. *Allow the latest non-abandoned PR to be any merged disposition* — a merged
+///    `Review` sitting ahead of an older `CompleteTask` reconciles too.
+///
+/// Shared by the reconcile command guard, the supervisor's Reconcile
+/// suppression, and the action model's Reconcile recommendation.
+pub(crate) fn reconcilable_pr_set(prs: &[TaskPr]) -> bool {
+    let none_in_flight = !prs
+        .iter()
+        .any(|pr| pr.abandoned_at.is_none() && pr.phase() != PrPhase::Merged);
+    let latest_non_abandoned_merged = prs
+        .iter()
+        .filter(|pr| pr.abandoned_at.is_none())
+        .max_by_key(|pr| pr.sequence)
+        .is_some_and(|pr| pr.phase() == PrPhase::Merged);
+    none_in_flight && latest_non_abandoned_merged
 }
 
 /// The directive at `current_directive_version`, or `None` when the row is
@@ -4753,6 +4787,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             resume_refusal: resume_refusal.as_deref(),
             pending_directive: has_pending_directive(&session),
             directive_applied: current_directive_applied(&store, &session).await?,
+            reconcilable: reconcilable_pr_set(&prs),
             ci: active.and_then(|pr| pr.fresh_ci()),
             process_alive: if session.status.is_process_active() {
                 Some(process_alive)
@@ -5799,13 +5834,17 @@ pub fn task_reconcile(
             .task_prs(&session.id)
             .await
             .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-        // The *newest* PR must be the completing merge. An older CompleteTask
-        // behind a later Review/next-PR merge is a serial successor, not a Task
-        // settling — it must not authorize reconciliation.
-        if !latest_pr_completes_task(&prs) {
+        // The settled PR set must be reconcilable: no non-abandoned PR still in
+        // flight, and the latest non-abandoned PR merged in any disposition
+        // (`Review` or `CompleteTask`). A trailing abandoned unpublished successor
+        // is ignored; a later non-abandoned open/unmerged Review still refuses.
+        // Looser than automatic completion by design — the attestation and the
+        // Linear-complete proof below carry the truth the newest merge cannot.
+        if !reconcilable_pr_set(&prs) {
             return Err(task_error(format!(
-                "Task {} is not settling on a CompleteTask merge; its newest pull request is not a \
-                 merged CompleteTask. Reconcile settles only a Task whose latest merge completes it",
+                "Task {} has no settled merge to reconcile; its latest non-abandoned pull request \
+                 has not merged, or a non-abandoned PR is still in flight. Reconcile settles only a \
+                 Task whose latest non-abandoned PR has merged",
                 session.launch.issue.identifier
             )));
         }
@@ -5978,7 +6017,7 @@ mod tests {
         cached_github_observation, changes_snapshot, count_recovery_attempts, current_directive,
         decide_open_pr_status, derive_workspace_slug, diff_snapshot, ensure_working_pr,
         ensure_working_pr_with_authority, file_snapshot, latest_pr_completes_task, next_pr_slug,
-        owning_wave, parse_pr_slug, parse_workspace_slug, project_context,
+        owning_wave, parse_pr_slug, parse_workspace_slug, project_context, reconcilable_pr_set,
         reconcile_process_liveness, reconcile_project_tasks, reconcile_task_pr,
         recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
         refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
@@ -7127,17 +7166,103 @@ mod tests {
             .expect("settle successor as Review-merged");
     }
 
-    /// Multi-PR sabotage: an older merged `CompleteTask` behind a later merged
-    /// `Review` must never authorize reconciliation — through the direct command,
-    /// the supervisor suppression, or automatic completion. Reverting any consumer
-    /// to `task_prs(..).any(CompleteTask)` flips one of these assertions.
+    /// Append a rotated successor that never published and was then abandoned —
+    /// the trailing row in the live ENG-29 shape. It is the newest PR by sequence
+    /// but carries no publication and no merge, so it must not hide the real
+    /// settled merge underneath it.
+    async fn append_abandoned_unpublished_successor(store: &SharedStore, prev: &TaskPr) {
+        let now = OffsetDateTime::now_utc();
+        let mut succ = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: prev.task_session_id.clone(),
+            sequence: prev.sequence + 1,
+            slug: format!("{}-succ", prev.slug),
+            branch: format!("{}-succ", prev.branch),
+            base_commit: prev.base_commit.clone(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+        };
+        store
+            .settle_task_pr(prev, Some(&succ))
+            .await
+            .expect("insert successor working PR");
+        succ.abandoned_at = Some(now);
+        succ.updated_at = now;
+        store
+            .update_task_pr(&succ)
+            .await
+            .expect("abandon the unpublished successor");
+    }
+
+    /// Append a later, non-abandoned, *open* (unmerged) `Review` successor — the
+    /// sabotage the reconcile predicate must still refuse: real work is in flight,
+    /// so the Task has not settled no matter what merged before it.
+    async fn append_open_review_successor(store: &SharedStore, prev: &TaskPr, number: u32) {
+        let now = OffsetDateTime::now_utc();
+        let mut succ = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: prev.task_session_id.clone(),
+            sequence: prev.sequence + 1,
+            slug: format!("{}-open", prev.slug),
+            branch: format!("{}-open", prev.branch),
+            base_commit: prev.base_commit.clone(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+        };
+        store
+            .settle_task_pr(prev, Some(&succ))
+            .await
+            .expect("insert successor working PR");
+        succ.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number,
+                url: format!("https://example.com/pr/{number}"),
+                head_sha: Some("open-head".to_string()),
+            }),
+        });
+        succ.updated_at = now;
+        store
+            .update_task_pr(&succ)
+            .await
+            .expect("open the successor PR");
+    }
+
+    /// The exact live ENG-29 shape, exposed once ENG-30 merged: an older merged
+    /// `CompleteTask`, a **later merged `Review`**, and a trailing **abandoned
+    /// unpublished successor**, with an applied-but-unincorporated final directive
+    /// and a Linear-complete issue. Reconciliation now *succeeds* and clears the
+    /// orphan — where the strict `latest_pr_completes_task` (kept for automatic
+    /// completion) would refuse. The supervisor leaves the Reconcile
+    /// recommendation standing and never auto-completes.
     #[test]
-    fn an_older_completetask_behind_a_later_review_never_reconciles() {
+    fn reconcile_settles_a_later_merged_review_over_an_older_completetask_with_abandoned_successor()
+    {
         let repo = TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-        let (home, store, session) = runtime.block_on(async {
-            let (home, store, session, _rec) =
-                applied_unincorporated_task(&repo, "jack/sabotage", 1064, 5, true).await;
+        let (home, store, session, recovery_id) = runtime.block_on(async {
+            let (home, store, session, recovery_id) =
+                applied_unincorporated_task(&repo, "jack/eng-29", 1064, 5, true).await;
             let first = store
                 .task_prs(&session.id)
                 .await
@@ -7146,31 +7271,107 @@ mod tests {
                 .next()
                 .expect("first PR");
             append_merged_review_pr(&store, &first, 1099).await;
+            let review = store
+                .task_prs(&session.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .max_by_key(|pr| pr.sequence)
+                .expect("merged Review PR");
+            append_abandoned_unpublished_successor(&store, &review).await;
+            let session = store.get_task_session(&session.id).await.unwrap().unwrap();
+
+            let prs = store.task_prs(&session.id).await.unwrap();
+            assert_eq!(prs.len(), 3);
+            // Automatic completion stays strict: the newest PR is not a completing
+            // merge, so this Task must never auto-complete.
+            assert!(
+                !latest_pr_completes_task(&prs),
+                "the newest row is an abandoned successor, not a merged CompleteTask"
+            );
+            // Reconciliation trusts the settled set: latest non-abandoned PR is the
+            // merged Review, nothing in flight.
+            assert!(
+                reconcilable_pr_set(&prs),
+                "a merged Review under a trailing abandoned successor is reconcilable"
+            );
+
+            // Supervisor recognizes the shape: leaves it awaiting attestation.
             let project = store
                 .get_project_session(&session.project_session_id)
                 .await
                 .unwrap()
                 .unwrap();
+            reconcile_project_tasks(&store, &project)
+                .await
+                .expect("supervisor tolerates the reconcilable shape");
+            let after = store.get_task_session(&session.id).await.unwrap().unwrap();
+            assert_eq!(
+                after.status,
+                TaskSessionStatus::Waiting,
+                "supervisor never settles it hands-off"
+            );
+            assert!(after.latest_process.is_none(), "no body relaunched");
+            (home, store, after, recovery_id)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let _linear = LinearCompleteOverride::set(true);
+
+        // Legal-action reporting points at Reconcile, never StartNextPr.
+        let snapshot = task_snapshot(&session).expect("snapshot the reconcilable Task");
+        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Reconcile));
+        assert!(
+            !snapshot
+                .actions
+                .status(TaskAction::StartNextPr)
+                .unwrap()
+                .available
+        );
+
+        let summary = "Directive v5 shipped in the merged head; the Review landed after the \
+                       CompleteTask and the acknowledgement turn was interrupted.";
+        let result = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            5,
+            summary.to_string(),
+        )
+        .expect("operator attestation settles the later-Review shape");
+        assert_eq!(result.session.status, TaskSessionStatus::Completed);
+        assert_eq!(
+            result.cleared_commands,
+            vec![recovery_id],
+            "the orphaned Persisted recovery command is cleared in place"
+        );
+        drop(store);
+    }
+
+    /// Preserved sabotage: a later, non-abandoned, *open* (unmerged) `Review`
+    /// successor is genuine in-flight work, so the settled set is not
+    /// reconcilable and the command refuses. Loosening `reconcilable_pr_set` to
+    /// accept an unmerged non-abandoned PR flips the predicate assertion.
+    #[test]
+    fn reconcile_refuses_a_later_nonabandoned_unmerged_review() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, store, session) = runtime.block_on(async {
+            let (home, store, session, _rec) =
+                applied_unincorporated_task(&repo, "jack/open-review", 1064, 5, true).await;
+            let first = store
+                .task_prs(&session.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("first PR");
+            append_open_review_successor(&store, &first, 1099).await;
             let session = store.get_task_session(&session.id).await.unwrap().unwrap();
 
-            // The shared predicate: the newest PR (Review) is not a completing merge.
             let prs = store.task_prs(&session.id).await.unwrap();
-            assert_eq!(prs.len(), 2);
             assert!(
-                !latest_pr_completes_task(&prs),
-                "a later Review merge is not reconcilable, even behind an older CompleteTask"
-            );
-
-            // Supervisor suppression is gated solely by `latest_pr_completes_task`
-            // on this same PR set (asserted false above), so it cannot fire; a
-            // supervisor pass must never auto-complete the Task from the older
-            // CompleteTask either.
-            let _ = reconcile_project_tasks(&store, &project).await;
-            let after = store.get_task_session(&session.id).await.unwrap().unwrap();
-            assert_ne!(
-                after.status,
-                TaskSessionStatus::Completed,
-                "must not auto-complete from an older CompleteTask behind a later Review"
+                !reconcilable_pr_set(&prs),
+                "a later non-abandoned unmerged Review is in-flight work, not reconcilable"
             );
             (home, store, session)
         });
@@ -7178,18 +7379,17 @@ mod tests {
         let _env = StoreEnvGuard::new(home.path());
         let _linear = LinearCompleteOverride::set(true);
 
-        // Direct command: refuses because the newest PR is not a merged CompleteTask.
         let err = task_reconcile(
             &session.launch.issue.identifier,
             CallerAuthority::Operator,
             5,
             "attest".to_string(),
         )
-        .expect_err("later-Review case is refused");
+        .expect_err("an in-flight later Review is refused");
+        let message = err.to_string();
         assert!(
-            err.to_string()
-                .contains("not settling on a CompleteTask merge"),
-            "{err}"
+            message.contains("active pull request") || message.contains("has not merged"),
+            "{message}"
         );
         drop(store);
     }
@@ -7275,6 +7475,91 @@ mod tests {
             merged(1, AfterMerge::CompleteTask),
         ]));
         assert!(!latest_pr_completes_task(&[]));
+    }
+
+    /// The reconcile predicate selects the latest *non-abandoned* PR and accepts
+    /// any merged disposition, but refuses any non-abandoned unmerged PR.
+    #[test]
+    fn reconcilable_pr_set_selects_the_latest_non_abandoned_merge() {
+        #[derive(Clone, Copy)]
+        enum Shape {
+            Merged(AfterMerge),
+            Open,
+            AbandonedUnpublished,
+        }
+        fn pr(sequence: u32, shape: Shape) -> TaskPr {
+            let now = OffsetDateTime::UNIX_EPOCH;
+            let (publication, merge_commit, abandoned_at) = match shape {
+                Shape::Merged(after_merge) => (
+                    Some(PrPublication {
+                        requested_at: now,
+                        after_merge,
+                        next_slug: None,
+                        github: Some(GithubPr {
+                            number: sequence,
+                            url: "u".to_string(),
+                            head_sha: None,
+                        }),
+                    }),
+                    Some("m".to_string()),
+                    None,
+                ),
+                Shape::Open => (
+                    Some(PrPublication {
+                        requested_at: now,
+                        after_merge: AfterMerge::Review,
+                        next_slug: None,
+                        github: Some(GithubPr {
+                            number: sequence,
+                            url: "u".to_string(),
+                            head_sha: Some("h".to_string()),
+                        }),
+                    }),
+                    None,
+                    None,
+                ),
+                Shape::AbandonedUnpublished => (None, None, Some(now)),
+            };
+            TaskPr {
+                id: TaskPrId::new(),
+                task_session_id: TaskSessionId::new(),
+                sequence,
+                slug: format!("s{sequence}"),
+                branch: format!("b{sequence}"),
+                base_commit: "base".to_string(),
+                parent_pr_id: None,
+                publication,
+                merge_commit,
+                abandoned_at,
+                created_at: now,
+                updated_at: now,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+            }
+        }
+        // The live ENG-29 shape: merged CompleteTask, later merged Review, trailing
+        // abandoned unpublished successor → reconcilable.
+        assert!(reconcilable_pr_set(&[
+            pr(1, Shape::Merged(AfterMerge::CompleteTask)),
+            pr(2, Shape::Merged(AfterMerge::Review)),
+            pr(3, Shape::AbandonedUnpublished),
+        ]));
+        // A plain completing merge is reconcilable too.
+        assert!(reconcilable_pr_set(&[pr(
+            1,
+            Shape::Merged(AfterMerge::CompleteTask)
+        )]));
+        // A later non-abandoned open PR is in-flight work → not reconcilable.
+        assert!(!reconcilable_pr_set(&[
+            pr(1, Shape::Merged(AfterMerge::CompleteTask)),
+            pr(2, Shape::Open),
+        ]));
+        // Nothing merged (only an abandoned row) → not reconcilable.
+        assert!(!reconcilable_pr_set(&[pr(1, Shape::AbandonedUnpublished)]));
+        assert!(!reconcilable_pr_set(&[]));
     }
 
     /// Create a parent Task with a published (not merged) PR, then a child Task

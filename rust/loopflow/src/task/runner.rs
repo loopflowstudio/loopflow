@@ -2081,8 +2081,10 @@ mod tests {
         PreparedTaskStep,
     };
     use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
-    use crate::child_session::{ChildProcessReservation, ChildRef};
-    use crate::durable::RunLease;
+    use crate::child_session::ChildRef;
+    use crate::durable::{
+        AdvanceReceipt, Containment, LaunchRoute, RunAdvance, RunLease, RunTrigger,
+    };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::WaveId;
@@ -2242,7 +2244,7 @@ mod tests {
         provider: &str,
         worktree: PathBuf,
         directive_text: Option<&str>,
-    ) -> (TaskSession, ChildProcessReservation) {
+    ) -> (TaskSession, RunLease) {
         let wave = Wave::new(
             WaveId::new(),
             format!("wave-{provider}"),
@@ -2346,29 +2348,51 @@ mod tests {
                 .unwrap();
         }
         session.begin_generation(format!("task-{provider}"));
-        let reservation = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+        store.update_task_session(&session).await.unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
-            .unwrap()
             .unwrap();
-        (session, reservation)
+        let home = store.home("test-home").await.unwrap();
+        let (_run, lease) = store
+            .reserve_run(&work, &home.id, RunTrigger::User)
+            .await
+            .unwrap();
+        let receipt = store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: provider.to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: format!("task-{provider}"),
+                    },
+                    cwd: session.worktree.clone(),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: session.provider_session_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(receipt, AdvanceReceipt::Launch(_)));
+        (session, lease)
     }
 
     async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, RunLease) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("registry.db");
         let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
-        let (mut session, reservation) = seed_conformance_session(
+        let (mut session, lease) = seed_conformance_session(
             store.clone(),
             provider,
             PathBuf::from(format!("/repo.{provider}")),
             None,
         )
         .await;
-        let lease = store
-            .resolve_run_lease(reservation.run_token.clone())
-            .await
-            .unwrap();
         if let Some(process) = &mut session.latest_process {
             process.state = crate::child_session::ChildLeaseState::Active;
         }
@@ -2389,17 +2413,13 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let (session, reservation) = seed_conformance_session(
+        let (session, lease) = seed_conformance_session(
             store.clone(),
             "codex",
             repo.path().to_path_buf(),
             Some("record this provider turn"),
         )
         .await;
-        let lease = store
-            .resolve_run_lease(reservation.run_token.clone())
-            .await
-            .unwrap();
         crate::journal::emit(
             repo.path(),
             crate::journal::LfNode::Run,
@@ -3004,15 +3024,37 @@ mod tests {
         };
         store.create_task_session(&session, &pr).await.unwrap();
         session.begin_generation("lf-task-opencode".to_string());
-        let reservation = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        let lease = store
-            .resolve_run_lease(reservation.run_token.clone())
+        store.update_task_session(&session).await.unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
             .unwrap();
+        let home = store.home("test-home").await.unwrap();
+        let (_run, lease) = store
+            .reserve_run(&work, &home.id, RunTrigger::User)
+            .await
+            .unwrap();
+        let receipt = store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "opencode".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "lf-task-opencode".to_string(),
+                    },
+                    cwd: session.worktree.clone(),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: session.provider_session_id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(receipt, AdvanceReceipt::Launch(_)));
         if let Some(process) = &mut session.latest_process {
             process.state = crate::child_session::ChildLeaseState::Active;
         }

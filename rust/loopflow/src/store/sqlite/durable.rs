@@ -2783,45 +2783,6 @@ fn import_run_for_child(
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) fn reserve_run_for_child(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    process: &crate::child_session::ChildProcessGeneration,
-    trigger: Option<&RunTrigger>,
-) -> StoreResult<crate::durable::RunLeaseToken> {
-    let work = work_for_child_in(tx, target)?;
-    let epoch = current_epoch_in(tx, &work)?;
-    let home_id = reserving_home_in(tx, &work)?;
-    let default_trigger = RunTrigger::Input {
-        basis: epoch.current_basis.clone(),
-    };
-    let trigger_json = serde_json::to_string(trigger.unwrap_or(&default_trigger))
-        .expect("run trigger must serialize");
-    let token = crate::durable::RunLeaseToken::new();
-    let lease_hash = token.hash();
-    let run_id = RunId::new();
-    tx.execute(
-        "INSERT INTO runs (
-            id, epoch_id, home_id, state, trigger_json, lease_hash,
-            lease_generation, source_kind, source_id, created_at, ended_at
-         ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
-        params![
-            run_id.as_str(),
-            epoch.id.as_str(),
-            home_id.as_str(),
-            trigger_json,
-            lease_hash,
-            i64::from(process.generation),
-            target.target_kind(),
-            target.target_id(),
-            now_unix(),
-        ],
-    )?;
-    insert_child_control_launch(tx, target, &run_id, process, "reserved")?;
-    Ok(token)
-}
-
 fn insert_child_control_launch(
     tx: &Transaction<'_>,
     target: &ChildRef,
@@ -2878,56 +2839,6 @@ fn insert_child_control_launch(
             "UPDATE agent_launches SET launch_state=?2 WHERE id=?1",
             params![launch.id.as_str(), launch_state],
         )?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-pub(crate) fn activate_run_for_child(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<()> {
-    let run_id = tx
-        .query_row(
-            "SELECT id FROM runs
-             WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-               AND state='reserved'",
-            params![
-                target.target_kind(),
-                target.target_id(),
-                i64::from(generation)
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .ok_or_else(|| {
-            StoreError::InvalidData(format!(
-                "{} generation {generation} has no reserved Run",
-                target.target_id()
-            ))
-        })?;
-    if tx.execute(
-        "UPDATE runs SET state='active'
-         WHERE id=?1 AND state='reserved'",
-        [&run_id],
-    )? == 0
-    {
-        return Err(StoreError::InvalidData(format!(
-            "{} generation {generation} has no reserved Run",
-            target.target_id()
-        )));
-    }
-    if tx.execute(
-        "UPDATE agent_launches SET launch_state='live'
-         WHERE product_run_id=?1 AND launch_state='starting'",
-        [&run_id],
-    )? != 1
-    {
-        return Err(StoreError::InvalidData(format!(
-            "{} generation {generation} has no starting Launch",
-            target.target_id()
-        )));
     }
     Ok(())
 }

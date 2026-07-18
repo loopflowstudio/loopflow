@@ -14,10 +14,8 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
-    ChildProcessGeneration, ChildRef, ChildWriteLease, ObservationRecipient,
+    ChildProcessGeneration, ChildRef, ObservationRecipient,
 };
-#[cfg(test)]
-use crate::child_session::{ChildLeaseToken, ChildProcessReservation};
 use crate::durable::{Author, RunLease};
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
@@ -37,8 +35,6 @@ use crate::task::{
     TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
 };
 
-#[cfg(test)]
-use super::durable::{activate_run_for_child, reserve_run_for_child};
 use super::durable::{
     create_project_spine, create_task_spine, end_run_for_child, end_run_for_lease,
     fence_run_for_child, validate_run_lease, work_for_child_in,
@@ -305,48 +301,6 @@ impl SqliteStore {
         Ok(true)
     }
 
-    #[cfg(test)]
-    pub(crate) fn activate_task_process(
-        &self,
-        session: &TaskSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        validate_task_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Task activation requires a process generation".to_string())
-        })?;
-        if process.state != ChildLeaseState::Active || process.generation != lease.generation {
-            return Err(StoreError::InvalidData(
-                "Task activation requires the matching Active generation".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = update_task_session_for_lease_in(
-            &transaction,
-            session,
-            lease,
-            ChildLeaseState::Reserved,
-        )?;
-        if changed == 0 {
-            return Err(lease_revoked("Task Session", session.id.as_str(), lease));
-        }
-        insert_task_event_in(
-            &transaction,
-            session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        activate_run_for_child(
-            &transaction,
-            &ChildRef::Task(session.id.clone()),
-            lease.generation,
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub(crate) fn activate_task_process_for_run(
         &self,
         session: &TaskSession,
@@ -380,20 +334,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn update_task_session_for_lease(
-        &self,
-        session: &TaskSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        validate_task_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if update_task_session_for_lease_in(&conn, session, lease, ChildLeaseState::Active)? == 0 {
-            return Err(lease_revoked("Task Session", session.id.as_str(), lease));
-        }
-        Ok(())
-    }
-
     pub(crate) fn update_task_session_for_run(
         &self,
         session: &TaskSession,
@@ -407,48 +347,6 @@ impl SqliteStore {
                 lease.run_id, session.id
             )));
         }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn finish_task_process(
-        &self,
-        session: &TaskSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        validate_task_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Task finish requires a process generation".to_string())
-        })?;
-        if process.state != ChildLeaseState::Finished
-            || process.outcome.is_none()
-            || process.generation != lease.generation
-        {
-            return Err(StoreError::InvalidData(
-                "Task finish requires the matching Finished generation and outcome".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_task_session_for_lease_in(&transaction, session, lease, ChildLeaseState::Active)?
-            == 0
-        {
-            return Err(lease_revoked("Task Session", session.id.as_str(), lease));
-        }
-        insert_task_event_in(
-            &transaction,
-            session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        end_run_for_child(
-            &transaction,
-            &ChildRef::Task(session.id.clone()),
-            lease.generation,
-        )?;
-        close_task_epoch_if_quiescent(&transaction, session)?;
-        transaction.commit()?;
         Ok(())
     }
 
@@ -681,17 +579,7 @@ impl SqliteStore {
         session: &TaskSession,
         skipped_pr: Option<&TaskPr>,
     ) -> StoreResult<()> {
-        self.complete_task_session_with_lease(session, skipped_pr, None)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn complete_task_session_for_lease(
-        &self,
-        session: &TaskSession,
-        skipped_pr: Option<&TaskPr>,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        self.complete_task_session_with_lease(session, skipped_pr, Some(lease))
+        self.complete_task_session_with_authority(session, skipped_pr, None)
     }
 
     pub(crate) fn complete_task_session_for_run(
@@ -700,23 +588,13 @@ impl SqliteStore {
         skipped_pr: Option<&TaskPr>,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        self.complete_task_session_with_authority(session, skipped_pr, None, Some(lease))
-    }
-
-    fn complete_task_session_with_lease(
-        &self,
-        session: &TaskSession,
-        skipped_pr: Option<&TaskPr>,
-        lease: Option<&ChildWriteLease>,
-    ) -> StoreResult<()> {
-        self.complete_task_session_with_authority(session, skipped_pr, lease, None)
+        self.complete_task_session_with_authority(session, skipped_pr, Some(lease))
     }
 
     fn complete_task_session_with_authority(
         &self,
         session: &TaskSession,
         skipped_pr: Option<&TaskPr>,
-        child_lease: Option<&ChildWriteLease>,
         run_lease: Option<&RunLease>,
     ) -> StoreResult<()> {
         validate_task_session(session)?;
@@ -736,9 +614,6 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project_session(&transaction, session)?;
-        if let Some(lease) = child_lease {
-            require_child_write_lease(&transaction, &ChildRef::Task(session.id.clone()), lease)?;
-        }
         if let Some(lease) = run_lease {
             require_run_owns_child(&transaction, &ChildRef::Task(session.id.clone()), lease)?;
         }
@@ -754,27 +629,17 @@ impl SqliteStore {
                 return Err(StoreError::NotFound);
             }
         }
-        let changed = match (child_lease, run_lease) {
-            (Some(lease), None) => update_task_session_for_lease_in(
-                &transaction,
-                session,
-                lease,
-                ChildLeaseState::Active,
-            )?,
-            (None, Some(lease)) => update_task_session_for_run_in(&transaction, session, lease)?,
-            (None, None) => {
+        let changed = match run_lease {
+            Some(lease) => update_task_session_for_run_in(&transaction, session, lease)?,
+            None => {
                 let parameters = task_session_control_params(session);
                 transaction.execute(
                     TASK_SESSION_UPDATE,
                     rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
                 )?
             }
-            (Some(_), Some(_)) => unreachable!("one write authority at a time"),
         };
         if changed == 0 {
-            if let Some(lease) = child_lease {
-                return Err(lease_revoked("Task Session", session.id.as_str(), lease));
-            }
             if let Some(lease) = run_lease {
                 return Err(StoreError::InvalidAuthority(format!(
                     "Run {} cannot complete Task Session {}",
@@ -785,95 +650,6 @@ impl SqliteStore {
         }
         transaction.commit()?;
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn reserve_task_process(
-        &self,
-        session: &TaskSession,
-        expected_status: TaskSessionStatus,
-        trigger: Option<&crate::durable::RunTrigger>,
-    ) -> StoreResult<Option<ChildProcessReservation>> {
-        validate_task_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Task process reservation requires a generation".to_string())
-        })?;
-        let previous_generation = process.generation.checked_sub(1).ok_or_else(|| {
-            StoreError::InvalidData("Task process generation must start at one".to_string())
-        })?;
-        let token = ChildLeaseToken::new();
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = transaction.execute(
-            "UPDATE task_sessions SET
-                status = ?2, status_reason = ?3, status_at = ?4,
-                process_generation = ?5, process_pid = ?6,
-                process_tmux_name = ?7, process_started_at = ?8,
-                updated_at = ?9, process_lease_token = ?11,
-                process_group_id = ?12, process_agent = ?13,
-                process_provider = ?14, process_provider_session_id = ?15,
-                process_lease_state = 'reserved', process_outcome_json = NULL,
-                process_provenance_json = ?17
-             WHERE id = ?1 AND status = ?10
-               AND COALESCE(process_generation, 0) = ?16
-               AND (process_lease_state IS NULL OR process_lease_state = 'finished')",
-            params![
-                session.id.as_str(),
-                session.status.as_str(),
-                session.status_reason,
-                session.status_at.unix_timestamp(),
-                i64::from(process.generation),
-                process.pid.map(i64::from),
-                process.tmux_name,
-                process.started_at.unix_timestamp(),
-                session.updated_at.unix_timestamp(),
-                expected_status.as_str(),
-                token.as_str(),
-                process.process_group_id.map(i64::from),
-                process.agent,
-                process.provider,
-                process.provider_session_id,
-                i64::from(previous_generation),
-                process
-                    .provenance
-                    .as_ref()
-                    .map(|provenance| serde_json::to_string(provenance)
-                        .expect("child body provenance must serialize")),
-            ],
-        )?;
-        if changed == 0 {
-            return Ok(None);
-        }
-        let run_token = reserve_run_for_child(
-            &transaction,
-            &ChildRef::Task(session.id.clone()),
-            process,
-            trigger,
-        )?;
-        insert_task_event_in(
-            &transaction,
-            session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        insert_task_event_in(
-            &transaction,
-            session,
-            &TaskEventKind::StatusChanged {
-                from: expected_status,
-                to: session.status,
-                reason: session.status_reason.clone(),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(Some(ChildProcessReservation {
-            write_lease: ChildWriteLease {
-                generation: process.generation,
-                token,
-            },
-            run_token,
-        }))
     }
 
     pub fn handoff_task_body(
@@ -1016,27 +792,6 @@ impl SqliteStore {
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn update_task_pr_for_lease(
-        &self,
-        pr: &TaskPr,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        validate_task_pr(pr)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(
-            &transaction,
-            &ChildRef::Task(pr.task_session_id.clone()),
-            lease,
-        )?;
-        if update_task_pr(&transaction, pr)? == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.commit()?;
         Ok(())
     }
 
@@ -1476,26 +1231,6 @@ impl SqliteStore {
         Ok(event)
     }
 
-    #[cfg(test)]
-    pub(crate) fn append_task_event_for_lease(
-        &self,
-        session_id: &TaskSessionId,
-        lease: &ChildWriteLease,
-        kind: &TaskEventKind,
-    ) -> StoreResult<TaskEvent> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, &ChildRef::Task(session_id.clone()), lease)?;
-        let session = transaction.query_row(
-            TASK_SESSION_SELECT,
-            params![session_id.as_str()],
-            map_task_session_row,
-        )?;
-        let event = insert_task_event_in(&transaction, &session, kind)?;
-        transaction.commit()?;
-        Ok(event)
-    }
-
     pub(crate) fn append_task_event_for_run(
         &self,
         session_id: &TaskSessionId,
@@ -1657,48 +1392,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn activate_project_process(
-        &self,
-        session: &ProjectSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        validate_project_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Project activation requires a process generation".to_string())
-        })?;
-        if process.state != ChildLeaseState::Active || process.generation != lease.generation {
-            return Err(StoreError::InvalidData(
-                "Project activation requires the matching Active generation".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = update_project_session_for_lease_in(
-            &transaction,
-            session,
-            lease,
-            ChildLeaseState::Reserved,
-        )?;
-        if changed == 0 {
-            return Err(lease_revoked("Project Session", session.id.as_str(), lease));
-        }
-        insert_project_event_in(
-            &transaction,
-            session,
-            &ProjectEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        activate_run_for_child(
-            &transaction,
-            &ChildRef::Project(session.id.clone()),
-            lease.generation,
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
     pub(crate) fn activate_project_process_for_run(
         &self,
         session: &ProjectSession,
@@ -1729,21 +1422,6 @@ impl SqliteStore {
             },
         )?;
         transaction.commit()?;
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub(crate) fn update_project_session_for_lease(
-        &self,
-        session: &ProjectSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        validate_project_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if update_project_session_for_lease_in(&conn, session, lease, ChildLeaseState::Active)? == 0
-        {
-            return Err(lease_revoked("Project Session", session.id.as_str(), lease));
-        }
         Ok(())
     }
 
@@ -1909,94 +1587,6 @@ impl SqliteStore {
         )?;
         transaction.commit()?;
         Ok(process)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn reserve_project_process(
-        &self,
-        session: &ProjectSession,
-        expected_status: ProjectSessionStatus,
-        trigger: Option<&crate::durable::RunTrigger>,
-    ) -> StoreResult<Option<ChildProcessReservation>> {
-        validate_project_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Project process reservation requires a generation".to_string())
-        })?;
-        let previous_generation = process.generation.checked_sub(1).ok_or_else(|| {
-            StoreError::InvalidData("Project process generation must start at one".to_string())
-        })?;
-        let token = ChildLeaseToken::new();
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = transaction.execute(
-            "UPDATE project_sessions SET
-                status=?2, status_reason=?3, status_at=?4,
-                process_generation=?5, process_pid=?6, process_tmux_name=?7,
-                process_started_at=?8, updated_at=?9,
-                process_lease_token=?11, process_group_id=?12,
-                process_agent=?13, process_provider=?14,
-                process_provider_session_id=?15, process_lease_state='reserved',
-                process_outcome_json=NULL, process_provenance_json=?17
-             WHERE id=?1 AND status=?10
-               AND COALESCE(process_generation, 0)=?16
-               AND (process_lease_state IS NULL OR process_lease_state = 'finished')",
-            params![
-                session.id.as_str(),
-                session.status.as_str(),
-                session.status_reason,
-                session.status_at.unix_timestamp(),
-                i64::from(process.generation),
-                process.pid.map(i64::from),
-                process.tmux_name,
-                process.started_at.unix_timestamp(),
-                session.updated_at.unix_timestamp(),
-                expected_status.as_str(),
-                token.as_str(),
-                process.process_group_id.map(i64::from),
-                process.agent,
-                process.provider,
-                process.provider_session_id,
-                i64::from(previous_generation),
-                process
-                    .provenance
-                    .as_ref()
-                    .map(|provenance| serde_json::to_string(provenance)
-                        .expect("child body provenance must serialize")),
-            ],
-        )?;
-        if changed == 0 {
-            return Ok(None);
-        }
-        let run_token = reserve_run_for_child(
-            &transaction,
-            &ChildRef::Project(session.id.clone()),
-            process,
-            trigger,
-        )?;
-        insert_project_event_in(
-            &transaction,
-            session,
-            &ProjectEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        insert_project_event_in(
-            &transaction,
-            session,
-            &ProjectEventKind::StatusChanged {
-                from: expected_status,
-                to: session.status,
-                reason: session.status_reason.clone(),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(Some(ChildProcessReservation {
-            write_lease: ChildWriteLease {
-                generation: process.generation,
-                token,
-            },
-            run_token,
-        }))
     }
 
     pub fn handoff_project_body(
@@ -2262,22 +1852,6 @@ impl SqliteStore {
             project_session_id,
             observation,
             None,
-            None,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn consume_task_observation_for_project_for_lease(
-        &self,
-        project_session_id: &ProjectSessionId,
-        observation: &ObservationOutboxRow,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<bool> {
-        self.consume_task_observation_for_project_with_authority(
-            project_session_id,
-            observation,
-            Some(lease),
-            None,
         )
     }
 
@@ -2290,7 +1864,6 @@ impl SqliteStore {
         self.consume_task_observation_for_project_with_authority(
             project_session_id,
             observation,
-            None,
             Some(lease),
         )
     }
@@ -2299,7 +1872,6 @@ impl SqliteStore {
         &self,
         project_session_id: &ProjectSessionId,
         observation: &ObservationOutboxRow,
-        child_lease: Option<&ChildWriteLease>,
         run_lease: Option<&RunLease>,
     ) -> StoreResult<bool> {
         let (
@@ -2320,13 +1892,6 @@ impl SqliteStore {
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(lease) = child_lease {
-            require_child_write_lease(
-                &transaction,
-                &ChildRef::Project(project_session_id.clone()),
-                lease,
-            )?;
-        }
         if let Some(lease) = run_lease {
             require_run_owns_child(
                 &transaction,
@@ -2786,42 +2351,6 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     kickoff_flow=?43, kickoff_interaction_policy=?44,
     gate_flow=?45, gate_interaction_policy=?46
     WHERE id=?1";
-const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
-    issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
-    project_id=?6, project_slug=?7, project_name=?8, project_prompt_context=?9,
-    wave_id=?10, status=?11, status_reason=?12, status_at=?13,
-    worktree=?14, workspace_slug=?15, agent=?16, provider=?17,
-    provider_session_id=?18, process_generation=?19, process_pid=?20,
-    process_tmux_name=?21, process_started_at=?22,
-    created_at=?23, updated_at=?24,
-    pm_snapshot_synced_at=?25, pm_writeback_json=?26,
-    project_session_id=?27,
-    lf_bin=?28, db_path=?29, lf_home=?30,
-    abandon_requested_at=?31, abandon_reason=?32,
-    lifecycle_phase=CASE WHEN ?48>=phase_epoch THEN ?47 ELSE lifecycle_phase END,
-    phase_cursor=CASE
-        WHEN ?48>phase_epoch OR
-             (?48=phase_epoch AND (?36>phase_iteration OR
-                                   (?36=phase_iteration AND ?35>phase_cursor)))
-        THEN ?35 ELSE phase_cursor
-    END,
-    phase_iteration=CASE
-        WHEN ?48>phase_epoch THEN ?36
-        WHEN ?48=phase_epoch THEN MAX(phase_iteration, ?36)
-        ELSE phase_iteration
-    END,
-    phase_epoch=MAX(phase_epoch, ?48),
-    gate_cycle=CASE WHEN ?48>=phase_epoch THEN ?49 ELSE gate_cycle END,
-    gate_proposal_json=CASE WHEN ?48>=phase_epoch THEN ?50 ELSE gate_proposal_json END,
-    process_group_id=?37, process_agent=?38, process_provider=?39,
-    process_provider_session_id=?40, process_lease_state=?41,
-    process_outcome_json=?42, process_provenance_json=?51
-    WHERE id=?1 AND process_generation=?52 AND process_lease_token=?53
-      AND process_lease_state=?54
-      AND (
-        status NOT IN ('completed', 'abandoned') OR status=?11 OR
-        (status='completed' AND ?11='running' AND ?47='gate' AND ?48>phase_epoch)
-      )";
 const TASK_SESSION_RUN_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
     project_id=?6, project_slug=?7, project_name=?8, project_prompt_context=?9,
@@ -3065,22 +2594,6 @@ fn task_session_control_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     parameters
 }
 
-fn update_task_session_for_lease_in(
-    conn: &Connection,
-    session: &TaskSession,
-    lease: &ChildWriteLease,
-    expected_state: ChildLeaseState,
-) -> StoreResult<usize> {
-    let mut parameters = task_session_params(session);
-    parameters.push(Box::new(i64::from(lease.generation)));
-    parameters.push(Box::new(lease.token.as_str().to_string()));
-    parameters.push(Box::new(expected_state.as_str().to_string()));
-    Ok(conn.execute(
-        TASK_SESSION_LEASE_UPDATE,
-        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-    )?)
-}
-
 fn update_task_session_for_run_in(
     conn: &Connection,
     session: &TaskSession,
@@ -3092,51 +2605,6 @@ fn update_task_session_for_run_in(
         TASK_SESSION_RUN_UPDATE,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?)
-}
-
-fn lease_revoked(kind: &str, id: &str, lease: &ChildWriteLease) -> StoreError {
-    StoreError::LeaseRevoked {
-        target: format!("{kind} {id}"),
-        generation: lease.generation,
-    }
-}
-
-pub(super) fn require_child_write_lease(
-    conn: &Connection,
-    target: &ChildRef,
-    lease: &ChildWriteLease,
-) -> StoreResult<()> {
-    let table = match target {
-        ChildRef::Project(_) => "project_sessions",
-        ChildRef::Task(_) => "task_sessions",
-    };
-    let current: bool = conn.query_row(
-        &format!(
-            "SELECT EXISTS(
-                SELECT 1 FROM {table}
-                WHERE id=?1 AND process_generation=?2
-                  AND process_lease_token=?3 AND process_lease_state='active'
-             )"
-        ),
-        params![
-            target.target_id(),
-            i64::from(lease.generation),
-            lease.token.as_str()
-        ],
-        |row| row.get(0),
-    )?;
-    if current {
-        Ok(())
-    } else {
-        Err(lease_revoked(
-            match target {
-                ChildRef::Project(_) => "Project Session",
-                ChildRef::Task(_) => "Task Session",
-            },
-            target.target_id(),
-            lease,
-        ))
-    }
 }
 
 fn require_run_owns_child(
@@ -3653,23 +3121,6 @@ const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     lf_bin=?23, db_path=?24, lf_home=?25,
     abandon_requested_at=?26, abandon_reason=?27
     WHERE id=?1";
-#[cfg(test)]
-const PROJECT_SESSION_LEASE_UPDATE: &str = "UPDATE project_sessions SET
-    project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
-    wave_id=?6, pm_snapshot_synced_at=?7, status=?8,
-    status_reason=?9, status_at=?10, iteration=?11,
-    observation_cursor=?12, last_state_fingerprint=?13, agent=?14, provider=?15,
-    provider_session_id=?16, process_generation=?17, process_pid=?18,
-    process_tmux_name=?19, process_started_at=?20, created_at=?21,
-    updated_at=?22,
-    lf_bin=?23, db_path=?24, lf_home=?25,
-    abandon_requested_at=?26, abandon_reason=?27,
-    process_group_id=?28, process_agent=?29, process_provider=?30,
-    process_provider_session_id=?31, process_lease_state=?32,
-    process_outcome_json=?33, process_provenance_json=?34
-    WHERE id=?1 AND process_generation=?35 AND process_lease_token=?36
-      AND process_lease_state=?37
-      AND (status NOT IN ('completed', 'abandoned') OR status=?8)";
 const PROJECT_SESSION_RUN_UPDATE: &str = "UPDATE project_sessions SET
     project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
     wave_id=?6, pm_snapshot_synced_at=?7, status=?8,
@@ -3802,23 +3253,6 @@ fn project_session_control_params(session: &ProjectSession) -> Vec<Box<dyn ToSql
     let mut parameters = project_session_params(session);
     parameters.truncate(27);
     parameters
-}
-
-#[cfg(test)]
-fn update_project_session_for_lease_in(
-    conn: &Connection,
-    session: &ProjectSession,
-    lease: &ChildWriteLease,
-    expected_state: ChildLeaseState,
-) -> StoreResult<usize> {
-    let mut parameters = project_session_params(session);
-    parameters.push(Box::new(i64::from(lease.generation)));
-    parameters.push(Box::new(lease.token.as_str().to_string()));
-    parameters.push(Box::new(expected_state.as_str().to_string()));
-    Ok(conn.execute(
-        PROJECT_SESSION_LEASE_UPDATE,
-        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-    )?)
 }
 
 fn update_project_session_for_run_in(

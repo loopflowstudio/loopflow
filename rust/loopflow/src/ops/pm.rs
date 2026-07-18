@@ -3378,17 +3378,20 @@ mod tests {
     async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
         let (_directory, store) = reteam_test_store().await;
         let session_id = seed_reteam_task_session(&store, "issue-live", "W2-42").await;
-        let mut session = store
+        let session = store
             .get_task_session(&session_id)
             .await
             .expect("read session")
             .expect("session exists");
-        session.begin_generation("lf-task-test".to_string());
-        store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+        let work = store
+            .work_for_child(&crate::child_session::ChildRef::Task(session.id.clone()))
             .await
-            .expect("reserve active Run")
-            .expect("Run reserved");
+            .expect("resolve Task Work");
+        let home = store.home("test-home").await.expect("resolve Home");
+        store
+            .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+            .await
+            .expect("reserve active Run");
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([reteam_project_node(
                 "project-1",

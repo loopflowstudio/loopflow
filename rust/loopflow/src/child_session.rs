@@ -70,68 +70,6 @@ pub enum ChildSessionDataError {
     InvalidLeaseState(String),
 }
 
-/// Opaque capability held only by the body allowed to write for a Session.
-///
-/// The token deliberately implements neither serialization nor display. Its
-/// debug representation is redacted so an error path cannot turn the lease
-/// into ambient authority.
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct ChildLeaseToken(String);
-
-impl ChildLeaseToken {
-    #[cfg(test)]
-    pub(crate) fn new() -> Self {
-        Self(format!("cl_{}", uuid::Uuid::new_v4().simple()))
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Debug for ChildLeaseToken {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("ChildLeaseToken([REDACTED])")
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct ChildWriteLease {
-    pub(crate) generation: u32,
-    pub(crate) token: ChildLeaseToken,
-}
-
-/// Temporary bridge while Session process containment still exists.
-///
-/// The body receives the two independent capabilities through separate env
-/// values: the compatibility lease may update the old Session row, while the
-/// Run lease is the only authority accepted by product control mutations.
-#[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ChildProcessReservation {
-    pub(crate) write_lease: ChildWriteLease,
-    pub(crate) run_token: crate::durable::RunLeaseToken,
-}
-
-#[cfg(test)]
-impl std::ops::Deref for ChildProcessReservation {
-    type Target = ChildWriteLease;
-
-    fn deref(&self) -> &Self::Target {
-        &self.write_lease
-    }
-}
-
-impl std::fmt::Debug for ChildWriteLease {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ChildWriteLease")
-            .field("generation", &self.generation)
-            .field("token", &self.token)
-            .finish()
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -771,9 +709,9 @@ mod tests {
     use super::{
         body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
         plan_stranded_recovery, BodyCategory, BodyControl, BodyEvidence, BodyIntent, BodyOwner,
-        BodyRecoveryPlan, ChildBodyOutcome, ChildLeaseState, ChildLeaseToken,
-        ChildProcessGeneration, ChildWriteLease, Duration, StrandedPlan, TaskEvent, TaskEventKind,
-        TaskSessionId, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
+        BodyRecoveryPlan, ChildBodyOutcome, ChildLeaseState, ChildProcessGeneration, Duration,
+        StrandedPlan, TaskEvent, TaskEventKind, TaskSessionId, DEFAULT_STALL_AFTER,
+        MAX_RECOVERY_ATTEMPTS,
     };
 
     fn evidence(intent: BodyIntent, alive: bool, progress: Duration) -> BodyEvidence {
@@ -919,34 +857,6 @@ mod tests {
             obs.controls,
             vec![BodyControl::Resume, BodyControl::Abandon]
         );
-    }
-
-    #[test]
-    fn child_write_lease_never_prints_or_serializes_its_token() {
-        let token = ChildLeaseToken::new();
-        let raw = token.as_str().to_string();
-        let lease = ChildWriteLease {
-            generation: 7,
-            token,
-        };
-
-        let debug = format!("{lease:?}");
-        assert!(debug.contains("[REDACTED]"));
-        assert!(!debug.contains(&raw));
-        let evidence = ChildProcessGeneration {
-            generation: lease.generation,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "body".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            started_at: time::OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Reserved,
-            outcome: None,
-            provenance: None,
-        };
-        assert!(!serde_json::to_string(&evidence).unwrap().contains(&raw));
     }
 
     fn body(state: ChildLeaseState, outcome: Option<ChildBodyOutcome>) -> ChildProcessGeneration {

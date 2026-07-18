@@ -3766,7 +3766,7 @@ mod tests {
             .await
             .unwrap()
             .expect("other Session reserves its own write lease");
-        assert_ne!(first_lease.token, second_lease.token);
+        assert_ne!(first_lease.run_token, second_lease.run_token);
 
         let loaded = store.get_task_session(&session.id).await.unwrap().unwrap();
         assert_eq!(loaded.status, TaskSessionStatus::Starting);

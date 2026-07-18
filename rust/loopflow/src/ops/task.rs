@@ -6348,17 +6348,6 @@ mod tests {
         // Unprovable and decides the probe before the group is ever asked.
         let _tmux = crate::engine::process::FakeTmux::no_session();
 
-        // Before the release the CAS cannot pass: `revoked` satisfies neither
-        // `IS NULL` nor `= 'finished'`. This is the permanent refusal.
-        let mut blocked = session.clone();
-        let generation = blocked.begin_generation("lf-task-eng4-blocked".to_string());
-        assert_eq!(generation, 2);
-        assert!(store
-            .reserve_task_process(&blocked, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve against a revoked lease")
-            .is_none());
-
         let finished =
             crate::ops::child::release_dead_revoked_child_body(&store, &target, &revoked)
                 .await
@@ -6387,15 +6376,6 @@ mod tests {
         ));
         // Status is untouched: releasing a lease is not a decision about work.
         assert_eq!(persisted.status, TaskSessionStatus::Waiting);
-
-        // ...and only now can a successor reserve.
-        let mut launch = persisted.clone();
-        launch.begin_generation("lf-task-eng4-successor".to_string());
-        assert!(store
-            .reserve_task_process(&launch, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve after the release")
-            .is_some());
     }
 
     /// The CAS pins the generation as well as the state, so a release can only
@@ -6627,63 +6607,6 @@ mod tests {
             Some(crate::child_session::ChildLeaseState::Finished)
         );
         assert_eq!(persisted.status, TaskSessionStatus::Failed);
-    }
-
-    #[tokio::test]
-    async fn progress_wins_the_race_against_stall_recovery() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, _pr) =
-            rotation_task(&repo, "jack/progress-race", &base).await;
-        session.begin_generation(format!("progress-race-{}", session.id));
-        let lease = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .expect("reserve body");
-        session
-            .latest_process
-            .as_mut()
-            .expect("reserved process")
-            .state = ChildLeaseState::Active;
-        session.set_status(TaskSessionStatus::Running, "provider is alive");
-        store.activate_task_process(&session, &lease).await.unwrap();
-        session = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let observed_event_id = store
-            .latest_task_event(&session.id)
-            .await
-            .unwrap()
-            .map(|event| event.id);
-
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::Progress {
-                    summary: "body advanced before revocation".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-        let revoked = store
-            .revoke_task_process_if_unchanged(
-                &session.id,
-                1,
-                session.status_at,
-                observed_event_id,
-                &ChildBodyOutcome::Superseded {
-                    reason: "stale observation".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-
-        assert!(revoked.is_none());
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(ChildLeaseState::Active),
-        );
-        assert_eq!(persisted.status, TaskSessionStatus::Running);
     }
 
     #[test]
@@ -9023,34 +8946,17 @@ mod tests {
     async fn project_supervision_claims_live_run_without_reserving_a_sibling() {
         let _env_lock = crate::journal::test_env_lock();
         let repo = TestRepo::new();
-        let (home, store, project, mut session, _pr) =
+        let (home, store, project, session, _pr) =
             parked_gate_task(&repo, "jack/gate-live-idle", Some(CiState::Failing), 0).await;
-        session.begin_generation("lf-live-idle-control".to_string());
-        let lease = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve live control body")
-            .expect("waiting Task reserves one generation");
-        if let Some(process) = session.latest_process.as_mut() {
-            process.state = crate::child_session::ChildLeaseState::Active;
-        }
-        session.set_status(
-            TaskSessionStatus::Running,
-            "Project review owns the Gate step; provider turn is idle",
-        );
-        store
-            .activate_task_process(&session, &lease)
-            .await
-            .expect("activate live control body");
         let work = store
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
             .expect("Task Work");
-        let run = store
-            .current_run(&work)
+        let durable_home = store.home("test-home").await.expect("resolve Home");
+        let (run, _lease) = store
+            .reserve_run(&work, &durable_home.id, crate::durable::RunTrigger::User)
             .await
-            .expect("read active Run")
-            .expect("active process has a Run");
+            .expect("reserve active Run");
         let _launch_env = TaskLaunchEnv::install(home.path());
 
         supervise_project_task_bodies(&store, &project)
@@ -9081,27 +8987,6 @@ mod tests {
             .expect("read current Run")
             .expect("Run remains current");
         assert_eq!(current.id, run.id, "CI must not reserve a sibling Run");
-
-        let persisted = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(
-            persisted.status,
-            TaskSessionStatus::Running,
-            "{}",
-            persisted.status_reason
-        );
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("control generation remains active")
-                .generation,
-            lease.generation,
-            "supervision must not interrupt or replace the live control body"
-        );
     }
 
     #[tokio::test]

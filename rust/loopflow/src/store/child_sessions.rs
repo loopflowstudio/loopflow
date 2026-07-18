@@ -3,8 +3,6 @@
 use crate::child_session::{
     ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ObservationRecipient,
 };
-#[cfg(test)]
-use crate::child_session::{ChildProcessReservation, ChildWriteLease};
 use crate::durable::{Author, RunLease};
 use crate::id::WaveId;
 use crate::project_session::{
@@ -21,15 +19,19 @@ use time::OffsetDateTime;
 use super::{run_sqlite, Store, StoreResult};
 
 #[cfg(test)]
-async fn _acquire_promotion_reservation_lock() -> StoreResult<crate::promotion_lock::PromotionLock>
-{
-    crate::promotion_lock::acquire_shared()
-        .await
-        .map_err(|error| {
-            super::StoreError::InvalidData(format!(
-                "acquire shared promotion lock before body reservation: {error}"
-            ))
-        })
+#[derive(Debug, Clone)]
+pub(crate) struct TestRunReservation {
+    pub(crate) run_token: crate::durable::RunLeaseToken,
+    lease: RunLease,
+}
+
+#[cfg(test)]
+impl std::ops::Deref for TestRunReservation {
+    type Target = RunLease;
+
+    fn deref(&self) -> &Self::Target {
+        &self.lease
+    }
 }
 
 impl Store {
@@ -119,20 +121,6 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn activate_task_process(
-        &self,
-        session: &TaskSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        let session = session.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.activate_task_process(&session, &lease)
-        })
-        .await
-    }
-
     pub(crate) async fn activate_task_process_for_run(
         &self,
         session: &TaskSession,
@@ -147,17 +135,23 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) async fn update_task_session_for_lease(
+    pub(crate) async fn activate_task_process(
         &self,
         session: &TaskSession,
-        lease: &ChildWriteLease,
+        lease: &RunLease,
     ) -> StoreResult<()> {
-        let session = session.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_session_for_lease(&session, &lease)
-        })
-        .await
+        let launch = self
+            .current_launch(lease)
+            .await?
+            .ok_or_else(|| super::StoreError::InvalidData("test Run has no Launch".to_string()))?;
+        self.advance_run(
+            lease,
+            crate::durable::RunAdvance::LaunchLive {
+                launch_id: launch.id,
+            },
+        )
+        .await?;
+        self.activate_task_process_for_run(session, lease).await
     }
 
     pub(crate) async fn update_task_session_for_run(
@@ -174,17 +168,12 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) async fn finish_task_process(
+    pub(crate) async fn update_task_session_for_lease(
         &self,
         session: &TaskSession,
-        lease: &ChildWriteLease,
+        lease: &RunLease,
     ) -> StoreResult<()> {
-        let session = session.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_task_process(&session, &lease)
-        })
-        .await
+        self.update_task_session_for_run(session, lease).await
     }
 
     pub(crate) async fn finish_task_process_for_run(
@@ -198,6 +187,15 @@ impl Store {
             store.finish_task_process_for_run(&session, &lease)
         })
         .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn finish_task_process(
+        &self,
+        session: &TaskSession,
+        lease: &RunLease,
+    ) -> StoreResult<()> {
+        self.finish_task_process_for_run(session, lease).await
     }
 
     pub(crate) async fn revoke_task_process(
@@ -260,22 +258,6 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn complete_task_session_for_lease(
-        &self,
-        session: &TaskSession,
-        skipped_pr: Option<&TaskPr>,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        let session = session.clone();
-        let skipped_pr = skipped_pr.cloned();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_task_session_for_lease(&session, skipped_pr.as_ref(), &lease)
-        })
-        .await
-    }
-
     pub(crate) async fn complete_task_session_for_run(
         &self,
         session: &TaskSession,
@@ -292,17 +274,62 @@ impl Store {
     }
 
     #[cfg(test)]
+    pub(crate) async fn complete_task_session_for_lease(
+        &self,
+        session: &TaskSession,
+        skipped_pr: Option<&TaskPr>,
+        lease: &RunLease,
+    ) -> StoreResult<()> {
+        self.complete_task_session_for_run(session, skipped_pr, lease)
+            .await
+    }
+
+    #[cfg(test)]
     pub(crate) async fn reserve_task_process(
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
-    ) -> StoreResult<Option<ChildProcessReservation>> {
-        let _promotion_lock = _acquire_promotion_reservation_lock().await?;
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_process(&session, expected_status, None)
-        })
-        .await
+    ) -> StoreResult<Option<TestRunReservation>> {
+        let current = self.get_task_session(&session.id).await?;
+        if current.as_ref().map(|row| row.status) != Some(expected_status) {
+            return Ok(None);
+        }
+        self.update_task_session(session).await?;
+        let work = self
+            .work_for_child(&crate::child_session::ChildRef::Task(session.id.clone()))
+            .await?;
+        let home = self.home("legacy-test").await?;
+        let (_run, lease) = match self
+            .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+            .await
+        {
+            Ok(reserved) => reserved,
+            Err(_) => return Ok(None),
+        };
+        let process = session.latest_process.as_ref().ok_or_else(|| {
+            super::StoreError::InvalidData("test Task reservation has no process".to_string())
+        })?;
+        self.advance_run(
+            &lease,
+            crate::durable::RunAdvance::LaunchStarting {
+                route: crate::durable::LaunchRoute {
+                    provider: process.provider.clone(),
+                    model: None,
+                    account_id: None,
+                },
+                containment: crate::durable::Containment::Tmux {
+                    name: process.tmux_name.clone(),
+                },
+                cwd: session.worktree.clone(),
+                surface: "headless".to_string(),
+                opaque: false,
+                resume_token: process.provider_session_id.clone(),
+            },
+        )
+        .await?;
+        let run_token = crate::durable::RunLeaseToken::parse(lease.env_value())
+            .expect("a resolved Run lease has a valid token");
+        Ok(Some(TestRunReservation { run_token, lease }))
     }
 
     pub async fn handoff_task_body(
@@ -372,20 +399,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn update_task_pr_for_lease(
-        &self,
-        pr: &TaskPr,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        let pr = pr.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_pr_for_lease(&pr, &lease)
-        })
-        .await
-    }
-
     pub(crate) async fn update_task_pr_for_run(
         &self,
         pr: &TaskPr,
@@ -397,6 +410,15 @@ impl Store {
             store.update_task_pr_for_run(&pr, &lease)
         })
         .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn update_task_pr_for_lease(
+        &self,
+        pr: &TaskPr,
+        lease: &RunLease,
+    ) -> StoreResult<()> {
+        self.update_task_pr_for_run(pr, lease).await
     }
 
     pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
@@ -661,63 +683,6 @@ impl Store {
         Ok(event)
     }
 
-    #[cfg(test)]
-    pub(crate) async fn append_task_event_for_lease(
-        &self,
-        session_id: &TaskSessionId,
-        lease: &ChildWriteLease,
-        kind: &TaskEventKind,
-    ) -> StoreResult<TaskEvent> {
-        let session_id = session_id.clone();
-        let lease = lease.clone();
-        let kind = kind.clone();
-        let write_session_id = session_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_task_event_for_lease(&write_session_id, &lease, &write_kind)
-        })
-        .await?;
-        if kind.is_project_observable() {
-            if let Some(session) = self.get_task_session(&session_id).await? {
-                if let Err(error) =
-                    crate::ops::project::wake_task_project_route(self, &session).await
-                {
-                    tracing::debug!(
-                        %error,
-                        %session_id,
-                        project_session_id = %session.project_session_id,
-                        event_id = event.id,
-                        "Task observation wake failed; Project lifecycle touch will retry"
-                    );
-                }
-                if kind.is_root_wave_observable() {
-                    match self.get_wave(&session.wave_id).await? {
-                        Some(wave) => {
-                            if let Err(error) =
-                                crate::lf::commands::chat::nudge_child_observations(wave.name())
-                                    .await
-                            {
-                                tracing::debug!(
-                                    %error,
-                                    %session_id,
-                                    event_id = event.id,
-                                    "live Task observation delivery failed; Wave observer will retry"
-                                );
-                            }
-                        }
-                        None => tracing::error!(
-                            wave_id = %session.wave_id,
-                            %session_id,
-                            event_id = event.id,
-                            "Task observation cannot nudge its missing owning Wave"
-                        ),
-                    }
-                }
-            }
-        }
-        Ok(event)
-    }
-
     pub(crate) async fn append_task_event_for_run(
         &self,
         session_id: &TaskSessionId,
@@ -774,6 +739,17 @@ impl Store {
         Ok(event)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn append_task_event_for_lease(
+        &self,
+        session_id: &TaskSessionId,
+        lease: &RunLease,
+        kind: &TaskEventKind,
+    ) -> StoreResult<TaskEvent> {
+        self.append_task_event_for_run(session_id, lease, kind)
+            .await
+    }
+
     pub async fn task_events_after(
         &self,
         session_id: &TaskSessionId,
@@ -828,20 +804,6 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn activate_project_process(
-        &self,
-        session: &ProjectSession,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<()> {
-        let session = session.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.activate_project_process(&session, &lease)
-        })
-        .await
-    }
-
     pub(crate) async fn activate_project_process_for_run(
         &self,
         session: &ProjectSession,
@@ -856,17 +818,23 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) async fn update_project_session_for_lease(
+    pub(crate) async fn activate_project_process(
         &self,
         session: &ProjectSession,
-        lease: &ChildWriteLease,
+        lease: &RunLease,
     ) -> StoreResult<()> {
-        let session = session.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_project_session_for_lease(&session, &lease)
-        })
-        .await
+        let launch = self
+            .current_launch(lease)
+            .await?
+            .ok_or_else(|| super::StoreError::InvalidData("test Run has no Launch".to_string()))?;
+        self.advance_run(
+            lease,
+            crate::durable::RunAdvance::LaunchLive {
+                launch_id: launch.id,
+            },
+        )
+        .await?;
+        self.activate_project_process_for_run(session, lease).await
     }
 
     pub(crate) async fn update_project_session_for_run(
@@ -882,6 +850,15 @@ impl Store {
         .await
     }
 
+    #[cfg(test)]
+    pub(crate) async fn update_project_session_for_lease(
+        &self,
+        session: &ProjectSession,
+        lease: &RunLease,
+    ) -> StoreResult<()> {
+        self.update_project_session_for_run(session, lease).await
+    }
+
     pub(crate) async fn finish_project_process_for_run(
         &self,
         session: &ProjectSession,
@@ -893,6 +870,54 @@ impl Store {
             store.finish_project_process_for_run(&session, &lease)
         })
         .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn reserve_project_process(
+        &self,
+        session: &ProjectSession,
+        expected_status: ProjectSessionStatus,
+    ) -> StoreResult<Option<TestRunReservation>> {
+        let current = self.get_project_session(&session.id).await?;
+        if current.as_ref().map(|row| row.status) != Some(expected_status) {
+            return Ok(None);
+        }
+        self.update_project_session(session).await?;
+        let work = self
+            .work_for_child(&crate::child_session::ChildRef::Project(session.id.clone()))
+            .await?;
+        let home = self.home("legacy-test").await?;
+        let (_run, lease) = match self
+            .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+            .await
+        {
+            Ok(reserved) => reserved,
+            Err(_) => return Ok(None),
+        };
+        let process = session.latest_process.as_ref().ok_or_else(|| {
+            super::StoreError::InvalidData("test Project reservation has no process".to_string())
+        })?;
+        self.advance_run(
+            &lease,
+            crate::durable::RunAdvance::LaunchStarting {
+                route: crate::durable::LaunchRoute {
+                    provider: process.provider.clone(),
+                    model: None,
+                    account_id: None,
+                },
+                containment: crate::durable::Containment::Tmux {
+                    name: process.tmux_name.clone(),
+                },
+                cwd: std::path::PathBuf::from("/tmp/project-test"),
+                surface: "headless".to_string(),
+                opaque: false,
+                resume_token: process.provider_session_id.clone(),
+            },
+        )
+        .await?;
+        let run_token = crate::durable::RunLeaseToken::parse(lease.env_value())
+            .expect("a resolved Run lease has a valid token");
+        Ok(Some(TestRunReservation { run_token, lease }))
     }
 
     pub(crate) async fn revoke_project_process(
@@ -916,20 +941,6 @@ impl Store {
         let session_id = session_id.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.finish_revoked_project_process(&session_id, generation)
-        })
-        .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn reserve_project_process(
-        &self,
-        session: &ProjectSession,
-        expected_status: ProjectSessionStatus,
-    ) -> StoreResult<Option<ChildProcessReservation>> {
-        let _promotion_lock = _acquire_promotion_reservation_lock().await?;
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_project_process(&session, expected_status, None)
         })
         .await
     }
@@ -1127,26 +1138,6 @@ impl Store {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn consume_task_observation_for_project_for_lease(
-        &self,
-        project_session_id: &ProjectSessionId,
-        observation: &ObservationOutboxRow,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<bool> {
-        let project_session_id = project_session_id.clone();
-        let observation = observation.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.consume_task_observation_for_project_for_lease(
-                &project_session_id,
-                &observation,
-                &lease,
-            )
-        })
-        .await
-    }
-
     pub(crate) async fn consume_task_observation_for_project_for_run(
         &self,
         project_session_id: &ProjectSessionId,
@@ -1164,5 +1155,16 @@ impl Store {
             )
         })
         .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn consume_task_observation_for_project_for_lease(
+        &self,
+        project_session_id: &ProjectSessionId,
+        observation: &ObservationOutboxRow,
+        lease: &RunLease,
+    ) -> StoreResult<bool> {
+        self.consume_task_observation_for_project_for_run(project_session_id, observation, lease)
+            .await
     }
 }

@@ -64,9 +64,18 @@ git rebase --continue
 
 Repeat until `git rebase --continue` completes without conflicts.
 
-### 4. Verify and push
+### 4. Verify the resolution and push
+
+If the rebase was conflict-free, do not run tests. The branch-authored patch
+did not change; the next gate or CI run owns integration proof against the new
+base.
+
+If you resolved conflicts, run the smallest behavioral test that exercises the
+reconciled behavior, once, after the rebase completes. Do not expand into the
+whole project suite or unrelated lint/build checks here. Gate and CI own that
+broader proof.
+
 ```bash
-# Run the project's test suite (see TESTING.md)
 git push --force-with-lease
 ```
 

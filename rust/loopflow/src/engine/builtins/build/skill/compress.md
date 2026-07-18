@@ -37,7 +37,10 @@ The bar: could someone reading this code for the first time understand it faster
    Apply changes directly. Prefer reshaping over deleting—a better structure beats surgical removal.
 
 5. **Verify**
-   Run tests. If something breaks, the reduction went too far.
+   If the reduction changed executable behavior, run the smallest existing
+   behavioral test that covers it. If only structure changed, do not rerun the
+   branch suite; gate owns that proof. If the focused test breaks, the
+   reduction went too far.
 
 ## What to reduce
 

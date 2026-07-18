@@ -1,35 +1,36 @@
 # Testing
 
-CI runs six test suites. All must pass before merging.
+CI runs the full proof matrix in parallel. Local work should run the smallest
+proof that can change the next decision.
 
 ## Quick Reference
 
 ```bash
-# Run all checks (what CI runs)
-cargo fmt --check                      # Rust formatting
-cargo clippy --all-targets -- -D warnings # Rust lints (warnings = errors)
-cargo test --all                       # Rust tests
-uv run pytest python/tests/            # Python tests
-cd website && uv run python dev.py test # Website tests
-swift test --package-path swift        # Swift package tests
-cd swift && xcodegen generate && xcodebuild build-for-testing -project LoopflowSwift.xcodeproj -scheme LoopflowMac -destination 'platform=macOS' -derivedDataPath .build/xcode-derived-data -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=  # Loopflow UI compile
-tests/e2e/test_smoke.sh               # E2E smoke
+uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
+uv run pytest python/tests/test_test_time.py           # trace timing toolkit
+uv run python scripts/test.py --list                   # affected-suite plan
+uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
+uv run python scripts/test_time.py --days 7            # where agent verification time went
 ```
 
-Run at minimum the checks that apply to files you changed. A PR that passes locally but fails CI is a broken gate.
+Escalate from a focused behavior to affected suites when crossing a component
+boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
+to reproduce a matrix failure or when release guidance requires it.
 
 ## Changed-Aware Runner
 
 ```bash
 uv run python scripts/test.py          # run only the suites your branch touched
+uv run python scripts/test.py --reuse-passing # reuse only an identical tree + plan pass
 uv run python scripts/test.py --list   # print the plan, run nothing
-uv run python scripts/test.py --all    # run every suite (the full matrix)
-uv run python scripts/test.py --history 30 # read the durable budget window
+uv run python scripts/test.py --all    # reproduce the serial full matrix
 ```
 
 `scripts/test.py` diffs your branch against `origin/main`, maps changed paths
-to the CI jobs above, and runs just those—fast suites first. Use it as the
-tight loop while iterating; run `--all` once before you ship.
+to the CI jobs below, and runs just those—fast suites first. `--reuse-passing`
+uses a prior pass only when tracked and untracked file content, the worktree,
+and the selected command plan are identical. Full and required-host runs never
+reuse evidence.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
 their paths change—the run prints why and how to force them:
@@ -41,9 +42,9 @@ uv run python scripts/test.py --base HEAD~5  # diff against a different ref
 
 ### Bounded and honest
 
-Every phase runs under a printed wall-clock budget (see
-`release/GATE_BUDGET.md`). A phase that overruns is killed—process group and
-all—and reported as `TIMEOUT <phase> (budget Ns)`, so **no phase can hang the
+Every phase runs under a printed wall-clock limit. A phase that overruns is
+killed—process group and all—and reported as `TIMEOUT <phase> (budget Ns)`, so
+**no phase can hang the
 gate**. The plan and summary print each phase's `elapsed / budget`; later
 phases remain visible as `not_run` after an earlier failure. On failure the
 phase log (and any `.xcresult`) is preserved under
@@ -56,12 +57,21 @@ Git common directory:
 <git-common-dir>/loopflow/pre-land/runs/<kind>/<run-id>.json
 ```
 
-This evidence is shared by linked worktrees and survives Task-worktree and
-`.lf/tmp` cleanup. A full `--all` run fails with `MEASUREMENT FAILED` if its
-record cannot be written; changed-aware and `--ui-host` runs print one
-`MEASUREMENT WARNING` and preserve their underlying test result. Read the
-full-run budget evidence with `--history 30`; `IN PROGRESS`, `NOT HOLDING`, and
-`HOLDING` make the Developer Efficiency observation window explicit.
+This evidence is shared by linked worktrees and survives `.lf/tmp` cleanup.
+Records contain operational identity, exact-tree and plan fingerprints,
+phase status, and elapsed time—not commands or output. Persistence failure is
+a warning and never replaces the underlying test result.
+
+Use the trace ledger for time analysis:
+
+```bash
+uv run python scripts/test_time.py --days 7
+uv run python scripts/test_time.py --days 7 --repo /path/to/main/repo
+uv run python scripts/test_time.py --days 7 --worktree /path/to/exact/worktree
+```
+
+The report merges parallel intervals per launch and prints only aggregate
+categories and skills. It never prints commands, prompts, or output.
 
 The summary states **what each suite proves**. The `loopflow` suite compiles
 the app and UI-test runners; it does **not** run hosted UI behavior. That real
@@ -143,18 +153,22 @@ See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. Six parallel jobs:
+See `.github/workflows/ci.yml`. Nine proof jobs run in parallel and feed the
+aggregate `tests-result` check:
 
 | Job | Runner | Command |
 |-----|--------|---------|
-| `rust-test` | ubuntu-latest | `cargo fmt`, `cargo clippy`, `cargo test --all` |
+| `scratch-clear` | ubuntu-latest | reject landing-only scratch artifacts |
+| `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy` |
+| `rust-test` | ubuntu-latest | `cargo nextest run --all` |
+| `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | `tests/e2e/test_smoke.sh` |
-| `swift-test` | macos-15 | `swift test --package-path swift` |
-| `loopflow-ui-test` | macos-15 | xcodegen + xcodebuild |
+| `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
+| `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-All six must pass for PRs to merge.
+All nine must pass for `tests-result` to pass.
 
 ## Dependabot workflow
 
@@ -218,6 +232,8 @@ tests/e2e/test_rebase_conflict.sh
 
 ```bash
 package-smoke/lf --version
+package-smoke/lf --help
+package-smoke/lf --list
 ```
 
 Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.

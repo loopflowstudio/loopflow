@@ -53,11 +53,14 @@ Make the implementation as clean as possible.
    Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
 
 4. **Tests and lints**
-   Run the project's test suite and all required lint checks.
+   Run the affected suites and required lint checks once for the current tree.
    - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
    - Use the repo's standard command entrypoints and CI definitions.
-   - In the iterative loop, run the narrowest thing that covers what the branch touched — if the repo documents a changed-aware runner, use it; note anything slow you skip and why. That's the loop to tighten against.
-   - Before final ship, run the full matrix once (the repo's full-suite entrypoint, or the CI checks directly). Run everything CI enforces for the files you touched—nothing that would go red on the merge gate should be skipped on the last pass.
+   - Prefer a changed-aware runner. If it can reuse a passing result only for
+     identical tracked/untracked content and the same plan, enable that reuse.
+   - Do not run the full local matrix merely to mirror parallel CI. Run it only
+     when release guidance requires it or when reproducing a full-matrix failure.
+   - Record what was selected, reused, or deliberately left to CI.
    Fix failures—determine whether it's broken test or broken code. Add tests for key behavior changes. Keep them focused. Delete flaky tests rather than patching them.
 
 5. **Cleanup**
@@ -154,7 +157,9 @@ If nothing needs fixing and tests pass, say so—but still write the design revi
 git diff main...HEAD     # see what changed
 ```
 
-Find lint/test commands from repo guidance (`TESTING.md`, `README.md`, docs) and mirror CI checks. A gate that passes locally but fails CI is a broken gate.
+Find lint/test commands from repo guidance (`TESTING.md`, `README.md`, docs)
+and map the touched files to the checks that can fail because of them. CI owns
+the full parallel matrix.
 
 ## Adaptation
 

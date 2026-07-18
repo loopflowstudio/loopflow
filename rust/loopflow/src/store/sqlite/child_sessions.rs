@@ -14,7 +14,8 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
-    ChildLeaseToken, ChildProcessGeneration, ChildRef, ChildWriteLease, ObservationRecipient,
+    ChildLeaseToken, ChildProcessGeneration, ChildProcessReservation, ChildRef, ChildWriteLease,
+    ObservationRecipient,
 };
 use crate::durable::Author;
 use crate::engine::InteractionPolicy;
@@ -294,7 +295,7 @@ impl SqliteStore {
         }
         tx.execute(
             "UPDATE task_sessions SET issue_identifier=?2, updated_at=?3
-             WHERE epoch_id IN (SELECT id FROM epochs WHERE task_id=?1)",
+             WHERE epoch_id IN (SELECT id FROM epochs WHERE task_id=?1 AND state='open')",
             params![task_id, new_identifier, now_unix()],
         )?;
         tx.commit()?;
@@ -670,7 +671,7 @@ impl SqliteStore {
         session: &TaskSession,
         expected_status: TaskSessionStatus,
         trigger: Option<&crate::durable::RunTrigger>,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         validate_task_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
             StoreError::InvalidData("Task process reservation requires a generation".to_string())
@@ -721,11 +722,10 @@ impl SqliteStore {
         if changed == 0 {
             return Ok(None);
         }
-        reserve_run_for_child(
+        let run_token = reserve_run_for_child(
             &transaction,
             &ChildRef::Task(session.id.clone()),
             process.generation,
-            token.as_str(),
             trigger,
         )?;
         insert_task_event_in(
@@ -745,9 +745,12 @@ impl SqliteStore {
             },
         )?;
         transaction.commit()?;
-        Ok(Some(ChildWriteLease {
-            generation: process.generation,
-            token,
+        Ok(Some(ChildProcessReservation {
+            write_lease: ChildWriteLease {
+                generation: process.generation,
+                token,
+            },
+            run_token,
         }))
     }
 
@@ -1721,7 +1724,7 @@ impl SqliteStore {
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
         trigger: Option<&crate::durable::RunTrigger>,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         validate_project_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
             StoreError::InvalidData("Project process reservation requires a generation".to_string())
@@ -1771,11 +1774,10 @@ impl SqliteStore {
         if changed == 0 {
             return Ok(None);
         }
-        reserve_run_for_child(
+        let run_token = reserve_run_for_child(
             &transaction,
             &ChildRef::Project(session.id.clone()),
             process.generation,
-            token.as_str(),
             trigger,
         )?;
         insert_project_event_in(
@@ -1795,9 +1797,12 @@ impl SqliteStore {
             },
         )?;
         transaction.commit()?;
-        Ok(Some(ChildWriteLease {
-            generation: process.generation,
-            token,
+        Ok(Some(ChildProcessReservation {
+            write_lease: ChildWriteLease {
+                generation: process.generation,
+                token,
+            },
+            run_token,
         }))
     }
 

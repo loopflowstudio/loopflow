@@ -1377,6 +1377,7 @@ mod tests {
             context_persist_ms: 0,
             first_event_seq: None,
             last_event_seq: None,
+            root_output: None,
             basis: Some(basis),
         }
     }
@@ -1466,7 +1467,7 @@ mod tests {
             .await
             .unwrap();
         let parent_lease = store
-            .run_lease_for_child(&ChildRef::Project(project.id.clone()), &child_lease)
+            .resolve_run_lease(child_lease.run_token.clone())
             .await
             .unwrap();
         let task_work = store
@@ -1487,7 +1488,7 @@ mod tests {
             .await
             .unwrap();
         let task_run_lease = store
-            .run_lease_for_child(&ChildRef::Task(task.id.clone()), &task_child_lease)
+            .resolve_run_lease(task_child_lease.run_token.clone())
             .await
             .unwrap();
         let launch = store
@@ -1549,6 +1550,36 @@ mod tests {
             .unwrap();
         assert!(store.review(&task_work).await.unwrap().is_some());
 
+        let turn = store
+            .advance_run(
+                &task_run_lease,
+                RunAdvance::TurnStarting {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Turn(turn) = turn else {
+            panic!("expected child Turn")
+        };
+        let mut turn_row = store
+            .sqlite
+            .agent_turn(turn.id.as_str())
+            .unwrap()
+            .expect("child Turn is stored");
+        turn_row.root_output = Some("The retry still reuses the failed head.".to_string());
+        store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
+        let attention = store.child_attention(&parent_lease.work).await.unwrap();
+        assert_eq!(attention.len(), 1);
+        assert_eq!(
+            attention[0].latest_output.as_deref(),
+            Some("The retry still reuses the failed head.")
+        );
+        let control_seed = attention[0].render();
+        assert!(control_seed.contains("The retry still reuses the failed head."));
+        assert!(control_seed.contains("lf work steer task"));
+        assert!(control_seed.contains("lf work close task"));
+
         let receipt = store
             .steer(
                 &ControlCtx::Run(&parent_lease),
@@ -1572,6 +1603,11 @@ mod tests {
             .await
             .unwrap();
         assert!(store.review(&task_work).await.unwrap().is_none());
+        assert!(store
+            .child_attention(&parent_lease.work)
+            .await
+            .unwrap()
+            .is_empty());
 
         store
             .stop_run(
@@ -1591,6 +1627,11 @@ mod tests {
             .await
             .expect_err("a stopped parent Run cannot steer");
         assert!(matches!(error, super::StoreError::InvalidAuthority(_)));
+        assert!(matches!(
+            store.resolve_run_lease(child_lease.run_token.clone()).await,
+            Err(super::StoreError::InvalidAuthority(_))
+        ));
+        assert!(crate::durable::RunLeaseToken::parse("run_not-a-capability").is_err());
     }
 
     #[tokio::test]
@@ -1775,7 +1816,7 @@ mod tests {
             .unwrap();
 
         let rows = store
-            .ci_incidents_since(task.created_at, None, Some("owner/repo"))
+            .ci_incidents_since(observed_at, None, Some("owner/repo"))
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);
@@ -2576,7 +2617,7 @@ mod tests {
             .await
             .unwrap_err()
             .to_string()
-            .contains("active body"));
+            .contains("active Run"));
     }
 
     #[tokio::test]

@@ -1,10 +1,10 @@
 use crate::child_session::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ContainmentObservation,
-    ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt, LaunchId,
-    LaunchSurface, Review, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId,
-    SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildReview,
+    ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId,
+    InterruptReceipt, LaunchId, LaunchSurface, Review, Run, RunAdvance, RunControl, RunLease,
+    RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -52,17 +52,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.current_run(&work)).await
     }
 
-    pub(crate) async fn run_lease_for_child(
+    pub(crate) async fn resolve_run_lease(
         &self,
-        target: &crate::child_session::ChildRef,
-        lease: &crate::child_session::ChildWriteLease,
+        token: crate::durable::RunLeaseToken,
     ) -> StoreResult<RunLease> {
-        let target = target.clone();
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.run_for_child_lease(&target, &lease)
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.resolve_run_lease(&token)).await
     }
 
     pub async fn advance_run(
@@ -158,7 +152,7 @@ impl Store {
         .await
     }
 
-    pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<Review>> {
+    pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildReview>> {
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| store.child_attention(&parent)).await
     }

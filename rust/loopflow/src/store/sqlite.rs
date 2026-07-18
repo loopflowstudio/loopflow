@@ -1251,8 +1251,11 @@ impl SqliteStore {
     }
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM epochs WHERE wave_id = ?1", params![wave_id])?;
+        tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1884,7 +1887,8 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq, epoch_id, basis_rev
+                    context_persist_ms, first_event_seq, last_event_seq, root_output,
+                    epoch_id, basis_rev
              FROM agent_turns WHERE launch_id IN ({placeholders})
              ORDER BY started_at, rowid, ordinal"
             );
@@ -1906,7 +1910,8 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq, epoch_id, basis_rev
+                    context_persist_ms, first_event_seq, last_event_seq, root_output,
+                    epoch_id, basis_rev
              FROM agent_turns WHERE id=?1",
         )?;
         let row = stmt.query_row(params![id], map_agent_turn).optional()?;
@@ -2074,10 +2079,10 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             provider_total_input_tokens, peak_input_tokens, context_window_tokens,
             provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
             cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
-            first_event_seq, last_event_seq, epoch_id, basis_rev
+            first_event_seq, last_event_seq, root_output, epoch_id, basis_rev
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
             ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29, ?30, ?31)",
+            ?28, ?29, ?30, ?31, ?32)",
         params![
             turn.id,
             turn.launch_id,
@@ -2108,6 +2113,7 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.context_persist_ms,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.root_output,
             turn.basis.as_ref().map(|basis| basis.epoch_id.as_str()),
             turn.basis.as_ref().map(|basis| basis.revision as i64),
         ],
@@ -2181,7 +2187,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             peak_input_tokens = ?7, context_window_tokens = ?8,
             provider_output_tokens = ?9, reasoning_tokens = ?10,
             cache_read_tokens = ?11, cache_write_tokens = ?12, cost_usd = ?13,
-            first_event_seq = ?14, last_event_seq = ?15
+            first_event_seq = ?14, last_event_seq = ?15, root_output = ?16
          WHERE id = ?1",
         params![
             turn.id,
@@ -2199,6 +2205,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             turn.cost_usd,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.root_output,
         ],
     )?;
     Ok(())
@@ -2235,14 +2242,15 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         context_persist_ms: row.get(26)?,
         first_event_seq: row.get(27)?,
         last_event_seq: row.get(28)?,
+        root_output: row.get(29)?,
         basis: match (
-            row.get::<_, Option<String>>(29)?,
-            row.get::<_, Option<i64>>(30)?,
+            row.get::<_, Option<String>>(30)?,
+            row.get::<_, Option<i64>>(31)?,
         ) {
             (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
                 epoch_id: crate::durable::EpochId::parse(&epoch_id).map_err(|error| {
                     rusqlite::Error::FromSqlConversionFailure(
-                        29,
+                        30,
                         rusqlite::types::Type::Text,
                         Box::new(error),
                     )
@@ -2252,7 +2260,7 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
             (None, None) => None,
             _ => {
                 return Err(rusqlite::Error::InvalidColumnType(
-                    29,
+                    30,
                     "epoch_id/basis_rev".to_string(),
                     rusqlite::types::Type::Null,
                 ))

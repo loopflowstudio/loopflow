@@ -7,6 +7,13 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 
+/// The one opaque capability inherited by every command inside an active Run.
+pub const RUN_LEASE_ENV: &str = "LF_RUN_LEASE";
+
+/// Marks a process as an in-Run agent entrypoint even if its capability was
+/// accidentally stripped. That case must fail closed rather than become User.
+pub const RUN_CONTEXT_ENV: &str = "LF_RUN_CONTEXT";
+
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -319,7 +326,9 @@ pub struct Launch {
     pub containment: Containment,
     pub opaque_basis: Option<Basis>,
     pub resume_token: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
 }
 
@@ -392,6 +401,7 @@ pub struct Turn {
     pub basis: Basis,
     pub state: BoundaryState,
     pub provider_turn_id: Option<String>,
+    pub root_output: Option<String>,
     pub started_at: OffsetDateTime,
     pub ended_at: Option<OffsetDateTime>,
 }
@@ -611,12 +621,22 @@ impl RunLease {
 pub(crate) struct RunLeaseToken(String);
 
 impl RunLeaseToken {
-    pub(crate) fn from_child(value: &str) -> Self {
-        Self(format!("rl_child_{value}"))
-    }
-
     pub(crate) fn new() -> Self {
         Self(format!("rl_{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
+        let value = value.trim();
+        let suffix = value
+            .strip_prefix("rl_")
+            .ok_or_else(|| DurableDataError::InvalidId("expected opaque Run lease".to_string()))?;
+        uuid::Uuid::parse_str(suffix)
+            .map_err(|error| DurableDataError::InvalidId(error.to_string()))?;
+        Ok(Self(value.to_string()))
+    }
+
+    pub(crate) fn env_value(&self) -> &str {
+        &self.0
     }
 
     pub(crate) fn hash(&self) -> String {
@@ -677,6 +697,33 @@ pub struct Review {
     pub position: FlowPosition,
     pub attention: AttentionRoute,
     pub opened_at: OffsetDateTime,
+}
+
+/// Oldest-first parent control input reconstructed from durable child facts.
+///
+/// This is a query result, not an inbox row. If delivery races a boundary the
+/// parent can render the same projection again from the child Review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChildReview {
+    pub review: Review,
+    pub latest_output: Option<String>,
+    pub evidence: serde_json::Value,
+}
+
+impl ChildReview {
+    pub fn render(&self) -> String {
+        let kind = self.review.work.kind();
+        let id = self.review.work.id();
+        let facts = serde_json::to_string_pretty(self).expect("Child Review facts must serialize");
+        format!(
+            "<lf:child-review work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
+             Service this child before background Project work. Use \
+             `lf work steer {kind} {id} \"<response>\"` to continue or \
+             `lf work close {kind} {id}` to finish. Delivery alone does not clear attention.\n\n\
+             Durable child output and current evidence:\n{facts}\n</lf:child-review>",
+            self.review.basis.epoch_id, self.review.basis.revision,
+        )
+    }
 }
 
 /// The generic surface for reopening an opaque or provider-backed Launch.

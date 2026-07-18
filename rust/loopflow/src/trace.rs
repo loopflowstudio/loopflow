@@ -751,6 +751,7 @@ pub struct AgentTurnRow {
     pub context_persist_ms: i64,
     pub first_event_seq: Option<i64>,
     pub last_event_seq: Option<i64>,
+    pub root_output: Option<String>,
     pub basis: Option<crate::durable::Basis>,
 }
 
@@ -1060,6 +1061,7 @@ impl TraceCapture {
             context_persist_ms: persist_ms,
             first_event_seq: Some(0),
             last_event_seq: Some(0),
+            root_output: None,
             basis: start.basis,
         };
         let assets = prepared
@@ -1174,6 +1176,7 @@ impl TraceCapture {
             context_persist_ms: persist_start.elapsed().as_millis() as i64,
             first_event_seq: Some(self.event_seq as i64),
             last_event_seq: None,
+            root_output: None,
             basis,
         };
         let assets = prepared
@@ -1262,10 +1265,13 @@ impl TraceCapture {
 
     fn record_stream_event(&mut self, event: &StreamEvent) -> StoreResult<()> {
         let payload = match event {
-            StreamEvent::Text(text) => RecordedConversationPayload::LegacyText {
-                stream: "assistant".to_string(),
-                text: text.clone(),
-            },
+            StreamEvent::Text(text) => {
+                self.record_root_output(text)?;
+                RecordedConversationPayload::LegacyText {
+                    stream: "assistant".to_string(),
+                    text: text.clone(),
+                }
+            }
             StreamEvent::ToolUse { name, summary } => RecordedConversationPayload::LegacyTool {
                 name: name.clone(),
                 summary: summary.clone(),
@@ -1316,9 +1322,20 @@ impl TraceCapture {
                 self.usage_observed = true;
                 self.usage = usage.clone();
             }
+            ConversationEvent::TextDelta { content, .. } => {
+                self.record_root_output(content)?;
+            }
             _ => {}
         }
         self.append_payload(RecordedConversationPayload::Conversation { event })
+    }
+
+    fn record_root_output(&mut self, text: &str) -> StoreResult<()> {
+        self.turn
+            .root_output
+            .get_or_insert_with(String::new)
+            .push_str(text);
+        crate::journal::open_ledger()?.finish_agent_turn_capture(&self.turn)
     }
 
     fn finish(&mut self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
@@ -1842,6 +1859,10 @@ mod tests {
             },
         )
         .unwrap();
+        capture.record_conversation(crate::chat::types::ConversationEvent::TextDelta {
+            turn_id: "provider-turn-1".to_string(),
+            content: "partial child answer".to_string(),
+        });
         capture.begin_turn("message", "follow up").unwrap();
         capture.finish("completed", false).unwrap();
 
@@ -1859,6 +1880,10 @@ mod tests {
             .unwrap();
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].status, "partial");
+        assert_eq!(
+            turns[0].root_output.as_deref(),
+            Some("partial child answer")
+        );
         assert_eq!(turns[1].context_coverage, "provider_total_only");
         assert_eq!(turns[1].provider_input_tokens, None);
         #[cfg(unix)]

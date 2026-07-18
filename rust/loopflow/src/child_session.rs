@@ -116,6 +116,25 @@ pub(crate) struct ChildWriteLease {
     pub(crate) token: ChildLeaseToken,
 }
 
+/// Temporary bridge while Session process containment still exists.
+///
+/// The body receives the two independent capabilities through separate env
+/// values: the compatibility lease may update the old Session row, while the
+/// Run lease is the only authority accepted by product control mutations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChildProcessReservation {
+    pub(crate) write_lease: ChildWriteLease,
+    pub(crate) run_token: crate::durable::RunLeaseToken,
+}
+
+impl std::ops::Deref for ChildProcessReservation {
+    type Target = ChildWriteLease;
+
+    fn deref(&self) -> &Self::Target {
+        &self.write_lease
+    }
+}
+
 impl std::fmt::Debug for ChildWriteLease {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter

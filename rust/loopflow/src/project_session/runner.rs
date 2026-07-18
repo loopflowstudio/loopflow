@@ -21,7 +21,7 @@ use crate::durable::{Basis, BoundarySeed};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
-    ApprovalPolicy, Harness, RecoveryDecision,
+    ApprovalPolicy, Harness, RecoveryDecision, SendCurrentOutcome,
 };
 use crate::project_session::{
     ChildEventPayload, ProjectEventKind, ProjectSession, ProjectSessionId, ProjectSessionStatus,
@@ -111,7 +111,10 @@ async fn run_project_session_inner(
         .await?;
     let target = ChildRef::Project(session.id.clone());
     let work = store.work_for_child(&target).await?;
-    let _run_lease = store.run_lease_for_child(&target, lease).await?;
+    let run_lease = crate::ops::required_run_lease(&store).await?;
+    if run_lease.work != work {
+        anyhow::bail!("ambient Run lease does not own Project Work {}", work.id());
+    }
     let run = store
         .current_run(&work)
         .await?
@@ -130,10 +133,34 @@ async fn run_project_session_inner(
         resume_token: session.provider_session_id.clone(),
         opaque_basis: None,
     };
+    let mut pending = VecDeque::new();
+    let initial_input = take_current_input(&store, &session, lease, &mut pending).await?;
+    let initial_child = if initial_input.is_none() {
+        store.child_attention(&work).await?.into_iter().next()
+    } else {
+        None
+    };
     let observations = consume_task_observations(&store, &mut session, lease).await?;
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
-    let prepared =
-        prepare_project_flow_step(&store, &mut session, lease, &wave, &flow, &observations).await?;
+    let prepared = match initial_child.as_ref() {
+        Some(child) => {
+            let mut turn = crate::lf::commands::run::prepare_harness_turn(
+                "project_pursue",
+                &child.render(),
+                wave.name(),
+                None,
+            )?;
+            turn.config.agent = Some(session.agent.clone());
+            PreparedProjectStep {
+                turn,
+                basis: run_lease.basis.clone(),
+            }
+        }
+        None => {
+            prepare_project_flow_step(&store, &mut session, lease, &wave, &flow, &observations)
+                .await?
+        }
+    };
     let (harness_name, _) = crate::engine::config::parse_agent(&session.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -191,10 +218,26 @@ async fn run_project_session_inner(
     }
     let mut active_basis = prepared.basis.clone();
 
-    let mut pending = VecDeque::new();
     let mut flow_turn_active = false;
-    if let Some(input) = take_current_input(&store, &session, lease, &mut pending).await? {
+    let mut control_turn_active = initial_input.is_some() || initial_child.is_some();
+    let mut provider_turn_active;
+    let mut pending_child = None;
+    let mut delivered_child = initial_child
+        .as_ref()
+        .map(|child| (child.review.launch_id.clone(), child.review.basis.revision));
+    if let Some(input) = initial_input {
         apply_input(&store, &session, lease, harness.as_mut(), input).await?;
+        provider_turn_active = true;
+    } else if control_turn_active {
+        apply_input(
+            &store,
+            &session,
+            lease,
+            harness.as_mut(),
+            PendingInput::system(prepared.turn.input),
+        )
+        .await?;
+        provider_turn_active = true;
     } else {
         start_project_flow_turn(
             &store,
@@ -207,6 +250,7 @@ async fn run_project_session_inner(
         )
         .await?;
         flow_turn_active = true;
+        provider_turn_active = true;
     }
 
     let (attachment_tx, mut attachment_rx) = mpsc::unbounded_channel();
@@ -236,19 +280,20 @@ async fn run_project_session_inner(
                 }
             }
             _ = poll.tick() => {
-                let active_turn_id = flow_turn_active
+                let active_turn_id = provider_turn_active
                     .then(|| capture.as_ref().map(|capture| capture.current_turn_id()))
                     .flatten();
                 if let Some(stop) = absorb_run_control(
                     &store,
                     ChildTarget::Project(&session.id, lease),
+                    &run_lease,
                     harness.as_mut(),
-                    flow_turn_active,
+                    provider_turn_active,
                     active_turn_id.as_deref(),
                 ).await? {
                     return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
                 }
-                if flow_turn_active {
+                if provider_turn_active {
                     if let Some(capture) = &capture {
                         send_outstanding_steers(
                             &store,
@@ -258,6 +303,21 @@ async fn run_project_session_inner(
                             &active_basis,
                         )
                         .await?;
+                    }
+                }
+                if provider_turn_active && !control_turn_active {
+                    if let Some(child) = store.child_attention(&work).await?.into_iter().next() {
+                        let key = (child.review.launch_id.clone(), child.review.basis.revision);
+                        if delivered_child.as_ref() != Some(&key) {
+                            if !matches!(
+                                harness.send_current(&child.render()).await,
+                                SendCurrentOutcome::Sent { .. }
+                            ) {
+                                harness.interrupt().await?;
+                                pending_child = Some(child);
+                            }
+                            delivered_child = Some(key);
+                        }
                     }
                 }
             }
@@ -295,6 +355,7 @@ async fn run_project_session_inner(
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
                     ConversationEvent::TurnStarted { .. } => {
+                        provider_turn_active = true;
                         turn_had_durable_side_effect = false;
                     }
                     ConversationEvent::ItemCompleted { item, .. } => {
@@ -306,6 +367,9 @@ async fn run_project_session_inner(
                         }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
+                        let was_control_turn = control_turn_active;
+                        control_turn_active = false;
+                        delivered_child = None;
                         if let Some(capture) = &capture {
                             let outcome = match status {
                                 Lifecycle::Completed => "completed",
@@ -331,20 +395,18 @@ async fn run_project_session_inner(
                             )
                             .await;
                         }
-                        if let Err(error) =
-                            verify_control_plane_checkout(Path::new(wave.repo()))
-                        {
-                            return finish_failed(
-                                &store,
-                                &mut session,
-                                lease,
-                                harness.as_mut(),
-                                &error.to_string(),
-                            )
-                            .await;
+                        if !was_control_turn {
+                            if let Err(error) = verify_control_plane_checkout(Path::new(wave.repo())) {
+                                return finish_failed(
+                                    &store,
+                                    &mut session,
+                                    lease,
+                                    harness.as_mut(),
+                                    &error.to_string(),
+                                )
+                                .await;
+                            }
                         }
-                        let resume_interrupted_flow =
-                            flow_turn_active && status == Lifecycle::Interrupted;
                         let flow_iteration_completed = if flow_turn_active {
                             finish_project_flow_turn(&mut flow, status)?
                         } else {
@@ -352,11 +414,32 @@ async fn run_project_session_inner(
                         };
                         flow_turn_active = false;
                         if let Some(input) = take_current_input(&store, &session, lease, &mut pending).await? {
-                            if resume_interrupted_flow {
-                                open_project_flow_body(&mut flow, wave.repo())?;
-                                flow_turn_active = true;
-                            }
                             apply_input(&store, &session, lease, harness.as_mut(), input).await?;
+                            control_turn_active = true;
+                            provider_turn_active = true;
+                            continue;
+                        }
+                        let queued_child = store.child_attention(&work).await?.into_iter().next();
+                        let next_child = pending_child.take().or(queued_child);
+                        if let Some(child) = next_child {
+                            let boundary = store.boundary_seed(&work).await?;
+                            let input = child.render();
+                            if let Some(capture) = &capture {
+                                capture.begin_turn_at("queued", &input, Some(boundary.basis))?;
+                            }
+                            apply_input(
+                                &store,
+                                &session,
+                                lease,
+                                harness.as_mut(),
+                                PendingInput::system(input),
+                            ).await?;
+                            control_turn_active = true;
+                            provider_turn_active = true;
+                            delivered_child = Some((
+                                child.review.launch_id,
+                                child.review.basis.revision,
+                            ));
                             continue;
                         }
                         if status != Lifecycle::Interrupted {
@@ -373,6 +456,7 @@ async fn run_project_session_inner(
                                             observations.join("\n")
                                         )),
                                 ).await?;
+                                provider_turn_active = true;
                                 continue;
                             }
                         }
@@ -398,6 +482,7 @@ async fn run_project_session_inner(
                             )
                             .await?;
                             flow_turn_active = true;
+                            provider_turn_active = true;
                             continue;
                         }
                         let summary = bounded_summary(&last_text);
@@ -443,6 +528,7 @@ async fn run_project_session_inner(
                             )
                             .await?;
                             flow_turn_active = true;
+                            provider_turn_active = true;
                             continue;
                         }
                         session.last_state_fingerprint = Some(outcome.fingerprint);

@@ -149,7 +149,7 @@ fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::pr
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = wave_id {

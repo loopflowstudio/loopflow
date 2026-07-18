@@ -18,7 +18,7 @@ use crate::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
-pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
 /// Serializes tests that mutate process-global store or run identity variables.
@@ -124,7 +124,7 @@ struct RunContext {
     repo: Option<String>,
     wave: Option<String>,
     seq: i64,
-    /// True when this process minted the run id (vs inheriting LF_RUN_ID);
+    /// True when this process minted the run id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the run ends.
     minted_run_id: bool,
 }
@@ -268,7 +268,7 @@ fn try_emit(
         )
     {
         if context.minted_run_id {
-            std::env::remove_var(LF_RUN_ID_ENV);
+            std::env::remove_var(LF_TRACE_ID_ENV);
         }
         std::env::remove_var(LF_PROCESS_ID_ENV);
         clear_context();
@@ -455,7 +455,7 @@ fn ensure_run_context(
             // carry the same identity as the ledger rows. The export is
             // removed when the run ends (see try_emit).
             let run_id = TraceId::default();
-            std::env::set_var(LF_RUN_ID_ENV, run_id.as_str());
+            std::env::set_var(LF_TRACE_ID_ENV, run_id.as_str());
             (run_id, true)
         }
     };
@@ -582,7 +582,7 @@ fn next_seq() -> i64 {
 }
 
 fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
-    let value = std::env::var(LF_RUN_ID_ENV).ok()?;
+    let value = std::env::var(LF_TRACE_ID_ENV).ok()?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
@@ -592,7 +592,7 @@ fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
         Ok(run_id) => Some(run_id),
         Err(err) => {
             debug!(
-                env = LF_RUN_ID_ENV,
+                env = LF_TRACE_ID_ENV,
                 value = trimmed,
                 repo = %repo_root.display(),
                 error = %err,
@@ -763,18 +763,18 @@ mod tests {
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = journal_test_guard();
         super::clear_context();
-        let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
+        let previous = std::env::var(super::LF_TRACE_ID_ENV).ok();
         let previous_process = std::env::var(super::LF_PROCESS_ID_ENV).ok();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         match value {
-            Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
-            None => std::env::remove_var(super::LF_RUN_ID_ENV),
+            Some(value) => std::env::set_var(super::LF_TRACE_ID_ENV, value),
+            None => std::env::remove_var(super::LF_TRACE_ID_ENV),
         }
         let result = run();
         super::clear_context();
         match previous {
-            Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
-            None => std::env::remove_var(super::LF_RUN_ID_ENV),
+            Some(value) => std::env::set_var(super::LF_TRACE_ID_ENV, value),
+            None => std::env::remove_var(super::LF_TRACE_ID_ENV),
         }
         match previous_process {
             Some(value) => std::env::set_var(super::LF_PROCESS_ID_ENV, value),
@@ -786,7 +786,7 @@ mod tests {
     fn journal_test_guard() -> TestLedgerGuard {
         let guard = TestLedgerGuard::new();
         super::clear_context();
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         guard
     }
@@ -1120,7 +1120,7 @@ mod tests {
         assert_eq!(child.parent_process_id, Some(parent.process_id));
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1147,7 +1147,7 @@ mod tests {
 
         // A parent that exported its identity but never reached the ledger.
         let ghost = ExecId::new();
-        std::env::set_var(super::LF_RUN_ID_ENV, recorded.run_id.as_str());
+        std::env::set_var(super::LF_TRACE_ID_ENV, recorded.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
 
         let context = super::ensure_run_context(repo.path(), &fields)
@@ -1171,7 +1171,7 @@ mod tests {
 
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1180,7 +1180,7 @@ mod tests {
         let repo = TestRepo::new();
         let fields = started_fields(&["lf".to_string(), "task".to_string()], repo.path(), "main");
 
-        // A detached body inherits LF_RUN_ID/LF_PROCESS_ID from a launcher that
+        // A detached body inherits LF_TRACE_ID/LF_PROCESS_ID from a launcher that
         // has already exited. The launcher's row outlives it, so the parent
         // still resolves and must survive the drop rule.
         super::emit(
@@ -1199,7 +1199,7 @@ mod tests {
 
         // The body carries what the launcher handed it, not what the launcher
         // left behind: a terminal run clears LF_PROCESS_ID from the env.
-        std::env::set_var(super::LF_RUN_ID_ENV, launcher.run_id.as_str());
+        std::env::set_var(super::LF_TRACE_ID_ENV, launcher.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, launcher.process_id.as_str());
         super::clear_context();
 
@@ -1212,7 +1212,7 @@ mod tests {
 
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1234,14 +1234,14 @@ mod tests {
             .expect("run context")
             .expect("context");
 
-        assert!(context.minted_run_id, "no LF_RUN_ID means a fresh trace");
+        assert!(context.minted_run_id, "no LF_TRACE_ID means a fresh trace");
         assert_eq!(
             context.parent_process_id, None,
             "a fresh trace has no in-trace parent to name"
         );
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]

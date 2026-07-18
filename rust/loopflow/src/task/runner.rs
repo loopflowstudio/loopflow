@@ -86,13 +86,15 @@ async fn run_task_session_inner(
             .await
             .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?,
     );
-    run_task_session_with(store, session_id, lease, create_harness).await
+    let run_lease = crate::ops::required_run_lease(&store).await?;
+    run_task_session_with(store, session_id, lease, &run_lease, create_harness).await
 }
 
 async fn run_task_session_with(
     store: SharedStore,
     session_id: TaskSessionId,
     lease: &ChildWriteLease,
+    run_lease: &crate::durable::RunLease,
     create_harness: crate::harness::CreateHarness,
 ) -> Result<()> {
     let generation = lease.generation;
@@ -133,7 +135,9 @@ async fn run_task_session_with(
         .await?;
     let target = ChildRef::Task(session.id.clone());
     let work = store.work_for_child(&target).await?;
-    let run_lease = store.run_lease_for_child(&target, lease).await?;
+    if run_lease.work != work {
+        anyhow::bail!("ambient Run lease does not own Task Work {}", work.id());
+    }
     let run = store
         .current_run(&work)
         .await?
@@ -154,7 +158,7 @@ async fn run_task_session_with(
     };
     // Typed current-head evidence selects ci-fix before ordinary lifecycle work.
     // The exact Run claim is the crash/recovery fence; no command row mediates it.
-    let mut ci_fix_wake = arm_ci_fix_wake(&store, &session, &run_lease).await?;
+    let mut ci_fix_wake = arm_ci_fix_wake(&store, &session, run_lease).await?;
     let mut flow = if ci_fix_wake.is_some() {
         Playhead::new(QueuedInvocation::load(&session.worktree, "ci-fix")?).0
     } else {
@@ -236,14 +240,14 @@ async fn run_task_session_with(
         capture.set_provider_session_id(session.provider_session_id.clone());
     }
     store
-        .set_flow_position(&run_lease, prepared.position.clone())
+        .set_flow_position(run_lease, prepared.position.clone())
         .await?;
     if let Some(attention) = prepared.attention.clone() {
         let capture = capture
             .as_ref()
             .ok_or_else(|| anyhow!("interactive Task step requires an observable active Launch"))?;
         store
-            .route_review(&run_lease, &capture.launch_id(), attention)
+            .route_review(run_lease, &capture.launch_id(), attention)
             .await?;
     }
     let mut active_basis = prepared.basis.clone();
@@ -297,6 +301,7 @@ async fn run_task_session_with(
                 if let Some(stop) = absorb_run_control(
                     &store,
                     ChildTarget::Task(&session.id, lease),
+                    run_lease,
                     harness.as_mut(),
                     provider_turn_active,
                     active_turn_id.as_deref(),
@@ -321,7 +326,7 @@ async fn run_task_session_with(
                     }
                     None
                 } else if ci_fix_wake.is_none() {
-                    arm_ci_fix_wake(&store, &session, &run_lease).await?
+                    arm_ci_fix_wake(&store, &session, run_lease).await?
                 } else {
                     None
                 };
@@ -448,7 +453,7 @@ async fn run_task_session_with(
                             .await;
                         }
                         if ci_fix_wake.is_none() {
-                            let wake = arm_ci_fix_wake(&store, &session, &run_lease).await?;
+                            let wake = arm_ci_fix_wake(&store, &session, run_lease).await?;
                             if let Some(wake) = wake {
                                 active_basis = start_ci_fix_flow(
                                     &store,
@@ -617,6 +622,7 @@ async fn run_task_session_with(
                                         &store,
                                         &mut session,
                                         lease,
+                                        run_lease,
                                         harness.as_mut(),
                                         &mut flow,
                                         wave.name(),
@@ -650,6 +656,7 @@ async fn run_task_session_with(
                                     &store,
                                     &mut session,
                                     lease,
+                                    run_lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
@@ -771,6 +778,7 @@ async fn run_task_session_with(
                                     &store,
                                     &mut session,
                                     lease,
+                                    run_lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
@@ -823,6 +831,7 @@ async fn run_task_session_with(
                                         &store,
                                         &mut session,
                                         lease,
+                                        run_lease,
                                         harness.as_mut(),
                                         &mut flow,
                                         capture.as_ref(),
@@ -896,6 +905,7 @@ async fn run_task_session_with(
                                     &store,
                                     &mut session,
                                     lease,
+                                    run_lease,
                                     harness.as_mut(),
                                     &mut flow,
                                     wave.name(),
@@ -1148,25 +1158,25 @@ async fn start_task_flow_turn(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_prepared_task_step(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: &ChildWriteLease,
+    run_lease: &crate::durable::RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::trace::CaptureHandle>,
     prepared: PreparedTaskStep,
 ) -> Result<StartedTaskStep> {
-    let target = ChildRef::Task(session.id.clone());
-    let run_lease = store.run_lease_for_child(&target, lease).await?;
     store
-        .set_flow_position(&run_lease, prepared.position.clone())
+        .set_flow_position(run_lease, prepared.position.clone())
         .await?;
     if let Some(attention) = &prepared.attention {
         let capture = capture
             .ok_or_else(|| anyhow!("interactive Task step requires an observable active Launch"))?;
         store
-            .route_review(&run_lease, &capture.launch_id(), attention.clone())
+            .route_review(run_lease, &capture.launch_id(), attention.clone())
             .await?;
     }
     if let Some(capture) = capture {
@@ -1180,10 +1190,12 @@ async fn start_prepared_task_step(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn start_resumed_task_phase(
     store: &SharedStore,
     session: &mut TaskSession,
     lease: &ChildWriteLease,
+    run_lease: &crate::durable::RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     wave_name: &str,
@@ -1191,7 +1203,10 @@ async fn start_resumed_task_phase(
 ) -> Result<StartedTaskStep> {
     *flow = resume_task_phase(session)?;
     let prepared = prepare_task_flow_step(store, session, lease, wave_name, flow, None).await?;
-    start_prepared_task_step(store, session, lease, harness, flow, capture, prepared).await
+    start_prepared_task_step(
+        store, session, lease, run_lease, harness, flow, capture, prepared,
+    )
+    .await
 }
 
 fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool> {
@@ -1977,10 +1992,10 @@ mod tests {
 
     use super::{
         ci_fix_seed, handle_body_failure, infra_blocked_reason, prepare_task_flow_step,
-        progress_summary, resume_task_phase, run_task_session_inner, PreparedTaskStep,
+        progress_summary, resume_task_phase, run_task_session_with, PreparedTaskStep,
     };
     use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
-    use crate::child_session::{ChildRef, ChildWriteLease};
+    use crate::child_session::{ChildProcessReservation, ChildRef, ChildWriteLease};
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Harness, SendCurrentOutcome};
     use crate::id::WaveId;
@@ -2139,7 +2154,7 @@ mod tests {
         provider: &str,
         worktree: PathBuf,
         directive_text: Option<&str>,
-    ) -> (TaskSession, ChildWriteLease) {
+    ) -> (TaskSession, ChildProcessReservation) {
         let wave = Wave::new(
             WaveId::new(),
             format!("wave-{provider}"),
@@ -2243,25 +2258,26 @@ mod tests {
                 .unwrap();
         }
         session.begin_generation(format!("task-{provider}"));
-        let lease = store
+        let reservation = store
             .reserve_task_process(&session, TaskSessionStatus::Waiting)
             .await
             .unwrap()
             .unwrap();
-        (session, lease)
+        (session, reservation)
     }
 
     async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, ChildWriteLease) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("registry.db");
         let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
-        let (mut session, lease) = seed_conformance_session(
+        let (mut session, reservation) = seed_conformance_session(
             store.clone(),
             provider,
             PathBuf::from(format!("/repo.{provider}")),
             None,
         )
         .await;
+        let lease = reservation.write_lease;
         if let Some(process) = &mut session.latest_process {
             process.state = crate::child_session::ChildLeaseState::Active;
         }
@@ -2279,13 +2295,18 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let (session, lease) = seed_conformance_session(
-            store,
+        let (session, reservation) = seed_conformance_session(
+            store.clone(),
             "codex",
             repo.path().to_path_buf(),
             Some("record this provider turn"),
         )
         .await;
+        let run_lease = store
+            .resolve_run_lease(reservation.run_token.clone())
+            .await
+            .unwrap();
+        let lease = reservation.write_lease;
         crate::journal::emit(
             repo.path(),
             crate::journal::LfNode::Run,
@@ -2293,9 +2314,11 @@ mod tests {
             crate::journal::LfEventFields::default(),
         );
 
-        run_task_session_inner(
+        run_task_session_with(
+            store,
             session.id,
             &lease,
+            &run_lease,
             Box::new(|name, _approval, events| {
                 assert_eq!(name, "codex");
                 Ok(Box::new(RunnerUsageHarness { events, inputs: 0 }))

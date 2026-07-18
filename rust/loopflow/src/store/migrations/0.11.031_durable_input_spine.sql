@@ -251,6 +251,8 @@ CREATE TABLE runs (
 );
 CREATE UNIQUE INDEX idx_runs_one_active_epoch
     ON runs(epoch_id) WHERE state != 'ended';
+CREATE UNIQUE INDEX idx_runs_lease_hash
+    ON runs(lease_hash) WHERE lease_hash IS NOT NULL;
 CREATE UNIQUE INDEX idx_runs_source_generation
     ON runs(source_kind, source_id, lease_generation)
     WHERE source_id IS NOT NULL AND lease_generation IS NOT NULL;
@@ -589,6 +591,7 @@ CREATE TABLE agent_turns_next (
     provider_total_input_tokens INTEGER,
     peak_input_tokens INTEGER,
     context_window_tokens INTEGER,
+    root_output TEXT,
     epoch_id TEXT,
     basis_rev INTEGER,
     CHECK ((epoch_id IS NULL) = (basis_rev IS NULL)),
@@ -605,7 +608,7 @@ INSERT INTO agent_turns_next (
     cache_read_tokens, cache_write_tokens, cost_usd, context_gather_ms,
     context_render_ms, context_persist_ms, first_event_seq, last_event_seq,
     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
-    epoch_id, basis_rev
+    root_output, epoch_id, basis_rev
 )
 SELECT
     id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
@@ -615,7 +618,7 @@ SELECT
     cache_read_tokens, cache_write_tokens, cost_usd, context_gather_ms,
     context_render_ms, context_persist_ms, first_event_seq, last_event_seq,
     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
-    NULL, NULL
+    NULL, NULL, NULL
 FROM agent_turns;
 
 DROP TABLE agent_turns;

@@ -131,15 +131,15 @@ These are the implementation being replaced, not compatibility contracts.
     claims replace its lifecycle/source/effect/claim state.
 11. Global promotion and PM reteam now fence active writers through Run and
     containment evidence rather than Session status.
+12. One opaque `LF_RUN_LEASE` now resolves exact active Run authority without a
+    caller-supplied Work, Session, generation, or Author. Observed root Turn
+    output feeds the Project runner's oldest-first child control lane.
 
-The structural gap is now execution authority and responsiveness. Session/body
-stores still reserve, activate, revoke, and reap through duplicated
-Project/Task paths, then mirror those transitions into Run. `ambient_run_lease`
-still derives the Run from Session id, generation, and token. Parent loops do
-not drain `child_attention`, and the Review projection lacks durable root Turn
-output for an automatic parent seed. The next cut makes one opaque Run lease,
-shared Run execution, and the parent control lane authoritative, then deletes
-the Session/body controller.
+The structural gap is now shared execution. Session/body stores still reserve,
+activate, revoke, and reap through duplicated Project/Task paths, then mirror
+those transitions into Run. The Wave resident also lacks the Project runner's
+ordered child control lane. The next cut moves both through shared Run
+execution and deletes the Session/body controller.
 
 ## Target contract
 
@@ -817,37 +817,32 @@ fence active writers through Run/containment evidence.
 
 Execution still crosses one legacy bridge. Project/Task Session runners own
 process reservation, generations, status, revocation, and recovery, then mirror
-them into Run. `ambient_run_lease` reconstructs Run authority from those legacy
-credentials. `child_attention` has no Wave/Project scheduler consumer, and Turn
-does not yet retain the root output needed to explain the child request. The
-large cut is therefore structurally half complete, not done.
+them into Run. Product control authority no longer crosses that bridge: one
+opaque `LF_RUN_LEASE` hash resolves the exact active Run and missing agent
+authority fails closed. Turn retains observed root assistant output, and the
+Project runner drains direct input then oldest child Review before background
+work with live-send or interrupt-and-seed fallback. The Wave resident does not
+yet drain the same projection, and the duplicate Session lifecycle remains.
 
-The next implementation pass finishes one **large authority cut**, not another
-set of additive bridges:
+The remaining pass finishes the authority cut rather than adding another
+bridge:
 
-1. replace the Session/generation credential bundle with one opaque, exact,
-   fail-closed Run lease inherited by the executor process tree;
-2. retain optional root assistant output on Turn and use it with current child
-   facts to render the parent control seed;
-3. make the same Wave or Project Run drain direct User and oldest child
-   attention before background flow, live-delivering or interrupt-and-seeding
-   according to the active Turn's observed behavior;
-4. preserve the background playhead across that control boundary and make
-   Review response independent of clean writable main;
-5. replace Project/Task reservation, status, revocation, reaping, settlement,
+1. give the Wave resident the same ordered control projection the Project
+   runner now executes;
+2. prove live and seed-only child control against deterministic parent harnesses;
+3. replace Project/Task reservation, status, revocation, reaping, settlement,
    and recovery with shared Run reserve/advance/stop;
-6. delete Session/body process authority, env vars, DTOs, and duplicate runners;
-7. restore focused CI preemption and fresh-settlement tests removed with the
+4. delete Session/body process authority, env vars, DTOs, and duplicate runners;
+5. restore focused CI preemption and fresh-settlement tests removed with the
    command-ledger suite;
-8. consolidate unpublished schema work under main's dependency-ordered draft
+6. consolidate unpublished schema work under main's dependency-ordered draft
    migration contract, leaving no supported intermediate architecture.
 
 The size objective is already met, which removes any incentive to delete proof.
-Current source is 121,613 physical Rust lines after main's account-lease and
-promotion additions: 118,921 normalized, 12,206 below the 131,127 checkpoint
-and 206 below the adjusted 121,819 physical target. Remaining deletion must
-remove duplicate truth; behavioral tests may make the final count rise within
-that budget.
+Current source is 121,818 physical / 119,126 normalized Rust lines, one below
+both adjusted targets. Remaining deletion must remove duplicate truth rather
+than spending that margin; behavioral proof may not be traded away for the
+count.
 
 It is done when:
 

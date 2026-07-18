@@ -612,6 +612,7 @@ mod tests {
             context_persist_ms: 0,
             first_event_seq: Some(0),
             last_event_seq: Some(1),
+            root_output: None,
             basis: None,
         };
         store

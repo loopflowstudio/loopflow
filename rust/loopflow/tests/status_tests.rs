@@ -139,6 +139,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         context_persist_ms: 1,
         first_event_seq: None,
         last_event_seq: None,
+        root_output: None,
         basis: None,
     };
     store
@@ -158,7 +159,7 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = ambient_wave_id {

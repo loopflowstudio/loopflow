@@ -1127,7 +1127,7 @@ mod promote_tests {
     #[test]
     fn staging_is_content_addressed_and_refuses_a_byte_mismatch() {
         let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("bin");
+        let bin_dir = dir.path().canonicalize().unwrap().join("bin");
         let candidate = dir.path().join("lf");
         fs::write(&candidate, b"BINARY-A").unwrap();
 
@@ -1435,7 +1435,7 @@ mod promote_tests {
         let bin_dir = dir.path().join("bin");
         let candidate = dir.path().join("lf");
         fs::write(&candidate, b"retained-bytes").unwrap();
-        let staged = stage_binary(&candidate, &bin_dir).unwrap();
+        let staged = fs::canonicalize(stage_binary(&candidate, &bin_dir).unwrap()).unwrap();
 
         // A correctly content-addressed member of the store resolves. Compare
         // against the canonicalized staged path so a symlinked TMPDIR

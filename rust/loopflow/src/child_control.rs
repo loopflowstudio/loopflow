@@ -64,15 +64,13 @@ pub(crate) enum CommandStop {
 pub(crate) async fn absorb_run_control(
     store: &SharedStore,
     target: ChildTarget<'_>,
+    run_lease: &crate::durable::RunLease,
     harness: &mut dyn Harness,
     turn_active: bool,
     active_turn_id: Option<&str>,
 ) -> Result<Option<CommandStop>> {
     target.validate_write_lease(store).await?;
-    let run_lease = store
-        .run_lease_for_child(&target.as_ref(), target.lease())
-        .await?;
-    match store.run_control(&run_lease, active_turn_id).await? {
+    match store.run_control(run_lease, active_turn_id).await? {
         Some(crate::durable::RunControl::Interrupt) => {
             if turn_active {
                 harness.interrupt().await?;

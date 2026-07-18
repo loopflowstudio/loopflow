@@ -1,15 +1,15 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child_session::{ChildRef, ChildWriteLease};
+use crate::child_session::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, Containment,
-    ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState,
-    FlowPosition, Home, HomeId, InterruptReceipt, Launch, LaunchId, LaunchRoute, LaunchState,
-    LaunchSurface, ProjectId, Review, Run, RunAdvance, RunId, RunLease, RunLeaseToken, RunState,
-    RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId, SteerReceipt, StopCause,
-    StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn, TurnId,
-    Wait, WaitId, WaitOn, WorkRef, WorkStatus,
+    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, ChildReview,
+    Containment, ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId,
+    EpochReceipt, EpochState, FlowPosition, Home, HomeId, InterruptReceipt, Launch, LaunchId,
+    LaunchRoute, LaunchState, LaunchSurface, ProjectId, Review, Run, RunAdvance, RunId, RunLease,
+    RunLeaseToken, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId,
+    SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
+    ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSession;
@@ -17,7 +17,6 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::TaskSession;
 
-use super::child_sessions::require_child_write_lease;
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -122,6 +121,26 @@ impl SqliteStore {
             return Ok(None);
         };
         run_for_epoch_in(&conn, &epoch.id)
+    }
+
+    pub(crate) fn resolve_run_lease(&self, token: &RunLeaseToken) -> StoreResult<RunLease> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let id = conn
+            .query_row(
+                "SELECT id FROM runs
+                 WHERE lease_hash=?1 AND state IN ('reserved', 'active')",
+                [token.hash()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                StoreError::InvalidAuthority(
+                    "Run lease is malformed, stale, stopped, or unknown".to_string(),
+                )
+            })?;
+        let run = run_by_id_in(&conn, &RunId::parse(&id).map_err(invalid_durable)?)?;
+        let basis = current_epoch_in(&conn, &run.work)?.current_basis;
+        Ok(RunLease::new(run.id, run.work, basis, token.clone()))
     }
 
     pub fn advance_run(
@@ -231,6 +250,7 @@ impl SqliteStore {
                     basis: basis.clone(),
                     state: BoundaryState::Starting,
                     provider_turn_id: None,
+                    root_output: None,
                     started_at: OffsetDateTime::now_utc(),
                     ended_at: None,
                 };
@@ -561,7 +581,7 @@ impl SqliteStore {
         Ok(surface)
     }
 
-    pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<Review>> {
+    pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildReview>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT e.wave_id, e.project_id, e.task_id
@@ -583,7 +603,31 @@ impl SqliteStore {
         for row in rows {
             let work = work_from_parts(row?)?;
             if let Some(review) = review_in(&conn, &work)? {
-                reviews.push(review);
+                let latest_output = conn
+                    .query_row(
+                        "SELECT root_output FROM agent_turns
+                         WHERE launch_id=?1 AND root_output IS NOT NULL
+                         ORDER BY ordinal DESC LIMIT 1",
+                        [review.launch_id.as_str()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                let evidence_json: String = conn.query_row(
+                    "SELECT wt.payload_json FROM work_truth wt
+                     WHERE wt.epoch_id=?1 ORDER BY wt.rev DESC LIMIT 1",
+                    [review.basis.epoch_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let status = work_status_in(&conn, &work)?;
+                reviews.push(ChildReview {
+                    review,
+                    latest_output,
+                    evidence: serde_json::json!({
+                        "work": serde_json::from_str::<serde_json::Value>(&evidence_json)
+                            .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                        "status": status,
+                    }),
+                });
             }
         }
         Ok(reviews)
@@ -1097,57 +1141,6 @@ impl SqliteStore {
         })?;
         validate_basis(&applied, proposed)
     }
-
-    pub(crate) fn run_for_child_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<crate::durable::RunLease> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        require_child_write_lease(&conn, target, lease)?;
-        let work = work_for_child_in(&conn, target)?;
-        let (run_id, epoch_id, revision) = conn
-            .query_row(
-                "SELECT r.id, r.epoch_id, e.current_rev
-                 FROM runs r JOIN epochs e ON e.id=r.epoch_id
-                 WHERE r.source_kind=?1 AND r.source_id=?2
-                   AND r.lease_generation=?3 AND r.state IN ('reserved', 'active')
-                 ORDER BY r.created_at DESC LIMIT 1",
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(lease.generation)
-                ],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
-                },
-            )
-            .optional()?
-            .ok_or_else(|| {
-                StoreError::InvalidData(format!(
-                    "{} generation {} has no active Run",
-                    target.target_id(),
-                    lease.generation
-                ))
-            })?;
-        Ok(crate::durable::RunLease::new(
-            RunId::parse(&run_id).map_err(|error| {
-                StoreError::InvalidData(format!("invalid stored Run id: {error}"))
-            })?,
-            work,
-            Basis {
-                epoch_id: EpochId::parse(&epoch_id).map_err(|error| {
-                    StoreError::InvalidData(format!("invalid stored Epoch id: {error}"))
-                })?,
-                revision: revision as u64,
-            },
-            crate::durable::RunLeaseToken::from_child(lease.token.as_str()),
-        ))
-    }
 }
 
 fn map_home(conn: &Connection, route: &str) -> StoreResult<Home> {
@@ -1634,7 +1627,7 @@ fn require_turn_for_run(conn: &Connection, turn_id: &TurnId, run_id: &RunId) -> 
 fn control_turn_in(conn: &Connection, turn_id: &TurnId) -> StoreResult<Turn> {
     let row = conn.query_row(
         "SELECT launch_id, epoch_id, basis_rev, status, provider_turn_id,
-                started_at, ended_at FROM agent_turns WHERE id=?1",
+                root_output, started_at, ended_at FROM agent_turns WHERE id=?1",
         [turn_id.as_str()],
         |row| {
             Ok((
@@ -1643,8 +1636,9 @@ fn control_turn_in(conn: &Connection, turn_id: &TurnId) -> StoreResult<Turn> {
                 row.get::<_, i64>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<i64>>(7)?,
             ))
         },
     )?;
@@ -1657,9 +1651,10 @@ fn control_turn_in(conn: &Connection, turn_id: &TurnId) -> StoreResult<Turn> {
         },
         state: BoundaryState::parse_turn(&row.3).map_err(invalid_durable)?,
         provider_turn_id: row.4,
-        started_at: OffsetDateTime::from_unix_timestamp(row.5).map_err(invalid_durable)?,
+        root_output: row.5,
+        started_at: OffsetDateTime::from_unix_timestamp(row.6).map_err(invalid_durable)?,
         ended_at: row
-            .6
+            .7
             .map(OffsetDateTime::from_unix_timestamp)
             .transpose()
             .map_err(invalid_durable)?,
@@ -2174,12 +2169,10 @@ fn import_run_for_child(
         basis: epoch.current_basis,
     })
     .expect("run trigger must serialize");
-    let imported_lease = format!(
-        "imported:{}:{}:{generation}",
-        target.target_kind(),
-        target.target_id()
-    );
-    let lease_hash = crate::durable::RunLeaseToken::from_child(&imported_lease).hash();
+    // A legacy body never receives product Run authority by derivation. The
+    // imported slot stays fenced until containment is reconciled, and only a
+    // newly reserved Run gets a capability its process can inherit.
+    let lease_hash = crate::durable::RunLeaseToken::new().hash();
     tx.execute(
         "INSERT INTO runs (
             id, epoch_id, home_id, state, trigger_json, lease_hash,
@@ -2205,9 +2198,8 @@ pub(crate) fn reserve_run_for_child(
     tx: &Transaction<'_>,
     target: &ChildRef,
     generation: u32,
-    lease_token: &str,
     trigger: Option<&RunTrigger>,
-) -> StoreResult<RunId> {
+) -> StoreResult<crate::durable::RunLeaseToken> {
     let work = work_for_child_in(tx, target)?;
     let epoch = current_epoch_in(tx, &work)?;
     let home_id: String = tx.query_row(
@@ -2220,7 +2212,8 @@ pub(crate) fn reserve_run_for_child(
     };
     let trigger_json = serde_json::to_string(trigger.unwrap_or(&default_trigger))
         .expect("run trigger must serialize");
-    let lease_hash = crate::durable::RunLeaseToken::from_child(lease_token).hash();
+    let token = crate::durable::RunLeaseToken::new();
+    let lease_hash = token.hash();
     let run_id = RunId::new();
     tx.execute(
         "INSERT INTO runs (
@@ -2239,7 +2232,7 @@ pub(crate) fn reserve_run_for_child(
             now_unix(),
         ],
     )?;
-    Ok(run_id)
+    Ok(token)
 }
 
 pub(crate) fn activate_run_for_child(

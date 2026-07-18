@@ -1860,7 +1860,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
 /// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
-/// `{run_id}` segment present only when `LF_RUN_ID` is set (daemon-dispatched
+/// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
 /// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
@@ -1883,7 +1883,7 @@ pub fn write_prompt_log(
         }
         _ => safe_skill,
     };
-    let run_part = std::env::var(crate::journal::LF_RUN_ID_ENV)
+    let run_part = std::env::var(crate::journal::LF_TRACE_ID_ENV)
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());

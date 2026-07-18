@@ -1,26 +1,56 @@
 # Open implementation notes
 
+- This pass now mints an independent opaque `LF_RUN_LEASE`, stores only its
+  hash, resolves it directly to the exact active Run, clears it across distinct
+  child launches, and fails closed when an agent context loses it. The old
+  Session lease remains only for compatibility row writes; product controls no
+  longer reconstruct authority from it.
+- Observed root assistant output now persists on Turn, and the Project runner
+  drains direct input then the oldest child Review before background work. It
+  live-delivers to the active parent Turn when possible; otherwise it
+  interrupts once, seeds the durable child projection, and leaves the
+  background playhead on its next unfinished step. Wave scheduling still needs
+  the same lane before the cut is complete.
+- The trace-only `LF_RUN_ID` environment variable is renamed `LF_TRACE_ID`, so
+  the public Run vocabulary no longer collides with diagnostic lineage.
+- `root_output` was folded into unpublished migration 0.11.031 rather than
+  adding another intermediate ordinal. The complete 0.11.030-0.11.035 branch
+  tail still needs conversion to dependency-ordered drafts at the final schema
+  cut; the missing runtime `DRAFTS` contract remains unresolved.
 - Stored Review/Handoff and ChildCommand are gone. The remaining core cut is
-  exact Run credentialing, parent attention scheduling, durable root Turn
-  output, and deletion of the Project/Task Session-body controller.
-- `ambient_run_lease` still derives authority from Session id + generation +
-  body token, and a missing legacy bundle can become User. The next pass uses
-  one opaque `LF_RUN_LEASE` whose hash locates the exact active Run and fails
-  closed.
+  the Wave control lane and deletion of the Project/Task Session-body
+  controller.
 - Main's account-lease broker confirms the capability semantics: resolve once,
   inherit one fixed opaque grant, prevent nested widening, and fail closed.
   Run lease validation stays local to SQLite; it does not need another SSH
   broker.
-- Review attention currently contains no child utterance. Persist optional root
-  assistant text on Turn and project it with current child facts into the
-  parent control seed. This avoids both a Message aggregate and an unusable
-  content-free attention signal.
 - Main's draft scripts/docs refer to a Rust `DRAFTS` registry that was not
   landed. The six unpublished architecture migrations must become drafts, but
   fresh test databases still need one coherent way to apply them before the
   release cut. Do not invent a second durable migration ledger.
 - The branch has already exceeded the normalized 12,000-line deletion target.
   Restore focused CI/control behavior tests even if the physical count rises.
+
+## Implementation review findings
+
+- The first exact-lease draft lacked a uniqueness constraint on active lease
+  hashes. The unpublished spine now enforces it, so one capability cannot
+  ambiguously resolve to two Runs even if token generation is ever replaced.
+- The shared Launch DTO exposed `OffsetDateTime` in Rust's structural serde
+  shape while the pinned Rust/Swift fixture uses RFC 3339. The wire now names
+  RFC 3339 explicitly and the cross-language fixture passes.
+- Stable Task identifier rebind initially rewrote terminal Session history.
+  The compatibility write now follows only the open Epoch; historical Sessions
+  retain the identifier they actually ran under.
+- Adding the stable Wave Epoch made legacy Wave deletion fail its foreign-key
+  fence. Deletion now removes the Wave Epoch and its cascading facts in the
+  same transaction; Runs or child Work still prevent unsafe deletion.
+- Persisting every assistant delta makes partial output crash-visible, but it
+  also writes the growing Turn output repeatedly. Keep this until the parent
+  scheduling proof exists; a later batching change must preserve partial
+  failure/interruption evidence rather than optimizing it away.
+- The CLI Wave-resolution registry still named the deleted `reviews catch-up`
+  command. Its stale row is removed rather than recreating the Review surface.
 
 ## Codex steer rejections: what the live app-server proved
 

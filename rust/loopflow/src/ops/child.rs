@@ -3,12 +3,11 @@
 use std::time::Duration;
 
 use crate::child_session::{
-    project_write_lease_from_env, task_write_lease_from_env, ChildBodyHandoffRequest,
-    ChildBodyOutcome, ChildProcessGeneration, ChildRef, PROJECT_GENERATION_ENV,
-    PROJECT_LEASE_TOKEN_ENV, TASK_GENERATION_ENV, TASK_LEASE_TOKEN_ENV,
+    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ChildRef,
 };
 use crate::durable::{
-    AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Run, SteerReceipt,
+    AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Run, RunLease, RunLeaseToken,
+    SteerReceipt, RUN_CONTEXT_ENV, RUN_LEASE_ENV,
 };
 use crate::project_session::ProjectSession;
 use crate::store::{SharedStore, Store};
@@ -353,55 +352,44 @@ pub(crate) async fn append_steer(
     }
 }
 
-pub(crate) async fn ambient_run_lease(
-    store: &Store,
-) -> OpsResult<Option<crate::durable::RunLease>> {
-    let project_id = std::env::var("LF_PROJECT_SESSION_ID").ok();
-    let task_id = std::env::var("LF_TASK_SESSION_ID").ok();
-    match (project_id, task_id) {
-        (Some(_), Some(_)) => Err(child_error(
-            "control process carries both Project and Task Run credentials",
-        )),
-        (Some(id), None) => {
-            let id = crate::project_session::ProjectSessionId::parse(&id)
-                .map_err(|error| child_error(error.to_string()))?;
-            let lease =
-                project_write_lease_from_env().map_err(|error| child_error(error.to_string()))?;
-            store
-                .run_lease_for_child(&ChildRef::Project(id), &lease)
-                .await
-                .map(Some)
-                .map_err(child_error)
-        }
-        (None, Some(id)) => {
-            let id = crate::task::TaskSessionId::parse(&id)
-                .map_err(|error| child_error(error.to_string()))?;
-            let lease =
-                task_write_lease_from_env().map_err(|error| child_error(error.to_string()))?;
-            store
-                .run_lease_for_child(&ChildRef::Task(id), &lease)
-                .await
-                .map(Some)
-                .map_err(child_error)
-        }
-        (None, None) => {
-            let incomplete = [
-                PROJECT_GENERATION_ENV,
-                PROJECT_LEASE_TOKEN_ENV,
-                TASK_GENERATION_ENV,
-                TASK_LEASE_TOKEN_ENV,
-            ]
-            .iter()
-            .any(|name| std::env::var_os(name).is_some());
-            if incomplete {
-                Err(child_error(
-                    "control process carries an incomplete Run credential",
-                ))
-            } else {
-                Ok(None)
-            }
-        }
+pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLease>> {
+    if let Some(value) = std::env::var_os(RUN_LEASE_ENV) {
+        let value = value
+            .into_string()
+            .map_err(|_| child_error("LF_RUN_LEASE is not valid UTF-8"))?;
+        let token =
+            RunLeaseToken::parse(&value).map_err(|_| child_error("LF_RUN_LEASE is malformed"))?;
+        return store
+            .resolve_run_lease(token)
+            .await
+            .map(Some)
+            .map_err(child_error);
     }
+
+    let agent_context = [
+        RUN_CONTEXT_ENV,
+        "LF_PROJECT_SESSION_ID",
+        "LF_PROJECT_GENERATION",
+        "LF_PROJECT_LEASE_TOKEN",
+        "LF_TASK_SESSION_ID",
+        "LF_TASK_GENERATION",
+        "LF_TASK_LEASE_TOKEN",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(name).is_some());
+    if agent_context {
+        Err(child_error(
+            "in-Run agent process has no LF_RUN_LEASE; refusing User authority",
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+pub(crate) async fn required_run_lease(store: &Store) -> OpsResult<RunLease> {
+    ambient_run_lease(store)
+        .await?
+        .ok_or_else(|| child_error("in-Run entrypoint requires LF_RUN_LEASE"))
 }
 
 fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHandoffRequest> {

@@ -1,8 +1,8 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child_session::{
-    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ChildRef, ChildWriteLease,
-    ObservationRecipient,
+    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ChildProcessReservation,
+    ChildRef, ChildWriteLease, ObservationRecipient,
 };
 use crate::durable::Author;
 use crate::id::WaveId;
@@ -235,7 +235,7 @@ impl Store {
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         let _promotion_lock = _acquire_promotion_reservation_lock().await?;
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
@@ -249,7 +249,7 @@ impl Store {
         session: &TaskSession,
         expected_status: TaskSessionStatus,
         trigger: crate::durable::RunTrigger,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_process(&session, expected_status, Some(&trigger))
@@ -790,7 +790,7 @@ impl Store {
         &self,
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         let _promotion_lock = _acquire_promotion_reservation_lock().await?;
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {

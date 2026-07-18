@@ -69,7 +69,7 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env("NO_COLOR", "1")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID");
     if let Some(path) = path {
         command.env("PATH", path);

@@ -1,5 +1,52 @@
 # Open implementation notes
 
+## Rebase aborted 2026-07-17: a second agent owns this worktree
+
+A rebase of `jack-heart/architecture` onto `origin/main` (`1a3079a94`) was
+started and then backed out. **The blocker is concurrency, not conflict
+difficulty.**
+
+`codex exec` (pid 62201, parent `lf` pid 62086, started 20:16, still alive after
+59 minutes) is executing inside `/Users/jack/src/loopflow.architecture` while
+this rebase ran. Mid-rebase it resolved a working tree full of conflict markers
+without this agent touching them, so neither driver could trust the resulting
+tree. Rebasing a worktree that another driver owns corrupts history, not just
+files. Do not retry until that process is gone.
+
+Damage assessment: the tree was clean at the start of this session, and the
+branch is restored to `cae6cfe8b` with a clean tree. If the concurrent codex
+run held **uncommitted** edits made after 20:16, `git reset --hard` destroyed
+them; nothing committed was lost. No push happened.
+
+Refs left behind:
+
+- `backup/architecture-prerebase` → `cae6cfe8b`, the branch tip as found.
+- `rebase/architecture-squash-wip` → `160289fac`, a squash of the whole branch
+  onto `origin/main`. **Its conflict resolution is unverified** — it is the tree
+  the other driver mutated, not a reviewed merge. Inspect or discard; do not
+  land it.
+
+What the rebase learned, for whoever retries it:
+
+- Commit-by-commit replay is the wrong shape here. 19 of 32 commits applied,
+  then `d670f27c4` ("make Steer and Basis authoritative") hit 38 conflict hunks
+  across 11 files, with 13 commits still to replay behind it. Every hunk was
+  modified on both sides — no hunk was a clean "base unchanged by main" take.
+- One squashed replay against `origin/main` reduces the same work to ~63 hunks
+  resolved once. Given the branch is a single landing (PR #1073) made of
+  checkpoint commits, that is the recommended shape.
+- The dominant conflict pattern is: main modified a surface this branch deletes
+  (FollowUp/Acknowledge/Decide/RequestDecision commands, `DirectiveChanged`/
+  `DecisionRequested` events, ambient `resolve_caller_authority` in
+  `ops/util.rs`). Those resolve to the branch side (delete). The hunks needing
+  real judgment are where main added new behavior the branch must keep:
+  `lf task reconcile` (ENG-113 #1090, #1087), the Linear PR-attachment fix
+  (#1089), and the migration release-cut/promotion boundary (#1081, #1086) —
+  the last of which also bears directly on the unresolved `DRAFTS` question
+  recorded below.
+- `lf/commands/handoff.rs` and `task/runner/ci_fix_lifecycle_tests.rs` are
+  modify/delete conflicts; the branch deletes both, which is intended.
+
 ## Landing split decision 2026-07-18
 
 Land the normalized control spine before deleting the Session controller.

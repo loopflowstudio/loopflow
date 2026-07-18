@@ -369,6 +369,7 @@ mod tests {
             agent: None,
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
+            resume_token: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,

@@ -19,7 +19,7 @@ use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
-use crate::provider_account::resolve_provider_account_blocking;
+use crate::provider_account::{resolve_provider_account_blocking, RateLimitSignal};
 use crate::provider_auth::Provider;
 
 /// PID of the current child agent process. The Ctrl+C handler sends SIGTERM
@@ -89,6 +89,8 @@ pub struct LaunchResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+    /// Typed provider failure when the process output identifies one.
+    pub failure: Option<AgentFailure>,
 }
 
 /// Configuration for launching an agent.
@@ -102,6 +104,8 @@ pub struct AgentConfig {
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
+    /// Opaque provider continuation token for this launch.
+    pub resume_token: Option<String>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
     /// Skip permission prompts
@@ -128,6 +132,7 @@ impl std::fmt::Debug for AgentConfig {
             )
             .field("agent", &self.agent)
             .field("max_turns", &self.max_turns)
+            .field("resume_token", &self.resume_token)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -562,6 +567,34 @@ pub fn resolve_codex_model(model: &str) -> Option<String> {
 }
 
 const CODEX_DEFAULT_SERVICE_TIER: &str = "default";
+const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+];
+const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
+const FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum AgentFailure {
+    /// The selected model or provider has no current serving capacity.
+    #[error("provider capacity")]
+    Capacity,
+    /// A request-level rate limit may clear after backoff.
+    #[error("provider rate limit")]
+    RateLimit,
+    /// The provider reported temporary service unavailability.
+    #[error("provider unavailable")]
+    Unavailable,
+    /// The provider process reported a retryable connection failure.
+    #[error("provider transport")]
+    Transport,
+    /// The selected managed account exhausted a subscription window.
+    #[error("account subscription limit")]
+    AccountSubscriptionLimit { resets_at: Option<i64> },
+}
 
 /// Build `thread/start` params for Codex app-server sessions.
 ///
@@ -661,7 +694,7 @@ pub fn build_claude_command(
         max_turns: launch.max_turns,
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
-        resume_id: None,
+        resume_id: launch.resume_token.clone(),
     };
     cmd.extend(claude_args.to_args());
 
@@ -680,7 +713,11 @@ pub fn build_codex_command(
 ) -> Vec<String> {
     // `codex exec` for batch/auto mode, `codex` for interactive
     let mut cmd = if process.auto {
-        vec!["codex".to_string(), "exec".to_string()]
+        let mut cmd = vec!["codex".to_string(), "exec".to_string()];
+        if launch.resume_token.is_some() {
+            cmd.push("resume".to_string());
+        }
+        cmd
     } else {
         vec!["codex".to_string()]
     };
@@ -728,6 +765,12 @@ pub fn build_codex_command(
         process.auto,
         launch.skip_permissions,
     ));
+
+    if process.auto {
+        if let Some(resume_token) = &launch.resume_token {
+            cmd.push(resume_token.clone());
+        }
+    }
 
     cmd
 }
@@ -885,6 +928,278 @@ pub fn launch_agent(
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
 ) -> Result<LaunchResult, CoreError> {
+    _launch_with_transient_retries(
+        launch,
+        process,
+        &TRANSIENT_RETRY_DELAYS,
+        |attempt, retry| _launch_agent_once(attempt, process, capabilities, retry),
+        thread::sleep,
+    )
+}
+
+#[derive(Debug)]
+enum AgentAttempt {
+    Finished {
+        result: LaunchResult,
+        can_failover: bool,
+    },
+    AccountUnavailable(CoreError),
+}
+
+fn _launch_with_transient_retries(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    retry_delays: &[Duration],
+    mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentAttempt, CoreError>,
+    mut wait: impl FnMut(Duration),
+) -> Result<LaunchResult, CoreError> {
+    let mut attempt_config = launch.clone();
+    let mut attempt = 1;
+    let mut subscription_failure = None;
+
+    loop {
+        let (mut result, can_failover) = match run(&attempt_config, attempt > 1)? {
+            AgentAttempt::Finished {
+                result,
+                can_failover,
+            } => (result, can_failover),
+            AgentAttempt::AccountUnavailable(error) => {
+                let Some(result) = subscription_failure else {
+                    return Err(error);
+                };
+                tracing::warn!(%error, "alternate provider account unavailable");
+                return Ok(result);
+            }
+        };
+        let (harness, _) = parse_agent(attempt_config.agent.as_deref().unwrap_or("claude:opus"));
+        let failure = if process.auto {
+            result
+                .failure
+                .or_else(|| _classify_agent_failure(&harness, &result))
+        } else {
+            None
+        };
+        result.failure = failure;
+        let Some(failure) = failure else {
+            return Ok(result);
+        };
+        if matches!(failure, AgentFailure::AccountSubscriptionLimit { .. }) && !can_failover {
+            return Ok(result);
+        }
+        let Some(transient_delay) = retry_delays.get(attempt - 1).copied() else {
+            return Ok(result);
+        };
+        let limit_resets_at = match &failure {
+            AgentFailure::AccountSubscriptionLimit { resets_at } => *resets_at,
+            _ => None,
+        };
+
+        attempt_config = launch.clone();
+        let (delay, failover) = match &failure {
+            AgentFailure::AccountSubscriptionLimit { .. } => {
+                subscription_failure = Some(result.clone());
+                attempt_config.task_prompt = format!(
+                    "{FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
+                    launch.task_prompt
+                );
+                (Duration::ZERO, true)
+            }
+            _ => {
+                subscription_failure = None;
+                let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
+                if matches!(harness.as_str(), "claude" | "codex") {
+                    if let Some(resume_token) = resume_token {
+                        attempt_config.resume_token = Some(resume_token);
+                        attempt_config.task_prompt = RETRY_PROMPT.to_string();
+                    }
+                }
+                (transient_delay, false)
+            }
+        };
+
+        tracing::warn!(
+            failure = %failure,
+            attempt,
+            next_attempt = attempt + 1,
+            max_attempts = retry_delays.len() + 1,
+            delay_ms = delay.as_millis(),
+            resumed = attempt_config.resume_token.is_some(),
+            account_failover = failover,
+            limit_resets_at,
+            "recoverable agent failure; retrying"
+        );
+        wait(delay);
+        attempt += 1;
+    }
+}
+
+fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<AgentFailure> {
+    if result.exit_code == 0 {
+        return None;
+    }
+    if let Some(signal) = _account_limit_signal(harness, result).filter(|signal| signal.limited) {
+        return Some(AgentFailure::AccountSubscriptionLimit {
+            resets_at: signal.resets_at,
+        });
+    }
+    _find_provider_error(result, _classify_transient_text)
+}
+
+fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T>) -> Option<T> {
+    for line in result.stdout.lines() {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if !_is_provider_error(&value) {
+            continue;
+        }
+        if let Some(failure) = ["message", "error", "result"]
+            .into_iter()
+            .filter_map(|field| value.get(field))
+            .find_map(|value| _classify_provider_error_value(value, classify))
+        {
+            return Some(failure);
+        }
+    }
+    result.stderr.lines().find_map(classify)
+}
+
+fn _is_provider_error(value: &serde_json::Value) -> bool {
+    match value
+        .get("type")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+    {
+        "turn.failed" | "error" => true,
+        "result" => {
+            value
+                .get("is_error")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+                || value
+                    .get("subtype")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|subtype| subtype == "failed" || subtype.contains("error"))
+        }
+        _ => false,
+    }
+}
+
+fn _classify_provider_error_value<T>(
+    value: &serde_json::Value,
+    classify: fn(&str) -> Option<T>,
+) -> Option<T> {
+    match value {
+        serde_json::Value::String(text) => classify(text),
+        serde_json::Value::Object(fields) => fields
+            .values()
+            .find_map(|value| _classify_provider_error_value(value, classify)),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(|value| _classify_provider_error_value(value, classify)),
+        _ => None,
+    }
+}
+
+fn _classify_transient_text(text: &str) -> Option<AgentFailure> {
+    let text = text.to_ascii_lowercase();
+    if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
+        Some(AgentFailure::Capacity)
+    } else if text.contains("rate limit")
+        || text.contains("rate_limit")
+        || text.contains("too many requests")
+        || text.contains("status 429")
+        || text.contains("status code 429")
+    {
+        Some(AgentFailure::RateLimit)
+    } else if text.contains("temporarily unavailable")
+        || text.contains("service unavailable")
+        || text.contains("server is busy")
+        || text.contains("server overloaded")
+        || text.contains("try again later")
+        || text.contains("internal server error")
+        || text.contains("status 502")
+        || text.contains("status 503")
+        || text.contains("status 504")
+    {
+        Some(AgentFailure::Unavailable)
+    } else if text.contains("connection reset")
+        || text.contains("connection closed")
+        || text.contains("connection refused")
+        || text.contains("network error")
+        || text.contains("request timed out")
+        || text.contains("request timeout")
+    {
+        Some(AgentFailure::Transport)
+    } else {
+        None
+    }
+}
+
+fn _account_limit_signal(harness: &str, result: &LaunchResult) -> Option<RateLimitSignal> {
+    let mut signal = result
+        .stdout
+        .lines()
+        .filter_map(|line| match harness {
+            "claude" => crate::harness::claude_rate_limit_signal(line),
+            "codex" => serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| crate::harness::codex_rate_limit_signal(&value)),
+            _ => None,
+        })
+        .max_by_key(|signal| (signal.limited, signal.utilization_percent.unwrap_or(0)));
+
+    if result.exit_code != 0 && _find_provider_error(result, _classify_subscription_limit).is_some()
+    {
+        signal = Some(RateLimitSignal {
+            utilization_percent: Some(100),
+            resets_at: signal.as_ref().and_then(|signal| signal.resets_at),
+            limited: true,
+            reason: "subscription usage limit".to_string(),
+            windows: signal.map(|signal| signal.windows).unwrap_or_default(),
+        });
+    }
+    signal
+}
+
+fn _classify_subscription_limit(text: &str) -> Option<()> {
+    let text = text.to_ascii_lowercase();
+    (text.contains("you've hit your usage limit")
+        || text.contains("you have hit your usage limit")
+        || text.contains("usage limit reached")
+        || text.contains("usage limit has been reached")
+        || text.contains("subscription limit")
+        || text.contains("subscription quota")
+        || text.contains("quota exceeded")
+        || text.contains("insufficient_quota")
+        || text.contains("rate_limit_reached"))
+    .then_some(())
+}
+
+fn _provider_resume_token(result: &LaunchResult) -> Option<String> {
+    result.stdout.lines().find_map(|line| {
+        let value: serde_json::Value = serde_json::from_str(line).ok()?;
+        let session_id = [
+            value.get("session_id"),
+            value.get("sessionId"),
+            value.get("thread_id"),
+            value.pointer("/stream_event/event/session_id"),
+            value.pointer("/params/thread/id"),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|value| value.as_str().filter(|value| !value.is_empty()))
+        .map(str::to_string);
+        session_id
+    })
+}
+
+fn _launch_agent_once(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    capabilities: &AgentCapabilities,
+    retry: bool,
+) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
@@ -938,13 +1253,17 @@ pub fn launch_agent(
         "codex" => Some(Provider::Codex),
         _ => None,
     };
-    let account_route = managed_provider
-        .map(|provider| resolve_provider_account_blocking(provider, None))
+    let account_route = match managed_provider
+        .map(|provider| resolve_provider_account_blocking(provider, launch.resume_token.clone()))
         .transpose()
-        .map_err(|error| {
-            CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
-        })?
-        .flatten();
+    {
+        Ok(route) => route.flatten(),
+        Err(error) => {
+            return Ok(AgentAttempt::AccountUnavailable(
+                CoreError::ExecutionFailed(format!("failed to select provider account: {error}")),
+            ));
+        }
+    };
     if account_route
         .as_ref()
         .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
@@ -953,7 +1272,19 @@ pub fn launch_agent(
         cmd.args(["-c", "cli_auth_credentials_store=\"file\""]);
     }
     if let Some(route) = &account_route {
+        tracing::info!(
+            provider = %harness,
+            account_id = %route.account_id(),
+            "selected provider account"
+        );
         route.apply(&mut cmd);
+    }
+    if retry {
+        if let Some(capture) = &process.capture {
+            capture
+                .fail_and_begin_launch(harness.clone(), model.clone(), &launch.task_prompt)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        }
     }
     apply_harness_env(&harness, &mut cmd, process);
 
@@ -1009,6 +1340,18 @@ pub fn launch_agent(
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
     };
+    let mut can_failover = account_route.is_some();
+    if let (Some(route), Ok(result)) = (&account_route, &result) {
+        let resume_token = _provider_resume_token(result);
+        let signal = _account_limit_signal(&harness, result);
+        let limited = signal.as_ref().is_some_and(|signal| signal.limited);
+        if let Err(error) = route.record_launch_blocking(resume_token, signal) {
+            tracing::warn!(%error, "failed to record provider account launch");
+            if limited {
+                can_failover = false;
+            }
+        }
+    }
     if let Some(capture) = implicit_capture {
         let outcome = match &result {
             Ok(result) if result.exit_code == 0 => "completed",
@@ -1018,7 +1361,10 @@ pub fn launch_agent(
             .finish(outcome, !process.auto)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    result
+    result.map(|result| AgentAttempt::Finished {
+        result,
+        can_failover,
+    })
 }
 
 fn launch_batch(
@@ -1096,6 +1442,7 @@ fn launch_batch(
         exit_code: status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
         stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
+        failure: None,
     })
 }
 
@@ -1125,6 +1472,7 @@ fn launch_interactive(
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
+        failure: None,
     })
 }
 
@@ -1280,6 +1628,7 @@ fn launch_streaming(
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
+        failure: None,
     })
 }
 
@@ -2053,6 +2402,7 @@ trust_level = "trusted"
             agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
+            resume_token: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2077,6 +2427,7 @@ trust_level = "trusted"
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
+            resume_token: None,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2101,6 +2452,7 @@ trust_level = "trusted"
             agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
+            resume_token: None,
             skip_permissions: false,
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".to_string(),
@@ -2159,5 +2511,272 @@ trust_level = "trusted"
         assert_eq!(cmd.first(), Some(&"claude".to_string()));
         assert!(cmd.contains(&"--model".to_string()));
         assert!(cmd.contains(&unknown_model.to_string()));
+    }
+
+    fn managed_attempt(result: LaunchResult) -> AgentAttempt {
+        AgentAttempt::Finished {
+            result,
+            can_failover: true,
+        }
+    }
+
+    fn failed_result(message: &str) -> LaunchResult {
+        LaunchResult {
+            exit_code: 1,
+            stdout: format!(r#"{{"type":"turn.failed","error":{{"message":"{message}"}}}}"#),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn transient_capacity_failure_resumes_and_finishes() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            task_prompt: "compress the branch".to_string(),
+            ..Default::default()
+        };
+        let process = auto_process();
+        let mut results = vec![
+            LaunchResult {
+                exit_code: 1,
+                stdout: concat!(
+                    "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}\n",
+                    "{\"type\":\"turn.failed\",\"error\":{\"message\":\"Selected model is at capacity. Please try a different model.\"}}\n"
+                )
+                .to_string(),
+                stderr: String::new(),
+                failure: None,
+            },
+            LaunchResult {
+                exit_code: 0,
+                ..Default::default()
+            },
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let mut waits = Vec::new();
+
+        let result = _launch_with_transient_retries(
+            &launch,
+            &process,
+            &[Duration::ZERO],
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
+                attempts.push(config.clone());
+                Ok(managed_attempt(
+                    results.next().expect("scripted launch result"),
+                ))
+            },
+            |delay| waits.push(delay),
+        )
+        .expect("retry succeeds");
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].task_prompt, "compress the branch");
+        assert_eq!(attempts[0].resume_token, None);
+        assert_eq!(attempts[1].task_prompt, RETRY_PROMPT);
+        assert_eq!(attempts[1].resume_token.as_deref(), Some("thread-123"));
+        assert_eq!(waits, vec![Duration::ZERO]);
+    }
+
+    #[test]
+    fn subscription_limit_fails_over_without_resuming_the_account_session() {
+        let launch = AgentConfig {
+            agent: Some("claude:opus".to_string()),
+            task_prompt: "compress the branch".to_string(),
+            ..Default::default()
+        };
+        let process = auto_process();
+        let failure = LaunchResult {
+            exit_code: 1,
+            stdout: concat!(
+                "{\"type\":\"system\",\"session_id\":\"session-123\"}\n",
+                "{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\",\"rate_limit_type\":\"five_hour\",\"utilization\":1.0,\"resets_at\":1900000000}}\n",
+                "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":\"You've hit your usage limit\"}\n"
+            )
+            .to_string(),
+            stderr: String::new(),
+            failure: None,
+        };
+        assert!(matches!(
+            _classify_agent_failure("claude", &failure),
+            Some(AgentFailure::AccountSubscriptionLimit {
+                resets_at: Some(1_900_000_000)
+            })
+        ));
+        let mut results = vec![
+            failure,
+            LaunchResult {
+                exit_code: 0,
+                ..Default::default()
+            },
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+        let mut waits = Vec::new();
+
+        let result = _launch_with_transient_retries(
+            &launch,
+            &process,
+            &[Duration::from_secs(30)],
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
+                attempts.push(config.clone());
+                Ok(managed_attempt(
+                    results.next().expect("scripted launch result"),
+                ))
+            },
+            |delay| waits.push(delay),
+        )
+        .expect("account failover succeeds");
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[1].resume_token, None);
+        assert!(attempts[1].task_prompt.starts_with(FAILOVER_PROMPT));
+        assert!(attempts[1].task_prompt.contains("compress the branch"));
+        assert_eq!(waits, vec![Duration::ZERO]);
+    }
+
+    #[test]
+    fn unavailable_account_failover_returns_the_typed_failure() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let mut attempts = 0;
+
+        let result = _launch_with_transient_retries(
+            &launch,
+            &process,
+            &[Duration::ZERO],
+            |_, _| {
+                attempts += 1;
+                if attempts > 1 {
+                    return Ok(AgentAttempt::AccountUnavailable(
+                        CoreError::ExecutionFailed("no eligible account".to_string()),
+                    ));
+                }
+                Ok(managed_attempt(failed_result(
+                    "You've hit your usage limit",
+                )))
+            },
+            |_| {},
+        )
+        .expect("typed launch failure is returned");
+
+        assert!(matches!(
+            result.failure,
+            Some(AgentFailure::AccountSubscriptionLimit { .. })
+        ));
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn unrecorded_subscription_limit_is_not_retried() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let result = _launch_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |_, _| {
+                Ok(AgentAttempt::Finished {
+                    result: failed_result("You've hit your usage limit"),
+                    can_failover: false,
+                })
+            },
+            |_| panic!("unsafe failover must not retry"),
+        )
+        .expect("typed launch failure is returned");
+
+        assert!(matches!(
+            result.failure,
+            Some(AgentFailure::AccountSubscriptionLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn permanent_agent_failure_is_not_retried() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let mut attempts = 0;
+
+        let result = _launch_with_transient_retries(
+            &launch,
+            &process,
+            &[Duration::ZERO],
+            |_, _| {
+                attempts += 1;
+                Ok(managed_attempt(failed_result("invalid request")))
+            },
+            |_| panic!("permanent failure must not wait"),
+        )
+        .expect("nonzero launch result is returned");
+
+        assert_eq!(result.exit_code, 1);
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn transient_retry_exhaustion_returns_last_failure() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let process = auto_process();
+        let mut attempts = 0;
+        let mut waits = 0;
+
+        let result = _launch_with_transient_retries(
+            &launch,
+            &process,
+            &[Duration::ZERO, Duration::ZERO],
+            |_, _| {
+                attempts += 1;
+                let mut result = failed_result("service unavailable");
+                result.exit_code = attempts;
+                Ok(managed_attempt(result))
+            },
+            |_| waits += 1,
+        )
+        .expect("last launch result is returned");
+
+        assert_eq!(result.exit_code, 3);
+        assert_eq!(result.failure, Some(AgentFailure::Unavailable));
+        assert_eq!(attempts, 3);
+        assert_eq!(waits, 2);
+    }
+
+    #[test]
+    fn resumed_commands_preserve_provider_session() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            resume_token: Some("thread-123".to_string()),
+            ..default_launch()
+        };
+        let codex = build_codex_command(&launch, &auto_process(), None);
+        assert_eq!(&codex[..3], ["codex", "exec", "resume"]);
+        assert_eq!(codex.last().map(String::as_str), Some("thread-123"));
+
+        let launch = AgentConfig {
+            agent: Some("claude:opus".to_string()),
+            resume_token: Some("session-123".to_string()),
+            ..default_launch()
+        };
+        let claude = build_claude_command(
+            &launch,
+            &auto_process(),
+            &AgentCapabilities::default(),
+            Some("opus"),
+        );
+        assert_arg_pair(&claude, "--resume", "session-123");
     }
 }

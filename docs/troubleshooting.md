@@ -49,8 +49,16 @@ acceptance is not incorporation; the Basis of a later successful boundary is.
 
 **Symptom:** Tasks fail with rate limit errors.
 
-Claude, Codex, Gemini, and OpenCode have usage limits. Resume the same Session
-on another supported Session provider:
+One-shot headless runs retry transient capacity, rate-limit, availability, and
+transport failures four times. Codex and Claude continue the same provider
+session, preserving partial work; the backoff ladder tops out at 30 seconds.
+
+Managed-account subscription exhaustion takes a different path: Loopflow marks
+the account unavailable until its reported reset and immediately tries the next
+account in the grant. `--account` retains the normal route as fallback;
+`--only-account` stays inside the accounts it names.
+
+If the retries exhaust for a managed Task, resume it on another provider:
 
 ```bash
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"

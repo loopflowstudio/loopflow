@@ -112,7 +112,7 @@ fn normalize_timestamp(timestamp: i64) -> i64 {
     }
 }
 
-pub(super) fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
+pub(crate) fn rate_limit_signal(params: &Value) -> Option<RateLimitSignal> {
     let snapshot = params.get("rateLimits").unwrap_or(params);
     let reached = snapshot.get("rateLimitReachedType").and_then(Value::as_str);
     let plan = snapshot.get("planType").and_then(Value::as_str);

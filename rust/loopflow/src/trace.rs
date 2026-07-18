@@ -867,6 +867,39 @@ impl CaptureHandle {
         capture.finish_current_turn(status, OffsetDateTime::now_utc().unix_timestamp())
     }
 
+    pub(crate) fn fail_and_begin_launch(
+        &self,
+        provider: String,
+        model: Option<String>,
+        text: &str,
+    ) -> StoreResult<()> {
+        let mut capture = self.0.lock().expect("trace capture mutex poisoned");
+        if capture.launch.control.is_some() {
+            return Err(StoreError::InvalidData(
+                "a control Launch successor must be reserved before capture".to_string(),
+            ));
+        }
+        let context = capture.context.clone();
+        let start = CaptureStart {
+            provider,
+            model,
+            surface: capture.launch.surface.clone(),
+            input_op: "message".to_string(),
+            gather_ms: 0,
+            render_ms: 0,
+            raw_provider: capture.provider_path.is_some(),
+            basis: None,
+            control: None,
+        };
+        capture.finish("failed", false)?;
+        *capture = TraceCapture::begin(
+            context,
+            PreparedTurnContext::provider_total_only(text),
+            start,
+        )?;
+        Ok(())
+    }
+
     pub fn current_turn_id(&self) -> String {
         self.0
             .lock()
@@ -908,6 +941,7 @@ impl CaptureHandle {
 
 #[derive(Debug)]
 struct TraceCapture {
+    context: TraceCaptureContext,
     launch: AgentLaunchRow,
     turn: AgentTurnRow,
     conversation_path: PathBuf,
@@ -1018,11 +1052,11 @@ impl TraceCapture {
             ended_at: None,
             repo: context.repo.display().to_string(),
             worktree: context.worktree.display().to_string(),
-            wave: context.wave,
-            flow: context.flow,
-            skill: context.skill,
-            project: context.project,
-            task: context.task,
+            wave: context.wave.clone(),
+            flow: context.flow.clone(),
+            skill: context.skill.clone(),
+            project: context.project.clone(),
+            task: context.task.clone(),
             provider: start.provider,
             model: start.model,
             surface: start.surface,
@@ -1099,6 +1133,7 @@ impl TraceCapture {
         }
 
         Ok(Self {
+            context,
             launch,
             turn,
             conversation_path: published_conversation_path,
@@ -1875,28 +1910,42 @@ mod tests {
             content: "partial child answer".to_string(),
         });
         capture.begin_turn("message", "follow up").unwrap();
+        capture
+            .fail_and_begin_launch(
+                "codex".to_string(),
+                Some("gpt-5.6".to_string()),
+                "retry after provider failure",
+            )
+            .unwrap();
         capture.finish("completed", false).unwrap();
 
         let store = crate::journal::open_ledger().unwrap();
         let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
-        assert_eq!(launches.len(), 1);
-        assert_eq!(launches[0].capture_status, "complete");
+        assert_eq!(launches.len(), 2);
+        assert_eq!(launches[0].outcome, "failed");
+        assert_eq!(launches[1].outcome, "completed");
+        assert_eq!(launches[1].capture_status, "complete");
         assert_eq!(launches[0].project.as_deref(), Some("context"));
         assert_eq!(launches[0].task.as_deref(), Some("W2-71"));
         assert!(!std::path::Path::new(&launches[0].artifact_dir).is_absolute());
         let conversation = super::resolve_artifact(&launches[0].conversation_path).unwrap();
         assert!(conversation.is_file());
-        let turns = store
+        let first_turns = store
             .agent_turns_for_launches(&[launches[0].id.clone()])
             .unwrap();
-        assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0].status, "partial");
+        assert_eq!(first_turns.len(), 2);
+        assert_eq!(first_turns[0].status, "partial");
         assert_eq!(
-            turns[0].root_output.as_deref(),
+            first_turns[0].root_output.as_deref(),
             Some("partial child answer")
         );
-        assert_eq!(turns[1].context_coverage, "provider_total_only");
-        assert_eq!(turns[1].provider_input_tokens, None);
+        assert_eq!(first_turns[1].status, "failed");
+        let retry_turns = store
+            .agent_turns_for_launches(&[launches[1].id.clone()])
+            .unwrap();
+        assert_eq!(retry_turns.len(), 1);
+        assert_eq!(retry_turns[0].context_coverage, "provider_total_only");
+        assert_eq!(retry_turns[0].provider_input_tokens, None);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

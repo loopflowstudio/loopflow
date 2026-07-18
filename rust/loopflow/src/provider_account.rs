@@ -162,6 +162,10 @@ impl std::fmt::Debug for ProviderAccountRoute {
 }
 
 impl ProviderAccountRoute {
+    pub(crate) fn account_id(&self) -> &ProviderAccountId {
+        &self.account_id
+    }
+
     pub(crate) fn resume_requested_session(&self) -> bool {
         self.resume_requested_session
     }
@@ -230,6 +234,30 @@ impl ProviderAccountRoute {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn record_launch_blocking(
+        &self,
+        provider_session_id: Option<String>,
+        signal: Option<RateLimitSignal>,
+    ) -> Result<(), ProviderAccountError> {
+        if provider_session_id.is_none() && signal.is_none() {
+            return Ok(());
+        }
+        let route = self.clone();
+        _run_blocking_account(self.provider, "record", move |runtime| {
+            runtime.block_on(async {
+                if let Some(signal) = signal {
+                    route.record_rate_limit(&signal).await?;
+                }
+                if let Some(provider_session_id) = provider_session_id {
+                    if let Err(error) = route.pin_session(&provider_session_id).await {
+                        tracing::warn!(%error, "failed to pin provider session account");
+                    }
+                }
+                Ok(())
+            })
+        })
     }
 }
 
@@ -579,21 +607,31 @@ pub(crate) fn resolve_provider_account_blocking(
     provider: Provider,
     provider_session_id: Option<String>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    _run_blocking_account(provider, "route", move |runtime| {
+        runtime.block_on(resolve_provider_account(
+            provider,
+            provider_session_id.as_deref(),
+        ))
+    })
+}
+
+fn _run_blocking_account<T: Send + 'static>(
+    provider: Provider,
+    action: &'static str,
+    operation: impl FnOnce(&tokio::runtime::Runtime) -> Result<T, ProviderAccountError> + Send + 'static,
+) -> Result<T, ProviderAccountError> {
     std::thread::Builder::new()
-        .name(format!("lf-{}-account-route", provider.as_str()))
+        .name(format!("lf-{}-account-{action}", provider.as_str()))
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-            runtime.block_on(resolve_provider_account(
-                provider,
-                provider_session_id.as_deref(),
-            ))
+            operation(&runtime)
         })
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
         .join()
-        .map_err(|_| ProviderAccountError::Runtime("account resolver panicked".to_string()))?
+        .map_err(|_| ProviderAccountError::Runtime(format!("account {action} worker panicked")))?
 }
 
 async fn route_store() -> Result<Option<SharedStore>, ProviderAccountError> {
@@ -1082,6 +1120,57 @@ mod account_first_tests {
             .unwrap()
             .last_selected_at
             .is_some());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn hard_limit_moves_the_route_to_the_next_account() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let first = account(Provider::Codex, "first", temp.path());
+        let second = account(Provider::Codex, "second", temp.path());
+        store.upsert_provider_account(&first).await.unwrap();
+        store.upsert_provider_account(&second).await.unwrap();
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Codex,
+                accounts: vec![first.account_id.clone(), second.account_id.clone()],
+                created_at: now_unix(),
+                updated_at: now_unix(),
+            })
+            .await
+            .unwrap();
+
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .expect("first routed account");
+        assert_eq!(route.account_id, first.account_id);
+        route
+            .record_rate_limit(&RateLimitSignal {
+                utilization_percent: Some(100),
+                resets_at: Some(now_unix() + 300),
+                limited: true,
+                reason: "subscription usage limit".to_string(),
+                windows: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let failover = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .expect("second routed account");
+        assert_eq!(failover.account_id, second.account_id);
     }
 
     #[tokio::test]

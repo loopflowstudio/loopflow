@@ -153,7 +153,7 @@ struct DTOFixtureTests {
         let surface = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: data)
 
         #expect(surface.id == "launch_00000000000000000000000000000001")
-        #expect(surface.work.kind == "task")
+        #expect(surface.work.kind == .task)
         #expect(surface.status == .live)
         #expect(surface.attention?.kind == "user")
         #expect(surface.attentionAt == "2026-07-17T12:01:00Z")
@@ -168,52 +168,36 @@ struct DTOFixtureTests {
     func workStatusFixtureRoundTrips() throws {
         let data = try loadFixtureData("work_statuses.json")
         let statuses = try JSONDecoder().decode([WorkStatus].self, from: data)
+        func wait(at index: Int) -> WorkWait? {
+            guard case .waiting(let wait) = statuses[index] else { return nil }
+            return wait
+        }
 
         #expect(statuses[0] == .ready)
         #expect(statuses[1] == .running(runID: "run_00000000000000000000000000000001"))
-        if case .waiting(let wait) = statuses[2] {
-            #expect(wait.on == .input(after: WorkBasis(
-                epochID: "epoch_00000000000000000000000000000004",
-                revision: 7
-            )))
-        } else {
-            Issue.record("expected input wait")
-        }
-        if case .waiting(let wait) = statuses[3] {
-            #expect(wait.on == .time(notBefore: "2026-07-17T13:00:00Z"))
-        } else {
-            Issue.record("expected time wait")
-        }
-        if case .waiting(let wait) = statuses[4] {
-            #expect(wait.on == .event(WorkEventReference(source: "github", id: "check-42")))
-        } else {
-            Issue.record("expected event wait")
-        }
-        if case .waiting(let wait) = statuses[5] {
-            #expect(wait.on == .child(WorkReference(
-                kind: .task,
-                id: "task_0000000000000000000000000000000e"
-            )))
-        } else {
-            Issue.record("expected child wait")
-        }
-        if case .waiting(let wait) = statuses[6] {
-            #expect(wait.on == .capability(WorkCapabilityReference(
-                kind: "deploy",
-                key: "production"
-            )))
-        } else {
-            Issue.record("expected capability wait")
-        }
-        if case .waiting(let wait) = statuses[7] {
-            #expect(wait.on == .effect(WorkEffectReference(
-                kind: "message",
-                idempotencyKey: "release-ready"
-            )))
-            #expect(wait.resolvedAt == "2026-07-17T12:06:00Z")
-        } else {
-            Issue.record("expected effect wait")
-        }
+        #expect(try #require(wait(at: 2)).on == .input(after: WorkBasis(
+            epochID: "epoch_00000000000000000000000000000004",
+            revision: 7
+        )))
+        #expect(try #require(wait(at: 3)).on == .time(notBefore: "2026-07-17T13:00:00Z"))
+        #expect(try #require(wait(at: 4)).on == .event(WorkEventReference(
+            source: "github",
+            id: "check-42"
+        )))
+        #expect(try #require(wait(at: 5)).on == .child(WorkReference(
+            kind: .task,
+            id: "task_0000000000000000000000000000000e"
+        )))
+        #expect(try #require(wait(at: 6)).on == .capability(WorkCapabilityReference(
+            kind: "deploy",
+            key: "production"
+        )))
+        let effectWait = try #require(wait(at: 7))
+        #expect(effectWait.on == .effect(WorkEffectReference(
+            kind: "message",
+            idempotencyKey: "release-ready"
+        )))
+        #expect(effectWait.resolvedAt == "2026-07-17T12:06:00Z")
         #expect(statuses[8] == .done)
         #expect(statuses[9] == .abandoned)
 

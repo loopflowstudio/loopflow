@@ -1,4 +1,3 @@
-import SwiftUI
 import Testing
 @testable import Loopflow
 
@@ -53,12 +52,5 @@ struct WaveTests {
         )
 
         #expect(wave.objectiveTagline == "Make releases boring.")
-    }
-
-    @Test("status owns its visual treatment")
-    func statusOwnsVisualTreatment() {
-        #expect(WorkStatus.running(runID: "run_test").icon == "circle.fill")
-        #expect(WorkStatus.running(runID: "run_test").color == .statusSuccess)
-        #expect(WorkStatus.ready.icon == "circle")
     }
 }

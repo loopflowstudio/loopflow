@@ -17,8 +17,6 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
 
     public var repo: String { api.repo }
 
-    public var status: WorkStatus { api.status }
-
     public var displayName: String { name }
 
     /// The stable id of this Wave's parent, when one exists. Drives future
@@ -41,7 +39,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         }
         return WaveLens.forWave(
             live: api.live,
-            status: status,
+            status: api.status,
             activeTasks: api.activeTasks,
             activeProjects: api.activeProjects
         )

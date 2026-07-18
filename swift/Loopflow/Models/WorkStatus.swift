@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 
 public enum WorkStatus: Codable, Sendable, Hashable {
     case ready
@@ -91,24 +91,6 @@ public enum WorkStatus: Codable, Sendable, Hashable {
         }
     }
 
-    public var color: Color {
-        switch self {
-        case .running, .done: .statusSuccess
-        case .waiting: .statusWarning
-        case .abandoned: .statusError
-        case .ready: .statusNeutral
-        }
-    }
-
-    public var icon: String {
-        switch self {
-        case .ready: "circle"
-        case .running: "circle.fill"
-        case .waiting: "pause.circle"
-        case .done: "checkmark.circle.fill"
-        case .abandoned: "xmark.circle"
-        }
-    }
 }
 
 public struct WorkReference: Codable, Sendable, Hashable {

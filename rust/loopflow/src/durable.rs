@@ -906,60 +906,24 @@ mod tests {
 
         assert!(matches!(statuses[0], WorkStatus::Ready));
         assert!(matches!(statuses[1], WorkStatus::Running { .. }));
-        assert!(matches!(
-            statuses[2],
-            WorkStatus::Waiting {
-                wait: super::Wait {
-                    on: WaitOn::Input { .. },
-                    ..
-                }
-            }
-        ));
-        assert!(matches!(
-            statuses[3],
-            WorkStatus::Waiting {
-                wait: super::Wait {
-                    on: WaitOn::Time { .. },
-                    ..
-                }
-            }
-        ));
-        assert!(matches!(
-            statuses[4],
-            WorkStatus::Waiting {
-                wait: super::Wait {
-                    on: WaitOn::Event { .. },
-                    ..
-                }
-            }
-        ));
-        assert!(matches!(
-            statuses[5],
-            WorkStatus::Waiting {
-                wait: super::Wait {
-                    on: WaitOn::Child { .. },
-                    ..
-                }
-            }
-        ));
-        assert!(matches!(
-            statuses[6],
-            WorkStatus::Waiting {
-                wait: super::Wait {
-                    on: WaitOn::Capability { .. },
-                    ..
-                }
-            }
-        ));
-        assert!(matches!(
-            statuses[7],
-            WorkStatus::Waiting {
-                wait: super::Wait {
-                    on: WaitOn::Effect { .. },
-                    ..
-                }
-            }
-        ));
+        let wait_kinds = statuses[2..8]
+            .iter()
+            .map(|status| match status {
+                WorkStatus::Waiting { wait } => match &wait.on {
+                    WaitOn::Input { .. } => "input",
+                    WaitOn::Time { .. } => "time",
+                    WaitOn::Event { .. } => "event",
+                    WaitOn::Child { .. } => "child",
+                    WaitOn::Capability { .. } => "capability",
+                    WaitOn::Effect { .. } => "effect",
+                },
+                _ => panic!("expected waiting status"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            wait_kinds,
+            ["input", "time", "event", "child", "capability", "effect"]
+        );
         assert!(matches!(statuses[8], WorkStatus::Done));
         assert!(matches!(statuses[9], WorkStatus::Abandoned));
 

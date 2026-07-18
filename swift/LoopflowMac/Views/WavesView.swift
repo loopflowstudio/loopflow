@@ -10,10 +10,6 @@ enum RepoFilter: Hashable {
     case repo(String)
 }
 
-private struct AuthoredWaveSnapshot: Hashable {
-    let name: String
-}
-
 struct WavesView: View {
     let portfolioService: PortfolioService
 
@@ -34,7 +30,7 @@ struct WavesView: View {
 
     /// Authored waves discovered on disk per repo path: `<repo>/wave/<name>/GOAL.md`.
     /// Merged with registered waves so not-yet-launched waves are still listed.
-    @State private var authoredWavesByRepo: [String: [AuthoredWaveSnapshot]] = [:]
+    @State private var authoredWavesByRepo: [String: [String]] = [:]
     @State private var plansByWaveKey: [String: WavePlan] = [:]
 
     @State private var selection: RepoFilter = .all
@@ -42,9 +38,6 @@ struct WavesView: View {
     @State private var isShowingCreate = false
     @State private var didApplyInitialRepo = false
     @State private var didRestoreStickyRepo = false
-
-    /// Synthetic id prefix for an authored Wave without a registry row yet.
-    private static let authoredIdPrefix = "authored:"
 
     /// All waves across every repo: registry rows merged with Waves authored on
     /// disk that have not been served yet.
@@ -59,8 +52,8 @@ struct WavesView: View {
         let live = repoStates[repo.path]?.waves ?? []
         let liveNames = Set(live.map(\.name))
         let placeholders = (authoredWavesByRepo[repo.path] ?? [])
-            .filter { !liveNames.contains($0.name) }
-            .map { authoredPlaceholder(repoPath: repo.path, snapshot: $0) }
+            .filter { !liveNames.contains($0) }
+            .map { authoredPlaceholder(repoPath: repo.path, waveName: $0) }
         return (live + placeholders).sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
@@ -92,15 +85,14 @@ struct WavesView: View {
         return result
     }
 
-    /// An idle, not-yet-launched row for a wave authored on disk. Its id carries the
-    /// `authoredIdPrefix` so the terminal pane knows to create-and-run on launch.
-    private func authoredPlaceholder(repoPath: String, snapshot: AuthoredWaveSnapshot) -> WaveViewModel {
+    /// An idle, not-yet-launched row for a wave authored on disk.
+    private func authoredPlaceholder(repoPath: String, waveName: String) -> WaveViewModel {
         WaveViewModel(api: Wave(
-            id: "\(Self.authoredIdPrefix)\(repoPath)#\(snapshot.name)",
-            name: snapshot.name,
+            id: "\(repoPath)#\(waveName)",
+            name: waveName,
             repo: repoPath,
             status: .ready
-        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)],
+        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: waveName)],
         isRegistered: false)
     }
 
@@ -474,7 +466,7 @@ struct WavesView: View {
         if AppTestMode.shouldBypassRegistry { return }
         let paths = repos.map(\.path)
         authoredWavesByRepo = await Task.detached {
-            var result: [String: [AuthoredWaveSnapshot]] = [:]
+            var result: [String: [String]] = [:]
             for path in paths {
                 result[path] = Self.authoredWaves(inRepo: path)
             }
@@ -483,7 +475,7 @@ struct WavesView: View {
     }
 
     /// Wave names authored on disk at `<repo>/wave/<name>/GOAL.md`, sorted.
-    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [AuthoredWaveSnapshot] {
+    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [String] {
         let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
         let fm = FileManager.default
         guard let children = try? fm.contentsOfDirectory(
@@ -499,8 +491,8 @@ struct WavesView: View {
                 let goal = url.appendingPathComponent("GOAL.md")
                 return fm.fileExists(atPath: goal.path, isDirectory: &isDir) && !isDir.boolValue
             }
-            .map { AuthoredWaveSnapshot(name: $0.lastPathComponent) }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map(\.lastPathComponent)
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     private func ensureRepoStates() {
@@ -579,10 +571,10 @@ struct WavesView: View {
             let key = Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
             targets[key] = (wave.repo, wave.name)
         }
-        for (repoPath, snapshots) in authored {
-            for snapshot in snapshots {
-                let key = Self.wavePlanKey(repoPath: repoPath, waveName: snapshot.name)
-                targets[key] = (repoPath, snapshot.name)
+        for (repoPath, waveNames) in authored {
+            for waveName in waveNames {
+                let key = Self.wavePlanKey(repoPath: repoPath, waveName: waveName)
+                targets[key] = (repoPath, waveName)
             }
         }
 

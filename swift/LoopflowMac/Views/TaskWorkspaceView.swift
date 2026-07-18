@@ -71,9 +71,9 @@ final class TaskTerminalStore: ObservableObject {
     }
 }
 
-enum TaskWorkspaceSection: String, Codable, CaseIterable, Identifiable, Hashable {
+enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
-    case agent = "Review"
+    case review = "Review"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -137,8 +137,8 @@ struct TaskWorkspaceView: View {
                 switch section {
                 case .changes:
                     changesView
-                case .agent:
-                    agentView
+                case .review:
+                    reviewView
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskSessionId: runtime.sessionId,
@@ -239,7 +239,7 @@ struct TaskWorkspaceView: View {
     }
 
     @ViewBuilder
-    private var agentView: some View {
+    private var reviewView: some View {
         if !canReview {
             ContentUnavailableView(
                 "No Review needs you",

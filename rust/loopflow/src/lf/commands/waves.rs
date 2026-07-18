@@ -1570,7 +1570,7 @@ fn derive_task_attention(
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
     let live = process.alive == Some(true);
-    let human_handoff = matches!(
+    let human_attention = matches!(
         next_move.owner,
         NextMoveOwner::Human | NextMoveOwner::Review
     );
@@ -1582,11 +1582,11 @@ fn derive_task_attention(
             TaskAttentionLevel::Blue,
             "Waiting for your Review".to_string(),
         )
-    } else if live && human_handoff {
+    } else if live && human_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())
     } else if live {
         (TaskAttentionLevel::Green, next_move.reason.clone())
-    } else if human_handoff {
+    } else if human_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())
     } else if process.state == TaskProcessEvidenceState::Unavailable
         && runtime.is_some_and(|runtime| runtime.status.is_process_active())

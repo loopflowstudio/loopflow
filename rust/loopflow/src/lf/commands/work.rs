@@ -331,7 +331,7 @@ enum ReviewGuardReply {
 }
 
 struct ReviewExitGuard {
-    input: Option<ChildStdin>,
+    input: ChildStdin,
     output: BufReader<ChildStdout>,
     _lock: std::fs::File,
 }
@@ -381,7 +381,7 @@ impl ReviewExitGuard {
             .take()
             .ok_or_else(|| anyhow!("Review exit guard did not open stdout"))?;
         let mut guard = Self {
-            input: Some(input),
+            input,
             output: BufReader::new(output),
             _lock: lock,
         };
@@ -406,20 +406,13 @@ impl ReviewExitGuard {
     }
 
     fn cancel(&mut self) {
-        if self.input.is_some() {
-            let _ = self.write_command(&ReviewGuardCommand::Cancel);
-            self.input = None;
-        }
+        let _ = self.write_command(&ReviewGuardCommand::Cancel);
     }
 
     fn write_command(&mut self, command: &ReviewGuardCommand) -> anyhow::Result<()> {
-        let input = self
-            .input
-            .as_mut()
-            .ok_or_else(|| anyhow!("Review exit guard input is closed"))?;
-        serde_json::to_writer(&mut *input, command)?;
-        input.write_all(b"\n")?;
-        input.flush()?;
+        serde_json::to_writer(&mut self.input, command)?;
+        self.input.write_all(b"\n")?;
+        self.input.flush()?;
         Ok(())
     }
 

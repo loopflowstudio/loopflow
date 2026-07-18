@@ -303,7 +303,7 @@ private enum TintStyle {
         switch tint {
         case .green: .statusSuccess
         case .red: .statusError
-        case .blue: Color(hex: 0x3578C8)
+        case .blue: WaveLensColor.blue.glow
         case .black: palette.text
         case .neutral: .statusNeutral
         }

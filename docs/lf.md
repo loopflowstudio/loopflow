@@ -307,26 +307,12 @@ parent merges. The two Tasks keep separate identities, worktrees, and workers.
 tmux remains containment and read-only inspection; Review input never writes
 terminal bytes into the provider process.
 
-## Reviewing Work
-
-Open what currently needs you, then continue the Work. The same Launches the Run
-controller owns remain inspectable through the generic attach descriptor:
-
 ```bash
-lf queue
-lf work review task task_0123456789abcdef0123456789abcdef
-lf work continue task task_0123456789abcdef0123456789abcdef
-
 lf launch list --active --json
 lf launch status launch_... --json
 lf launch present launch_...                 # exec the tmux/provider attach route
 lf launch handback launch_... --outcome succeeded
 ```
-
-Review is derived from the Work's current conversational flow step, live
-Launch, Basis, and User attention. It has no separate queue row, transcript,
-disposition, or terminal outcome. Typed lines become ordinary Steers; Continue
-only advances the flow interval.
 
 Closing the app or terminal does not end the Launch. For an opaque TUI, record
 the observed boundary result with

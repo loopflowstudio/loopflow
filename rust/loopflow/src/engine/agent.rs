@@ -932,7 +932,7 @@ pub fn launch_agent(
         launch,
         process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt| _launch_agent_once(attempt, process, capabilities),
+        |attempt, retry| _launch_agent_once(attempt, process, capabilities, retry),
         thread::sleep,
     )
 }
@@ -950,7 +950,7 @@ fn _launch_with_transient_retries(
     launch: &AgentConfig,
     process: &ProcessConfig,
     retry_delays: &[Duration],
-    mut run: impl FnMut(&AgentConfig) -> Result<AgentAttempt, CoreError>,
+    mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentAttempt, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<LaunchResult, CoreError> {
     let mut attempt_config = launch.clone();
@@ -958,7 +958,7 @@ fn _launch_with_transient_retries(
     let mut subscription_failure = None;
 
     loop {
-        let (mut result, can_failover) = match run(&attempt_config)? {
+        let (mut result, can_failover) = match run(&attempt_config, attempt > 1)? {
             AgentAttempt::Finished {
                 result,
                 can_failover,
@@ -1029,17 +1029,6 @@ fn _launch_with_transient_retries(
             "recoverable agent failure; retrying"
         );
         wait(delay);
-        if let Some(capture) = &process.capture {
-            if failover {
-                capture.set_provider_session_id(None);
-            }
-            let trace_result = capture
-                .finish_turn("failed")
-                .and_then(|()| capture.begin_turn("message", &attempt_config.task_prompt));
-            if let Err(error) = trace_result {
-                tracing::warn!(error = %error, "failed to record agent retry turn");
-            }
-        }
         attempt += 1;
     }
 }
@@ -1209,6 +1198,7 @@ fn _launch_agent_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
+    retry: bool,
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let cmd_args = build_model_command(launch, process, capabilities);
@@ -1288,6 +1278,13 @@ fn _launch_agent_once(
             "selected provider account"
         );
         route.apply(&mut cmd);
+    }
+    if retry {
+        if let Some(capture) = &process.capture {
+            capture
+                .fail_and_begin_launch(harness.clone(), model.clone(), &launch.task_prompt)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        }
     }
     apply_harness_env(&harness, &mut cmd, process);
 
@@ -2563,7 +2560,8 @@ trust_level = "trusted"
             &launch,
             &process,
             &[Duration::ZERO],
-            |config| {
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
                 attempts.push(config.clone());
                 Ok(managed_attempt(
                     results.next().expect("scripted launch result"),
@@ -2622,7 +2620,8 @@ trust_level = "trusted"
             &launch,
             &process,
             &[Duration::from_secs(30)],
-            |config| {
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
                 attempts.push(config.clone());
                 Ok(managed_attempt(
                     results.next().expect("scripted launch result"),
@@ -2653,7 +2652,7 @@ trust_level = "trusted"
             &launch,
             &process,
             &[Duration::ZERO],
-            |_| {
+            |_, _| {
                 attempts += 1;
                 if attempts > 1 {
                     return Ok(AgentAttempt::AccountUnavailable(
@@ -2685,7 +2684,7 @@ trust_level = "trusted"
             &launch,
             &auto_process(),
             &[Duration::ZERO],
-            |_| {
+            |_, _| {
                 Ok(AgentAttempt::Finished {
                     result: failed_result("You've hit your usage limit"),
                     can_failover: false,
@@ -2714,7 +2713,7 @@ trust_level = "trusted"
             &launch,
             &process,
             &[Duration::ZERO],
-            |_| {
+            |_, _| {
                 attempts += 1;
                 Ok(managed_attempt(failed_result("invalid request")))
             },
@@ -2740,7 +2739,7 @@ trust_level = "trusted"
             &launch,
             &process,
             &[Duration::ZERO, Duration::ZERO],
-            |_| {
+            |_, _| {
                 attempts += 1;
                 let mut result = failed_result("service unavailable");
                 result.exit_code = attempts;

@@ -366,24 +366,23 @@ pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLeas
             .map_err(child_error);
     }
 
-    let agent_context = [
-        RUN_CONTEXT_ENV,
-        "LF_PROJECT_SESSION_ID",
-        "LF_PROJECT_GENERATION",
-        "LF_PROJECT_LEASE_TOKEN",
-        "LF_TASK_SESSION_ID",
-        "LF_TASK_GENERATION",
-        "LF_TASK_LEASE_TOKEN",
-    ]
-    .iter()
-    .any(|name| std::env::var_os(name).is_some());
-    if agent_context {
-        Err(child_error(
-            "in-Run agent process has no LF_RUN_LEASE; refusing User authority",
-        ))
-    } else {
-        Ok(None)
+    // `LF_RUN_CONTEXT` is the sole positive marker that this process is an
+    // agent body rather than a person at a shell. It matters because User
+    // authority is the ambient fallback: `AuthenticatedRequest::cli()` treats
+    // local shell presence as the user, which is right for a local-first
+    // product but means a body that lost its lease would otherwise inherit
+    // full User rights. Every Launch sets this var, so its presence without a
+    // resolvable lease is a fenced or stale writer and must fail closed.
+    //
+    // This deliberately does not consult the legacy Session env vars. They
+    // served as this sentinel before Run owned authority; keying on them now
+    // would make deleting them a silent privilege escalation.
+    if std::env::var_os(RUN_CONTEXT_ENV).is_some() {
+        return Err(child_error(
+            "in-Run agent process has no usable LF_RUN_LEASE; refusing User authority",
+        ));
     }
+    Ok(None)
 }
 
 pub(crate) async fn required_run_lease(store: &Store) -> OpsResult<RunLease> {

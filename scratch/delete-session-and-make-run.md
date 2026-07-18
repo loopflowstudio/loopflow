@@ -160,6 +160,49 @@ Do **not** start stage 3 until both extractions compile and the old runners are
 thin wrappers over them — that is what makes the deletion mechanical instead of
 a rewrite.
 
+#### Blast-radius survey (measured; corrects the kickoff estimate)
+
+The kickoff called `generation` a 359-reference mechanical wavefront. That was
+wrong in a useful direction: **only 12 function signatures take it**, none
+returns it, and the bulk of the ~400 token hits are `.generation` field reads
+inside code already slated for deletion. Three SQL columns
+(`process_generation` ×24 in one file, `lease_generation` ×8 in one file) and
+one event variant (`LeaseRevoked`) carry the rest.
+
+Likewise the ~95 production Session write-call-sites **funnel through three
+wrappers**: `ops/task.rs:891–995` (the `*_with_authority` family),
+`task/runner.rs:1499` (`set_and_record_status`), and
+`project_session/runner.rs:942`. Retargeting those three onto Run/Launch covers
+most of the mechanical work. (`store/mod.rs`'s 34 apparent hits are entirely
+inside `mod tests`, which starts at line 1021.)
+
+`ops/task.rs` is **46% tests** — production is lines 1–5060 only. Of that:
+~1,600 deletable Session lifecycle (`task_run` 363–742; `record_task_failure`
+…`launch_task_process` 1681–1956; the supervision/recovery block 1957–2463,
+the single biggest deletable run; control verbs 4715–5060), ~2,900 must-survive
+PR/CI/git/gate/workspace domain, ~550 genuinely mixed. The hardest single
+function is `reconcile_task_pr_with_authority` (2734–3056, ~320 lines), which
+interleaves PR reconciliation with Session status writes at 2875–2931, 2959,
+and 3005–3040.
+
+**Category (d) — needs redesign, not deletion.** These use the Session enum as
+a *vocabulary* for real domain policy:
+
+| Site | What it really encodes |
+| --- | --- |
+| `task/mod.rs:172,179` | `TaskGateProposal` settle-outcome validation — needs its own outcome enum |
+| `task/mod.rs:916,924` | PM writeback invariants (completed vs gate cycle) |
+| `ops/task.rs:2489` | `decide_open_pr_status` — pure CI-triage policy returning the Session enum; must re-emit as a Run/Wait decision |
+| `ops/task.rs:2959,3037` | edge-triggered "merge completes Task" detection; needs a Run-terminal-transition equivalent |
+| `project_session/runner.rs:848–878` | Project outcome aggregation over child Task statuses, incl. the `Blocked` fingerprint-stall rule — real supervisory policy |
+| `store/sqlite/child_sessions.rs:146,170,613,1044,1080` | recovery-succession and completion-transaction preconditions |
+| `store/ci_incidents.rs:16` | **persisted** `task_status` column — needs a migration, not a type swap |
+
+The Session→Epoch bridge (`epoch_state_for_task/project`,
+`close_task_epoch_if_quiescent` at `child_sessions.rs:2356/2385` and
+`durable.rs:2706/2720`) is category (d) inverted: delete the *mapping*, because
+Run must own that seam directly.
+
 Stage 1 was far cheaper than estimated: production code branched on
 `evidence.status` in exactly **two** places (`is_terminal()` and `== Abandoned`);
 the other 36 references were test fixtures. The status axis also shrank 8 → 5,

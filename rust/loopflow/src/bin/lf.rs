@@ -1497,14 +1497,14 @@ fn main() -> anyhow::Result<()> {
                 }
             },
             Some(Commands::Ssh {
-                host,
+                target,
                 repo,
                 secret,
                 forward_agent,
                 remote_native,
                 cmd,
             }) => loopflow::lf::commands::ssh::run(
-                host,
+                target,
                 repo.as_deref(),
                 secret,
                 *forward_agent,
@@ -1780,6 +1780,16 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn ssh_help_prefers_home_identity() {
+        let help = Cli::try_parse_from(["lf", "ssh", "--help"])
+            .expect_err("help exits through clap")
+            .to_string();
+
+        assert!(help.contains("<TARGET>"));
+        assert!(help.contains("HomeId (preferred), SSH alias, or user@host"));
     }
 
     /// `serve` is retired. The parser can't reject it outright — the

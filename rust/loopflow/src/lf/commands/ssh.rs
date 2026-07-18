@@ -1,4 +1,4 @@
-//! `lf ssh <host|HomeId> -- <cmd...>` — run a command on a remote machine.
+//! `lf ssh <HomeId|host> -- <cmd...>` — run a command on a remote machine.
 //!
 //! Foreground commands bring narrowly resolved local credentials. Managed
 //! Claude/Codex accounts stay behind a foreground Unix-socket broker; the

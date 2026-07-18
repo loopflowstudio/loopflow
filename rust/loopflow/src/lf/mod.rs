@@ -586,15 +586,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ReceiptCommand,
     },
-    /// Run a command on a remote host carrying your local credentials.
+    /// Run a command on a Home or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
     /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh mini-heart -- lf pr open`.
+    /// to resolve them locally. Example: `lf ssh <home-id> -- lf pr open`.
     Ssh {
-        /// Remote host (ssh alias or user@host)
-        host: String,
+        /// HomeId (preferred), SSH alias, or user@host
+        target: String,
         /// Repository path on the remote, relative to $HOME
         #[arg(long = "repo")]
         repo: Option<String>,

@@ -571,6 +571,10 @@ fn classify(output: &std::process::Output) -> Outcome {
         if resolution_text.contains("is not registered on this machine") {
             return Outcome::UnknownExplicit;
         }
+        if resolution_text.contains("owning Wave") && resolution_text.contains("is not registered")
+        {
+            return Outcome::StaleIdentity;
+        }
         if resolution_text.contains("stale") {
             return Outcome::StaleIdentity;
         }

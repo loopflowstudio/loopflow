@@ -28,8 +28,9 @@ MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
-# A draft file is `<name>__<id>.sql`; the readable name never contains `__`.
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]+)\.sql$")
+# A draft file is `<name>__<id>.sql`; the readable name never contains `__`, and
+# the id is an immutable 128-bit token (32 hex chars).
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
 DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)

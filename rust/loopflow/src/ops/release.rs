@@ -1815,8 +1815,9 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            drafts.join("add_wave_colour__deadbeef.sql"),
-            "-- name: add_wave_colour\n-- id: deadbeef\n-- depends_on: \n\
+            drafts.join("add_wave_colour__deadbeefdeadbeefdeadbeefdeadbeef.sql"),
+            "-- name: add_wave_colour\n-- id: deadbeefdeadbeefdeadbeefdeadbeef\n\
+             -- depends_on: \n\
              ALTER TABLE waves ADD COLUMN colour TEXT;\n",
         )
         .unwrap();

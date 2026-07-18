@@ -39,9 +39,10 @@ def repo(tmp_path: Path) -> Path:
 
 def _token(name: str) -> str:
     # Deterministic per name so re-run/two-repo tests build identical draft files.
+    # 128-bit (32 hex chars), matching the immutable id new_migration.py mints.
     import hashlib
 
-    return hashlib.sha1(name.encode()).hexdigest()[:8]
+    return hashlib.sha256(name.encode()).hexdigest()[:32]
 
 
 def draft(
@@ -60,7 +61,7 @@ def draft(
 def draft_names(repo: Path) -> set[str]:
     import re
 
-    pattern = re.compile(r"^([a-z][a-z0-9_]*)__[0-9a-f]+\.sql$")
+    pattern = re.compile(r"^([a-z][a-z0-9_]*)__[0-9a-f]{32}\.sql$")
     return {
         match.group(1)
         for path in (repo / DRAFTS).glob("*.sql")
@@ -226,8 +227,8 @@ def test_a_dependency_on_an_unknown_name_fails(repo: Path) -> None:
 def test_two_drafts_sharing_a_readable_name_fail(repo: Path) -> None:
     # Distinct tokens keep the files distinct at authoring; a shared readable
     # name only ever surfaces as one release-cut failure, never a merge conflict.
-    draft(repo, "dup", token="aaaaaaaa")
-    draft(repo, "dup", token="bbbbbbbb")
+    draft(repo, "dup", token="a" * 32)
+    draft(repo, "dup", token="b" * 32)
     before = (repo / MIGRATIONS_RS).read_text()
 
     result = run(repo, "0.11.30")

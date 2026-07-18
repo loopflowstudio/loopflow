@@ -26,7 +26,7 @@ REGISTRY = """const MIGRATIONS: &[Migration] = &[
 ];
 """
 
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]+)\.sql$")
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
 
 
 @pytest.fixture
@@ -66,7 +66,9 @@ def test_new_migration_writes_a_file_only_draft_with_no_ordinal(repo: Path) -> N
     files = draft_files(repo)
     assert len(files) == 1
     name, token = parse(files[0])
-    assert name == "add_wave_colour" and re.fullmatch(r"[0-9a-f]{8}", token)
+    # A 128-bit token (32 hex chars) — materially collision-resistant, not the
+    # earlier 32-bit token that two same-name branches could realistically clash.
+    assert name == "add_wave_colour" and re.fullmatch(r"[0-9a-f]{32}", token)
     body = (repo / DRAFTS / files[0]).read_text()
     assert body.startswith(f"-- name: add_wave_colour\n-- id: {token}\n-- depends_on: \n")
     # No canonical ordinal moved, and no Rust registry entry to paste anywhere.
@@ -94,7 +96,10 @@ def test_two_branches_same_name_have_no_shared_registry_edit(repo: Path, tmp_pat
 
     _, id_a = parse(draft_files(repo)[0])
     _, id_b = parse(draft_files(other)[0])
+    # Distinct, and each a full 128-bit token: if the id ever narrows back to a
+    # weak width, one of these fullmatches fails before the collision ever could.
     assert id_a != id_b
+    assert re.fullmatch(r"[0-9a-f]{32}", id_a) and re.fullmatch(r"[0-9a-f]{32}", id_b)
     assert (repo / MIGRATIONS_RS).read_text() == registry_before
     assert (other / MIGRATIONS_RS).read_text() == registry_before
 
@@ -106,6 +111,20 @@ def test_the_same_name_authored_twice_here_keeps_both(repo: Path) -> None:
     assert len(files) == 2
     assert {parse(f)[0] for f in files} == {"add_wave_colour"}
     assert len({parse(f)[1] for f in files}) == 2
+
+
+def test_many_concurrent_same_name_drafts_never_collide(repo: Path) -> None:
+    # The collision-free claim, exercised: author one readable name many times
+    # (the concurrent-branch worst case) and prove every minted id is a distinct
+    # 128-bit token. A narrowed id would repeat here or fail the width check —
+    # a 32-bit token has a ~50% chance of colliding within ~77k of these.
+    count = 64
+    for _ in range(count):
+        assert run(repo, "add_wave_colour").returncode == 0
+    ids = [parse(f)[1] for f in draft_files(repo)]
+    assert len(ids) == count
+    assert all(re.fullmatch(r"[0-9a-f]{32}", token) for token in ids)
+    assert len(set(ids)) == count, "minted ids collided"
 
 
 def test_new_migration_never_fetches_or_touches_git(repo: Path) -> None:

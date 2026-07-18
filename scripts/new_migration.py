@@ -6,8 +6,11 @@
 
 Writes `rust/loopflow/src/store/migrations/drafts/<name>__<id>.sql` carrying a
 `-- name:` / `-- id:` / `-- depends_on:` header and a SQL body to fill in. The
-`<id>` is an immutable 8-hex-char token minted here; the `<name>` is the readable
-label and the `--depends-on` handle. A draft has no ordinal: the release cut
+`<id>` is an immutable 128-bit token (32 hex chars) minted here; the `<name>` is
+the readable label and the `--depends-on` handle. 128 bits is materially
+collision-resistant — two branches would need on the order of 2**64 same-name
+drafts before a birthday collision, so distinct files are a guarantee, not a
+hope. A draft has no ordinal: the release cut
 (`lf release run`) is the single boundary that orders the accumulated drafts and
 assigns canonical `<major>.<minor>.<ordinal>` ids.
 
@@ -36,8 +39,9 @@ DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
 # A draft file is `<name>__<id>.sql`; the name never contains `__`, so the last
-# `__` separates the readable name from the immutable token.
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]+)\.sql$")
+# `__` separates the readable name from the immutable 128-bit token (32 hex chars).
+DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
 
 
 def _released_names() -> set[str]:
@@ -109,7 +113,7 @@ def main() -> None:
             )
             raise SystemExit(1)
 
-    draft_id = secrets.token_hex(4)
+    draft_id = secrets.token_hex(16)
     DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
     path = DRAFTS_DIR / f"{name}__{draft_id}.sql"
     dependency_line = ", ".join(depends_on)

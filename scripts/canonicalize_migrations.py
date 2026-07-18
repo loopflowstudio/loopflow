@@ -46,11 +46,13 @@ DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
 # `<name>__<id>.sql`; the readable name never contains `__`, so the last `__`
-# separates it from the immutable token.
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]+)\.sql$")
+# separates it from the immutable 128-bit token (32 hex chars).
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
+DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
 # `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
 # value would swallow the newline and capture the next SQL line.
 DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
+DRAFT_HEADER_ID = re.compile(r"^--[ \t]*id:[ \t]*(.*)$", re.MULTILINE)
 DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
 VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -110,13 +112,24 @@ def _read_drafts() -> list[Draft]:
         match = DRAFT_FILE.match(path.name)
         if not match:
             _fail(f"draft {path.name} is not `<snake_case_name>__<id>.sql` — run scripts/new_migration.py")
-        name = match.group(1)
+        name, file_id = match.group(1), match.group(2)
         text = path.read_text()
         header = DRAFT_HEADER_NAME.search(text)
         if not header:
             _fail(f"draft {path.name} has no `-- name:` header")
         if header.group(1) != name:
             _fail(f"draft {path.name} header names {header.group(1)!r}, not {name!r}")
+        id_header = DRAFT_HEADER_ID.search(text)
+        if not id_header:
+            _fail(f"draft {path.name} has no `-- id:` header")
+        header_id = id_header.group(1).strip()
+        if not DRAFT_ID.fullmatch(header_id):
+            _fail(
+                f"draft {path.name} id {header_id!r} is not a 128-bit token "
+                "(32 hex chars) — run scripts/new_migration.py"
+            )
+        if header_id != file_id:
+            _fail(f"draft {path.name} header id {header_id!r} disagrees with its filename")
         depends = DRAFT_HEADER_DEPENDS.search(text)
         dependencies: list[str] = []
         if depends:

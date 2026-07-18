@@ -7,11 +7,13 @@ uv run python scripts/check_migrations.py                # what CI and the relea
 
 Write the SQL below the header, and you are done — there is nothing to paste into
 `migrations.rs`. A **draft** carries a stable snake_case name, an immutable
-authoring id, and **no ordinal**; it lives at `migrations/drafts/<name>__<id>.sql`.
+authoring id (a 128-bit token, 32 hex chars), and **no ordinal**; it lives at
+`migrations/drafts/<name>__<id>.sql`.
 The draft's file *is* its registration: canonicalization discovers it by scanning
 the directory, and Rust never sees it until the release cut appends the canonical
 `Migration` entry it generates. Because a draft has no ordinal and two branches
-authoring the same name mint different ids, concurrent branches never contend,
+authoring the same name mint different 128-bit ids (materially collision-resistant),
+concurrent branches never contend,
 renumber, or share a registry edit, and the allocator performs no `git fetch` or
 rebase. Ordering that matters — a data migration that must run after another — is
 declared with `--depends-on` (naming another draft or an already-released

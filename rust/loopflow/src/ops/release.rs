@@ -1774,9 +1774,17 @@ mod tests {
     }
 
     /// The release worktree — not a manual script invocation — turns drafts into
-    /// canonical migrations. Driving `canonicalize_migrations` over a repo with a
-    /// pending draft proves the Rust release code installs the canonical tail
-    /// (files + registry) before the commit, and consumes the draft.
+    /// canonical migrations. This drives the *production* release sequence
+    /// (`prepare_release_in_worktree`), not the `canonicalize_migrations` helper
+    /// directly, so it is sabotage-sensitive: deleting the real canonicalization
+    /// call site makes the drafts never freeze and the asserts below fail. A
+    /// direct helper call cannot catch that regression.
+    ///
+    /// The bare temp worktree has no manifests (so the version bump is a no-op)
+    /// and no repo/wave/store context (so the release-notes stage fails fast,
+    /// with no network). Canonicalization runs before that stage, so the tree is
+    /// already frozen by the time `prepare_release_in_worktree` returns its
+    /// (expected) error — which we ignore and assert on the tree instead.
     #[test]
     fn the_release_run_canonicalizes_drafts_into_the_committed_tree() {
         let script =
@@ -1813,7 +1821,23 @@ mod tests {
         )
         .unwrap();
 
-        canonicalize_migrations(root, "0.11.4").unwrap();
+        // A target with no manifests: the version bump is a no-op, canonicalize
+        // runs, then the notes stage fails fast in this contextless worktree.
+        let target = ReleaseTarget {
+            name: "default".to_string(),
+            area: Vec::new(),
+            tag_prefix: "v".to_string(),
+            manifests: Vec::new(),
+            workflow: None,
+        };
+        let _ = prepare_release_in_worktree(
+            root,
+            "0.11.4",
+            "v0.11.3",
+            &[],
+            &target,
+            &crate::ops::progress::NullProgress,
+        );
 
         // The draft is now a canonical, registered migration.
         let canonical = migrations.join("0.11.002_add_wave_colour.sql");

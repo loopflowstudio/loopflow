@@ -137,7 +137,7 @@ struct RoadmapView: View {
                 attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
-                initialSection: .agent
+                initialSection: selection.task.attention.level == .blue ? .feedback : .changes
             )
         }
         .confirmationDialog(
@@ -927,6 +927,7 @@ private extension TaskAttentionLevel {
         switch self {
         case .green: .statusSuccess
         case .red: .statusError
+        case .blue: WaveLensColor.blue.glow
         case .black: .statusNeutral
         case .unknown: .statusWarning
         }

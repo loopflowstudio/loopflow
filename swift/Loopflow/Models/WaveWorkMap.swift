@@ -252,7 +252,7 @@ public struct WorkNextMove: Decodable, Sendable, Hashable {
 }
 
 public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
-    case green, red, black, unknown
+    case green, red, blue, black, unknown
 }
 
 /// The six lifecycle actions a Task Session can take. Mirrors the Rust

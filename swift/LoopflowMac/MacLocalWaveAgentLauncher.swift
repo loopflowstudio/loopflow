@@ -137,10 +137,10 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    static func resolvedTaskAttachCommand(repoPath: String, issue: String) throws -> [String] {
+    static func resolvedTaskFeedbackCommand(repoPath: String, taskId: String) throws -> [String] {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try resolveWaveCapableLf(originRepo: origin)
-        return taskAttachCommand(lfPath: lfPath, issue: issue)
+        return taskFeedbackCommand(lfPath: lfPath, taskId: taskId)
     }
 
     /// Open the branch's PR for human review from `worktree`. This delegates to
@@ -196,8 +196,8 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    static func taskAttachCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "attach", issue]
+    static func taskFeedbackCommand(lfPath: String, taskId: String) -> [String] {
+        [lfPath, "work", "feedback", "task", taskId, "--continue-on-exit"]
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`

@@ -71,9 +71,9 @@ final class TaskTerminalStore: ObservableObject {
     }
 }
 
-enum TaskWorkspaceSection: String, Codable, CaseIterable, Identifiable, Hashable {
+enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
-    case agent = "Agent"
+    case feedback = "Feedback"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -103,8 +103,8 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
-    @State private var attachCommand: [String]?
-    @State private var agentError: String?
+    @State private var feedbackCommand: [String]?
+    @State private var feedbackError: String?
 
     init(
         task: TaskPlanningSnapshot,
@@ -137,8 +137,8 @@ struct TaskWorkspaceView: View {
                 switch section {
                 case .changes:
                     changesView
-                case .agent:
-                    agentView
+                case .feedback:
+                    feedbackView
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskSessionId: runtime.sessionId,
@@ -158,7 +158,7 @@ struct TaskWorkspaceView: View {
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
         .task(id: runtime?.sessionId) { await loadChanges() }
-        .task(id: "agent:\(runtime?.sessionId ?? "none")") { await prepareAgentAttach() }
+        .task(id: "feedback:\(runtime?.sessionId ?? "none")") { await prepareFeedback() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -239,35 +239,35 @@ struct TaskWorkspaceView: View {
     }
 
     @ViewBuilder
-    private var agentView: some View {
-        if !canAttachToAgent {
+    private var feedbackView: some View {
+        if !canFeedback {
             ContentUnavailableView(
-                "Task agent is not running",
-                systemImage: "bolt.slash",
-                description: Text("Resume the Task Session from the roadmap before attaching.")
+                "No Feedback needs you",
+                systemImage: "checkmark.circle",
+                description: Text("This Task is not waiting for User attention.")
             )
-        } else if let attachCommand, let workspace, let runtime {
+        } else if let feedbackCommand, let workspace, let runtime {
             GhosttyTerminalView(
                 workingDirectory: workspace.worktree,
-                argv: attachCommand,
-                sessionId: "task-agent-\(runtime.sessionId)"
+                argv: feedbackCommand,
+                sessionId: "task-feedback-\(runtime.sessionId)"
             )
             .id(runtime.sessionId)
             .background(LoopflowPalette.dark.background)
-        } else if let agentError {
+        } else if let feedbackError {
             ContentUnavailableView(
-                "Task agent unavailable",
+                "Feedback unavailable",
                 systemImage: "exclamationmark.triangle",
-                description: Text(agentError)
+                description: Text(feedbackError)
             )
         } else {
-            ProgressView("Preparing Task agent…")
+            ProgressView("Preparing Feedback…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var canAttachToAgent: Bool {
-        runtime?.observation.controls.contains(.attach) ?? false
+    private var canFeedback: Bool {
+        attention.level == .blue
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {
@@ -381,24 +381,24 @@ struct TaskWorkspaceView: View {
     }
 
     @MainActor
-    private func prepareAgentAttach() async {
-        guard canAttachToAgent else {
-            attachCommand = nil
-            agentError = nil
+    private func prepareFeedback() async {
+        guard canFeedback else {
+            feedbackCommand = nil
+            feedbackError = nil
             return
         }
         let repoPath = repoPath
-        let issue = task.identifier
+        let taskId = task.id
         do {
-            attachCommand = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.resolvedTaskAttachCommand(
+            feedbackCommand = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.resolvedTaskFeedbackCommand(
                     repoPath: repoPath,
-                    issue: issue
+                    taskId: taskId
                 )
             }.value
-            agentError = nil
+            feedbackError = nil
         } catch {
-            agentError = error.localizedDescription
+            feedbackError = error.localizedDescription
         }
     }
 

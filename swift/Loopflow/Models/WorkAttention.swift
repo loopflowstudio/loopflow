@@ -31,6 +31,8 @@ public enum NowGroup: String, CaseIterable, Sendable, Hashable {
 /// reconstructs the attention level from status and process flags.
 public func nowGroup(for task: RoadmapTask) -> NowGroup? {
     switch task.attention.level {
+    case .blue:
+        return .readyForReview
     case .green:
         return .working
     case .black:

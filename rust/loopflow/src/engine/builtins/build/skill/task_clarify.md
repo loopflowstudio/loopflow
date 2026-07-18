@@ -17,7 +17,7 @@ instructions, current worktree, and any existing design note in `scratch/`.
   computable. Preserve a clear existing design.
 - Resolve reversible ambiguity with the simpler path. When a choice changes
   scope, behavior, or authority, state the exact question and alternatives in
-  the interactive step; the derived Review routes it to the supervisor.
+  the interactive step; the derived Feedback routes it to the supervisor.
 - Do not implement beyond a trivial probe that makes the design computable.
 
 ## Computable design contract

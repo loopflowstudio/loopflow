@@ -10,7 +10,7 @@ use crate::child_session::{
     ChildBodyOutcome, ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
     StrandedPlan, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
 };
-use crate::durable::{AttentionRoute, AuthenticatedRequest, ControlCtx, Review};
+use crate::durable::{AttentionRoute, AuthenticatedRequest, ControlCtx, Feedback};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
@@ -33,9 +33,7 @@ use crate::session_context::{
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
 };
-use crate::task::actions::{
-    derive_task_actions, ReviewGateState, TaskActionEvidence, TaskActionModel,
-};
+use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
@@ -350,10 +348,13 @@ fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
     Ok(true)
 }
 
-fn _refuse_current_human_review(session: &TaskSession, review: Option<&Review>) -> OpsResult<()> {
-    if review.is_some_and(|review| review.attention == AttentionRoute::User) {
+fn _refuse_current_human_feedback(
+    session: &TaskSession,
+    feedback: Option<&Feedback>,
+) -> OpsResult<()> {
+    if feedback.is_some_and(|feedback| feedback.attention == AttentionRoute::User) {
         return Err(task_error(format!(
-            "Task {} routes its current interactive step to the User; close it before changing interaction policy",
+            "Task {} routes current Feedback to the User; continue it before changing interaction policy",
             session.launch.issue.identifier
         )));
     }
@@ -454,11 +455,11 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     .work_for_child(&ChildRef::Task(session.id.clone()))
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
-                let review = store
-                    .review(&work)
+                let feedback = store
+                    .feedback(&work)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
-                _refuse_current_human_review(session, review.as_ref())?;
+                _refuse_current_human_feedback(session, feedback.as_ref())?;
             }
             if headless && _defer_task_interactions(session)? {
                 store
@@ -2869,7 +2870,7 @@ async fn reconcile_task_pr_with_authority(
                 // approved. The PR is settling in flight, so only the review
                 // half of the gate applies here. Do not weaken the review gate
                 // or infer merge from a green head.
-                let gate = review_gate(store, session).await?;
+                let gate = feedback_gate(store, session).await?;
                 if gate.satisfied {
                     session.set_status(
                         TaskSessionStatus::Completed,
@@ -3997,10 +3998,10 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
 // ---------------------------------------------------------------------------
 // Completion gate: the single source of truth for "may this Task be completed
 // in the PM yet?" A Task is completable only when every active PR is settled
-// (merged or explicitly abandoned) AND every required interaction review has an
-// explicit Approved outcome. Every path that sets a Task to `Completed` and
+// (merged or explicitly abandoned) AND no Feedback boundary remains open.
+// Every path that sets a Task to `Completed` and
 // fires the `CompleteTask` PM writeback consults this gate, so the PM row, the
-// durable Session, the PR state, and the review state converge monotonically.
+// durable Session, PR state, and Work flow converge monotonically.
 // ---------------------------------------------------------------------------
 
 /// The outcome of evaluating the completion gate.
@@ -4052,40 +4053,38 @@ impl CompletionGate {
     }
 }
 
-/// An open interactive flow interval blocks terminal completion. Closing it
+/// Open Feedback blocks terminal completion. Continuing it
 /// advances the playhead; no historical disposition participates in closure.
-async fn review_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<CompletionGate> {
+async fn feedback_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<CompletionGate> {
     let work = store
         .work_for_child(&ChildRef::Task(session.id.clone()))
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    let review = store
-        .review(&work)
+    let feedback = store
+        .feedback(&work)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    Ok(if review.is_none() {
+    Ok(if feedback.is_none() {
         CompletionGate {
             satisfied: true,
             blockers: Vec::new(),
             discardable_successor: None,
         }
     } else {
-        CompletionGate::unsatisfied(vec![
-            "current interactive flow step has not been closed".to_string()
-        ])
+        CompletionGate::unsatisfied(vec!["current Feedback has not continued".to_string()])
     })
 }
 
-/// Evaluate the completion gate against the Session's durable PR and review
+/// Evaluate the completion gate against the Session's durable PR and Feedback
 /// state. Pure over store state: running it twice changes nothing. Use this from
 /// paths where the PR state is already persisted (`task_complete`, the
 /// reconcile advance, the repair). The merge-reconcile path uses
-/// [`review_gate`] instead, since the PR it is settling is not yet on disk.
+/// [`feedback_gate`] first, since the PR it is settling is not yet on disk.
 pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     session: &TaskSession,
 ) -> OpsResult<CompletionGate> {
-    let mut gate = review_gate(store, session).await?;
+    let mut gate = feedback_gate(store, session).await?;
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -4373,15 +4372,6 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
                 .map(|pr| pr.phase()),
             None => None,
         };
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
-        let review_gate = store
-            .review(&work)
-            .await
-            .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
-            .map(|_| ReviewGateState::Active);
         let completion_gate = task_completion_gate(&store, &session).await?;
         let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
         let resume_refusal =
@@ -4405,7 +4395,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
                 None
             },
             predecessor_phase,
-            review_gate,
+            review_gate: None,
             abandon_intent: session.abandon_intent.is_some(),
             local_progress_unsettled: None,
         };
@@ -5029,30 +5019,6 @@ pub fn task_wait(
     }
 }
 
-pub fn task_attach(issue: &str) -> OpsResult<()> {
-    let session = task_status(issue)?;
-    if !session.status.is_process_active() {
-        return Err(task_error(format!(
-            "task {} is {}; resume it before attaching",
-            session.launch.issue.identifier,
-            session.status.as_str()
-        )));
-    }
-    let tmux_name = session
-        .latest_process
-        .as_ref()
-        .map(|process| process.tmux_name.as_str())
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| task_error("task has no attachable process; resume it first"))?;
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", tmux_name])
-        .status()
-        .map_err(|error| task_error(format!("failed to attach to task: {error}")))?;
-    if !status.success() {
-        return Err(task_error(format!("tmux attach failed for {tmux_name}")));
-    }
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;

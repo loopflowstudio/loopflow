@@ -15,7 +15,7 @@ lf roadmap             # every open Task across every wave
 ```
 
 `lf roadmap` buckets the whole machine's work by what it needs: **Now** (live
-and advancing), **Needs attention** (a User-routed Review or recovery),
+and advancing), **Needs attention** (User-routed Feedback or recovery),
 **Available**, **Later**. It overlays live evidence on
 the Linear-backed plan, so the answer to "where is my attention needed" is one
 command.
@@ -57,7 +57,8 @@ Reading is half; the system stays steerable while it runs.
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
 lf chat --follow                              # replay and tail the conversation
 lf task steer INF-123 "smaller PR"            # redirect one Task's active turn
-lf task attach INF-123                        # attach to the active tmux process
+lf queue                                      # Feedback waiting on you
+lf work feedback task task_...                # open its provider session
 lf launch list --active                       # reopenable provider/TUI processes
 ```
 
@@ -65,7 +66,11 @@ Steering is durable-first: `steer` appends direction before attempting a live
 send. Provider acceptance is only transport evidence; a later successful
 boundary Basis proves application — see [The Agent API](agent-api.md#steer).
 
-Interactive work (a login, a judgment call, a demo) stays on the owning
+Feedback is the current flow interval plus its live Launch, Basis, and attention
+route. `lf work feedback` presents that Launch; `lf work continue` advances the
+flow without inventing an approval disposition.
+
+Genuinely terminal-shaped work (a login, an opaque TUI) stays on the owning
 Launch. `lf launch present <id>` reopens its attach route, and `lf launch
 handback <id> --outcome ...` records explicit terminal evidence without
 inventing a second Session.
@@ -78,9 +83,10 @@ second database, no machine-wide service. What the CLI reads, it renders:
 
 - **Wave Chat** — the persistent conversation, with send, steer, and interrupt.
 - **Roadmap** — every Task across every wave with lifecycle controls and
-  attention chips: green (advancing), red (needs a human), black (settled).
-- **Task workspace** — changed files, per-file patches, and an embedded
-  terminal attached to the running agent.
+  attention lenses: green (advancing), blue (waiting on you), red (unhealthy),
+  black (settled).
+- **Task workspace** — changed files, per-file patches, an embedded Feedback
+  session, and local inspection tools.
 - **Context Lab** — the same `lf context` evidence, with "refine in a task"
   one click away.
 - **Telemetry** — token spend, codebase growth, registry health.
@@ -95,9 +101,9 @@ tmux ls                     # live agent processes
 tmux attach -r -t <name>    # read-only look inside one
 ```
 
-Steer through `lf chat --steer` and `lf task steer`. Use `lf task attach` only
-when the provider interaction itself needs a terminal; raw terminal input is
-not durable direction.
+Use `lf work feedback` when the Work explicitly asks for you: it opens the
+recorded provider session. Use `lf chat --steer` or `lf task steer` to send
+durable direction without entering that session.
 
 ## Next
 

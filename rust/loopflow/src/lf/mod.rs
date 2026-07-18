@@ -301,6 +301,21 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WorkCommand,
     },
+    /// List current User-attention Feedback, oldest first
+    Queue {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Internal: continue Feedback if its presentation client exits unexpectedly
+    #[command(name = "__feedback-exit-guard", hide = true)]
+    FeedbackExitGuard {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        launch_id: String,
+        epoch_id: String,
+        revision: u64,
+    },
     /// Internal: run one durable Task Session process generation
     #[command(name = "__task", hide = true)]
     TaskRunner {
@@ -690,7 +705,7 @@ pub enum LaunchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
-    /// Show current Epoch, Basis, Run, Wait, and Review projection
+    /// Show current Epoch, Basis, Run, Wait, and Feedback projection
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -707,8 +722,28 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Advance the current interactive flow step without recording a disposition
-    Close {
+    /// Present the current User-attention Feedback in its recorded Launch
+    Feedback {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        /// Continue when the presentation exits successfully
+        #[arg(long, conflicts_with = "continue_on_exit")]
+        continue_on_success: bool,
+        /// Continue whenever the presentation exits, including signals or crashes
+        #[arg(long, conflicts_with = "continue_on_success")]
+        continue_on_exit: bool,
+    },
+    /// Continue past the current Feedback boundary
+    Continue {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Escalate immediate child Feedback from this parent Run to the User
+    Escalate {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
@@ -1025,8 +1060,6 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Attach read-write to the Task Session control terminal
-    Attach { issue: String },
     /// Explicitly end a Task Session without merging
     Abandon {
         issue: String,
@@ -2517,14 +2550,45 @@ mod tests {
             }) if kind == "task" && id == "task_1" && message == "inspect the failure"
         ));
 
-        let close = Cli::try_parse_from(["lf", "work", "close", "project", "project_1"])
-            .expect("parse Work close");
+        let continue_cli = Cli::try_parse_from(["lf", "work", "continue", "project", "project_1"])
+            .expect("parse Work continue");
         assert!(matches!(
-            close.command,
+            continue_cli.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Close { kind, id, json: false }
+                cmd: WorkCommand::Continue { kind, id, json: false }
             }) if kind == "project" && id == "project_1"
         ));
+
+        let feedback = Cli::try_parse_from([
+            "lf",
+            "work",
+            "feedback",
+            "task",
+            "task_1",
+            "--continue-on-exit",
+        ])
+        .expect("parse Feedback presentation exit policy");
+        assert!(matches!(
+            feedback.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Feedback {
+                    kind,
+                    id,
+                    continue_on_success: false,
+                    continue_on_exit: true,
+                }
+            }) if kind == "task" && id == "task_1"
+        ));
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "feedback",
+            "task",
+            "task_1",
+            "--continue-on-success",
+            "--continue-on-exit",
+        ])
+        .is_err());
     }
 
     #[test]

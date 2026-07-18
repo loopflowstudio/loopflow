@@ -1,14 +1,20 @@
 - kickoff
-- review-design
+- step:
+    name: review-design
+    feedback: true
 - implement
 - compress
 - lint
 - xor:
     paths:
       demo:
-        step: demo
+        steps:
+          - name: demo
+            feedback: true
         description: "Observable change — walk through the experience"
       code-review:
-        step: code-review
+        steps:
+          - name: code-review
+            feedback: true
         description: "Internal change — walk through the code"
 - gate

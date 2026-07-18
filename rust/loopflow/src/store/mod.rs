@@ -1665,24 +1665,24 @@ mod tests {
                     work: task_work.clone(),
                     epoch_id: task_basis.epoch_id,
                     flow: "task".to_string(),
-                    step: "review".to_string(),
+                    step: "feedback".to_string(),
                     step_index: 1,
                     iteration: 0,
-                    interactive: true,
+                    feedback: true,
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
             .await
             .unwrap();
         store
-            .route_review(
+            .route_feedback(
                 &task_run_lease,
                 &launch.id,
                 AttentionRoute::Parent(parent_lease.work.clone()),
             )
             .await
             .unwrap();
-        assert!(store.review(&task_work).await.unwrap().is_some());
+        assert!(store.feedback(&task_work).await.unwrap().is_some());
 
         let turn = store
             .advance_run(
@@ -1712,7 +1712,7 @@ mod tests {
         let control_seed = attention[0].render();
         assert!(control_seed.contains("The retry still reuses the failed head."));
         assert!(control_seed.contains("lf work steer task"));
-        assert!(control_seed.contains("lf work close task"));
+        assert!(control_seed.contains("lf work continue task"));
 
         let receipt = store
             .steer(
@@ -1728,10 +1728,10 @@ mod tests {
             Author::Run(parent_lease.run_id.clone())
         );
         let parked = store
-            .review(&task_work)
+            .feedback(&task_work)
             .await
             .unwrap()
-            .expect("steering does not close Review attention");
+            .expect("steering does not close Feedback attention");
         assert!(parked.attention_at.is_none());
         assert!(store
             .child_attention(&parent_lease.work)
@@ -1739,7 +1739,7 @@ mod tests {
             .unwrap()
             .is_empty());
         store
-            .route_review(
+            .route_feedback(
                 &task_run_lease,
                 &launch.id,
                 AttentionRoute::Parent(parent_lease.work.clone()),
@@ -1748,7 +1748,7 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .review(&task_work)
+                .feedback(&task_work)
                 .await
                 .unwrap()
                 .expect("re-entering the same flow keeps the route")
@@ -1766,10 +1766,10 @@ mod tests {
         turn_row.ended_at = Some(OffsetDateTime::now_utc().unix_timestamp());
         store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
         let rearmed = store
-            .review(&task_work)
+            .feedback(&task_work)
             .await
             .unwrap()
-            .expect("the child's next reply keeps the Review open");
+            .expect("the child's next reply keeps the Feedback open");
         assert!(rearmed.attention_at.is_some());
         assert_eq!(
             store
@@ -1815,18 +1815,18 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        let review = store
-            .review(&task_work)
+        let feedback = store
+            .feedback(&task_work)
             .await
             .unwrap()
-            .expect("answering a child parks but does not close its Review");
-        assert!(review.attention_at.is_none());
-        assert_eq!(review.basis, answered.steer.basis);
+            .expect("answering a child parks but does not continue its Feedback");
+        assert!(feedback.attention_at.is_none());
+        assert_eq!(feedback.basis, answered.steer.basis);
         store
-            .close_review(&ControlCtx::Run(&parent_lease), &task_work, &review.basis)
+            .continue_feedback(&ControlCtx::Run(&parent_lease), &task_work, &feedback.basis)
             .await
             .unwrap();
-        assert!(store.review(&task_work).await.unwrap().is_none());
+        assert!(store.feedback(&task_work).await.unwrap().is_none());
         assert!(store
             .child_attention(&parent_lease.work)
             .await

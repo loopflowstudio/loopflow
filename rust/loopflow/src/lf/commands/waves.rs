@@ -23,6 +23,7 @@ use crate::child_session::{
 };
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
+use crate::durable::AttentionRoute;
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
@@ -262,6 +263,7 @@ pub struct TaskRuntimeSnapshot {
 pub enum TaskAttentionLevel {
     Green,
     Red,
+    Blue,
     Black,
     Unknown,
 }
@@ -308,6 +310,12 @@ pub struct LocalProgressEvidence {
     pub authored_commits: Option<bool>,
     pub recovery_required: Option<bool>,
     pub reason: Option<String>,
+}
+
+struct TaskAttentionEvidence {
+    process: TaskProcessEvidence,
+    local_progress: LocalProgressEvidence,
+    user_feedback: bool,
 }
 
 /// A Task's shared attention projection and the evidence that proves it.
@@ -1331,7 +1339,7 @@ async fn snapshot_task_detail(
             latest,
         )
     });
-    let action_evidence = match session {
+    let (action_evidence, user_feedback) = match session {
         Some(session) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
@@ -1340,35 +1348,44 @@ async fn snapshot_task_detail(
             let work = store
                 .work_for_child(&ChildRef::Task(session.id.clone()))
                 .await?;
-            let review_gate = store.review(&work).await?.map(|_| ReviewGateState::Active);
-            Some(TaskActionEvidence {
-                status: session.status,
-                latest_pr_phase: latest.map(TaskPr::phase),
-                latest_pr_after_merge: latest
-                    .and_then(|pr| pr.publication.as_ref())
-                    .map(|p| p.after_merge),
-                latest_pr_next_slug: latest
-                    .and_then(|pr| pr.publication.as_ref())
-                    .and_then(|p| p.next_slug.as_deref()),
-                completion_refusal: completion_refusal.as_deref(),
-                resume_refusal: resume_refusal.as_deref(),
-                pending_directive: false,
-                ci: active.and_then(|pr| pr.fresh_ci()),
-                process_alive: process.alive,
-                predecessor_phase,
-                review_gate,
-                abandon_intent: session.abandon_intent.is_some(),
-                local_progress_unsettled: local_progress.unsettled,
-            })
+            let feedback = store.feedback(&work).await?;
+            let user_feedback = feedback
+                .as_ref()
+                .is_some_and(|feedback| feedback.attention == AttentionRoute::User);
+            (
+                Some(TaskActionEvidence {
+                    status: session.status,
+                    latest_pr_phase: latest.map(TaskPr::phase),
+                    latest_pr_after_merge: latest
+                        .and_then(|pr| pr.publication.as_ref())
+                        .map(|p| p.after_merge),
+                    latest_pr_next_slug: latest
+                        .and_then(|pr| pr.publication.as_ref())
+                        .and_then(|p| p.next_slug.as_deref()),
+                    completion_refusal: completion_refusal.as_deref(),
+                    resume_refusal: resume_refusal.as_deref(),
+                    pending_directive: false,
+                    ci: active.and_then(|pr| pr.fresh_ci()),
+                    process_alive: process.alive,
+                    predecessor_phase,
+                    review_gate: None,
+                    abandon_intent: session.abandon_intent.is_some(),
+                    local_progress_unsettled: local_progress.unsettled,
+                }),
+                user_feedback,
+            )
         }
-        None => None,
+        None => (None, false),
     };
     let attention = derive_task_attention(
         item.completed,
         runtime.as_ref(),
         &next_move,
-        process,
-        local_progress,
+        TaskAttentionEvidence {
+            process,
+            local_progress,
+            user_feedback,
+        },
         action_evidence.as_ref(),
         observed_at,
     );
@@ -1539,25 +1556,36 @@ fn derive_task_attention(
     pm_completed: bool,
     runtime: Option<&TaskRuntimeSnapshot>,
     next_move: &NextMove,
-    process: TaskProcessEvidence,
-    local_progress: LocalProgressEvidence,
+    evidence: TaskAttentionEvidence,
     action_evidence: Option<&TaskActionEvidence>,
     observed_at: time::OffsetDateTime,
 ) -> TaskAttentionSnapshot {
+    let TaskAttentionEvidence {
+        process,
+        local_progress,
+        user_feedback,
+    } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
     let live = process.alive == Some(true);
-    let human_handoff = matches!(
+    let human_attention = matches!(
         next_move.owner,
         NextMoveOwner::Human | NextMoveOwner::Review
     );
     let failed = runtime.is_some_and(|runtime| runtime.status == TaskSessionStatus::Failed);
-    let (level, reason) = if live && human_handoff {
+    let (level, reason) = if failed {
+        (TaskAttentionLevel::Red, next_move.reason.clone())
+    } else if user_feedback {
+        (
+            TaskAttentionLevel::Blue,
+            "Waiting for your feedback".to_string(),
+        )
+    } else if live && human_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())
     } else if live {
         (TaskAttentionLevel::Green, next_move.reason.clone())
-    } else if human_handoff || failed {
+    } else if human_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())
     } else if process.state == TaskProcessEvidenceState::Unavailable
         && runtime.is_some_and(|runtime| runtime.status.is_process_active())
@@ -2052,6 +2080,7 @@ fn task_attention_label(level: TaskAttentionLevel) -> &'static str {
     match level {
         TaskAttentionLevel::Green => "green",
         TaskAttentionLevel::Red => "red",
+        TaskAttentionLevel::Blue => "blue",
         TaskAttentionLevel::Black => "black",
         TaskAttentionLevel::Unknown => "unknown",
     }
@@ -3156,8 +3185,11 @@ mod tests {
             pm_completed,
             runtime,
             next_move,
-            process,
-            local_progress,
+            TaskAttentionEvidence {
+                process,
+                local_progress,
+                user_feedback: false,
+            },
             action_evidence.as_ref(),
             now(),
         )
@@ -3222,8 +3254,11 @@ mod tests {
             completed,
             runtime,
             &next_move,
-            process,
-            local_progress,
+            TaskAttentionEvidence {
+                process,
+                local_progress,
+                user_feedback: false,
+            },
             action_evidence.as_ref(),
             now(),
         )
@@ -3246,6 +3281,42 @@ mod tests {
         );
         assert_eq!(green.level, TaskAttentionLevel::Green);
         assert_eq!(green.actions.recommended, Some(TaskAction::NoAction));
+
+        let blue = derive_task_attention(
+            false,
+            Some(&running),
+            &NextMove {
+                owner: NextMoveOwner::Review,
+                reason: "Review is open".into(),
+            },
+            TaskAttentionEvidence {
+                process: process(TaskProcessEvidenceState::Observed, Some(true)),
+                local_progress: local_progress(Some(false), Some(false), Some(false), Some(false)),
+                user_feedback: true,
+            },
+            None,
+            now(),
+        );
+        assert_eq!(blue.level, TaskAttentionLevel::Blue);
+        assert_eq!(blue.reason, "Waiting for your feedback");
+
+        let failed = task_runtime(TaskSessionStatus::Failed, "provider failed", at(30), false);
+        let red_over_blue = derive_task_attention(
+            false,
+            Some(&failed),
+            &NextMove {
+                owner: NextMoveOwner::Human,
+                reason: "recover the failed body".into(),
+            },
+            TaskAttentionEvidence {
+                process: process(TaskProcessEvidenceState::Observed, Some(false)),
+                local_progress: local_progress(Some(false), Some(false), Some(false), Some(false)),
+                user_feedback: true,
+            },
+            None,
+            now(),
+        );
+        assert_eq!(red_over_blue.level, TaskAttentionLevel::Red);
 
         let human = projected_attention(
             false,

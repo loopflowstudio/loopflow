@@ -113,7 +113,7 @@ lf design && lf implement && lf gate    # manual chain
 lf build                                # one design → code → demo/review → gate pass
 ```
 
-Flows automate handoffs within one bounded pass. `build` runs kickoff →
+Flows automate steps within one bounded pass. `build` runs kickoff →
 review-design → implement → compress → lint → demo/review → gate. Use `ship` or
 `deploy` for the explicit delivery workflow. Repetition belongs to Wave,
 Project, and Task runtimes.
@@ -180,8 +180,8 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf project attach <project>` or `lf task attach <issue>` for a writable,
-audited control prompt. Stop a running Wave with `lf stop <name>`.
+Use `lf queue`, then `lf work feedback <kind> <id>`, for work that
+needs you. Stop a running Wave with `lf stop <name>`.
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.

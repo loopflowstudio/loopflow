@@ -86,15 +86,14 @@ enum LaunchTargetLauncher {
         Set([LaunchTarget.warp, .vscode, .cursor].filter { appURL($0) != nil })
     }
 
-    /// Whether the descriptor's execution host is another machine. Rust emits
-    /// `localhost` for a local Home and the bare hostname (optionally with port)
-    /// for a remote Home. A bare non-local token is therefore remote, not a local
-    /// alias whose worktree may be probed on this machine.
+    /// Whether the descriptor's execution Home is another machine. Rust emits
+    /// `<owner>@local` locally and an SSH address remotely.
     static func isRemoteHome(_ host: String) -> Bool {
         let trimmed = host.trimmingCharacters(in: .whitespaces)
         return !trimmed.isEmpty
             && trimmed != "localhost"
             && trimmed != "local"
+            && !trimmed.hasSuffix("@local")
             && trimmed != "127.0.0.1"
             && trimmed != "::1"
     }
@@ -118,6 +117,20 @@ enum LaunchTargetLauncher {
         return Command(
             cwd: "/",
             argv: sshArgv(host: attach.host, home: home, remoteCommand: remoteCommand),
+            environment: [:]
+        )
+    }
+
+    /// Keep the Feedback controller local. `lf launch present` owns the one Home
+    /// hop needed to reach the recorded provider terminal.
+    static func feedbackCommand(for attach: LaunchSurfaceRecord) -> Command {
+        let lfPath = Bundle.main.url(forAuxiliaryExecutable: "lf")?.path ?? "lf"
+        return Command(
+            cwd: "/",
+            argv: [
+                lfPath, "work", "feedback", attach.work.kind, attach.work.id,
+                "--continue-on-exit",
+            ],
             environment: [:]
         )
     }

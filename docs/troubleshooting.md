@@ -26,11 +26,13 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf task attach INF-123
+lf queue
+lf work feedback task task_...
 ```
 
-`attach` opens the active tmux process. Use durable Steer for direction, or
-resume a stopped process through the same Task Work:
+`feedback` opens the recorded provider session. Send durable direction without
+opening it via Steer, continue past the boundary, or resume a stopped process
+through the same Task Work:
 
 ```bash
 lf task steer INF-123 "address the latest review"

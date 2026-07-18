@@ -682,7 +682,7 @@ pub struct FlowPosition {
     pub step: String,
     pub step_index: u32,
     pub iteration: u32,
-    pub interactive: bool,
+    pub feedback: bool,
     pub updated_at: OffsetDateTime,
 }
 
@@ -694,12 +694,12 @@ pub enum AttentionRoute {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Review {
+pub struct Feedback {
     pub work: WorkRef,
     pub launch_id: LaunchId,
     pub basis: Basis,
     pub position: FlowPosition,
-    /// Stable route for the entire interactive flow step.
+    /// Stable route for the entire Feedback step.
     pub attention: AttentionRoute,
     #[serde(with = "time::serde::rfc3339")]
     pub opened_at: OffsetDateTime,
@@ -711,26 +711,38 @@ pub struct Review {
 /// Oldest-first parent control input reconstructed from durable child facts.
 ///
 /// This is a query result, not an inbox row. If delivery races a boundary the
-/// parent can render the same projection again from the child Review.
+/// parent can render the same projection again from the child Feedback.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChildReview {
-    pub review: Review,
+pub struct ChildFeedback {
+    pub feedback: Feedback,
     pub latest_output: Option<String>,
     pub evidence: serde_json::Value,
 }
 
-impl ChildReview {
+/// User-facing Feedback reconstructed from current durable Work facts.
+///
+/// This is a query result, not a second lifecycle model or a queue row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserFeedback {
+    pub feedback: Feedback,
+    pub surface: LaunchSurface,
+    pub latest_output: Option<String>,
+    pub evidence: serde_json::Value,
+}
+
+impl ChildFeedback {
     pub fn render(&self) -> String {
-        let kind = self.review.work.kind();
-        let id = self.review.work.id();
-        let facts = serde_json::to_string_pretty(self).expect("Child Review facts must serialize");
+        let kind = self.feedback.work.kind();
+        let id = self.feedback.work.id();
+        let facts =
+            serde_json::to_string_pretty(self).expect("Child Feedback facts must serialize");
         format!(
-            "<lf:child-review work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
+            "<lf:child-feedback work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
              Service this child before background parent work. Use \
              `lf work steer {kind} {id} \"<response>\"` to continue or \
-             `lf work close {kind} {id}` to finish. Delivery alone does not clear attention.\n\n\
-             Durable child output and current evidence:\n{facts}\n</lf:child-review>",
-            self.review.basis.epoch_id, self.review.basis.revision,
+             `lf work continue {kind} {id}` to continue the flow. Delivery alone does not clear attention.\n\n\
+             Durable child output and current evidence:\n{facts}\n</lf:child-feedback>",
+            self.feedback.basis.epoch_id, self.feedback.basis.revision,
         )
     }
 }

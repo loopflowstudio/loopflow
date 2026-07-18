@@ -11,14 +11,14 @@ import Foundation
 /// - **View-only by default.** Ordinary bodies expose no controls. Only an
 ///   active interactive launch exposes `.open`, which re-attaches the exact
 ///   durable Session through `lf launch attach`.
-/// - **Red propagation.** A launch waiting on the human tints its Task, its
-///   Project, and its Wave red even while their bodies are alive.
+/// - **Blue propagation.** A launch waiting on the user tints its Task, its
+///   Project, and its Wave blue even while their bodies are alive.
 /// - **Honest evidence.** Missing, stale, unreachable, stopped, and unavailable
 ///   stay distinguishable from a healthy empty state; a broken source never
 ///   renders as a quiet zero.
 
 public enum AttentionTint: String, Sendable, Hashable {
-    case green, red, black, neutral
+    case green, red, blue, black, neutral
 }
 
 /// Why a row reads the way it does. Ordered by severity when several could
@@ -183,14 +183,20 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                     Self.launchRow($0, parentRowId: nil, staleThresholdSecs: staleThresholdSecs)
                 }
             )
-            let red = rows.contains { $0.tint == .red }
+            let tint: AttentionTint = if rows.contains(where: { $0.tint == .red }) {
+                .red
+            } else if rows.contains(where: { $0.tint == .blue }) {
+                .blue
+            } else {
+                .neutral
+            }
             groups.append(
                 ActiveSessionWaveGroup(
                     id: "unattributed",
                     waveName: "Unattributed",
                     home: "",
                     remote: false,
-                    tint: red ? .red : .neutral,
+                    tint: tint,
                     evidence: .observed,
                     unavailableReason: nil,
                     rows: rows
@@ -211,16 +217,17 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         staleThresholdSecs: Int
     ) -> ActiveSessionWaveGroup {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
-        // Only User-routed attention paints the external attention queue red.
-        // Parent-routed Reviews remain on the parent's control lane.
+        // Only User-routed attention paints the external attention queue blue.
+        // Parent-routed Feedback remains on the parent's control lane.
         let userLaunches = launches.filter {
             $0.attention?.kind == "user" && $0.attentionAt != nil
         }
         let blockingParentIds = Set(userLaunches.map(\.parentId))
-        let waveLevelBlocking = userLaunches.contains { $0.parentKind == "wave" }
+        let waveLevelAttention = userLaunches.contains { $0.parentKind == "wave" }
 
         var rows: [ActiveSessionRow] = []
-        var anyRed = waveLevelBlocking
+        var anyRed = false
+        var anyBlue = waveLevelAttention
         var handledLaunchIds: Set<String> = []
 
         if case let .available(projectItems, _) = projects {
@@ -229,7 +236,8 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                     !isTerminal(runtime.status)
                 else { continue }
                 let projectRowId = runtime.sessionId
-                var projectRed = blockingParentIds.contains(runtime.sessionId)
+                var projectRed = false
+                var projectBlue = blockingParentIds.contains(runtime.sessionId)
                 var childRows: [ActiveSessionRow] = []
 
                 for task in project.tasks {
@@ -239,8 +247,9 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                     let taskRowId = taskRuntime.sessionId
                     let blockingLaunch = blockingParentIds.contains(taskRuntime.sessionId)
                     var tint = tint(for: task.attention.level)
-                    if blockingLaunch { tint = .red }
+                    if blockingLaunch && tint != .red { tint = .blue }
                     if tint == .red { projectRed = true }
+                    if tint == .blue { projectBlue = true }
                     childRows.append(
                         ActiveSessionRow(
                             id: taskRowId,
@@ -280,8 +289,10 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                 }
 
                 if projectRed { anyRed = true }
+                if projectBlue { anyBlue = true }
                 let projectTint: AttentionTint =
-                    projectRed ? .red : (runtime.processAlive ? .green : .black)
+                    projectRed
+                    ? .red : (projectBlue ? .blue : (runtime.processAlive ? .green : .black))
                 rows.append(
                     ActiveSessionRow(
                         id: projectRowId,
@@ -331,6 +342,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                 staleThresholdSecs: staleThresholdSecs
             )
             if row.tint == .red { anyRed = true }
+            if row.tint == .blue { anyBlue = true }
             rows.append(row)
         }
 
@@ -348,6 +360,8 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         let tint: AttentionTint
         if anyRed {
             tint = .red
+        } else if anyBlue {
+            tint = .blue
         } else if rows.contains(where: { $0.tint == .green }) {
             tint = .green
         } else {
@@ -374,7 +388,9 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         staleThresholdSecs: Int
     ) -> ActiveSessionRow {
         let userAttention = launch.attention?.kind == "user" && launch.attentionAt != nil
-        let openable = userAttention && !launch.argv.isEmpty
+        // The Feedback presentation opens by Work and Launch, so an empty argv no longer
+        // makes a User-routed Feedback unopenable.
+        let openable = userAttention
         return ActiveSessionRow(
             id: "launch:\(launch.sessionId)",
             kind: .launch,
@@ -389,7 +405,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             ageSecs: launch.ageSecs,
             reason: launch.reason,
             nextOwner: userAttention ? .human : nil,
-            tint: userAttention ? .red : .green,
+            tint: userAttention ? .blue : .green,
             evidence: isStale(launch.ageSecs, staleThresholdSecs) ? .stale : .observed,
             actions: openable ? [.open] : [],
             launchId: openable ? launch.id : nil
@@ -424,6 +440,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         switch level {
         case .green: .green
         case .red: .red
+        case .blue: .blue
         case .black: .black
         case .unknown: .neutral
         }

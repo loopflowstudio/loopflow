@@ -21,6 +21,8 @@ pub struct Skill {
     pub action_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub feedback: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,6 +38,7 @@ impl Skill {
             directions: Vec::new(),
             action_style: None,
             interactive: None,
+            feedback: false,
             content: None,
             fast_path: None,
         }
@@ -98,8 +101,8 @@ pub struct XorPath {
 pub enum FlowAction {
     RunSkill { skill: ConcreteSkill },
     RunOps { ops: ConcreteOp },
-    WaitInteractive { skill: ConcreteSkill },
-    DeferInteractive { skill: ConcreteSkill },
+    WaitFeedback { skill: ConcreteSkill },
+    DeferFeedback { skill: ConcreteSkill },
     Xor { branch: ConcreteXor },
     Complete,
 }
@@ -209,10 +212,10 @@ pub fn next_action_with_policy(
     };
     match item.clone() {
         ConcreteStep::Skill(skill) => {
-            if skill.skill.interactive.unwrap_or(false) {
+            if skill.skill.feedback {
                 match policy {
-                    InteractionPolicy::Require => FlowAction::WaitInteractive { skill },
-                    InteractionPolicy::Defer => FlowAction::DeferInteractive { skill },
+                    InteractionPolicy::Require => FlowAction::WaitFeedback { skill },
+                    InteractionPolicy::Defer => FlowAction::DeferFeedback { skill },
                 }
             } else {
                 FlowAction::RunSkill { skill }
@@ -410,6 +413,7 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
         directions: frontmatter.directions,
         action_style: frontmatter.action_style,
         interactive: frontmatter.interactive,
+        feedback: false,
         content: Some(body),
         fast_path: frontmatter.fast_path,
     })
@@ -835,6 +839,10 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
             let default_agent = parse_optional_string(map, "default_agent");
             let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
+            let feedback = map
+                .get(key("feedback"))
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
             let directions = parse_directions_field(map);
             Ok(Skill {
                 name,
@@ -843,6 +851,7 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
                 directions,
                 action_style,
                 interactive,
+                feedback,
                 content: None,
                 fast_path: None,
             })
@@ -1098,6 +1107,7 @@ fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Skill {
     if let Some(interactive) = skill.interactive {
         resolved.interactive = Some(interactive);
     }
+    resolved.feedback = skill.feedback;
 
     resolved
 }
@@ -1552,7 +1562,7 @@ Be careful.
     }
 
     #[test]
-    fn next_action_marks_interactive_skills_as_wait() {
+    fn next_action_marks_feedback_steps_as_wait() {
         let flow = Flow {
             name: "demo".to_string(),
             items: vec![Step::Skill(Skill {
@@ -1561,7 +1571,8 @@ Be careful.
                 default_agent: None,
                 directions: Vec::new(),
                 action_style: None,
-                interactive: Some(true),
+                interactive: None,
+                feedback: true,
                 content: None,
                 fast_path: None,
             })],
@@ -1570,11 +1581,11 @@ Be careful.
         let repo = TempDir::new().unwrap();
         let items = expand_flow(&flow, repo.path()).unwrap();
         let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::WaitInteractive { .. }));
+        assert!(matches!(action, FlowAction::WaitFeedback { .. }));
     }
 
     #[test]
-    fn interaction_policy_defers_the_same_interactive_step() {
+    fn interaction_policy_defers_the_same_feedback_step() {
         let flow = Flow {
             name: "reviewed-code".to_string(),
             items: vec![Step::Skill(Skill {
@@ -1583,7 +1594,8 @@ Be careful.
                 default_agent: None,
                 directions: Vec::new(),
                 action_style: None,
-                interactive: Some(true),
+                interactive: None,
+                feedback: true,
                 content: None,
                 fast_path: None,
             })],
@@ -1594,11 +1606,11 @@ Be careful.
 
         assert!(matches!(
             next_action_with_policy(&items, 0, InteractionPolicy::Require),
-            FlowAction::WaitInteractive { .. }
+            FlowAction::WaitFeedback { .. }
         ));
         assert!(matches!(
             next_action_with_policy(&items, 0, InteractionPolicy::Defer),
-            FlowAction::DeferInteractive { .. }
+            FlowAction::DeferFeedback { .. }
         ));
     }
 
@@ -1616,9 +1628,7 @@ Be careful.
     }
 
     #[test]
-    fn expand_flow_resolves_interactive_from_skill_frontmatter() {
-        // A bare skill name reference in a flow should pick up interactive: true
-        // from the skill file's frontmatter, not remain None.
+    fn flow_feedback_does_not_leak_from_skill_frontmatter() {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().join(".lf/skills");
         fs::create_dir_all(&skills_dir).unwrap();
@@ -1635,16 +1645,11 @@ Be careful.
         let items = expand_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 1);
         let action = next_action(&items, 0);
-        assert!(
-            matches!(action, FlowAction::WaitInteractive { .. }),
-            "bare skill reference should resolve interactive from frontmatter"
-        );
+        assert!(matches!(action, FlowAction::RunSkill { .. }));
     }
 
     #[test]
-    fn expand_flow_resolves_builtin_interactive_skill() {
-        // The builtin "design" skill has interactive: true in its frontmatter.
-        // A flow referencing it by name should produce WaitInteractive.
+    fn builtin_skill_requires_explicit_flow_feedback() {
         let tmp = TempDir::new().unwrap();
         let flow = Flow {
             name: "test-flow".to_string(),
@@ -1659,11 +1664,7 @@ Be careful.
             "expanded flow should contain a design skill"
         );
         if let Some(ConcreteStep::Skill(skill)) = design {
-            assert_eq!(
-                skill.skill.interactive,
-                Some(true),
-                "builtin design skill should have interactive: true after expansion"
-            );
+            assert!(!skill.skill.feedback);
         }
     }
 
@@ -2086,7 +2087,7 @@ Be careful.
           - implement
           - step:
               name: review
-              interactive: true
+              feedback: true
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -2100,7 +2101,7 @@ Be careful.
         assert_eq!(tune.steps.len(), 2);
         assert_eq!(tune.steps[0].name, "implement");
         assert_eq!(tune.steps[1].name, "review");
-        assert_eq!(tune.steps[1].interactive, Some(true));
+        assert!(tune.steps[1].feedback);
     }
 
     #[test]

@@ -8,8 +8,8 @@ title: Architecture
 > **Moment of transparency — July 17, 2026**
 >
 > Loopflow now runs durable input through Work, Epoch, Basis, Steer, Send, and
-> the existing Turn ledger. Stored Review/Handoff and `ChildCommand` are gone;
-> Review is an interactive flow interval routed by Launch attention, and direct
+> the existing Turn ledger. Stored Feedback/Handoff and `ChildCommand` are gone;
+> Feedback is an interactive flow interval routed by Launch attention, and direct
 > Work controls exist. Project/Task Session runners and body leases still own
 > process execution and reconstruct Run authority from legacy generations.
 > Child attention is queryable but parent loops do not yet prioritize it. Run is
@@ -56,7 +56,7 @@ User -> Wave Chat -> Wave resident
 
 Steer -> Epoch Basis -> provider boundary -> agent Turn
 Run/Launch/Turn ledger <- body generation bridge -> provider process
-interactive flow + Launch attention -> Review projection / Swift surface
+interactive flow + Launch attention -> Feedback projection / Swift surface
 ```
 
 `lf` is the machine-wide CLI and JSON interface. `lf wave <name>` runs one
@@ -90,7 +90,7 @@ The current runtime contains several overlapping representations:
   can fall through to User authority;
 - child attention has durable routing but no parent scheduler consumer;
 - Turn records do not yet retain the root output a parent needs to understand a
-  child's question without inventing a Review message store.
+  child's question without inventing a Feedback message store.
 
 These are the implementation being replaced, not compatibility contracts.
 
@@ -112,7 +112,7 @@ These are the implementation being replaced, not compatibility contracts.
    lease handle, including across SSH.
 4. Revoked body recovery releases authority only after positive absence
    evidence; an unprovable probe remains fenced.
-5. A current actionable CI incident can interrupt a parked Task Review once
+5. A current actionable CI incident can interrupt a parked Task Feedback once
    and settle before the background lifecycle resumes. This is the narrow
    implementation precursor to the generic control lane.
 6. Authored Project/Task direction is only Steer. `ChildDirective`, directive
@@ -124,9 +124,9 @@ These are the implementation being replaced, not compatibility contracts.
 8. Stable Project/Task Work rows and Epochs survive Session succession. The
    bridge imports exact legacy generations into Runs and closes an Epoch only
    after its executor is quiescent.
-9. Stored Review and Handoff aggregates are deleted. Interactive flow position,
-   live Launch, and `attention: User | Parent(WorkRef)` derive Review. A
-   Basis-fenced `close_review` advances the flow without a disposition.
+9. Stored Feedback and Handoff aggregates are deleted. Interactive flow position,
+   live Launch, and `attention: User | Parent(WorkRef)` derive Feedback. A
+   Basis-fenced `continue_feedback` advances the flow without a disposition.
 10. `ChildCommand` is deleted. Direct Run/Work controls and typed CI incident
     claims replace its lifecycle/source/effect/claim state.
 11. Global promotion and PM reteam now fence active writers through Run and
@@ -183,8 +183,8 @@ Launch implementation detail and may disappear without changing Work identity.
 a public lifecycle target.
 
 There is no first-class `Actor`, writable `Ack`, `Handle`, `Body`, `Session`,
-`Block`, `Sleep`, `Interaction`, `InteractionId`, Review row, or `ReviewId` in
-the target. Review is derived from flow, Launch, and attention.
+`Block`, `Sleep`, `Interaction`, `InteractionId`, Feedback row, or `FeedbackId` in
+the target. Feedback is derived from flow, Launch, and attention.
 
 ## Identity and containment
 
@@ -330,14 +330,14 @@ never leave its only future copy in memory.
 
 ### Typed tool responses and CI
 
-**Decision.** Review conversation is not a decision protocol. Questions,
+**Decision.** Feedback conversation is not a decision protocol. Questions,
 brainstorming, critique, and consequential guidance are ordinary Steers inside
-the Review. There is no review disposition, approval state, or encoded
+the Feedback. There is no Feedback disposition, approval state, or encoded
 decision tree.
 
 When a specific tool genuinely declares a machine-readable choice, its response
 stays typed. Persist it, allocate its revision, and release that tool before
-optional provider notification. This narrow mechanism does not define Review
+optional provider notification. This narrow mechanism does not define Feedback
 or parent scheduling.
 
 A CI failure is evidence, not direction:
@@ -449,7 +449,7 @@ replay is safe. Unsafe or unknown effects produce a typed Wait.
 New input does not imply a new Run. While the Epoch already has an active Run,
 the input becomes durable control work for that Run and is selected at its next
 boundary. Only input that finds no active Run may resolve a Wait and reserve
-one. This is how a child Review or CI incident wakes useful execution without
+one. This is how a child Feedback or CI incident wakes useful execution without
 creating overlapping authority.
 
 ### Races
@@ -494,7 +494,7 @@ it as Loopflow identity. Only Succeeded applies Basis or supports completion.
 Partial usage survives every terminal outcome when reported.
 
 Turn also retains the optional root assistant text Loopflow observed. This is
-the minimum durable output needed to conduct a child Review and reconstruct an
+the minimum durable output needed to conduct a child Feedback and reconstruct an
 operator-facing conversation; it is not a provider transcript or a new Message
 aggregate. Partial, failed, and interrupted output remains evidence and does
 not apply Basis. Tool calls, native child transcripts, and vendor event detail
@@ -537,47 +537,47 @@ Any newer truth, Steer, typed tool response, or selected evidence makes the
 proposal stale. A live Steer cannot be blessed by the older Turn that received
 it. There is no `try_complete` state and no explicit Ack.
 
-## Review, Wait, and attention
+## Feedback, Wait, and attention
 
-**Decision.** A Review is an interactive interval in a Work flow. It may be
-critique, questions, brainstorming, or direction. One Review can contain many
+**Decision.** A Feedback is an interactive interval in a Work flow. It may be
+critique, questions, brainstorming, or direction. One Feedback can contain many
 Steers and provider Turns.
 
-Review is derived from facts the system already needs:
+Feedback is derived from facts the system already needs:
 
 ```text
 current flow step is interactive
 + active Launch
-+ Review route to User or immediate parent Work
++ Feedback route to User or immediate parent Work
 + latest observed root Turn output when the provider exposes Turns
-= open Review
+= open Feedback
 ```
 
-There is no Review row, Review id, reviewer generation, disposition, approval,
+There is no Feedback row, Feedback id, reviewer generation, disposition, approval,
 or copied evidence aggregate. Stable Work identifies the conversation target;
 `LaunchId` opens the current provider/TUI surface; Basis fences a stale close.
-At most one Review may be current for one Work because one flow has one current
+At most one Feedback may be current for one Work because one flow has one current
 step.
 
-Review route and pending attention are different facts on that Launch. The
+Feedback route and pending attention are different facts on that Launch. The
 route exists for the whole interactive interval. `attention_at` exists only
 while the routed peer owes the next response. A parent Steer clears pending
-attention after its durable commit but leaves the Review open. The child's next
-terminal Turn re-arms attention. `close_review` alone clears the route and
-advances flow. This is turn-taking state, not a Message, disposition, or Review
+attention after its durable commit but leaves the Feedback open. The child's next
+terminal Turn re-arms attention. `continue_feedback` alone clears the route and
+advances flow. This is turn-taking state, not a Message, disposition, or Feedback
 aggregate.
 
 ```text
-steer(work, text, if_basis)   # one message inside the Review
-close_review(work, if_basis) # end the interval and advance the flow
+steer(work, text, if_basis)   # one message inside the Feedback
+continue_feedback(work, if_basis) # end the interval and advance the flow
 open_launch(launch)           # attach a User client to its surface
 ```
 
 Closing records no judgment. Consequential feedback is already durable as
-Steer. The routed peer—User or parent—closes the Review; the child cannot
+Steer. The routed peer—User or parent—closes the Feedback; the child cannot
 silently release itself from requested attention.
 
-While its Launch is usable, a Work in Review remains Running. It is not asleep
+While its Launch is usable, a Work in Feedback remains Running. It is not asleep
 or blocked merely because the next participant has not replied.
 
 ### Parent responsiveness
@@ -586,7 +586,7 @@ or blocked merely because the next participant has not replied.
 background pursuit:
 
 1. explicit interrupt and direct User interaction;
-2. open child Reviews awaiting this parent, oldest first;
+2. open child Feedbacks awaiting this parent, oldest first;
 3. other child evidence that can unblock progress;
 4. the parent's own pursue, mutate, selection, and cadence work.
 
@@ -598,7 +598,7 @@ There is no reviewer Launch and no second parent agent.
 The projected parent seed contains the child's latest durable root Turn output
 plus current Work, flow, workspace, PR/CI, and other relevant domain facts.
 This is what lets the same protocol carry critique, questions, or brainstorming
-without restoring a Review prompt row. Attention without understandable child
+without restoring a Feedback prompt row. Attention without understandable child
 content is not considered serviced.
 
 When a child terminal Turn re-arms parent attention, the same transaction
@@ -617,7 +617,7 @@ resumes after the interaction. Plain User Steer still never implies interrupt;
 this is explicit parent scheduler policy for higher-priority child attention.
 
 The same rule handles other actionable control evidence. Current code has
-proved the narrow form for CI: a claimed incident can interrupt a parked Review
+proved the narrow form for CI: a claimed incident can interrupt a parked Feedback
 once, settle its bounded repair before the parent lifecycle loop, and leave the
 background playhead untouched. The target removes that CI-only ordering hook by
 making control input and background flow position separate facts. Completing a
@@ -625,7 +625,7 @@ control item cannot rewrite, advance, or validate the background playhead.
 
 Transport delivery to the parent does not discharge attention. The item stays
 first until the parent actually sends an ordinary Steer to the child or closes
-the Review. Steer clears only the pending turn; the Review remains open. A
+the Feedback. Steer clears only the pending turn; the Feedback remains open. A
 later terminal child Turn re-arms pending attention and creates the next
 control-lane item. After all child attention drains, the same parent agent
 resumes its own flow from durable position and Basis.
@@ -669,10 +669,10 @@ Run health (`Starting`, `Working`, `Stalled`, `Recovering`, `Dead`, or
 `Unobservable`) is fresh evidence, not Work lifecycle. An unreachable Home is
 not proof that its Run is dead.
 
-Swift is one User client. It derives `AwaitingUser` from a live Review routed to
+Swift is one User client. It derives `AwaitingUser` from a live Feedback routed to
 User and opens the Launch by `LaunchId`, including after Swift was closed. An
-external agent using the User API can conduct the same Review without becoming
-a Loopflow parent Run. A parent-routed Review appears only in that parent's
+external agent using the User API can conduct the same Feedback without becoming
+a Loopflow parent Run. A parent-routed Feedback appears only in that parent's
 control lane. Interaction and Handoff ids disappear.
 
 ## Decentralized Home
@@ -800,7 +800,7 @@ Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
    boundaries; map process generations, retries, and provider handoffs to Runs
    and Launches inside the Epoch;
 4. convert directives to canonical truth events; convert follow-up,
-   replacement, resume, and Review conversation prose to ordered Steers;
+   replacement, resume, and Feedback conversation prose to ordered Steers;
    convert narrow tool responses, CI, and lifecycle variants to typed facts;
 5. do not guess old incorporation—restart current Open Epochs with required
    current input outstanding;
@@ -828,8 +828,8 @@ file-only draft contract.
 
 **Current status.** The durable input and interaction shapes are authoritative.
 Stable Work/Epoch, ordered Basis, Steer/Send, immutable Turn Basis, typed
-ToolResponse/CI, derived Review, Launch attention/handback, Work status, and
-direct Work controls exist. `InteractionReview`, `InteractiveHandoff`, and
+ToolResponse/CI, derived Feedback, Launch attention/handback, Work status, and
+direct Work controls exist. `InteractionFeedback`, `InteractiveHandoff`, and
 `ChildCommand` have zero production references. Global promotion and PM reteam
 fence active writers through Run/containment evidence.
 
@@ -838,8 +838,8 @@ process reservation, generations, status, revocation, and recovery, then mirror
 them into Run. Product control authority no longer crosses that bridge: one
 opaque `LF_RUN_LEASE` hash resolves the exact active Run and missing agent
 authority fails closed. Turn retains observed root assistant output. Project
-and Wave drain direct input then oldest child Review before background work
-with live-send or interrupt-and-seed fallback. Review route remains open across
+and Wave drain direct input then oldest child Feedback before background work
+with live-send or interrupt-and-seed fallback. Feedback route remains open across
 the conversation while nullable pending attention clears on the routed Steer;
 the next terminal child Turn re-arms it and advances the parent Basis once.
 The duplicate Session lifecycle remains.
@@ -869,26 +869,26 @@ It is done when:
 - live Steer racing successful completion makes completion stale;
 - ordered Steers render once and apply together at the later Basis;
 - Unknown live Send is not repeated to that Turn and still seeds later;
-- one Review contains several Steers and Turns without creating Review rows or
+- one Feedback contains several Steers and Turns without creating Feedback rows or
   dispositions;
 - a parent control seed includes the child's latest durable root output and
-  current evidence without creating a Message or Review prompt store;
-- one Review supports repeated parent Steer → child Turn cycles without
+  current evidence without creating a Message or Feedback prompt store;
+- one Feedback supports repeated parent Steer → child Turn cycles without
   redelivering an answered turn, and each new child reply advances parent Basis;
-- Project and Wave service an awaiting child Review before beginning another
+- Project and Wave service an awaiting child Feedback before beginning another
   background flow step;
-- the agent already running the parent flow receives the Review; no reviewer
+- the agent already running the parent flow receives the Feedback; no reviewer
   Run, secondary parent agent, or stored priority inbox is created;
-- a child Review arriving during a non-steerable parent Turn interrupts and
+- a child Feedback arriving during a non-steerable parent Turn interrupts and
   becomes the next seeded input;
 - responding to the child resumes the interrupted parent playhead without
   replaying completed flow steps;
-- User and parent conduct the same Review protocol; only routing differs;
-- closing an old Review after Basis or flow position advances is rejected;
+- User and parent conduct the same Feedback protocol; only routing differs;
+- closing an old Feedback after Basis or flow position advances is rejected;
 - dirty canonical main cannot prevent a read-only parent control response;
 - an actionable CI incident arriving during an active Run becomes that Run's
   next control boundary; it never reserves an overlapping repair Run;
-- a land-time-only or stale CI incident neither interrupts a Review nor enters
+- a land-time-only or stale CI incident neither interrupts a Feedback nor enters
   the control lane;
 - CI settlement cannot attribute a cached pre-repair head as the repaired head;
   the first fresh repaired-head receipt is immutable;
@@ -904,7 +904,7 @@ It is done when:
   provider prose;
 - stale parent lease and stale Epoch/Basis writes are rejected;
 - current Wave/Project/Task control has no production Session/body generation,
-  directive, replacement, follow-up, resume-message, `InteractionReview`,
+  directive, replacement, follow-up, resume-message, `InteractionFeedback`,
   Handoff, `ChildCommand`, or command-decision path;
 - copied dogfood migration succeeds only after every writer is quiescent;
 - format, clippy, migration/race/controller tests, and DTO round trips pass.
@@ -924,10 +924,10 @@ Use deterministic barriers, never sleeps:
 - stop versus recovery;
 - provider send begins versus disconnect;
 - typed tool response versus seed-only blocked tool;
-- child Review versus parent background Turn on live and seed-only providers;
-- repeated child Review messages versus parent flow resumption;
-- actionable CI incident versus a parked Review and active Run;
-- non-actionable CI evidence versus a parked Review;
+- child Feedback versus parent background Turn on live and seed-only providers;
+- repeated child Feedback messages versus parent flow resumption;
+- actionable CI incident versus a parked Feedback and active Run;
+- non-actionable CI evidence versus a parked Feedback;
 - duplicate CI observation versus crash after reserve or active-Run claim;
 - fifty SQLite writers versus receipt allocation.
 
@@ -964,7 +964,7 @@ noun or source of truth:
 
 Questions about central orchestration, generic workflow engines, recursive
 Projects, provider-wide steer capability, writable Ack, replacement messages,
-or separate Interaction/Review decision aggregates are closed by the decisions
+or separate Interaction/Feedback decision aggregates are closed by the decisions
 above.
 
 ## Important paths

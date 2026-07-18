@@ -311,6 +311,13 @@ pub trait Harness: Send + Sync {
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Drivers that take resume state at `start` instead ignore this.
     fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}
+    /// Pin this Launch to the exact managed account already recorded in its
+    /// durable route. Accountless providers keep the default no-op.
+    fn set_provider_account_id(&mut self, _account_id: Option<crate::store::ProviderAccountId>) {}
+    /// The managed account selected before the first provider Turn begins.
+    fn provider_account_id(&self) -> Option<crate::store::ProviderAccountId> {
+        None
+    }
 }
 
 /// Constructor fn: `(harness_kind, approval, event_tx) -> harness`.

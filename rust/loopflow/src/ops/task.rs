@@ -1878,6 +1878,7 @@ async fn launch_task_process(
             cwd: session.worktree.clone(),
             tmux_name,
             agent: session.agent.clone(),
+            account_id: None,
             resume_token: session.provider_session_id.clone(),
         },
     )

@@ -20,6 +20,10 @@ use crate::harness::{
     ApprovalPolicy, Harness, RecoveryDecision, SendCurrentOutcome,
 };
 use crate::project::{ChildEventPayload, Project, ProjectEventKind, ProjectId};
+use crate::provider_account::recovery::{
+    capability_key, plan_run_route_recovery, settle_route_recovery, stop_launch_for_recovery,
+    ExactRoute, RecoveryChoice, RecoverySettlement, RecoveryStopOutcome,
+};
 use crate::store::SharedStore;
 use crate::wave::playhead::{
     BodyProvenance, Playhead, PlayheadEvent, QueuedInvocation, StepKind, StepOutcome,
@@ -54,6 +58,7 @@ async fn spawn_failover(
     session: &Project,
     lease: &RunLease,
     wave: &Wave,
+    route: &ExactRoute,
 ) -> Result<()> {
     let tmux_name = format!(
         "lf-project-{}-{}",
@@ -68,7 +73,8 @@ async fn spawn_failover(
             wave_id: session.wave_id.clone(),
             cwd: Path::new(wave.repo()).to_path_buf(),
             tmux_name,
-            agent: session.agent.clone(),
+            agent: route.agent.agent(),
+            account_id: route.account_id.clone(),
             resume_token: session.provider_session_id.clone(),
         },
     )
@@ -116,7 +122,7 @@ async fn run_project_inner(
     else {
         unreachable!("LaunchLive returns a Launch receipt")
     };
-    let run_control = crate::trace::ControlLaunch {
+    let mut run_control = crate::trace::ControlLaunch {
         run_id: run.id,
         home_id: run.home_id,
         account_id: launch.route.account_id.clone(),
@@ -156,13 +162,28 @@ async fn run_project_inner(
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(session.provider_session_id.clone());
+    let requested_account = launch
+        .route
+        .account_id
+        .as_deref()
+        .map(crate::store::ProviderAccountId::parse)
+        .transpose()
+        .map_err(|reason| anyhow!("invalid Launch account route: {reason}"))?;
+    harness.set_provider_account_id(requested_account);
     store.validate_run_lease(lease).await?;
     harness.start(&prepared.turn.config).await?;
     session.provider = harness_name;
     session.provider_session_id = harness.provider_session_id();
-    store
-        .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
+    let launch = store
+        .observe_launch_provider(
+            lease,
+            &launch.id,
+            harness.provider_account_id(),
+            session.provider_session_id.clone(),
+        )
         .await?;
+    run_control.account_id = launch.route.account_id.clone();
+    run_control.resume_token = launch.resume_token.clone();
     if let Err(error) = store.update_project_for_run(&session, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
@@ -912,10 +933,8 @@ async fn finish_failed(
     anyhow::bail!(error.to_string())
 }
 
-/// Handle a body failure with disconnect-class recovery: classify the failure,
-/// and if it's a disconnect/hollow-body with a configured backup agent, hand
-/// the next generation to the backup instead of leaving the body failed for
-/// the supervisor to respawn the same flaky provider.
+/// Recover a retryable body failure through the Run's next exact route after
+/// PRD-38 permits replacement and the current containment stops positively.
 async fn handle_body_failure(
     store: &SharedStore,
     session: &mut Project,
@@ -924,7 +943,7 @@ async fn handle_body_failure(
     wave: &Wave,
     reason: &str,
     turn_had_durable_side_effect: bool,
-) -> Result<Option<RunLease>> {
+) -> Result<Option<(RunLease, ExactRoute)>> {
     let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
     let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
     let decision = classify_disconnect_recovery(
@@ -934,59 +953,84 @@ async fn handle_body_failure(
         backup_agent,
     );
 
-    match decision {
-        RecoveryDecision::HandoffToBackup { agent, provider } => {
-            let _ = harness.stop().await;
-            store
-                .append_project_event_for_run(
-                    &session.id,
-                    lease,
-                    &ProjectEventKind::Failed {
-                        error: reason.to_string(),
-                        resumable: true,
-                    },
-                )
-                .await?;
-            store.update_project_for_run(session, lease).await?;
-            let launch = store.current_launch(lease).await?.ok_or_else(|| {
-                anyhow!("Project Run {} has no Launch to hand back", lease.run_id)
-            })?;
-            store
-                .advance_run(
-                    lease,
-                    crate::durable::RunAdvance::LaunchEnded {
-                        launch_id: launch.id,
-                        outcome: crate::durable::BoundaryState::Failed,
-                    },
-                )
-                .await?;
-            let handoff = ChildBodyHandoff {
-                from_agent: session.agent.clone(),
-                to_agent: agent.clone(),
-                from_provider: session.provider.clone(),
-                to_provider: provider.clone(),
-                reason: format!(
-                    "disconnect-class failure; handing off from {} to {agent}",
-                    session.agent
-                ),
-            };
-            if session.provider != provider {
-                session.provider_session_id = None;
+    let route_recovery_permitted = matches!(
+        decision,
+        RecoveryDecision::HandoffToBackup { .. } | RecoveryDecision::AllowRetry
+    ) || (matches!(decision, RecoveryDecision::Normal)
+        && !turn_had_durable_side_effect
+        && crate::engine::agent::classify_retryable_agent_failure(reason).is_some());
+
+    if route_recovery_permitted {
+        let launch = store
+            .current_launch(lease)
+            .await?
+            .ok_or_else(|| anyhow!("Project Run {} has no Launch to hand back", lease.run_id))?;
+        let current_route = ExactRoute::try_from(&launch.route)?;
+        let stopped = match stop_launch_for_recovery(store, lease, harness).await? {
+            RecoveryStopOutcome::Stopped(stopped) => stopped,
+            RecoveryStopOutcome::Fenced { error, stop } => {
+                tracing::error!(project = %session.id, containment = ?stop.containment, %error, "Project recovery left the Run fenced");
+                return Ok(None);
             }
-            session.agent = agent;
-            session.provider = provider;
-            store.update_project_for_run(session, lease).await?;
-            store
-                .append_project_event_for_run(
-                    &session.id,
-                    lease,
-                    &ProjectEventKind::BodyHandedOff { handoff },
-                )
-                .await?;
-            let rotated = store.rotate_run_lease(lease).await?;
-            store.update_project_for_run(session, &rotated).await?;
-            Ok(Some(rotated))
-        }
+        };
+        let choice = plan_run_route_recovery(store, lease, backup_agent).await?;
+        let failure = match &choice {
+            RecoveryChoice::Launch(_) => reason.to_string(),
+            RecoveryChoice::AwaitCapability { reasons } => format!(
+                "{reason}; waiting on provider route capability: {}",
+                capability_key(reasons)
+            ),
+        };
+        store
+            .append_project_event_for_run(
+                &session.id,
+                lease,
+                &ProjectEventKind::Failed {
+                    error: failure,
+                    resumable: true,
+                },
+            )
+            .await?;
+        store.update_project_for_run(session, lease).await?;
+        return match settle_route_recovery(store, lease, stopped, choice).await? {
+            RecoverySettlement::Launch {
+                lease: rotated,
+                route,
+            } => {
+                let agent = route.agent.agent();
+                let provider = route.agent.provider.clone();
+                let handoff = ChildBodyHandoff {
+                    from_agent: session.agent.clone(),
+                    to_agent: agent.clone(),
+                    from_provider: session.provider.clone(),
+                    to_provider: provider.clone(),
+                    reason: format!("route recovery after {reason}"),
+                };
+                if current_route.agent.provider != route.agent.provider
+                    || current_route.account_id != route.account_id
+                {
+                    session.provider_session_id = None;
+                }
+                session.agent = agent;
+                session.provider = provider;
+                store.update_project_for_run(session, &rotated).await?;
+                store
+                    .append_project_event_for_run(
+                        &session.id,
+                        &rotated,
+                        &ProjectEventKind::BodyHandedOff { handoff },
+                    )
+                    .await?;
+                Ok(Some((rotated, route)))
+            }
+            RecoverySettlement::AwaitCapability { wait } => {
+                tracing::info!(project = %session.id, wait = %wait.id, "Project waiting for a provider route capability");
+                Ok(None)
+            }
+        };
+    }
+
+    match decision {
         RecoveryDecision::Stop => {
             let non_convergence = format!(
                 "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
@@ -995,9 +1039,14 @@ async fn handle_body_failure(
                 .await
                 .map(|_| None)
         }
-        _ => finish_failed(store, session, lease, harness, reason, None)
-            .await
-            .map(|_| None),
+        RecoveryDecision::Normal | RecoveryDecision::AllowRetry => {
+            finish_failed(store, session, lease, harness, reason, None)
+                .await
+                .map(|_| None)
+        }
+        RecoveryDecision::HandoffToBackup { .. } => unreachable!(
+            "backup handoff is consumed by route recovery before ordinary failure handling"
+        ),
     }
 }
 
@@ -1010,7 +1059,7 @@ async fn fail_and_maybe_relaunch(
     reason: &str,
     turn_had_durable_side_effect: bool,
 ) -> Result<()> {
-    let Some(rotated) = handle_body_failure(
+    let Some((rotated, route)) = handle_body_failure(
         store,
         session,
         lease,
@@ -1023,7 +1072,7 @@ async fn fail_and_maybe_relaunch(
     else {
         return Ok(());
     };
-    spawn_failover(store, session, &rotated, wave).await
+    spawn_failover(store, session, &rotated, wave, &route).await
 }
 
 async fn finish_abandoned(

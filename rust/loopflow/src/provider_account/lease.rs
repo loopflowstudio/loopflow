@@ -23,7 +23,7 @@ use crate::provider_account::{
     account_login, match_account, AccountMatch, ProviderAccountError, RateLimitSignal,
 };
 use crate::provider_auth::Provider;
-use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
+use crate::store::{AccountLimitRow, ProviderAccount, ProviderAccountId, SharedStore};
 
 /// The encoded [`AccountLeaseHandle`] carried across process boundaries.
 pub const ACCOUNT_LEASE_ENV: &str = "LF_ACCOUNT_LEASE";
@@ -43,7 +43,7 @@ pub(crate) struct AccountLease {
 }
 
 impl AccountLease {
-    fn grant(&self, provider: Provider) -> Option<&ProviderGrant> {
+    pub(crate) fn grant(&self, provider: Provider) -> Option<&ProviderGrant> {
         self.grants.iter().find(|grant| grant.provider == provider)
     }
 }
@@ -417,6 +417,15 @@ enum BrokerOperation {
         provider: Provider,
         provider_session_id: Option<String>,
     },
+    ResolveExact {
+        provider: Provider,
+        account_id: ProviderAccountId,
+        provider_session_id: Option<String>,
+    },
+    AccountFacts {
+        provider: Provider,
+        account_id: ProviderAccountId,
+    },
     PinSession {
         provider: Provider,
         provider_session_id: String,
@@ -434,6 +443,13 @@ pub(crate) struct LeaseResolution {
     pub(crate) account_id: ProviderAccountId,
     access_token: String,
     pub(crate) resume_requested_session: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct LeaseAccountFacts {
+    pub(crate) account: Option<ProviderAccount>,
+    pub(crate) limits: Vec<AccountLimitRow>,
+    pub(crate) credential_available: bool,
 }
 
 impl std::fmt::Debug for LeaseResolution {
@@ -457,6 +473,7 @@ impl LeaseResolution {
 enum BrokerResponse {
     Lease(AccountLease),
     Resolution(LeaseResolution),
+    AccountFacts(Box<LeaseAccountFacts>),
     Ok,
     Error(String),
 }
@@ -592,6 +609,40 @@ impl BrokerState {
         })
     }
 
+    async fn resolve_exact(
+        &mut self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        provider_session_id: Option<&str>,
+    ) -> Result<LeaseResolution, ProviderAccountError> {
+        self.grant_contains(provider, account_id)?;
+        let access_token = self
+            .prepared
+            .credentials
+            .get(&(provider, account_id.clone()))
+            .cloned()
+            .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
+                provider,
+                accounts: format!("'{account_id}'"),
+            })?;
+        let resume_requested_session = match provider_session_id {
+            Some(session_id) => self
+                .prepared
+                .store
+                .provider_session_account(provider, session_id)
+                .await?
+                .is_some_and(|pinned| pinned == *account_id),
+            None => false,
+        };
+        self.spent_preferences
+            .insert((provider, account_id.clone()));
+        Ok(LeaseResolution {
+            account_id: account_id.clone(),
+            access_token,
+            resume_requested_session,
+        })
+    }
+
     fn grant_contains(
         &self,
         provider: Provider,
@@ -629,6 +680,43 @@ impl BrokerState {
                 self.resolve(provider, provider_session_id.as_deref())
                     .await?,
             )),
+            BrokerOperation::ResolveExact {
+                provider,
+                account_id,
+                provider_session_id,
+            } => Ok(BrokerResponse::Resolution(
+                self.resolve_exact(provider, &account_id, provider_session_id.as_deref())
+                    .await?,
+            )),
+            BrokerOperation::AccountFacts {
+                provider,
+                account_id,
+            } => {
+                self.grant_contains(provider, &account_id)?;
+                let account = self
+                    .prepared
+                    .store
+                    .list_provider_accounts(Some(provider.as_str()))
+                    .await?
+                    .into_iter()
+                    .find(|account| account.account_id == account_id);
+                let limits = self
+                    .prepared
+                    .store
+                    .provider_account_limits(Some(provider.as_str()))
+                    .await?
+                    .into_iter()
+                    .filter(|limit| limit.account_id == account_id)
+                    .collect();
+                Ok(BrokerResponse::AccountFacts(Box::new(LeaseAccountFacts {
+                    account,
+                    limits,
+                    credential_available: self
+                        .prepared
+                        .credentials
+                        .contains_key(&(provider, account_id)),
+                })))
+            }
             BrokerOperation::PinSession {
                 provider,
                 provider_session_id,
@@ -899,6 +987,40 @@ impl AccountLeaseClient {
             provider_session_id,
         })? {
             BrokerResponse::Resolution(resolution) => Ok(resolution),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn resolve_exact(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        provider_session_id: Option<String>,
+    ) -> Result<LeaseResolution, ProviderAccountError> {
+        match self.request(BrokerOperation::ResolveExact {
+            provider,
+            account_id: account_id.clone(),
+            provider_session_id,
+        })? {
+            BrokerResponse::Resolution(resolution) => Ok(resolution),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn account_facts(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+    ) -> Result<LeaseAccountFacts, ProviderAccountError> {
+        match self.request(BrokerOperation::AccountFacts {
+            provider,
+            account_id: account_id.clone(),
+        })? {
+            BrokerResponse::AccountFacts(facts) => Ok(*facts),
             _ => Err(ProviderAccountError::Runtime(
                 "account lease broker returned the wrong response".to_string(),
             )),
@@ -1303,6 +1425,25 @@ mod tests {
         // A sibling resolution avoids the spent, rate-limited preferred.
         let sibling = client.resolve(Provider::Codex, None).unwrap();
         assert_eq!(sibling.account_id, id("primary"));
+        assert!(
+            client
+                .account_facts(Provider::Claude, &id("personal"))
+                .unwrap()
+                .credential_available
+        );
+        let facts = client
+            .account_facts(Provider::Codex, &id("reserve"))
+            .unwrap();
+        assert!(facts
+            .account
+            .is_some_and(|account| account.cooldown_until.is_some()));
+        let exact = client
+            .resolve_exact(Provider::Claude, &id("work"), None)
+            .unwrap();
+        assert_eq!(exact.account_id, id("work"));
+        assert!(client
+            .resolve_exact(Provider::Claude, &id("outside"), None)
+            .is_err());
         // Resume stays on the account the store recorded for the session.
         store
             .pin_provider_session_route(Provider::Codex, "existing-session", &id("reserve"))

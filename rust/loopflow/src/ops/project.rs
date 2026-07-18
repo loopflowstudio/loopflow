@@ -382,6 +382,7 @@ pub(crate) async fn launch_project_process(
             cwd: Path::new(wave.repo()).to_path_buf(),
             tmux_name,
             agent: session.agent.clone(),
+            account_id: None,
             resume_token: session.provider_session_id.clone(),
         },
     )

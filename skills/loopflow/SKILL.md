@@ -61,7 +61,7 @@ implementation. Durable delegated work starts from an existing Linear task:
 ```bash
 lf task run <issue-id>                       # durable Task Session, own worktree
 lf task steer <issue-id> "smaller approach"  # redirect its active turn
-lf task receipt <cmd-id> --until incorporated --timeout 30s --json
+lf task status <issue-id> --json             # inspect durable state
 lf task wait <issue-id> --until terminal
 ```
 

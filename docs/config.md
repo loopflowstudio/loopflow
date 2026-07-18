@@ -302,7 +302,7 @@ runs mechanical `lf` commands.
 
 ### Session Launch
 
-Pick where interactive handoffs open.
+Pick where interactive Launches open.
 
 ```yaml
 session:

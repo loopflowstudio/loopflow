@@ -15,8 +15,8 @@ lf roadmap             # every open Task across every wave
 ```
 
 `lf roadmap` buckets the whole machine's work by what it needs: **Now** (live
-and advancing), **Needs attention** (waiting on a human — a handoff, a
-decision, a recovery), **Available**, **Later**. It overlays live evidence on
+and advancing), **Needs attention** (a User-routed Review or recovery),
+**Available**, **Later**. It overlays live evidence on
 the Linear-backed plan, so the answer to "where is my attention needed" is one
 command.
 
@@ -57,17 +57,18 @@ Reading is half; the system stays steerable while it runs.
 lf chat --steer "ship the parser fix first"   # reach the live wave body, else queue
 lf chat --follow                              # replay and tail the conversation
 lf task steer INF-123 "smaller PR"            # redirect one Task's active turn
-lf task attach INF-123                        # writable, audited control terminal
-lf handoff list                               # interactive work waiting on a human
+lf task attach INF-123                        # attach to the active tmux process
+lf launch list --active                       # reopenable provider/TUI processes
 ```
 
-Steering is receipted: a `steer` returns a command id, and
-`lf task receipt <id> --until incorporated` proves the redirect actually
-entered the Session — see [The Agent API](agent-api.md#steer).
+Steering is durable-first: `steer` appends direction before attempting a live
+send. Provider acceptance is only transport evidence; a later successful
+boundary Basis proves application — see [The Agent API](agent-api.md#steer).
 
-Handoffs are how agents hand a human genuinely interactive work (a login, a
-judgment call, a demo) without losing the thread: the handoff is durable,
-listed, and completes back into the owning Session.
+Interactive work (a login, a judgment call, a demo) stays on the owning
+Launch. `lf launch present <id>` reopens its attach route, and `lf launch
+handback <id> --outcome ...` records explicit terminal evidence without
+inventing a second Session.
 
 ## The Mac app
 
@@ -94,8 +95,9 @@ tmux ls                     # live agent processes
 tmux attach -r -t <name>    # read-only look inside one
 ```
 
-Steer through `lf chat --steer` and `lf task steer`; attach writable control
-through `lf task attach`. Never type into an agent's tmux session directly.
+Steer through `lf chat --steer` and `lf task steer`. Use `lf task attach` only
+when the provider interaction itself needs a terminal; raw terminal input is
+not durable direction.
 
 ## Next
 

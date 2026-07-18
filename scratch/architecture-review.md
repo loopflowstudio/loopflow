@@ -1,103 +1,150 @@
-# Architecture foundation review
+# Architecture control-spine review
 
 ## What was implemented
 
-- Researched the current Wave/Project/Task runtime and wrote the core cutover
-  plan around `Work → Epoch → Run → Launch → optional Turn`, with Steer, Basis,
-  Wait, Home authority, migration rules, races, and deletion guards made
-  explicit. This branch implements foundation slices, not that full cutover.
-- Added a prompt-authoring surface: `lf prompt`, the canonical `PROMPTS.md`
-  guide, focused evidence methods in the skills that exercise them, and a small
-  universal Evidence Loop in the standard operating prompt. The website serves
-  the same guide at `/docs/prompts` rather than maintaining a second copy.
-- Replaced provider-wide steering capability with a per-active-Turn
-  `send_current` outcome: `Sent`, `NotSteerable`, `Failed`, or `Unknown`. Codex
-  correlates `turn/steer` with the exact expected vendor Turn and its JSON-RPC
-  response; Claude, OpenCode, and opaque TUIs fall back to the next seed without
-  ordinary Steer interrupting execution.
-- Made `agent_turns` the sole additive spend store. `run_events` now owns only
-  exec/trace lineage; `usage`, `top`, `runs`, `doctor`, JSON, and Mac telemetry
-  read the same Turn query. The public Turn-spend wire names Turn, Launch,
-  trace, and exec and is pinned by one Rust/Swift fixture.
+- Added the durable `Work → Epoch → Run → Launch → optional Turn` spine, one
+  monotonic Basis per Epoch, typed Waits, stable Home identity, and one opaque
+  `LF_RUN_LEASE` that resolves the exact active Run without caller-supplied
+  Work or Session identity.
+- Made Steer the authored-direction record. User and active parent Runs append
+  through the same Basis-fenced mutation; immutable Send attempts record live
+  transport outcomes without claiming incorporation.
+- Deleted stored `InteractionReview`, `InteractiveHandoff`, and `ChildCommand`
+  aggregates. Review now derives from the interactive flow position, a live
+  Launch, its route, and nullable pending attention.
+- Completed the Review turn-taking handshake: a parent Steer parks pending
+  attention without closing Review, the child's next terminal Turn re-arms it
+  once and advances the parent's evidence Basis, and close advances the flow
+  under its existing fence.
+- Gave Wave and Project the same oldest-child-first control projection. Live
+  delivery interrupts the repurposed background body; seed-only delivery
+  preserves the saved playhead and services child attention before more
+  background work.
+- Made Turn the sole additive usage grain and persisted root assistant output
+  for reconstruction and parent control. `usage`, `top`, `runs`, `doctor`, JSON,
+  and Swift read the normalized Turn path.
+- Replaced provider-wide steerability with the exact active Turn's
+  `Sent | NotSteerable | Failed | Unknown` outcome and added public `lf work`
+  and `lf launch` surfaces.
+- Added `lf prompt`, focused prompt methods, and the short universal Evidence
+  Loop without injecting the full authoring guide into every execution.
 
 ## Key choices
 
-1. **Provider acceptance is transport evidence, not incorporation.** Every
-   steering outcome remains available to a later seed. `Sent` improves latency
-   but cannot bless the active Turn's older Basis.
-2. **Dynamic outcome, not static capability.** Steerability changes by exact
-   Turn kind and races its boundary. The controller asks the active Turn and
-   handles the typed result.
-3. **No temporary ChildCommand incorporation layer.** Crash-proof live steering
-   needs the planned Steer + Basis persistence transaction. Patching the old
-   command ledger would create the dual architecture this cutover is removing.
-4. **One additive usage fact.** A provider measures Turns. Exec boundaries,
-   raw Codex log files, and UI groupings do not get parallel totals. Missing,
-   zero, and cache-only measurements remain distinguishable.
-5. **Prompt doctrine rides where it is exercised.** The universal prompt pays
-   only for the evidence floor; authoring doctrine lives in `PROMPTS.md` and
-   `lf prompt`; research/debug/QA/portfolio methods stay in their own skills.
+1. **Authority is a capability, not ambient identity.** Agent mutations require
+   the exact active Run lease. Missing or stale credentials fail closed; only
+   authenticated external entrypoints construct User authority.
+2. **Transport acceptance is not application.** A live provider response can
+   reduce latency, but only a later successful boundary Basis proves that a
+   Steer was honored.
+3. **Review is an interval; attention is one unanswered turn.** Keeping the
+   route while clearing `attention_at` prevents duplicate parent delivery
+   without inventing a Review row or conversation ledger.
+4. **Reconstruction reads durable facts.** Work truth, Steers, flow position,
+   workspace and external evidence are authoritative. Provider transcripts and
+   continuation tokens are optional Launch hints.
+5. **Do not mask the remaining controller split.** The gate deliberately did
+   not restore a Session interrupt fallback when a mirrored Run has no product
+   Launch. That red test is evidence of the unfinished authority cut, not a
+   fixture inconvenience.
+
+The Mitchell-style review changed the branch in four concrete places:
+
+- user docs and builtin skills no longer teach deleted handoff, review,
+  directive-receipt, acknowledgment, or decision commands; a regression test
+  scans every embedded builtin skill for those retired surfaces;
+- integration and smoke tests clear inherited Run and legacy Session authority
+  and use isolated homes, so an agent's real development ledger cannot decide
+  test behavior;
+- successor tests now prove that predecessor and successor Session-era ids map
+  to one stable Work and that only the current Epoch enters a boundary seed;
+- the Wave-resolution matrix now supplies the missing `--channel` value instead
+  of mistaking a clap error for stale-identity behavior.
 
 ## How it fits together
 
 ```text
-authored direction ──> controller ──> send_current(exact Turn)
-       │                                  │
-       └──────────── later seed <─────────┘  Sent / reject / fail / unknown
+authenticated User / active parent Run
+                 │
+                 ▼
+          Steer + Basis revision ──────► Send(exact Turn)
+                 │                         │
+                 └──── next seed ◄────────┘ transport outcome only
 
-provider events ──> agent_turns ──> one Turn-spend query
-                                      ├─ lf usage / lf top / lf runs / doctor
-                                      └─ Mac telemetry
+Work ─► Epoch ─► Run ─► Launch ─► optional Turn ─► usage + root output
+                   └──► typed Wait
+
+interactive flow + live Launch + route + attention_at ─► derived Review
 ```
 
-The architecture documents define the intended authority and lifecycle model.
-The code in this branch clears two prerequisites: provider-neutral delivery
-outcomes and one execution-usage authority. The existing Session/body runtime
-remains authoritative until the structural migration can replace it in one
-cutover.
+Stable Work owns identity and input history. Run owns execution authority;
+Launch owns provider/process continuity; Turn owns observed exchange and spend.
+Wave and Project query the same child-attention facts before advancing their
+own background flow.
 
 ## Risks and bottlenecks
 
-- A confirmed Project/Task live Send still becomes an anonymous in-memory seed
-  after its `ChildCommand` is accepted. A controller crash can lose that seed.
-  This is the explicit Phase 1+3 blocker: immutable Steer plus Basis must land
-  together before live steering is crash-durable or completion-fenced.
-- Codex 0.144.5 uses JSON-RPC `-32600` for policy races and malformed requests
-  alike. The adapter matches the two observed race messages and treats unknown
-  wording as loud `Failed`; vendor prose changes degrade noisily, not silently.
-- A timed-out Codex request keeps only a retired request id until a late response
-  arrives or the Launch ends. This prevents a late rejection from becoming a
-  new Turn failure without retaining its oneshot waiter.
-- OpenCode Task/Project launches still do not report usage. The one ledger now
-  exposes that gap through `lf doctor`; normalizing the two parser/producer paths
-  is separate W2-289 work.
-- Phase 0 is now reconciled in `docs/architecture.md`: the workshop
-  alternatives are gone and the stored constraints, transactions, races, and
-  next durable-input slice are explicit. None of that core persistence exists
-  yet.
+### Blocking before this architecture can land
+
+- **Task and Project still execute through the Session/body controller.** Their
+  runners, stores, statuses, generations, `ChildWriteLease`, and legacy env
+  credentials remain load-bearing. The normalized Run currently mirrors those
+  bodies instead of conducting them.
+- The consequence is pinned by
+  `task_github_cache_tests::rest_failure_opens_one_durable_circuit_while_local_controls_continue`:
+  the fixture has a live legacy Task body and mirrored active Run but no product
+  Launch, so direct Run interrupt returns `Query returned no rows`. The correct
+  fix is to make every Task/Project executor a Run Launch, not to add a fallback.
+- Migrations `0.11.029`–`0.11.035` are still registered as canonical ordinals.
+  Main documents dependency-ordered drafts, but the Rust `DRAFTS` registry does
+  not exist. The final controller/schema cut must reconcile this once rather
+  than create a second migration ledger.
+- Rust source is 122,944 Tokei code lines, 1,125 above the 121,819 acceptance
+  ceiling. Nineteen production files still contain 567 references to
+  `ProjectSessionStatus`, `TaskSessionStatus`, or `ChildWriteLease`; deleting
+  that duplicate controller is the intended reduction.
+
+### Non-blocking follow-ons
+
+- OpenCode Task/Project launches still do not deliver usage into captured
+  Turns. Absence is now reported honestly rather than replaced with zero.
+- Persisting every assistant delta keeps partial output crash-visible but
+  rewrites a growing Turn row. Batch only after preserving partial terminal
+  evidence.
+- Credentialed provider smoke tests were not run during this headless gate.
 
 ## What's not included
 
-- Work/Epoch/Basis/Home persistence or migration;
-- Run/Launch containment and keeper recovery;
-- durable Steer/Send rows, narrow typed tool responses, and completion fencing;
-- reconstruction without provider transcripts;
-- Review/attention/status collapse and removal of Handoff/InteractionReview
-  aggregates;
-- OpenCode usage parser normalization;
-- the final Session/body/ChildCommand purge.
+- Session-free Task and Project `reserve | advance | stop` execution;
+- keeper recovery through that shared controller and the final schema drop;
+- the final draft-migration cutover;
+- OpenCode's single end-to-end usage parser/producer path;
+- transcript-free recovery drills across every credentialed provider;
+- hosted Mac UI behavior (`--ui-host` remains a separate host gate).
 
 ## Validation
 
-- Focused Rust steering, Turn-spend, trace attribution, and top tests pass.
-- Shared Rust/Swift `turn_spend.json` round-trips; focused Swift DTO and registry
-  query suites pass (25 tests).
-- Website suite passes: 61 passed, 3 skipped.
-- Final all-suite results are recorded in the PR body after the complete gate.
+Full gate command: `uv run python scripts/test.py --all`.
 
-The gate caught four cross-surface faults and fixed them: Mac telemetry still
-decoded the deleted boundary-span JSON; `lf top` still mixed a raw Codex reader
-with Turn totals; and a late timed-out Codex rejection could surface as a fresh
-provider error after its waiter was released. The full Wave-resolution matrix
-also invoked the real provider after resolving `project promote`; it now puts a
-failing provider stub first on `PATH`, keeping the resolution test hermetic.
+| Suite | Result |
+| --- | --- |
+| Python | 112 passed |
+| Rust fmt / clippy | passed, warnings denied |
+| Rust, no fail-fast | 1,814 passed, 1 architecture blocker failed, 2 skipped |
+| Website | 66 passed, 3 skipped |
+| Swift package | 191 passed; multiplatform boundary check passed |
+| E2E smoke | passed with an isolated Loopflow home |
+| Mac app build-for-testing | passed |
+| Hosted UI | not run; separate host gate |
+
+Additional checks:
+
+- `InteractionReview`, `InteractiveHandoff`, `ChildCommand`, `AwaitingHuman`,
+  and `Author::Human` have zero production Rust references.
+- Focused Review handshake, Wave live/seed scheduling, successor resolution,
+  land isolation, builtin prompt guard, and Wave resolution tests pass.
+- `git diff --check` passes.
+
+Disposition: **not ready to submit or land**. The branch has one precise red
+execution-path proof and has not met the controller-deletion, migration, or
+line-count acceptance criteria.

@@ -11,27 +11,26 @@ use loopflow::session_context::{
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
-
-/// Ambient identity vars a live `lf __task` process exports. When the test suite
-/// itself runs inside a Task Session, these leak in and steer `task_for_worktree`
-/// at the wrong (real) session's store, and `command_source` classification at the
-/// ambient Wave. Every `EnvGuard` clears them so task-aware tests resolve by
-/// worktree path, restoring them on drop.
-const AMBIENT_TASK_ENV: [&str; 6] = [
-    "LF_TASK_SESSION_ID",
-    "LF_TASK_GENERATION",
-    "LF_TASK_LEASE_TOKEN",
-    "LF_WAVE_ID",
-    "LF_PROJECT_SESSION_ID",
-    // Managed marker in `resolve_caller_authority`'s fail-closed set.
-    "LF_CHANNEL",
-];
 use loopflow::task::{
     PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
 };
 use loopflow::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
+
+/// Ambient authority a live agent process exports. Tests must never inherit the
+/// real Run or legacy Session that invoked the suite.
+const AMBIENT_AGENT_ENV: [&str; 9] = [
+    "LF_RUN_CONTEXT",
+    "LF_RUN_LEASE",
+    "LF_TASK_SESSION_ID",
+    "LF_TASK_GENERATION",
+    "LF_TASK_LEASE_TOKEN",
+    "LF_WAVE_ID",
+    "LF_PROJECT_SESSION_ID",
+    "LF_PROJECT_GENERATION",
+    "LF_PROJECT_LEASE_TOKEN",
+];
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -104,7 +103,7 @@ pub struct EnvGuard {
     previous_db_path: Option<OsString>,
     previous_control_home: Option<OsString>,
     previous_control_db_path: Option<OsString>,
-    previous_ambient_task: Vec<(&'static str, Option<OsString>)>,
+    previous_ambient_authority: Vec<(&'static str, Option<OsString>)>,
     _bin: TempDir,
     _lf_home: TempDir,
 }
@@ -112,20 +111,33 @@ pub struct EnvGuard {
 impl EnvGuard {
     #[allow(dead_code)] // Shared helper compiled into multiple test crates.
     pub fn new(entries: &[(&str, &str)]) -> Self {
-        Self::with_home(entries, None)
+        Self::_with_home_and_path(entries, None, true)
+    }
+
+    #[allow(dead_code)] // Shared helper used by tests that require PATH isolation.
+    pub fn new_isolated(entries: &[(&str, &str)]) -> Self {
+        Self::_with_home_and_path(entries, None, false)
     }
 
     #[allow(dead_code)] // Shared helper used only by tests that need HOME isolation.
     pub fn with_home(entries: &[(&str, &str)], home: Option<&Path>) -> Self {
+        Self::_with_home_and_path(entries, home, true)
+    }
+
+    fn _with_home_and_path(
+        entries: &[(&str, &str)],
+        home: Option<&Path>,
+        include_existing_path: bool,
+    ) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
         let bin = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
         }
         let previous_path = env::var("PATH").ok();
-        let new_path = match &previous_path {
-            Some(prev) => format!("{}:{}", bin.path().display(), prev),
-            None => bin.path().display().to_string(),
+        let new_path = match (&previous_path, include_existing_path) {
+            (Some(prev), true) => format!("{}:{}", bin.path().display(), prev),
+            _ => bin.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
         let previous_home = env::var("HOME").ok();
@@ -136,7 +148,7 @@ impl EnvGuard {
         let previous_db_path = env::var_os("LF_DB_PATH");
         let previous_control_home = env::var_os(CONTROL_HOME_ENV);
         let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
-        let previous_ambient_task = AMBIENT_TASK_ENV
+        let previous_ambient_authority = AMBIENT_AGENT_ENV
             .iter()
             .map(|name| {
                 let prev = env::var_os(name);
@@ -163,7 +175,7 @@ impl EnvGuard {
             previous_db_path,
             previous_control_home,
             previous_control_db_path,
-            previous_ambient_task,
+            previous_ambient_authority,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -205,7 +217,7 @@ impl Drop for EnvGuard {
             Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
             None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
-        for (name, prev) in &self.previous_ambient_task {
+        for (name, prev) in &self.previous_ambient_authority {
             match prev {
                 Some(prev) => env::set_var(name, prev),
                 None => env::remove_var(name),

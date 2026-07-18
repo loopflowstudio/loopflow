@@ -1,5 +1,34 @@
 # Open implementation notes
 
+## Gate audit 2026-07-17
+
+`uv run python scripts/test.py --all` now passes Python, website, Swift, E2E,
+fmt, clippy, Swift boundary checks, and the Mac build-for-testing gate. A
+no-fail-fast Rust run is 1,814 passed / 1 failed / 2 skipped. The sole failure is
+the controller split already named below:
+
+`task_github_cache_tests::rest_failure_opens_one_durable_circuit_while_local_controls_continue`
+constructs a live legacy Task body whose mirrored active Run has no product
+Launch, so direct Run interrupt returns `Query returned no rows`. Do not add a
+Session interrupt fallback. Every live Task/Project executor must become a Run
+Launch in the shared controller cut.
+
+Gate fixes kept on this branch:
+
+- customer docs and builtin skills no longer teach deleted Handoff, Review,
+  command-receipt, acknowledgment, or decision surfaces; a builtin test guards
+  the retired commands;
+- integration and E2E tests clear inherited Run/Session authority and isolate
+  their Loopflow homes instead of touching the invoking agent's development DB;
+- successor tests now assert stable Work/current Epoch semantics rather than
+  separate Session-era control seeds;
+- the Wave command matrix supplies the explicit radio channel value.
+
+Current measures: 122,944 Tokei Rust code lines (1,125 over the 121,819 target),
+19 production files and 567 references across `ProjectSessionStatus`,
+`TaskSessionStatus`, and `ChildWriteLease`. These are the remaining controller,
+not cleanup noise.
+
 ## Resume point verified 2026-07-17 (HEAD 5119f1791, tree clean)
 
 Green baseline this run: `cargo build -p loopflow`, `cargo fmt --all --check`,

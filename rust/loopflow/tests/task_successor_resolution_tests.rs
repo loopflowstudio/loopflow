@@ -126,7 +126,8 @@ fn webhook_routes_control_to_the_live_successor() {
         .expect("comment");
     assert_eq!(outcome, WebhookOutcome::Comment { delivered: true });
 
-    // The Steer landed on the live successor, not the completed predecessor.
+    // The webhook resolves the live successor Session, while control addresses
+    // the one stable Work and its current Epoch.
     let successor_work = rt
         .block_on(task.store.work_for_child(&ChildRef::Task(live.id.clone())))
         .expect("successor work");
@@ -143,13 +144,7 @@ fn webhook_routes_control_to_the_live_successor() {
                 .work_for_child(&ChildRef::Task(task.session.id.clone())),
         )
         .expect("predecessor work");
-    let predecessor_seed = rt
-        .block_on(task.store.boundary_seed(&predecessor_work))
-        .expect("predecessor seed");
-    assert!(
-        predecessor_seed.steers.is_empty(),
-        "the terminal predecessor must not receive control"
-    );
+    assert_eq!(predecessor_work, successor_work);
 }
 
 /// Status/roadmap: `lf task status` resolves the live successor, not the

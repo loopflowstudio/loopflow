@@ -4963,8 +4963,7 @@ pub fn task_resume(
     block_on_task(async move { resume_task_async(&issue, model, reason).await })
 }
 
-/// Async core of [`task_resume`], reusable from callers already inside a runtime
-/// (e.g. `lf handoff complete` waking the parent it just resolved).
+/// Async core of [`task_resume`], reusable from callers already inside a runtime.
 pub(crate) async fn resume_task_async(
     issue: &str,
     model: Option<String>,

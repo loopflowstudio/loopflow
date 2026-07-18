@@ -10,14 +10,14 @@ Linear-backed Task Session:
 ```bash
 lf task run INF-123 --name parser-recovery --directive "fix the parser before the docs"
 lf task steer INF-123 "also rename the flag"
-lf task receipt COMMAND_ID --until incorporated --timeout 30s
+lf task status INF-123 --json
 lf task wait INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Each Task Session owns one stable sibling worktree. Provider processes and
-transcript handles are replaceable body generations; a model handoff preserves
-the Session, directive, worktree, and PR chain.
+transcript handles are replaceable execution state; a model handoff preserves
+the Work, Steers, worktree, and PR chain.
 Ordered PRs own its serial branches; a merge settles one PR, while only
 `lf pr land -c` or `lf task complete` requests Task completion. The resident
 Task runs kickoff once, repeats its selected inner flow, and settles only after

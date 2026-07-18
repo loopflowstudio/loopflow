@@ -200,22 +200,16 @@ fn succession_carries_direction_and_racing_recovery_is_exactly_once() {
         "successor resumes from the predecessor cursor"
     );
 
-    // 5. Authored history stays attributable to the predecessor. The successor
-    //    begins with only the explicit carry Steer.
+    // 5. Both Session-era ids resolve to the same stable Work. Its current
+    //    Epoch begins with only the explicit carry Steer; old-Epoch input is
+    //    not selected into the recovered boundary.
     let predecessor_work = rt
         .block_on(store.work_for_child(&predecessor_target))
         .expect("predecessor work");
-    let predecessor_seed = rt
-        .block_on(store.boundary_seed(&predecessor_work))
-        .expect("predecessor seed");
-    assert_eq!(predecessor_seed.steers.len(), 2);
-    assert!(predecessor_seed.steers[0].text.contains("New title"));
-    assert!(predecessor_seed.steers[1]
-        .text
-        .contains("please prioritize"));
     let successor_work = rt
         .block_on(store.work_for_child(&successor_target))
         .expect("successor work");
+    assert_eq!(predecessor_work, successor_work);
     let successor_seed = rt
         .block_on(store.boundary_seed(&successor_work))
         .expect("successor seed");
@@ -424,18 +418,15 @@ fn webhooks_resolve_to_the_successor_across_the_boundary() {
         WebhookOutcome::Comment { delivered: true }
     );
 
-    // Exactly one edit + one comment on the predecessor, and the explicit carry
-    // plus one edit + one comment on the successor.
+    // Both Session-era ids still resolve to the stable Work. Its current Epoch
+    // contains the explicit carry plus one edit and one comment.
     let predecessor_work = rt
         .block_on(store.work_for_child(&ChildRef::Task(predecessor.id.clone())))
         .expect("predecessor work");
-    let predecessor_seed = rt
-        .block_on(store.boundary_seed(&predecessor_work))
-        .expect("predecessor seed");
-    assert_eq!(predecessor_seed.steers.len(), 2);
     let successor_work = rt
         .block_on(store.work_for_child(&ChildRef::Task(successor.id.clone())))
         .expect("successor work");
+    assert_eq!(predecessor_work, successor_work);
     let successor_seed = rt
         .block_on(store.boundary_seed(&successor_work))
         .expect("successor seed");

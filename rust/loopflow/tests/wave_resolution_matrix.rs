@@ -683,6 +683,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
             }
             WaveForm::Channel => {
                 args.push("--channel".to_string());
+                args.push(w.to_string());
             }
         }
     }

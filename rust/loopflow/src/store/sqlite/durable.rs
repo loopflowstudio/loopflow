@@ -658,6 +658,55 @@ impl SqliteStore {
             .collect()
     }
 
+    /// Record what the provider actually turned out to be once the body is running.
+    ///
+    /// Route provider/model are known before spawn, but the resume token and the
+    /// real process group only exist after the harness starts and can change
+    /// mid-Run when a provider hands back a new session id. This is the write
+    /// path `agent_launches` previously lacked — the Session row carried these
+    /// as `provider_session_id` and `latest_process`, which is exactly the
+    /// duplicate ownership being deleted.
+    ///
+    /// This records observation only. `RunAdvance::LaunchLive` remains the sole
+    /// state transition, so there is never a second way for a Launch to go
+    /// live. Only an active Run's own Launch may be updated, so a fenced or
+    /// ended writer cannot revive itself by reporting a provider observation.
+    ///
+    /// Containment is deliberately **not** writable here. It is established at
+    /// spawn and is the fence a reaper trusts; a live tmux unit vetoes stale
+    /// process evidence, so letting a later pid observation overwrite a tmux
+    /// name would downgrade the strongest containment the Run has. A Launch
+    /// that needs different containment is a different Launch.
+    pub fn observe_launch_provider(
+        &self,
+        lease: &RunLease,
+        launch_id: &LaunchId,
+        resume_token: Option<&str>,
+    ) -> StoreResult<Launch> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        if !matches!(run.state, RunState::Reserved | RunState::Active) {
+            return Err(StoreError::InvalidData(format!(
+                "Run {} cannot observe a provider while {:?}",
+                run.id, run.state
+            )));
+        }
+        if tx.execute(
+            "UPDATE agent_launches
+             SET resume_token=COALESCE(?3, resume_token),
+                 provider_session_id=COALESCE(?3, provider_session_id)
+             WHERE id=?1 AND product_run_id=?2 AND launch_state IN ('starting','live')",
+            params![launch_id.as_str(), lease.run_id.as_str(), resume_token],
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        let launch = control_launch_in(&tx, launch_id)?;
+        tx.commit()?;
+        Ok(launch)
+    }
+
     pub fn handback_launch(
         &self,
         launch_id: &LaunchId,
@@ -3384,4 +3433,152 @@ fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
             error.to_string(),
         )),
     )
+}
+
+#[cfg(test)]
+mod observe_launch_provider_tests {
+    use crate::durable::{Containment, LaunchRoute, RunAdvance, RunTrigger, StopCause, WorkRef};
+    use crate::id::WaveId;
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::StoreError;
+    use std::path::{Path, PathBuf};
+
+    /// A registered Wave is the cheapest real Work: `upsert_wave` is the only
+    /// public path that mints an Epoch, and Wave Work needs no PM binding.
+    fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("loopflow.db");
+        let store = SqliteStore::new(&path).expect("open a fresh store");
+        let wave_id = WaveId::new();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
+             VALUES (?1, 'probe', '/repo', 1700000000, NULL)",
+            [wave_id.as_str()],
+        )
+        .unwrap();
+        drop(conn);
+        // Reach the crate-private spine builder the public upsert path calls.
+        {
+            let mut raw = rusqlite::Connection::open(&path).unwrap();
+            let tx = raw.transaction().unwrap();
+            super::create_wave_spine(&tx, &wave_id, "probe", "/repo", 1_700_000_000).unwrap();
+            tx.commit().unwrap();
+        }
+        let work = WorkRef::Wave(wave_id);
+        (dir, store, work)
+    }
+
+    fn start_launch(store: &SqliteStore, work: &WorkRef) -> (crate::durable::RunLease, PathBuf) {
+        let home = store.home("local").unwrap();
+        let (_, lease) = store
+            .reserve_run(work, &home.id, &RunTrigger::User)
+            .expect("reserve a Run");
+        let cwd = PathBuf::from("/repo");
+        store
+            .advance_run(
+                &lease,
+                &RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "probe".to_string(),
+                    },
+                    cwd: cwd.clone(),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .expect("start a Launch");
+        (lease, cwd)
+    }
+
+    fn live_launch_id(store: &SqliteStore, path: &Path) -> crate::durable::LaunchId {
+        let _ = store;
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let id: String = conn
+            .query_row("SELECT id FROM agent_launches LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        crate::durable::LaunchId::parse(&id).unwrap()
+    }
+
+    /// The provider's resume token and real process group only exist after the
+    /// harness starts, and can change mid-Run. This is the write path that
+    /// replaces the Session row's `provider_session_id` / `latest_process`.
+    #[test]
+    fn a_running_launch_records_its_provider_continuity() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+
+        let launch = store
+            .observe_launch_provider(&lease, &launch_id, Some("thread_abc"))
+            .expect("record the observed provider");
+
+        assert_eq!(launch.resume_token.as_deref(), Some("thread_abc"));
+        assert_eq!(
+            launch.containment,
+            Containment::Tmux {
+                name: "probe".to_string()
+            },
+            "containment is spawn-time fencing evidence and must survive a provider observation"
+        );
+    }
+
+    /// A later observation that carries no token must not erase the one already
+    /// recorded — losing it would cost the Run its provider continuity across a
+    /// relaunch, which is exactly what recovery depends on.
+    #[test]
+    fn an_empty_observation_never_erases_recorded_continuity() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+
+        store
+            .observe_launch_provider(&lease, &launch_id, Some("thread_abc"))
+            .unwrap();
+        let launch = store
+            .observe_launch_provider(&lease, &launch_id, None)
+            .unwrap();
+
+        assert_eq!(launch.resume_token.as_deref(), Some("thread_abc"));
+    }
+
+    /// Fail closed: once the Run is stopped it is no longer a writer, so it
+    /// cannot report a provider observation. A dead process that wakes up and
+    /// reports must be rejected, not allowed to touch its old Launch.
+    #[test]
+    fn a_stopped_run_cannot_record_a_provider_observation() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+        store
+            .stop_run(
+                &lease,
+                &StopCause::Requested,
+                crate::durable::ContainmentObservation::Absent,
+            )
+            .expect("stop the Run with proven containment absence");
+
+        let error = store
+            .observe_launch_provider(&lease, &launch_id, Some("thread_zzz"))
+            .expect_err("a stopped Run must not remain a writer");
+
+        assert!(
+            matches!(
+                error,
+                StoreError::InvalidAuthority(_) | StoreError::InvalidData(_)
+            ),
+            "expected an authority refusal, got {error:?}"
+        );
+    }
 }

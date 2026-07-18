@@ -66,6 +66,42 @@ policies own: which flow runs, what closure means, what effects are legal. No
 factory trait, no registry, no generic Work row — an explicit `match` on
 `WorkRef`, per `docs/architecture.md`'s identity decision.
 
+### Refinement after reading the three loops (recorded during implementation)
+
+"One shared path" is **two** shared pieces, not one mega event loop. Reading
+`flowloop/wave.rs`, `project_session/runner.rs`, and `task/runner.rs` shows the
+Wave loop is a *supervisor* that spawns body processes through `BodyBackend`,
+while the Project and Task runners *are* bodies driving a provider harness
+in-process. Collapsing those two shapes into one function would be a category
+error. The duplication is real, but it sits in two layers:
+
+**(A) Supervisor — reserve, launch, probe, reap, recover.** Duplicated across
+`ops/project.rs` (`reserve_project_session`, `launch_project_process`) and
+`ops/task.rs` (`task_run`/`task_start`, `launch_task_process:1779`,
+`recover_stranded_task_body:2246`, `recover_stalled_task_body:2352`). This is
+what done-when #2's "one Run reserve/advance/stop/recover path" names. Wave
+already runs its own version of this shape against `Option<WaveControl>`.
+
+**(B) Body — the harness driver loop.** `project_session/runner.rs` and
+`task/runner.rs` are structurally *identical* here: the same `tokio::select!`
+arms (stdin attachment; a poll tick running `absorb_run_control` then
+`send_outstanding_steers` then child-attention preemption; `event_rx` with the
+same `ConversationEvent` match). Task's is larger only because its
+`TurnCompleted` arm also carries PR/CI/gate settlement. This is the bigger
+deletion — 1,232 + 2,991 lines collapsing toward one loop.
+
+So the target is `supervise_work(WorkRef)` and `run_work_body(WorkRef)`, with
+typed `match` dispatch at exactly four domain boundaries inside the body loop:
+prepare-next-step, `TurnCompleted` settlement, closure check, and allowed
+effects. Everything else is shared.
+
+Launch already has homes for every Session field the body loop persists:
+`Launch.resume_token` takes `session.provider_session_id`,
+`Launch.containment` takes `latest_process.tmux_name`, `Launch.opaque_basis`
+takes the TUI boundary. The one missing store op is an
+`observe_launch_provider(lease, launch, resume_token, process_group)` — Launch
+rows are currently written once by `insert_control_launch` and never updated.
+
 `task/actions.rs` is the wedge. `derive_task_actions(&TaskActionEvidence) ->
 TaskActionModel` is already pure: evidence in, decision out, no store. Re-point
 it at Run/Launch evidence **first**. It proves the spine carries the decision

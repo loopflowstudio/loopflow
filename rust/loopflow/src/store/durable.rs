@@ -166,6 +166,20 @@ impl Store {
         .await
     }
 
+    pub async fn observe_launch_provider(
+        &self,
+        lease: &RunLease,
+        launch_id: &LaunchId,
+        resume_token: Option<String>,
+    ) -> StoreResult<crate::durable::Launch> {
+        let lease = lease.clone();
+        let launch_id = launch_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.observe_launch_provider(&lease, &launch_id, resume_token.as_deref())
+        })
+        .await
+    }
+
     pub async fn handback_launch(
         &self,
         launch_id: &LaunchId,

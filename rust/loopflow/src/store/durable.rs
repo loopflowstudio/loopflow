@@ -199,6 +199,14 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn launches_for_run(
+        &self,
+        run_id: &crate::durable::RunId,
+    ) -> StoreResult<Vec<crate::durable::Launch>> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.launches_for_run(&run_id)).await
+    }
+
     /// Reconcile an observed Run after its writer has disappeared.
     ///
     /// The exact Run and Launch ids fence the observation against a concurrent
@@ -229,12 +237,18 @@ impl Store {
         &self,
         lease: &RunLease,
         launch_id: &LaunchId,
+        account_id: Option<crate::store::ProviderAccountId>,
         resume_token: Option<String>,
     ) -> StoreResult<crate::durable::Launch> {
         let lease = lease.clone();
         let launch_id = launch_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.observe_launch_provider(&lease, &launch_id, resume_token.as_deref())
+            store.observe_launch_provider(
+                &lease,
+                &launch_id,
+                account_id.as_ref(),
+                resume_token.as_deref(),
+            )
         })
         .await
     }

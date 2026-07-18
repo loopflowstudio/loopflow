@@ -676,6 +676,23 @@ impl SqliteStore {
         control_launch_for_run_in(&conn, run_id)
     }
 
+    pub(crate) fn launches_for_run(&self, run_id: &RunId) -> StoreResult<Vec<Launch>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id FROM agent_launches
+             WHERE product_run_id=?1 ORDER BY started_at, rowid",
+        )?;
+        let ids = statement
+            .query_map([run_id.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        ids.into_iter()
+            .map(|id| {
+                let id = LaunchId::parse(&id).map_err(invalid_durable)?;
+                control_launch_in(&conn, &id)
+            })
+            .collect()
+    }
+
     pub(crate) fn recover_run(
         &self,
         run_id: &RunId,
@@ -792,6 +809,7 @@ impl SqliteStore {
         &self,
         lease: &RunLease,
         launch_id: &LaunchId,
+        account_id: Option<&crate::store::ProviderAccountId>,
         resume_token: Option<&str>,
     ) -> StoreResult<Launch> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -805,10 +823,17 @@ impl SqliteStore {
         }
         if tx.execute(
             "UPDATE agent_launches
-             SET resume_token=COALESCE(?3, resume_token),
-                 provider_session_id=COALESCE(?3, provider_session_id)
-             WHERE id=?1 AND product_run_id=?2 AND launch_state IN ('starting','live')",
-            params![launch_id.as_str(), lease.run_id.as_str(), resume_token],
+             SET account_id=COALESCE(account_id, ?3),
+                 resume_token=COALESCE(?4, resume_token),
+                 provider_session_id=COALESCE(?4, provider_session_id)
+             WHERE id=?1 AND product_run_id=?2 AND launch_state IN ('starting','live')
+               AND (?3 IS NULL OR account_id IS NULL OR account_id=?3)",
+            params![
+                launch_id.as_str(),
+                lease.run_id.as_str(),
+                account_id.map(crate::store::ProviderAccountId::as_str),
+                resume_token,
+            ],
         )? == 0
         {
             return Err(StoreError::NotFound);
@@ -3357,7 +3382,7 @@ mod observe_launch_provider_tests {
         let launch_id = live_launch_id(&store, &path);
 
         let launch = store
-            .observe_launch_provider(&lease, &launch_id, Some("thread_abc"))
+            .observe_launch_provider(&lease, &launch_id, None, Some("thread_abc"))
             .expect("record the observed provider");
 
         assert_eq!(launch.resume_token.as_deref(), Some("thread_abc"));
@@ -3381,13 +3406,32 @@ mod observe_launch_provider_tests {
         let launch_id = live_launch_id(&store, &path);
 
         store
-            .observe_launch_provider(&lease, &launch_id, Some("thread_abc"))
+            .observe_launch_provider(&lease, &launch_id, None, Some("thread_abc"))
             .unwrap();
         let launch = store
-            .observe_launch_provider(&lease, &launch_id, None)
+            .observe_launch_provider(&lease, &launch_id, None, None)
             .unwrap();
 
         assert_eq!(launch.resume_token.as_deref(), Some("thread_abc"));
+    }
+
+    #[test]
+    fn a_launch_records_one_exact_account_route_and_rejects_route_drift() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+        let work_account = crate::store::ProviderAccountId::parse("work").unwrap();
+        let personal_account = crate::store::ProviderAccountId::parse("personal").unwrap();
+
+        let launch = store
+            .observe_launch_provider(&lease, &launch_id, Some(&work_account), None)
+            .unwrap();
+
+        assert_eq!(launch.route.account_id.as_deref(), Some("work"));
+        assert!(store
+            .observe_launch_provider(&lease, &launch_id, Some(&personal_account), None)
+            .is_err());
     }
 
     /// Fail closed: once the Run is stopped it is no longer a writer, so it
@@ -3408,7 +3452,7 @@ mod observe_launch_provider_tests {
             .expect("stop the Run with proven containment absence");
 
         let error = store
-            .observe_launch_provider(&lease, &launch_id, Some("thread_zzz"))
+            .observe_launch_provider(&lease, &launch_id, None, Some("thread_zzz"))
             .expect_err("a stopped Run must not remain a writer");
 
         assert!(

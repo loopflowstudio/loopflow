@@ -834,7 +834,7 @@ impl std::fmt::Display for ProviderAccountId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderAccount {
     pub provider: String,
     pub account_id: ProviderAccountId,
@@ -937,7 +937,7 @@ pub struct AccountLimitWindow {
 }
 
 /// A stored window observation for one managed account.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AccountLimitRow {
     pub provider: String,
     pub account_id: ProviderAccountId,

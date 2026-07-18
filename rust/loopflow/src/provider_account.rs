@@ -470,12 +470,27 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     provider_session_id: Option<&str>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    resolve_provider_account_exact(provider, provider_session_id, None).await
+}
+
+pub(crate) async fn resolve_provider_account_exact(
+    provider: Provider,
+    provider_session_id: Option<&str>,
+    exact_account_id: Option<&ProviderAccountId>,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     // A forwarded or locally-brokered account lease is the single source of
     // account authority when active. Descendants never re-resolve a selection;
     // they resolve one credential from the broker.
     if let Some(client) = lease::AccountLeaseClient::from_env()? {
-        let resolution = client.resolve(provider, provider_session_id.map(str::to_string))?;
+        let resolution = match exact_account_id {
+            Some(account_id) => client.resolve_exact(
+                provider,
+                account_id,
+                provider_session_id.map(str::to_string),
+            )?,
+            None => client.resolve(provider, provider_session_id.map(str::to_string))?,
+        };
         return Ok(Some(ProviderAccountRoute {
             provider,
             account_id: resolution.account_id.clone(),
@@ -501,6 +516,15 @@ pub(crate) async fn resolve_provider_account(
     if candidates.is_empty() {
         return Ok(None);
     }
+    let candidates = match exact_account_id {
+        Some(account_id) if candidates.contains(account_id) => vec![account_id.clone()],
+        Some(account_id) => {
+            return Err(ProviderAccountError::Runtime(format!(
+                "{provider}/{account_id} is outside the configured account route"
+            )))
+        }
+        None => candidates,
+    };
     let selection = store
         .select_provider_account(provider, &candidates, provider_session_id)
         .await?;
@@ -611,13 +635,13 @@ pub(crate) fn match_account<'a>(
     }
 }
 
-fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
+pub(crate) fn current_repo_id() -> Result<Option<RepoId>, ProviderAccountError> {
     let current = std::env::current_dir()
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
     Ok(RepoId::discover(&current).ok())
 }
 
-async fn provider_route_account_ids(
+pub(crate) async fn provider_route_account_ids(
     store: &SharedStore,
     repo_id: Option<&RepoId>,
     provider: Provider,

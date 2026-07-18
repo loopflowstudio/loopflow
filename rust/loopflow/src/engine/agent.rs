@@ -1054,7 +1054,7 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
             resets_at: signal.resets_at,
         });
     }
-    _find_provider_error(result, _classify_transient_text)
+    _find_provider_error(result, classify_retryable_agent_failure)
 }
 
 fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T>) -> Option<T> {
@@ -1113,7 +1113,7 @@ fn _classify_provider_error_value<T>(
     }
 }
 
-fn _classify_transient_text(text: &str) -> Option<AgentFailure> {
+pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
     let text = text.to_ascii_lowercase();
     if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
         Some(AgentFailure::Capacity)

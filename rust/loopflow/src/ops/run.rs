@@ -16,6 +16,7 @@ pub(crate) struct RunLaunch {
     pub cwd: PathBuf,
     pub tmux_name: String,
     pub agent: String,
+    pub account_id: Option<crate::store::ProviderAccountId>,
     pub resume_token: Option<String>,
 }
 
@@ -35,7 +36,10 @@ pub(crate) async fn launch_in_run(
                 route: LaunchRoute {
                     provider,
                     model,
-                    account_id: None,
+                    account_id: request
+                        .account_id
+                        .as_ref()
+                        .map(|account_id| account_id.as_str().to_string()),
                 },
                 containment: Containment::Tmux {
                     name: tmux_name.clone(),

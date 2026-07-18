@@ -4,10 +4,17 @@ use std::collections::HashSet;
 
 use thiserror::Error;
 
-use crate::durable::{LaunchId, LaunchRoute};
+use crate::durable::{
+    AdvanceReceipt, BoundaryState, CapabilityRef, ContainmentObservation, LaunchId, LaunchRoute,
+    RunAdvance, RunLease, StopCause, StopReceipt, Wait, WaitOn,
+};
 use crate::engine::config::parse_agent;
+use crate::harness::Harness;
+use crate::provider_account::lease::{AccountLease, AccountLeaseClient};
+use crate::provider_auth::{AuthStatus, Provider, ProviderAuthService};
 use crate::store::{
     AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
+    SharedStore, StoreError,
 };
 
 /// The canonical provider and model selected for one agent Launch.
@@ -28,6 +35,13 @@ impl AgentRoute {
             return Err(ExactRouteError::EmptyProvider);
         }
         Ok(Self { provider, model })
+    }
+
+    pub fn agent(&self) -> String {
+        match &self.model {
+            Some(model) => format!("{}:{model}", self.provider),
+            None => self.provider.clone(),
+        }
     }
 }
 
@@ -275,11 +289,372 @@ pub fn derive_chain_exclusions(
     Ok(routes)
 }
 
+#[derive(Debug, Error)]
+pub(crate) enum RunRouteRecoveryError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Account(#[from] crate::provider_account::ProviderAccountError),
+    #[error(transparent)]
+    ExactRoute(#[from] ExactRouteError),
+    #[error(transparent)]
+    History(#[from] RecoveryHistoryError),
+    #[error("Run {0} has no Launch history to recover")]
+    MissingLaunch(crate::durable::RunId),
+}
+
+/// The PRD-38 replacement seam consumed one route choice without taking over
+/// containment or effect judgment from its caller.
+#[derive(Debug)]
+pub(crate) enum RecoverySettlement {
+    Launch { lease: RunLease, route: ExactRoute },
+    AwaitCapability { wait: Wait },
+}
+
+#[derive(Debug)]
+pub(crate) enum RecoveryStopOutcome {
+    Stopped(StoppedLaunch),
+    Fenced {
+        error: String,
+        stop: Box<StopReceipt>,
+    },
+}
+
+/// Proof that the current executor positively stopped its provider containment.
+/// Only [`stop_launch_for_recovery`] can mint it.
+#[derive(Debug)]
+pub(crate) struct StoppedLaunch {
+    launch_id: LaunchId,
+}
+
+/// Read the fixed account grant and this Run's durable Launch chain, then apply
+/// the pure same-provider-before-backup policy.
+pub(crate) async fn plan_run_route_recovery(
+    store: &SharedStore,
+    lease: &RunLease,
+    backup_agent: Option<&str>,
+) -> Result<RecoveryChoice, RunRouteRecoveryError> {
+    let launches = store.launches_for_run(&lease.run_id).await?;
+    let first = launches
+        .first()
+        .ok_or_else(|| RunRouteRecoveryError::MissingLaunch(lease.run_id.clone()))?;
+    let current = launches
+        .last()
+        .expect("non-empty Launch history has a current Launch");
+    let primary_agent = ExactRoute::try_from(&first.route)?.agent;
+    let fixed_client = AccountLeaseClient::from_env()?;
+    let fixed_lease = fixed_client
+        .as_ref()
+        .map(AccountLeaseClient::describe)
+        .transpose()?;
+
+    let mut candidates = route_candidates(
+        store,
+        &primary_agent,
+        fixed_client.as_ref(),
+        fixed_lease.as_ref(),
+    )
+    .await?;
+    if let Some(backup) = backup_agent
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+    {
+        let backup = AgentRoute::parse(backup)?;
+        if backup != primary_agent {
+            candidates.extend(
+                route_candidates(store, &backup, fixed_client.as_ref(), fixed_lease.as_ref())
+                    .await?,
+            );
+        }
+    }
+    let mut seen = HashSet::new();
+    candidates.retain(|candidate| seen.insert(candidate.route.clone()));
+
+    // A Run ends when it succeeds or enters a Wait, so every ordered Launch in
+    // this still-active Run belongs to the current consecutive recovery chain.
+    let history = launches
+        .iter()
+        .enumerate()
+        .map(|(index, launch)| {
+            Ok(RecoveryHistoryEntry {
+                launch_id: launch.id.clone(),
+                route: ExactRoute::try_from(&launch.route)?,
+                recovery_predecessor: index
+                    .checked_sub(1)
+                    .map(|previous| launches[previous].id.clone()),
+            })
+        })
+        .collect::<Result<Vec<_>, ExactRouteError>>()?;
+    let excluded = derive_chain_exclusions(&history, &current.id)?;
+    Ok(plan_route_recovery(&candidates, &excluded))
+}
+
+async fn route_candidates(
+    store: &SharedStore,
+    agent: &AgentRoute,
+    fixed_client: Option<&AccountLeaseClient>,
+    fixed_lease: Option<&AccountLease>,
+) -> Result<Vec<RouteCandidate>, RunRouteRecoveryError> {
+    let Some(provider) = managed_provider(agent) else {
+        return Ok(vec![
+            accountless_candidate(store, agent, fixed_lease.is_none()).await,
+        ]);
+    };
+    let (account_ids, preferred) = match fixed_lease {
+        Some(lease) => match lease.grant(provider) {
+            Some(grant) => (grant.accounts.clone(), grant.preferred),
+            None => {
+                return Ok(vec![project_route_candidate(
+                    ExactRoute {
+                        agent: agent.clone(),
+                        account_id: None,
+                    },
+                    None,
+                    &[],
+                    RouteEvidence {
+                        within_grant: false,
+                        explicitly_selected: false,
+                        credential_resolves: false,
+                    },
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    time::OffsetDateTime::now_utc().date(),
+                )])
+            }
+        },
+        None => {
+            let repo_id = super::current_repo_id()?;
+            match super::provider_route_account_ids(store, repo_id.as_ref(), provider).await? {
+                Some(accounts) if !accounts.is_empty() => (accounts, 0),
+                _ => {
+                    return Ok(vec![accountless_candidate(store, agent, true).await]);
+                }
+            }
+        }
+    };
+
+    let local_facts = match fixed_client {
+        Some(_) => None,
+        None => Some((
+            store
+                .list_provider_accounts(Some(provider.as_str()))
+                .await?,
+            store
+                .provider_account_limits(Some(provider.as_str()))
+                .await?,
+        )),
+    };
+    let now = time::OffsetDateTime::now_utc();
+    let mut candidates = Vec::with_capacity(account_ids.len());
+    for (index, account_id) in account_ids.iter().enumerate() {
+        let (account, limits, credential_resolves) = match fixed_client {
+            Some(client) => {
+                let facts = client.account_facts(provider, account_id)?;
+                (facts.account, facts.limits, facts.credential_available)
+            }
+            None => {
+                let (accounts, limits) = local_facts
+                    .as_ref()
+                    .expect("local account facts exist without a forwarded lease");
+                let account = accounts
+                    .iter()
+                    .find(|account| account.account_id == *account_id)
+                    .cloned();
+                let credential_resolves = account.as_ref().is_some_and(|account| {
+                    account.home.as_deref().is_some_and(std::path::Path::exists)
+                });
+                (account, limits.clone(), credential_resolves)
+            }
+        };
+        candidates.push(project_route_candidate(
+            ExactRoute {
+                agent: agent.clone(),
+                account_id: Some(account_id.clone()),
+            },
+            account.as_ref(),
+            &limits,
+            RouteEvidence {
+                within_grant: true,
+                explicitly_selected: index < preferred,
+                credential_resolves,
+            },
+            now.unix_timestamp(),
+            now.date(),
+        ));
+    }
+    let preferred = preferred.min(candidates.len());
+    candidates[preferred..].sort_by_key(|candidate| candidate.strained);
+    Ok(candidates)
+}
+
+async fn accountless_candidate(
+    store: &SharedStore,
+    agent: &AgentRoute,
+    within_grant: bool,
+) -> RouteCandidate {
+    let credential_resolves = match auth_provider(agent) {
+        Some(provider) => ProviderAuthService::new(store.clone())
+            .status(provider)
+            .await
+            .is_ok_and(|snapshot| matches!(snapshot.status, AuthStatus::Active { .. })),
+        None => false,
+    };
+    let now = time::OffsetDateTime::now_utc();
+    project_route_candidate(
+        ExactRoute {
+            agent: agent.clone(),
+            account_id: None,
+        },
+        None,
+        &[],
+        RouteEvidence {
+            within_grant,
+            explicitly_selected: false,
+            credential_resolves,
+        },
+        now.unix_timestamp(),
+        now.date(),
+    )
+}
+
+fn managed_provider(agent: &AgentRoute) -> Option<Provider> {
+    match agent.provider.as_str() {
+        "claude" => Some(Provider::Claude),
+        "codex" => Some(Provider::Codex),
+        _ => None,
+    }
+}
+
+fn auth_provider(agent: &AgentRoute) -> Option<Provider> {
+    match agent.provider.as_str() {
+        "claude" => Some(Provider::Claude),
+        "codex" => Some(Provider::Codex),
+        "opencode" | "opencodezen" => Some(Provider::OpenCodeZen),
+        _ => None,
+    }
+}
+
+/// End the failed Launch, then either rotate the same Run lease for the chosen
+/// successor or record a typed capability Wait. The caller has already proved
+/// containment/effect safety and stopped the provider process.
+pub(crate) async fn settle_route_recovery(
+    store: &SharedStore,
+    lease: &RunLease,
+    stopped: StoppedLaunch,
+    choice: RecoveryChoice,
+) -> Result<RecoverySettlement, RunRouteRecoveryError> {
+    store
+        .advance_run(
+            lease,
+            RunAdvance::LaunchEnded {
+                launch_id: stopped.launch_id,
+                outcome: BoundaryState::Failed,
+            },
+        )
+        .await?;
+    match choice {
+        RecoveryChoice::Launch(route) => Ok(RecoverySettlement::Launch {
+            lease: store.rotate_run_lease(lease).await?,
+            route,
+        }),
+        RecoveryChoice::AwaitCapability { reasons } => {
+            let receipt = store
+                .advance_run(
+                    lease,
+                    RunAdvance::Wait {
+                        on: WaitOn::Capability {
+                            capability: CapabilityRef {
+                                kind: "provider_route".to_string(),
+                                key: capability_key(&reasons),
+                            },
+                        },
+                    },
+                )
+                .await?;
+            let AdvanceReceipt::Wait(wait) = receipt else {
+                unreachable!("RunAdvance::Wait returns a Wait receipt")
+            };
+            Ok(RecoverySettlement::AwaitCapability { wait })
+        }
+    }
+}
+
+/// Stop the provider subtree before consuming a route choice. Failure leaves
+/// the old Launch and Run fenced as unprovable; no stopped token exists, so a
+/// caller cannot rotate the lease or start a successor through this seam.
+pub(crate) async fn stop_launch_for_recovery(
+    store: &SharedStore,
+    lease: &RunLease,
+    harness: &mut dyn Harness,
+) -> Result<RecoveryStopOutcome, RunRouteRecoveryError> {
+    let launch = store
+        .current_launch(lease)
+        .await?
+        .ok_or_else(|| RunRouteRecoveryError::MissingLaunch(lease.run_id.clone()))?;
+    match harness.stop().await {
+        Ok(()) => Ok(RecoveryStopOutcome::Stopped(StoppedLaunch {
+            launch_id: launch.id,
+        })),
+        Err(error) => {
+            let error = format!("provider containment stop failed: {error}");
+            let stop = store
+                .stop_run(
+                    lease,
+                    StopCause::Failed {
+                        reason: error.clone(),
+                    },
+                    ContainmentObservation::Unprovable,
+                )
+                .await?;
+            Ok(RecoveryStopOutcome::Fenced {
+                error,
+                stop: Box::new(stop),
+            })
+        }
+    }
+}
+
+pub(crate) fn capability_key(reasons: &[(ExactRoute, RouteUnavailable)]) -> String {
+    if reasons.is_empty() {
+        return "recovery_chain_exhausted".to_string();
+    }
+    reasons
+        .iter()
+        .map(|(route, reason)| {
+            let account = route
+                .account_id
+                .as_ref()
+                .map(ProviderAccountId::as_str)
+                .unwrap_or("ambient");
+            let reason = match reason {
+                RouteUnavailable::Credential => "credential".to_string(),
+                RouteUnavailable::Capacity { resets_at } => resets_at
+                    .map(|reset| format!("capacity_until_{reset}"))
+                    .unwrap_or_else(|| "capacity".to_string()),
+                RouteUnavailable::Policy => "policy".to_string(),
+            };
+            format!("{}/{account}:{reason}", route.agent.agent())
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
     use time::{Date, Month};
 
     use super::*;
+    use crate::durable::{
+        AdvanceReceipt, Containment, Launch, LaunchState, RunState, RunTrigger, WorkRef, WorkStatus,
+    };
+    use crate::engine::agent::AgentConfig;
+    use crate::harness::Harness;
+    use crate::id::WaveId;
+    use crate::store::{open_store, StorageConfig};
+    use crate::wave::Wave;
 
     const NOW: i64 = 1_000;
 
@@ -340,6 +715,99 @@ mod tests {
             readiness,
             strained: false,
         }
+    }
+
+    #[derive(Debug)]
+    struct StopHarness {
+        fails: bool,
+    }
+
+    #[async_trait]
+    impl Harness for StopHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn interrupt(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> anyhow::Result<()> {
+            if self.fails {
+                anyhow::bail!("native descendants remain live");
+            }
+            Ok(())
+        }
+
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
+
+    async fn wave_work() -> (SharedStore, WorkRef) {
+        let directory = tempfile::tempdir().unwrap().keep();
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(directory.join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "route-recovery".to_string(),
+            directory.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let work = WorkRef::Wave(wave.id().clone());
+        (store, work)
+    }
+
+    async fn start_launch(
+        store: &SharedStore,
+        work: &WorkRef,
+        route: &ExactRoute,
+    ) -> (RunLease, Launch) {
+        let (_run, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
+        let launch = append_launch(store, &lease, route).await;
+        (lease, launch)
+    }
+
+    async fn append_launch(store: &SharedStore, lease: &RunLease, route: &ExactRoute) -> Launch {
+        let receipt = store
+            .advance_run(
+                lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute::from(route),
+                    containment: Containment::Tmux {
+                        name: format!("lf-route-recovery-{}", route.agent.provider),
+                    },
+                    cwd: PathBuf::from("/tmp/route-recovery"),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let AdvanceReceipt::Launch(launch) = receipt else {
+            panic!("expected Launch receipt")
+        };
+        let receipt = store
+            .advance_run(
+                lease,
+                RunAdvance::LaunchLive {
+                    launch_id: launch.id,
+                },
+            )
+            .await
+            .unwrap();
+        let AdvanceReceipt::Launch(launch) = receipt else {
+            panic!("expected live Launch receipt")
+        };
+        launch
     }
 
     #[test]
@@ -614,6 +1082,174 @@ mod tests {
         assert_eq!(
             derive_chain_exclusions(&history, &second_id).unwrap(),
             vec![first, second]
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_containment_stop_cannot_create_a_successor_launch() {
+        let (store, work) = wave_work().await;
+        let first_route = route("claude", Some("work"));
+        let (lease, first) = start_launch(&store, &work, &first_route).await;
+        let mut harness = StopHarness { fails: true };
+
+        let stopped = stop_launch_for_recovery(&store, &lease, &mut harness)
+            .await
+            .unwrap();
+
+        let RecoveryStopOutcome::Fenced { stop, .. } = stopped else {
+            panic!("failed stop must fence the Run")
+        };
+        assert_eq!(stop.containment, ContainmentObservation::Unprovable);
+        assert_eq!(stop.run.state, RunState::Stopping);
+        assert_eq!(
+            store.launches_for_run(&lease.run_id).await.unwrap().len(),
+            1
+        );
+        assert_eq!(
+            store
+                .current_launch_for_run(&lease.run_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            LaunchState::Stopping
+        );
+        assert_eq!(
+            store.current_run(&work).await.unwrap().unwrap().state,
+            RunState::Stopping
+        );
+        assert!(store.rotate_run_lease(&lease).await.is_err());
+        assert!(store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchEnded {
+                    launch_id: first.id,
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn recovery_settlement_keeps_account_and_provider_fallback_in_one_run() {
+        let (store, work) = wave_work().await;
+        let work_route = route("claude", Some("work"));
+        let personal_route = route("claude", Some("personal"));
+        let backup_route = route("codex", Some("backup"));
+        let (first_lease, first) = start_launch(&store, &work, &work_route).await;
+        let run_id = first_lease.run_id.clone();
+        let mut harness = StopHarness { fails: false };
+        let RecoveryStopOutcome::Stopped(stopped) =
+            stop_launch_for_recovery(&store, &first_lease, &mut harness)
+                .await
+                .unwrap()
+        else {
+            panic!("successful stop must mint settlement proof")
+        };
+        let RecoverySettlement::Launch {
+            lease: second_lease,
+            route: second_route,
+        } = settle_route_recovery(
+            &store,
+            &first_lease,
+            stopped,
+            RecoveryChoice::Launch(personal_route.clone()),
+        )
+        .await
+        .unwrap()
+        else {
+            panic!("expected same-provider successor")
+        };
+        assert_eq!(second_route, personal_route);
+        assert_eq!(second_lease.run_id, run_id);
+        assert!(store.validate_run_lease(&first_lease).await.is_err());
+        let second = append_launch(&store, &second_lease, &second_route).await;
+
+        let RecoveryStopOutcome::Stopped(stopped) =
+            stop_launch_for_recovery(&store, &second_lease, &mut harness)
+                .await
+                .unwrap()
+        else {
+            panic!("successful second stop must mint settlement proof")
+        };
+        let RecoverySettlement::Launch {
+            lease: third_lease,
+            route: third_route,
+        } = settle_route_recovery(
+            &store,
+            &second_lease,
+            stopped,
+            RecoveryChoice::Launch(backup_route.clone()),
+        )
+        .await
+        .unwrap()
+        else {
+            panic!("expected backup-provider successor")
+        };
+        assert_eq!(third_route, backup_route);
+        assert_eq!(third_lease.run_id, run_id);
+        assert!(store.validate_run_lease(&second_lease).await.is_err());
+        let third = append_launch(&store, &third_lease, &third_route).await;
+
+        let launches = store.launches_for_run(&run_id).await.unwrap();
+        assert_eq!(launches.len(), 3);
+        assert_eq!(launches[0].id, first.id);
+        assert_eq!(launches[0].state, LaunchState::Ended);
+        assert_eq!(launches[0].route, LaunchRoute::from(&work_route));
+        assert_eq!(launches[1].id, second.id);
+        assert_eq!(launches[1].state, LaunchState::Ended);
+        assert_eq!(launches[1].route, LaunchRoute::from(&personal_route));
+        assert_eq!(launches[2].id, third.id);
+        assert_eq!(launches[2].state, LaunchState::Live);
+        assert_eq!(launches[2].route, LaunchRoute::from(&backup_route));
+    }
+
+    #[tokio::test]
+    async fn exhausted_routes_record_a_typed_capability_wait() {
+        let (store, work) = wave_work().await;
+        let first_route = route("claude", Some("work"));
+        let backup_route = route("codex", Some("backup"));
+        let (lease, _) = start_launch(&store, &work, &first_route).await;
+        let mut harness = StopHarness { fails: false };
+        let RecoveryStopOutcome::Stopped(stopped) =
+            stop_launch_for_recovery(&store, &lease, &mut harness)
+                .await
+                .unwrap()
+        else {
+            panic!("successful stop must mint settlement proof")
+        };
+
+        let RecoverySettlement::AwaitCapability { wait } = settle_route_recovery(
+            &store,
+            &lease,
+            stopped,
+            RecoveryChoice::AwaitCapability {
+                reasons: vec![
+                    (first_route, RouteUnavailable::Credential),
+                    (backup_route, RouteUnavailable::Policy),
+                ],
+            },
+        )
+        .await
+        .unwrap() else {
+            panic!("expected typed capability Wait")
+        };
+
+        let WaitOn::Capability { capability } = &wait.on else {
+            panic!("expected capability Wait")
+        };
+        assert_eq!(capability.kind, "provider_route");
+        assert_eq!(capability.key, "claude/work:credential,codex/backup:policy");
+        let WorkStatus::Waiting { wait: stored_wait } = store.work_status(&work).await.unwrap()
+        else {
+            panic!("expected Work to expose the capability Wait")
+        };
+        assert_eq!(stored_wait.id, wait.id);
+        assert_eq!(stored_wait.on, wait.on);
+        assert_eq!(
+            store.launches_for_run(&lease.run_id).await.unwrap().len(),
+            1
         );
     }
 

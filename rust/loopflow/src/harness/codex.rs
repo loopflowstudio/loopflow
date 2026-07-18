@@ -36,8 +36,9 @@ use crate::harness::lf_tag::LfTagParser;
 use crate::harness::{
     codex_mapping, ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome,
 };
-use crate::provider_account::{resolve_provider_account, ProviderAccountRoute};
+use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
+use crate::store::ProviderAccountId;
 
 /// SIGKILL an entire process group. Killing only the direct child orphans
 /// the real app-server when `codex` on PATH is an npm shim that spawns it as
@@ -526,6 +527,7 @@ pub struct CodexHarness {
     provider_session_id: Arc<Mutex<Option<String>>>,
     resume_provider_session_id: Option<String>,
     account_route: Option<ProviderAccountRoute>,
+    requested_account_id: Option<ProviderAccountId>,
     /// Live turn id (from turn/started, cleared at turn/completed); steer and
     /// interrupt address the turn with it.
     current_turn_id: Arc<Mutex<Option<String>>>,
@@ -571,6 +573,7 @@ impl CodexHarness {
             provider_session_id: Arc::new(Mutex::new(None)),
             resume_provider_session_id: None,
             account_route: None,
+            requested_account_id: None,
             current_turn_id: Arc::new(Mutex::new(None)),
             initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
@@ -708,8 +711,12 @@ impl Harness for CodexHarness {
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
         let requested_session = self.resume_provider_session_id.clone();
-        let account_route =
-            resolve_provider_account(Provider::Codex, requested_session.as_deref()).await?;
+        let account_route = resolve_provider_account_exact(
+            Provider::Codex,
+            requested_session.as_deref(),
+            self.requested_account_id.as_ref(),
+        )
+        .await?;
         self.resume_provider_session_id = match &account_route {
             Some(route) if route.resume_requested_session() => requested_session,
             Some(_) => None,
@@ -876,6 +883,16 @@ impl Harness for CodexHarness {
 
     fn set_provider_session_id(&mut self, provider_session_id: Option<String>) {
         self.resume_provider_session_id = provider_session_id;
+    }
+
+    fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
+        self.requested_account_id = account_id;
+    }
+
+    fn provider_account_id(&self) -> Option<ProviderAccountId> {
+        self.account_route
+            .as_ref()
+            .map(|route| route.account_id().clone())
     }
 }
 

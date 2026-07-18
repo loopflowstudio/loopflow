@@ -137,7 +137,7 @@ struct RoadmapView: View {
                 attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
-                initialSection: selection.task.attention.level == .blue ? .review : .changes
+                initialSection: selection.task.attention.level == .blue ? .feedback : .changes
             )
         }
         .confirmationDialog(

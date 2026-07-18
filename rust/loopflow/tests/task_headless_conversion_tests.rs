@@ -53,7 +53,7 @@ fn run_headless(repo: &TestRepo, home: &std::path::Path) -> Output {
         .expect("run lf task run --headless")
 }
 
-fn seed_current_user_review(task: &RegisteredTask) {
+fn seed_current_user_feedback(task: &RegisteredTask) {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     runtime.block_on(async {
         let work = task
@@ -79,7 +79,7 @@ fn seed_current_user_review(task: &RegisteredTask) {
                         account_id: None,
                     },
                     containment: Containment::Tmux {
-                        name: "task-headless-review".to_string(),
+                        name: "task-headless-feedback".to_string(),
                     },
                     cwd: task.session.worktree.clone(),
                     surface: "terminal".to_string(),
@@ -112,14 +112,14 @@ fn seed_current_user_review(task: &RegisteredTask) {
                     step: "review-design".to_string(),
                     step_index: 0,
                     iteration: 0,
-                    interactive: true,
+                    feedback: true,
                     updated_at: time::OffsetDateTime::now_utc(),
                 },
             )
             .await
             .expect("record flow position");
         task.store
-            .route_review(&lease, &launch.id, AttentionRoute::User)
+            .route_feedback(&lease, &launch.id, AttentionRoute::User)
             .await
             .expect("route User attention");
     });
@@ -147,18 +147,21 @@ fn task_run_headless_existing_task_persists_all_policies() {
 }
 
 #[test]
-fn task_run_headless_existing_task_refuses_current_user_review() {
+fn task_run_headless_existing_task_refuses_current_user_feedback() {
     let repo = TestRepo::new();
-    let branch = "jack/task-headless-human-review";
+    let branch = "jack/task-headless-human-feedback";
     repo.create_branch(branch);
     let home = tempfile::tempdir().expect("Task home");
     let task = register_task(home.path(), repo.path(), branch, &repo.head_sha());
-    seed_current_user_review(&task);
+    seed_current_user_feedback(&task);
     let before = lifecycle_config(&task);
 
     let output = run_headless(&repo, home.path());
-    assert!(!output.status.success(), "current User review must refuse");
+    assert!(
+        !output.status.success(),
+        "current User Feedback must refuse"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("current interactive step"), "{stderr}");
+    assert!(stderr.contains("current Feedback"), "{stderr}");
     assert_eq!(lifecycle_config(&task), before);
 }

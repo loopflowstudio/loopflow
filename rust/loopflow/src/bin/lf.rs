@@ -1303,7 +1303,7 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Queue { json }) => {
                 loopflow::lf::commands::work::run_queue(*json)
             }
-            Some(Commands::ReviewExitGuard {
+            Some(Commands::FeedbackExitGuard {
                 kind,
                 id,
                 launch_id,

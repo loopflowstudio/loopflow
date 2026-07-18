@@ -44,7 +44,7 @@ struct PreparedTaskStep {
 
 #[derive(Debug)]
 struct StartedTaskStep {
-    review: bool,
+    feedback: bool,
     provider_turn_active: bool,
     basis: Option<Basis>,
 }
@@ -203,7 +203,7 @@ async fn run_task_session_with(
     };
 
     let mut pending = VecDeque::new();
-    let mut review_open = prepared.attention.is_some();
+    let mut feedback_open = prepared.attention.is_some();
     // Record this body's turns the way `flowloop/wave.rs` does. Without it a
     // Task Session's spend reaches no store at all: the provider runs in this
     // process, so no child `lf` records on its behalf.
@@ -247,7 +247,7 @@ async fn run_task_session_with(
             .as_ref()
             .ok_or_else(|| anyhow!("interactive Task step requires an observable active Launch"))?;
         store
-            .route_review(run_lease, &capture.launch_id(), attention)
+            .route_feedback(run_lease, &capture.launch_id(), attention)
             .await?;
     }
     let mut active_basis = prepared.basis.clone();
@@ -286,7 +286,7 @@ async fn run_task_session_with(
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
     // One preempt per provider turn; cleared with `provider_turn_active`.
-    let mut review_preempted = false;
+    let mut feedback_preempted = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -317,12 +317,12 @@ async fn run_task_session_with(
                 }
                 let wake = if provider_turn_active {
                     if ci_fix_wake.is_none()
-                        && !review_preempted
-                        && review_open
+                        && !feedback_preempted
+                        && feedback_open
                         && current_ci_incident_identity(&store, &session).await?.is_some()
                     {
                         harness.interrupt().await?;
-                        review_preempted = true;
+                        feedback_preempted = true;
                     }
                     None
                 } else if ci_fix_wake.is_none() {
@@ -342,8 +342,8 @@ async fn run_task_session_with(
                     ).await?;
                     ci_fix_wake = Some(wake);
                     // The bounded repair owns this body's exit. The durable Gate
-                    // review stays open for the next Task generation.
-                    review_open = false;
+                    // feedback stays open for the next Task generation.
+                    feedback_open = false;
                     flow_turn_active = true;
                     provider_turn_active = true;
                     last_text.clear();
@@ -369,13 +369,13 @@ async fn run_task_session_with(
                         &mut pending,
                     ).await?;
                 }
-                if review_open
+                if feedback_open
                     && !provider_turn_active
-                    && store.review(&work).await?.is_none()
+                    && store.feedback(&work).await?.is_none()
                 {
                     let boundary = store.boundary_seed(&work).await?;
-                    let close = "The interactive flow step was closed at the current Basis. \
-        Finish this step from the conversation already conducted; do not invent a disposition.";
+                    let close = "Feedback continued at the current Basis. \
+        Finish this step from the conversation already conducted.";
                     if let Some(capture) = &capture {
                         capture.begin_turn_at("queued", close, Some(boundary.basis.clone()))?;
                     }
@@ -434,7 +434,7 @@ async fn run_task_session_with(
                             capture.finish_turn(outcome)?;
                         }
                         provider_turn_active = false;
-                        review_preempted = false;
+                        feedback_preempted = false;
                         if status == Lifecycle::Failed {
                             let reason = drain_turn_failure_reason(
                                 &mut event_rx,
@@ -467,8 +467,8 @@ async fn run_task_session_with(
                                 ci_fix_wake = Some(wake);
                                 // The repair takes the just-released provider
                                 // boundary before Gate or lifecycle progression.
-                                // Its durable review remains open for recovery.
-                                review_open = false;
+                                // Its durable feedback remains open for recovery.
+                                feedback_open = false;
                                 flow_turn_active = true;
                                 provider_turn_active = true;
                                 last_text.clear();
@@ -489,25 +489,25 @@ async fn run_task_session_with(
                         }
                         let resume_interrupted_flow =
                             flow_turn_active && status == Lifecycle::Interrupted;
-                        let review_body_completed = review_open
-                            && store.review(&work).await?.is_none();
-                        if review_open && !review_body_completed {
+                        let feedback_body_completed = feedback_open
+                            && store.feedback(&work).await?.is_none();
+                        if feedback_open && !feedback_body_completed {
                             // The provider boundary ended, not the interactive
                             // flow interval. A later Steer starts another Turn;
-                            // only close_review advances the playhead.
+                            // only continue_feedback advances the playhead.
                             flow_turn_active = false;
                             last_text.clear();
                             continue 'runner;
                         }
                         let mut flow_iteration_completed = if flow_turn_active {
                             finish_task_flow_turn(&mut flow, status)?
-                        } else if review_body_completed {
-                            review_open = false;
+                        } else if feedback_body_completed {
+                            feedback_open = false;
                             finish_task_flow_turn(&mut flow, Lifecycle::Completed)?
                         } else {
                             false
                         };
-                        if flow_turn_active || review_body_completed {
+                        if flow_turn_active || feedback_body_completed {
                             let latest = store
                                 .get_task_session(&session.id)
                                 .await?
@@ -601,7 +601,7 @@ async fn run_task_session_with(
                                 provider_turn_active = true;
                                 continue 'runner;
                             }
-                            if review_open {
+                            if feedback_open {
                                 last_text.clear();
                                 continue 'runner;
                             }
@@ -632,7 +632,7 @@ async fn run_task_session_with(
                                     if let Some(basis) = &started.basis {
                                         active_basis = basis.clone();
                                     }
-                                    review_open = started.review;
+                                    feedback_open = started.feedback;
                                     flow_turn_active = true;
                                     provider_turn_active = started.provider_turn_active;
                                     last_text.clear();
@@ -666,7 +666,7 @@ async fn run_task_session_with(
                                 if let Some(basis) = &started.basis {
                                     active_basis = basis.clone();
                                 }
-                                review_open = started.review;
+                                feedback_open = started.feedback;
                                 flow_turn_active = true;
                                 provider_turn_active = started.provider_turn_active;
                                 continue 'runner;
@@ -788,7 +788,7 @@ async fn run_task_session_with(
                                 if let Some(basis) = &started.basis {
                                     active_basis = basis.clone();
                                 }
-                                review_open = started.review;
+                                feedback_open = started.feedback;
                                 flow_turn_active = true;
                                 provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
@@ -841,7 +841,7 @@ async fn run_task_session_with(
                                     if let Some(basis) = &started.basis {
                                         active_basis = basis.clone();
                                     }
-                                    review_open = started.review;
+                                    feedback_open = started.feedback;
                                     flow_turn_active = true;
                                     provider_turn_active = started.provider_turn_active;
                                     last_text.clear();
@@ -915,7 +915,7 @@ async fn run_task_session_with(
                                 if let Some(basis) = &started.basis {
                                     active_basis = basis.clone();
                                 }
-                                review_open = started.review;
+                                feedback_open = started.feedback;
                                 flow_turn_active = true;
                                 provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
@@ -1062,7 +1062,7 @@ async fn prepare_task_flow_step(
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
     let skill = crate::engine::load_skill(&step.step, Path::new(&session.worktree))?;
-    let attention = if step.review {
+    let attention = if step.feedback {
         let route = match session.phase_plan().interaction_policy {
             InteractionPolicy::Require => AttentionRoute::User,
             InteractionPolicy::Defer => AttentionRoute::Parent(
@@ -1082,7 +1082,7 @@ async fn prepare_task_flow_step(
                 .unwrap_or("Follow the named skill."),
         ));
         session.status_reason = format!(
-            "Task {} cycle {}, interactive step {} routes attention to {}",
+            "Task {} cycle {}, Feedback step {} routes attention to {}",
             session.lifecycle_phase.as_str(),
             session.lifecycle_cycle(),
             step.step,
@@ -1103,7 +1103,7 @@ async fn prepare_task_flow_step(
         step: step.step.clone(),
         step_index: step.index,
         iteration: step.iteration,
-        interactive: attention.is_some(),
+        feedback: attention.is_some(),
         updated_at: time::OffsetDateTime::now_utc(),
     };
     Ok(PreparedTaskStep {
@@ -1125,7 +1125,7 @@ fn interactive_step_protocol(
         AttentionRoute::Parent(_) => "the immediate parent Run",
     };
     format!(
-        "Conduct the `{skill}` Review step in this existing Task Launch. Attention is routed \
+        "Conduct the `{skill}` Feedback step in this existing Task Launch. Attention is routed \
 to {route}. Conversation arrives as ordinary Steers addressed to Work `{}`. Ask bounded \
 questions, respond in this same Launch, and wait when another answer is required. A current \
 Basis Continue advances the flow; there is no approval or changes-requested disposition. Extra \
@@ -1176,7 +1176,7 @@ async fn start_prepared_task_step(
         let capture = capture
             .ok_or_else(|| anyhow!("interactive Task step requires an observable active Launch"))?;
         store
-            .route_review(run_lease, &capture.launch_id(), attention.clone())
+            .route_feedback(run_lease, &capture.launch_id(), attention.clone())
             .await?;
     }
     if let Some(capture) = capture {
@@ -1184,7 +1184,7 @@ async fn start_prepared_task_step(
     }
     start_task_flow_turn(store, session, lease, harness, flow, prepared.turn).await?;
     Ok(StartedTaskStep {
-        review: prepared.attention.is_some(),
+        feedback: prepared.attention.is_some(),
         provider_turn_active: true,
         basis: Some(prepared.basis),
     })
@@ -2557,7 +2557,7 @@ mod tests {
             prepared.attention,
             Some(crate::durable::AttentionRoute::Parent(parent))
         );
-        assert!(prepared.position.interactive);
+        assert!(prepared.position.feedback);
         assert_eq!(prepared.position.step, "demo");
         assert!(prepared.turn.input.contains("ordinary Steers"));
         assert!(prepared
@@ -2575,7 +2575,7 @@ mod tests {
             prepared.attention,
             Some(crate::durable::AttentionRoute::User)
         );
-        assert!(prepared.position.interactive);
+        assert!(prepared.position.feedback);
         assert!(prepared.turn.input.contains("authenticated User"));
     }
 
@@ -2710,7 +2710,7 @@ mod tests {
     }
 
     /// The runtime wake/preempt gate. A fresh, repairable failure on the current
-    /// head warrants an incident (the runner would preempt a parked Review or arm
+    /// head warrants an incident (the runner would preempt a parked Feedback or arm
     /// a repair). Green, a stale reading for a past head, and a head red only on a
     /// land-time precondition all warrant nothing — so neither the review-preempt
     /// nor the idle repair path fires for them. This is the composed decision the
@@ -2752,7 +2752,7 @@ mod tests {
 
         // Red only on a land-time precondition (`scratch-clear`): a repair turn
         // could only delete the reviewer's artifact, so the gate refuses the wake
-        // even though the head is genuinely failing. A parked Review is not
+        // even though the head is genuinely failing. A parked Feedback is not
         // preempted for this reading.
         let land_time_only =
             open_pr_with_ci(Some(failing_on("headsha", vec![scratch_clear.clone()])));

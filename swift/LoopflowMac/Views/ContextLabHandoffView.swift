@@ -141,7 +141,7 @@ struct TaskWorkspaceWindow: View {
                     attention: task.attention,
                     repoPath: route.repoPath,
                     terminalStore: TaskTerminalStore.shared,
-                    initialSection: task.attention.level == .blue ? .review : .changes
+                    initialSection: task.attention.level == .blue ? .feedback : .changes
                 )
             } else if let errorMessage {
                 ContentUnavailableView(

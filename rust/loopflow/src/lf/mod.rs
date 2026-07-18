@@ -301,14 +301,14 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WorkCommand,
     },
-    /// List current User-attention Reviews, oldest first
+    /// List current User-attention Feedback, oldest first
     Queue {
         #[arg(long)]
         json: bool,
     },
-    /// Internal: continue a Review if its owning client exits unexpectedly
-    #[command(name = "__review-exit-guard", hide = true)]
-    ReviewExitGuard {
+    /// Internal: continue Feedback if its presentation client exits unexpectedly
+    #[command(name = "__feedback-exit-guard", hide = true)]
+    FeedbackExitGuard {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
@@ -705,7 +705,7 @@ pub enum LaunchCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
-    /// Show current Epoch, Basis, Run, Wait, and Review projection
+    /// Show current Epoch, Basis, Run, Wait, and Feedback projection
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -722,19 +722,19 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Talk with the current User-attention Review
-    Review {
+    /// Present the current User-attention Feedback in its recorded Launch
+    Feedback {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
-        /// Continue after a clean end-of-input
+        /// Continue when the presentation exits successfully
         #[arg(long, conflicts_with = "continue_on_exit")]
         continue_on_success: bool,
-        /// Continue whenever the Review client exits, including signals or crashes
+        /// Continue whenever the presentation exits, including signals or crashes
         #[arg(long, conflicts_with = "continue_on_success")]
         continue_on_exit: bool,
     },
-    /// Continue the current Review without recording a disposition
+    /// Continue past the current Feedback boundary
     Continue {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -742,7 +742,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Escalate an immediate child Review from this parent Run to the User
+    /// Escalate immediate child Feedback from this parent Run to the User
     Escalate {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -2559,19 +2559,19 @@ mod tests {
             }) if kind == "project" && id == "project_1"
         ));
 
-        let review = Cli::try_parse_from([
+        let feedback = Cli::try_parse_from([
             "lf",
             "work",
-            "review",
+            "feedback",
             "task",
             "task_1",
             "--continue-on-exit",
         ])
-        .expect("parse Review client exit policy");
+        .expect("parse Feedback presentation exit policy");
         assert!(matches!(
-            review.command,
+            feedback.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Review {
+                cmd: WorkCommand::Feedback {
                     kind,
                     id,
                     continue_on_success: false,
@@ -2582,7 +2582,7 @@ mod tests {
         assert!(Cli::try_parse_from([
             "lf",
             "work",
-            "review",
+            "feedback",
             "task",
             "task_1",
             "--continue-on-success",

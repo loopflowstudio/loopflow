@@ -223,9 +223,12 @@ async fn run_project_session_inner(
     let mut background_preempted = false;
     let mut provider_turn_active;
     let mut pending_child = None;
-    let mut delivered_child = initial_child
-        .as_ref()
-        .map(|child| (child.review.launch_id.clone(), child.review.basis.revision));
+    let mut delivered_child = initial_child.as_ref().map(|child| {
+        (
+            child.feedback.launch_id.clone(),
+            child.feedback.basis.revision,
+        )
+    });
     if let Some(input) = initial_input {
         apply_input(&store, &session, lease, harness.as_mut(), input).await?;
         provider_turn_active = true;
@@ -316,7 +319,7 @@ async fn run_project_session_inner(
                 }
                 if provider_turn_active && !control_turn_active {
                     if let Some(child) = store.child_attention(&work).await?.into_iter().next() {
-                        let key = (child.review.launch_id.clone(), child.review.basis.revision);
+                        let key = (child.feedback.launch_id.clone(), child.feedback.basis.revision);
                         if delivered_child.as_ref() != Some(&key) {
                             match harness.send_current(&child.render()).await {
                                 SendCurrentOutcome::Sent { .. } => {
@@ -469,8 +472,8 @@ async fn run_project_session_inner(
                             control_turn_active = true;
                             provider_turn_active = true;
                             delivered_child = Some((
-                                child.review.launch_id,
-                                child.review.basis.revision,
+                                child.feedback.launch_id,
+                                child.feedback.basis.revision,
                             ));
                             continue;
                         }

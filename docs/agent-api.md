@@ -63,7 +63,7 @@ same stable Work control surface:
 ```bash
 lf work status task task_... --json
 lf work steer task task_... "show the failing fixture" --json
-lf work close task task_...                         # finish the current Review
+lf work continue task task_...                      # continue past current Feedback
 ```
 
 A Steer receipt reports immutable delivery attempts, not incorporation. A

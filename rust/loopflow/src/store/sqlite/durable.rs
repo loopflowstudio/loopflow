@@ -5,13 +5,13 @@ use time::OffsetDateTime;
 
 use crate::child_session::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, ChildReview,
+    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, ChildFeedback,
     Containment, ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId,
-    EpochReceipt, EpochState, FlowPosition, Home, HomeId, InterruptReceipt, Launch, LaunchId,
-    LaunchRoute, LaunchState, LaunchSurface, ProjectId, Review, Run, RunAdvance, RunId, RunLease,
+    EpochReceipt, EpochState, Feedback, FlowPosition, Home, HomeId, InterruptReceipt, Launch,
+    LaunchId, LaunchRoute, LaunchState, LaunchSurface, ProjectId, Run, RunAdvance, RunId, RunLease,
     RunLeaseToken, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId,
     SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, Turn, TurnId, UserReview, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
+    ToolResponseWrite, Turn, TurnId, UserFeedback, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project_session::ProjectSession;
@@ -308,7 +308,7 @@ impl SqliteStore {
                     params![turn_id.as_str(), outcome.as_turn_status(), now_unix()],
                 )?;
                 if ended == 1 {
-                    rearm_review_attention(&tx, turn_id)?;
+                    rearm_feedback_attention(&tx, turn_id)?;
                 }
                 AdvanceReceipt::Turn(control_turn_in(&tx, turn_id)?)
             }
@@ -473,7 +473,7 @@ impl SqliteStore {
                 position.step,
                 i64::from(position.step_index),
                 i64::from(position.iteration),
-                position.interactive,
+                position.feedback,
                 position.updated_at.unix_timestamp(),
             ],
         )?;
@@ -481,18 +481,18 @@ impl SqliteStore {
         Ok(position.clone())
     }
 
-    pub fn route_review(
+    pub fn route_feedback(
         &self,
         lease: &RunLease,
         launch_id: &LaunchId,
         attention: &AttentionRoute,
-    ) -> StoreResult<Review> {
+    ) -> StoreResult<Feedback> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = validate_run_lease(&tx, lease)?;
         require_live_launch_for_run(&tx, launch_id, &run.id)?;
         let position = flow_position_in(&tx, &run.work, &run.epoch_id)?;
-        if !position.interactive {
+        if !position.feedback {
             return Err(StoreError::InvalidData(
                 "current flow step is not interactive".to_string(),
             ));
@@ -536,18 +536,18 @@ impl SqliteStore {
                     && work_id.as_deref() == attention_work_id => {}
             _ => {
                 return Err(StoreError::InvalidData(
-                    "Review attention route cannot change during an interactive flow".to_string(),
+                    "Feedback attention route cannot change during a Feedback step".to_string(),
                 ));
             }
         }
-        let review = review_in(&tx, &run.work)?.ok_or(StoreError::NotFound)?;
+        let feedback = feedback_in(&tx, &run.work)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
-        Ok(review)
+        Ok(feedback)
     }
 
-    pub fn review(&self, work: &WorkRef) -> StoreResult<Option<Review>> {
+    pub fn feedback(&self, work: &WorkRef) -> StoreResult<Option<Feedback>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        review_in(&conn, work)
+        feedback_in(&conn, work)
     }
 
     pub fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
@@ -630,7 +630,7 @@ impl SqliteStore {
         Ok(surface)
     }
 
-    pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildReview>> {
+    pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildFeedback>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT e.wave_id, e.project_id, e.task_id
@@ -649,22 +649,22 @@ impl SqliteStore {
                 row.get::<_, Option<String>>(2)?,
             ))
         })?;
-        let mut reviews = Vec::new();
+        let mut items = Vec::new();
         for row in rows {
             let work = work_from_parts(row?)?;
-            if let Some(review) = review_in(&conn, &work)? {
-                let (latest_output, evidence) = review_context_in(&conn, &review, &work)?;
-                reviews.push(ChildReview {
-                    review,
+            if let Some(feedback) = feedback_in(&conn, &work)? {
+                let (latest_output, evidence) = feedback_context_in(&conn, &feedback, &work)?;
+                items.push(ChildFeedback {
+                    feedback,
                     latest_output,
                     evidence,
                 });
             }
         }
-        Ok(reviews)
+        Ok(items)
     }
 
-    pub fn user_attention(&self) -> StoreResult<Vec<UserReview>> {
+    pub fn user_attention(&self) -> StoreResult<Vec<UserFeedback>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT e.wave_id, e.project_id, e.task_id
@@ -681,41 +681,41 @@ impl SqliteStore {
                 row.get::<_, Option<String>>(2)?,
             ))
         })?;
-        let mut reviews = Vec::new();
+        let mut items = Vec::new();
         for row in rows {
             let work = work_from_parts(row?)?;
-            if let Some(review) = review_in(&conn, &work)? {
-                if review.attention != AttentionRoute::User {
+            if let Some(feedback) = feedback_in(&conn, &work)? {
+                if feedback.attention != AttentionRoute::User {
                     continue;
                 }
                 let surface =
-                    launch_surface_in(&conn, &review.launch_id)?.ok_or(StoreError::NotFound)?;
-                let (latest_output, evidence) = review_context_in(&conn, &review, &work)?;
-                reviews.push(UserReview {
-                    review,
+                    launch_surface_in(&conn, &feedback.launch_id)?.ok_or(StoreError::NotFound)?;
+                let (latest_output, evidence) = feedback_context_in(&conn, &feedback, &work)?;
+                items.push(UserFeedback {
+                    feedback,
                     surface,
                     latest_output,
                     evidence,
                 });
             }
         }
-        Ok(reviews)
+        Ok(items)
     }
 
-    pub fn escalate_review(
+    pub fn escalate_feedback(
         &self,
         lease: &RunLease,
         child: &WorkRef,
         if_basis: &Basis,
-    ) -> StoreResult<Review> {
+    ) -> StoreResult<Feedback> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = validate_run_lease(&tx, lease)?;
-        let review = review_in(&tx, child)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&review.basis, if_basis)?;
-        if review.attention != AttentionRoute::Parent(run.work.clone()) {
+        let feedback = feedback_in(&tx, child)?.ok_or(StoreError::NotFound)?;
+        validate_basis(&feedback.basis, if_basis)?;
+        if feedback.attention != AttentionRoute::Parent(run.work.clone()) {
             return Err(StoreError::InvalidAuthority(
-                "Run may escalate only its own immediate child Review".to_string(),
+                "Run may escalate only its own immediate child Feedback".to_string(),
             ));
         }
         if tx.execute(
@@ -724,8 +724,8 @@ impl SqliteStore {
              WHERE id=?1 AND attention_kind='parent' AND attention_at=?2
                AND attention_work_kind=?4 AND attention_work_id=?5",
             params![
-                review.launch_id.as_str(),
-                review.opened_at.unix_timestamp(),
+                feedback.launch_id.as_str(),
+                feedback.opened_at.unix_timestamp(),
                 now_unix(),
                 run.work.kind(),
                 run.work.id(),
@@ -733,15 +733,15 @@ impl SqliteStore {
         )? == 0
         {
             return Err(StoreError::InvalidAuthority(
-                "child Review attention changed before escalation".to_string(),
+                "child Feedback attention changed before escalation".to_string(),
             ));
         }
-        let escalated = review_in(&tx, child)?.ok_or(StoreError::NotFound)?;
+        let escalated = feedback_in(&tx, child)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(escalated)
     }
 
-    pub fn close_review(
+    pub fn continue_feedback(
         &self,
         caller: Option<&RunLease>,
         work: &WorkRef,
@@ -749,16 +749,16 @@ impl SqliteStore {
     ) -> StoreResult<WorkStatus> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let review = review_in(&tx, work)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&review.basis, if_basis)?;
-        validate_review_caller(&tx, caller, &review)?;
-        advance_review_in(&tx, &review)?;
+        let feedback = feedback_in(&tx, work)?.ok_or(StoreError::NotFound)?;
+        validate_basis(&feedback.basis, if_basis)?;
+        validate_feedback_caller(&tx, caller, &feedback)?;
+        advance_feedback_in(&tx, &feedback)?;
         let status = work_status_in(&tx, work)?;
         tx.commit()?;
         Ok(status)
     }
 
-    pub(crate) fn continue_review_if_current(
+    pub(crate) fn continue_feedback_if_current(
         &self,
         work: &WorkRef,
         launch_id: &LaunchId,
@@ -766,38 +766,17 @@ impl SqliteStore {
     ) -> StoreResult<WorkStatus> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let review = review_in(&tx, work)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&review.basis, if_basis)?;
-        if review.launch_id != *launch_id || review.attention != AttentionRoute::User {
+        let feedback = feedback_in(&tx, work)?.ok_or(StoreError::NotFound)?;
+        validate_basis(&feedback.basis, if_basis)?;
+        if feedback.launch_id != *launch_id || feedback.attention != AttentionRoute::User {
             return Err(StoreError::InvalidAuthority(
-                "Review is no longer the current User-attention boundary".to_string(),
+                "Feedback is no longer the current User-attention boundary".to_string(),
             ));
         }
-        advance_review_in(&tx, &review)?;
+        advance_feedback_in(&tx, &feedback)?;
         let status = work_status_in(&tx, work)?;
         tx.commit()?;
         Ok(status)
-    }
-
-    pub(crate) fn steer_review_if_current(
-        &self,
-        work: &WorkRef,
-        launch_id: &LaunchId,
-        text: &str,
-        if_basis: &Basis,
-    ) -> StoreResult<SteerReceipt> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let review = review_in(&tx, work)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&review.basis, if_basis)?;
-        if review.launch_id != *launch_id || review.attention != AttentionRoute::User {
-            return Err(StoreError::InvalidAuthority(
-                "Review is no longer the current User-attention boundary".to_string(),
-            ));
-        }
-        let receipt = Self::append_steer_in(&tx, work, &Author::User, text)?;
-        tx.commit()?;
-        Ok(receipt)
     }
 
     pub fn interrupt(
@@ -880,7 +859,7 @@ impl SqliteStore {
                 "Run containment is not absent".to_string(),
             ));
         }
-        let child_review_open: bool = tx.query_row(
+        let child_feedback_open: bool = tx.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM agent_launches l
                 JOIN runs child_run ON child_run.id=l.product_run_id
@@ -893,9 +872,9 @@ impl SqliteStore {
             params![run.work.kind(), run.work.id()],
             |row| row.get(0),
         )?;
-        if child_review_open {
+        if child_feedback_open {
             return Err(StoreError::InvalidData(
-                "Run cannot complete while a child Review is open".to_string(),
+                "Run cannot complete while a child Feedback is open".to_string(),
             ));
         }
         let proposal = DoneProposal {
@@ -1861,7 +1840,7 @@ fn flow_position_in(
             step: row.1,
             step_index: row.2 as u32,
             iteration: row.3 as u32,
-            interactive: row.4,
+            feedback: row.4,
             updated_at: OffsetDateTime::from_unix_timestamp(row.5).map_err(invalid_durable)?,
         })
     })
@@ -1909,7 +1888,7 @@ fn parent_work(conn: &Connection, work: &WorkRef) -> StoreResult<Option<WorkRef>
     }
 }
 
-fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
+fn feedback_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Feedback>> {
     let Ok(epoch) = current_epoch_in(conn, work) else {
         return Ok(None);
     };
@@ -1938,7 +1917,7 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
         return Ok(None);
     };
     let position = flow_position_in(conn, work, &epoch.id)?;
-    if !position.interactive {
+    if !position.feedback {
         return Ok(None);
     }
     let attention = match (kind.as_str(), parent_kind, parent_id) {
@@ -1950,7 +1929,7 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
             ))
         }
     };
-    Ok(Some(Review {
+    Ok(Some(Feedback {
         work: work.clone(),
         launch_id: LaunchId::parse(&launch_id).map_err(invalid_durable)?,
         basis: epoch.current_basis,
@@ -1969,27 +1948,27 @@ fn clear_answered_attention(
     caller: Option<&RunLease>,
     work: &WorkRef,
 ) -> StoreResult<()> {
-    let Some(review) = review_in(tx, work)? else {
+    let Some(feedback) = feedback_in(tx, work)? else {
         return Ok(());
     };
-    if review.attention_at.is_none() || validate_review_caller(tx, caller, &review).is_err() {
+    if feedback.attention_at.is_none() || validate_feedback_caller(tx, caller, &feedback).is_err() {
         return Ok(());
     }
     tx.execute(
         "UPDATE agent_launches SET attention_at=NULL
          WHERE id=?1 AND attention_at=?2",
         params![
-            review.launch_id.as_str(),
-            review
+            feedback.launch_id.as_str(),
+            feedback
                 .attention_at
-                .expect("pending Review has an attention timestamp")
+                .expect("pending Feedback has an attention timestamp")
                 .unix_timestamp(),
         ],
     )?;
     Ok(())
 }
 
-pub(super) fn rearm_review_attention(tx: &Transaction<'_>, turn_id: &TurnId) -> StoreResult<()> {
+pub(super) fn rearm_feedback_attention(tx: &Transaction<'_>, turn_id: &TurnId) -> StoreResult<()> {
     let route = tx
         .query_row(
             "SELECT l.id, l.attention_kind, l.attention_work_kind, l.attention_work_id
@@ -2052,9 +2031,9 @@ pub(super) fn rearm_review_attention(tx: &Transaction<'_>, turn_id: &TurnId) -> 
     Ok(())
 }
 
-fn review_context_in(
+fn feedback_context_in(
     conn: &Connection,
-    review: &Review,
+    feedback: &Feedback,
     work: &WorkRef,
 ) -> StoreResult<(Option<String>, serde_json::Value)> {
     let latest_output = conn
@@ -2062,14 +2041,14 @@ fn review_context_in(
             "SELECT root_output FROM agent_turns
              WHERE launch_id=?1 AND root_output IS NOT NULL
              ORDER BY ordinal DESC LIMIT 1",
-            [review.launch_id.as_str()],
+            [feedback.launch_id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?;
     let evidence_json: String = conn.query_row(
         "SELECT wt.payload_json FROM work_truth wt
          WHERE wt.epoch_id=?1 ORDER BY wt.rev DESC LIMIT 1",
-        [review.basis.epoch_id.as_str()],
+        [feedback.basis.epoch_id.as_str()],
         |row| row.get(0),
     )?;
     let status = work_status_in(conn, work)?;
@@ -2081,42 +2060,42 @@ fn review_context_in(
     Ok((latest_output, evidence))
 }
 
-fn advance_review_in(tx: &Transaction<'_>, review: &Review) -> StoreResult<()> {
+fn advance_feedback_in(tx: &Transaction<'_>, feedback: &Feedback) -> StoreResult<()> {
     if tx.execute(
         "UPDATE work_flow_positions
          SET step_index=step_index+1, interactive=0, updated_at=?2
          WHERE epoch_id=?1 AND flow=?3 AND step=?4 AND step_index=?5 AND interactive=1",
         params![
-            review.position.epoch_id.as_str(),
+            feedback.position.epoch_id.as_str(),
             now_unix(),
-            review.position.flow.as_str(),
-            review.position.step.as_str(),
-            i64::from(review.position.step_index),
+            feedback.position.flow.as_str(),
+            feedback.position.step.as_str(),
+            i64::from(feedback.position.step_index),
         ],
     )? == 0
     {
         return Err(StoreError::InvalidAuthority(
-            "Review flow position changed before continuation".to_string(),
+            "Feedback flow position changed before continuation".to_string(),
         ));
     }
     // The route outlives a cleared `attention_at`: a parent Steer answers the
-    // pending turn without closing the Review. Continuation clears the route
+    // pending turn without closing the Feedback. Continuation clears the route
     // itself; the flow-position fence above is what rejects a stale caller.
     tx.execute(
         "UPDATE agent_launches SET attention_kind=NULL, attention_work_kind=NULL,
             attention_work_id=NULL, attention_at=NULL
          WHERE id=?1 AND attention_kind IS NOT NULL",
-        [review.launch_id.as_str()],
+        [feedback.launch_id.as_str()],
     )?;
     Ok(())
 }
 
-fn validate_review_caller(
+fn validate_feedback_caller(
     conn: &Connection,
     caller: Option<&RunLease>,
-    review: &Review,
+    feedback: &Feedback,
 ) -> StoreResult<()> {
-    match (&review.attention, caller) {
+    match (&feedback.attention, caller) {
         (AttentionRoute::User, None) => Ok(()),
         (AttentionRoute::Parent(parent), Some(lease)) => {
             let run = validate_run_lease(conn, lease)?;

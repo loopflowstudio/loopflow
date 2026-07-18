@@ -1,7 +1,7 @@
 - kickoff
 - step:
     name: review-design
-    review: true
+    feedback: true
 - implement
 - compress
 - lint
@@ -10,11 +10,11 @@
       demo:
         steps:
           - name: demo
-            review: true
+            feedback: true
         description: "Observable change — walk through the experience"
       code-review:
         steps:
           - name: code-review
-            review: true
+            feedback: true
         description: "Internal change — walk through the code"
 - gate

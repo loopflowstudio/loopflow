@@ -2,4 +2,4 @@
 - kickoff
 - step:
     name: review-design
-    review: true
+    feedback: true

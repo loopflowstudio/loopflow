@@ -218,7 +218,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
     ) -> ActiveSessionWaveGroup {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
         // Only User-routed attention paints the external attention queue blue.
-        // Parent-routed Reviews remain on the parent's control lane.
+        // Parent-routed Feedback remains on the parent's control lane.
         let userLaunches = launches.filter {
             $0.attention?.kind == "user" && $0.attentionAt != nil
         }
@@ -388,8 +388,8 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         staleThresholdSecs: Int
     ) -> ActiveSessionRow {
         let userAttention = launch.attention?.kind == "user" && launch.attentionAt != nil
-        // The Review client opens by Work and Launch, so an empty argv no longer
-        // makes a User-routed Review unopenable.
+        // The Feedback presentation opens by Work and Launch, so an empty argv no longer
+        // makes a User-routed Feedback unopenable.
         let openable = userAttention
         return ActiveSessionRow(
             id: "launch:\(launch.sessionId)",

@@ -1,10 +1,10 @@
 use crate::child_session::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildReview,
-    ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId,
-    InterruptReceipt, LaunchId, LaunchSurface, Review, Run, RunAdvance, RunControl, RunLease,
+    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildFeedback,
+    ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, Feedback, FlowPosition, Home,
+    HomeId, InterruptReceipt, LaunchId, LaunchSurface, Run, RunAdvance, RunControl, RunLease,
     RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
-    ToolResponseReceipt, ToolResponseWrite, UserReview, WorkRef, WorkStatus,
+    ToolResponseReceipt, ToolResponseWrite, UserFeedback, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -109,23 +109,23 @@ impl Store {
         .await
     }
 
-    pub async fn route_review(
+    pub async fn route_feedback(
         &self,
         lease: &RunLease,
         launch_id: &LaunchId,
         attention: AttentionRoute,
-    ) -> StoreResult<Review> {
+    ) -> StoreResult<Feedback> {
         let lease = lease.clone();
         let launch_id = launch_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.route_review(&lease, &launch_id, &attention)
+            store.route_feedback(&lease, &launch_id, &attention)
         })
         .await
     }
 
-    pub async fn review(&self, work: &WorkRef) -> StoreResult<Option<Review>> {
+    pub async fn feedback(&self, work: &WorkRef) -> StoreResult<Option<Feedback>> {
         let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.review(&work)).await
+        run_sqlite(&self.sqlite, move |store| store.feedback(&work)).await
     }
 
     pub async fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
@@ -152,31 +152,31 @@ impl Store {
         .await
     }
 
-    pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildReview>> {
+    pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildFeedback>> {
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| store.child_attention(&parent)).await
     }
 
-    pub async fn user_attention(&self) -> StoreResult<Vec<UserReview>> {
+    pub async fn user_attention(&self) -> StoreResult<Vec<UserFeedback>> {
         run_sqlite(&self.sqlite, move |store| store.user_attention()).await
     }
 
-    pub async fn escalate_review(
+    pub async fn escalate_feedback(
         &self,
         lease: &RunLease,
         child: &WorkRef,
         if_basis: &Basis,
-    ) -> StoreResult<Review> {
+    ) -> StoreResult<Feedback> {
         let lease = lease.clone();
         let child = child.clone();
         let if_basis = if_basis.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.escalate_review(&lease, &child, &if_basis)
+            store.escalate_feedback(&lease, &child, &if_basis)
         })
         .await
     }
 
-    pub(crate) async fn continue_review_if_current(
+    pub(crate) async fn continue_feedback_if_current(
         &self,
         work: &WorkRef,
         launch_id: &LaunchId,
@@ -186,29 +186,12 @@ impl Store {
         let launch_id = launch_id.clone();
         let if_basis = if_basis.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.continue_review_if_current(&work, &launch_id, &if_basis)
+            store.continue_feedback_if_current(&work, &launch_id, &if_basis)
         })
         .await
     }
 
-    pub(crate) async fn steer_review_if_current(
-        &self,
-        work: &WorkRef,
-        launch_id: &LaunchId,
-        text: &str,
-        if_basis: &Basis,
-    ) -> StoreResult<SteerReceipt> {
-        let work = work.clone();
-        let launch_id = launch_id.clone();
-        let text = text.to_string();
-        let if_basis = if_basis.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.steer_review_if_current(&work, &launch_id, &text, &if_basis)
-        })
-        .await
-    }
-
-    pub async fn close_review(
+    pub async fn continue_feedback(
         &self,
         context: &ControlCtx<'_>,
         work: &WorkRef,
@@ -221,7 +204,7 @@ impl Store {
         let work = work.clone();
         let if_basis = if_basis.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.close_review(context.as_ref(), &work, &if_basis)
+            store.continue_feedback(context.as_ref(), &work, &if_basis)
         })
         .await
     }
@@ -445,9 +428,9 @@ mod tests {
             id: ProjectSessionId::new(),
             launch: ProjectLaunchReceipt {
                 project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-review").unwrap(),
-                    slug: "review-runtime".to_string(),
-                    name: "Review Runtime".to_string(),
+                    id: LinearProjectId::new("project-feedback").unwrap(),
+                    slug: "feedback-runtime".to_string(),
+                    name: "Feedback Runtime".to_string(),
                     prompt_context: "Definition".to_string(),
                 },
                 pm_snapshot_synced_at: now.unix_timestamp(),
@@ -518,7 +501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn review_is_current_flow_launch_and_attention_not_a_stored_decision() {
+    async fn feedback_is_current_flow_launch_and_attention_not_a_stored_decision() {
         let (store, work, home) = wave_work().await;
         let (lease, launch) = start_launch(&store, &work, &home, false).await;
         let initial = store.current_epoch(&work).await.unwrap().current_basis;
@@ -532,22 +515,22 @@ mod tests {
                     step: "design".to_string(),
                     step_index: 2,
                     iteration: 1,
-                    interactive: true,
+                    feedback: true,
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
             .await
             .unwrap();
-        let review = store
-            .route_review(&lease, &launch.id, AttentionRoute::User)
+        let feedback = store
+            .route_feedback(&lease, &launch.id, AttentionRoute::User)
             .await
             .unwrap();
-        assert_eq!(review.work, work);
-        assert_eq!(review.launch_id, launch.id);
-        assert_eq!(review.position.step, "design");
+        assert_eq!(feedback.work, work);
+        assert_eq!(feedback.launch_id, launch.id);
+        assert_eq!(feedback.position.step, "design");
         let queued = store.user_attention().await.unwrap();
         assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].review, review);
+        assert_eq!(queued[0].feedback, feedback);
         assert_eq!(queued[0].surface.launch.id, launch.id);
 
         let request = AuthenticatedRequest::cli();
@@ -561,36 +544,36 @@ mod tests {
             .await
             .unwrap();
         let parked = store
-            .review(&work)
+            .feedback(&work)
             .await
             .unwrap()
-            .expect("a User response does not close the Review");
+            .expect("a User response does not close the Feedback");
         assert!(parked.attention_at.is_none());
         assert!(matches!(
             store
-                .close_review(&ControlCtx::User(&request), &work, &initial)
+                .continue_feedback(&ControlCtx::User(&request), &work, &initial)
                 .await,
             Err(StoreError::StaleBasis { .. })
         ));
         assert!(matches!(
             store
-                .continue_review_if_current(&work, &launch.id, &initial)
+                .continue_feedback_if_current(&work, &launch.id, &initial)
                 .await,
             Err(StoreError::StaleBasis { .. })
         ));
         assert!(matches!(
             store
-                .close_review(&ControlCtx::User(&request), &work, &steer.steer.basis,)
+                .continue_feedback(&ControlCtx::User(&request), &work, &steer.steer.basis,)
                 .await
                 .unwrap(),
             WorkStatus::Running { .. }
         ));
-        assert!(store.review(&work).await.unwrap().is_none());
+        assert!(store.feedback(&work).await.unwrap().is_none());
         assert!(store.user_attention().await.unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn exit_guard_steers_and_continues_only_the_exact_user_review() {
+    async fn exit_guard_continues_only_the_exact_user_feedback() {
         let (store, work, home) = wave_work().await;
         let (lease, launch) = start_launch(&store, &work, &home, false).await;
         let basis = store.current_epoch(&work).await.unwrap().current_basis;
@@ -601,52 +584,58 @@ mod tests {
                     work: work.clone(),
                     epoch_id: basis.epoch_id.clone(),
                     flow: "wave-pursue".to_string(),
-                    step: "review".to_string(),
+                    step: "feedback".to_string(),
                     step_index: 0,
                     iteration: 0,
-                    interactive: true,
+                    feedback: true,
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
             .await
             .unwrap();
         store
-            .route_review(&lease, &launch.id, AttentionRoute::User)
+            .route_feedback(&lease, &launch.id, AttentionRoute::User)
             .await
             .unwrap();
 
         assert!(matches!(
             store
-                .steer_review_if_current(&work, &LaunchId::new(), "wrong launch", &basis)
+                .continue_feedback_if_current(&work, &LaunchId::new(), &basis)
                 .await,
             Err(StoreError::InvalidAuthority(_))
         ));
+        let request = AuthenticatedRequest::cli();
         let steer = store
-            .steer_review_if_current(&work, &launch.id, "inspect the boundary", &basis)
+            .steer(
+                &ControlCtx::User(&request),
+                &work,
+                "inspect the boundary",
+                Some(&basis),
+            )
             .await
             .unwrap();
         assert!(matches!(
             store
-                .continue_review_if_current(&work, &launch.id, &basis)
+                .continue_feedback_if_current(&work, &launch.id, &basis)
                 .await,
             Err(StoreError::StaleBasis { .. })
         ));
         let status = store
-            .continue_review_if_current(&work, &launch.id, &steer.steer.basis)
+            .continue_feedback_if_current(&work, &launch.id, &steer.steer.basis)
             .await
             .unwrap();
         assert!(matches!(status, WorkStatus::Running { .. }));
-        assert!(store.review(&work).await.unwrap().is_none());
+        assert!(store.feedback(&work).await.unwrap().is_none());
         assert!(matches!(
             store
-                .steer_review_if_current(&work, &launch.id, "too late", &steer.steer.basis,)
+                .continue_feedback_if_current(&work, &launch.id, &steer.steer.basis)
                 .await,
             Err(StoreError::NotFound)
         ));
     }
 
     #[tokio::test]
-    async fn active_parent_run_can_escalate_only_its_current_child_review() {
+    async fn active_parent_run_can_escalate_only_its_current_child_feedback() {
         let (store, parent, home) = wave_work().await;
         let project = project_session(match &parent {
             WorkRef::Wave(id) => id.clone(),
@@ -667,17 +656,17 @@ mod tests {
                     work: child.clone(),
                     epoch_id: basis.epoch_id.clone(),
                     flow: "project".to_string(),
-                    step: "review".to_string(),
+                    step: "feedback".to_string(),
                     step_index: 0,
                     iteration: 0,
-                    interactive: true,
+                    feedback: true,
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
             .await
             .unwrap();
         store
-            .route_review(
+            .route_feedback(
                 &child_lease,
                 &child_launch.id,
                 AttentionRoute::Parent(parent.clone()),
@@ -686,13 +675,13 @@ mod tests {
             .unwrap();
 
         let escalated = store
-            .escalate_review(&parent_lease, &child, &basis)
+            .escalate_feedback(&parent_lease, &child, &basis)
             .await
             .unwrap();
         assert_eq!(escalated.attention, AttentionRoute::User);
         assert_eq!(store.user_attention().await.unwrap().len(), 1);
         assert!(matches!(
-            store.escalate_review(&parent_lease, &child, &basis).await,
+            store.escalate_feedback(&parent_lease, &child, &basis).await,
             Err(StoreError::InvalidAuthority(_))
         ));
     }
@@ -767,14 +756,14 @@ mod tests {
                     step: "demo".to_string(),
                     step_index: 0,
                     iteration: 0,
-                    interactive: true,
+                    feedback: true,
                     updated_at: OffsetDateTime::now_utc(),
                 },
             )
             .await
             .unwrap();
         store
-            .route_review(&lease, &launch.id, AttentionRoute::User)
+            .route_feedback(&lease, &launch.id, AttentionRoute::User)
             .await
             .unwrap();
 
@@ -782,7 +771,7 @@ mod tests {
         let reopened = store.launch_surface(&launch.id).await.unwrap().unwrap();
         assert_eq!(first, reopened);
         assert_eq!(first.attach_argv.as_ref().unwrap()[0], "tmux");
-        assert!(store.review(&work).await.unwrap().is_some());
+        assert!(store.feedback(&work).await.unwrap().is_some());
 
         let ended = store
             .handback_launch(&launch.id, BoundaryState::Unknown)
@@ -790,6 +779,6 @@ mod tests {
             .unwrap();
         assert_eq!(ended.launch.state, crate::durable::LaunchState::Ended);
         assert_eq!(ended.handback, Some(BoundaryState::Unknown));
-        assert!(store.review(&work).await.unwrap().is_none());
+        assert!(store.feedback(&work).await.unwrap().is_none());
     }
 }

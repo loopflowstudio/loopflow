@@ -30,7 +30,7 @@ selection. Follow the repo style guide.
 - Run the narrowest verification that covers the touched code.
 - When progress requires supervisor judgment, state the exact question and
   alternatives in the interactive step, then stop dependent work. The derived
-  Review routes the Turn to the parent; do not invent a provider-specific
+  Feedback routes the Turn to the parent; do not invent a provider-specific
   decision command or start unrelated work while it is pending.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for

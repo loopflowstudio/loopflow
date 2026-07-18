@@ -332,7 +332,7 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
         directions: Vec::new(),
         action_style: None,
         interactive: Some(true),
-        review: false,
+        feedback: false,
         fast_path: None,
     })
 }

@@ -1730,7 +1730,7 @@ impl SqliteStore {
         if was_running && turn.status != "running" {
             let turn_id = crate::durable::TurnId::parse(&turn.id)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-            durable::rearm_review_attention(&tx, &turn_id)?;
+            durable::rearm_feedback_attention(&tx, &turn_id)?;
         }
         tx.commit()?;
         Ok(())

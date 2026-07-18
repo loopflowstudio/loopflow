@@ -23,16 +23,16 @@ pub enum StepKind {
 pub struct StepPlan {
     pub name: String,
     pub kind: StepKind,
-    pub review: bool,
+    pub feedback: bool,
 }
 
 impl StepPlan {
     fn from_concrete(step: &ConcreteStep) -> Self {
-        let (name, kind, review) = match step {
+        let (name, kind, feedback) = match step {
             ConcreteStep::Skill(skill) => (
                 skill.skill.name.clone(),
                 StepKind::Skill,
-                skill.skill.review,
+                skill.skill.feedback,
             ),
             ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op, false),
             ConcreteStep::Xor(branch) => (
@@ -44,7 +44,11 @@ impl StepPlan {
                 false,
             ),
         };
-        Self { name, kind, review }
+        Self {
+            name,
+            kind,
+            feedback,
+        }
     }
 }
 
@@ -102,7 +106,7 @@ pub struct StepRef {
     pub flow: String,
     pub step: String,
     pub kind: StepKind,
-    pub review: bool,
+    pub feedback: bool,
     pub index: u32,
     pub total: u32,
     pub iteration: u32,
@@ -459,7 +463,7 @@ fn step_ref(invocation: &InvocationState) -> Option<StepRef> {
         flow: invocation.flow.clone(),
         step: step.name.clone(),
         kind: step.kind,
-        review: step.review,
+        feedback: step.feedback,
         index: invocation.cursor,
         total: invocation.steps.len() as u32,
         iteration: invocation.iteration,
@@ -479,7 +483,7 @@ mod tests {
                 .map(|name| StepPlan {
                     name: (*name).to_string(),
                     kind: StepKind::Skill,
-                    review: false,
+                    feedback: false,
                 })
                 .collect(),
         }

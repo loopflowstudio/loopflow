@@ -253,13 +253,13 @@ lf stop designer                                   # stop its listener and resid
 lf project run <linear-project-id>                  # durable Project Session
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
-lf task run DES-125 --headless                       # route Reviews to the Project
+lf task run DES-125 --headless                       # route Feedback to the Project
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
-lf queue                                             # User-attention Reviews, oldest first
-lf work review task task_...                        # explicit: /continue advances
-lf work review task task_... --continue-on-success  # EOF advances
-lf work review task task_... --continue-on-exit     # every client exit advances
+lf queue                                             # User-attention Feedback, oldest first
+lf work feedback task task_...                       # open the recorded Launch
+lf work feedback task task_... --continue-on-success # clean exit advances
+lf work feedback task task_... --continue-on-exit   # every exit advances
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -267,7 +267,7 @@ lf task wait DES-123
 lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
-lf work close task task_...                         # advance the current Review
+lf work continue task task_...                      # advance past current Feedback
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
@@ -282,30 +282,30 @@ Its provider process and transcript are replaceable execution state: plain
 Work, durable Steers, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
-Every Task runs `kickoff → iterate N → gate`. A flow step declares `review: true`;
-the active Launch routes that Review to the User or the immediate parent Run.
+Every Task runs `kickoff → iterate N → gate`. A flow step declares
+`feedback: true`; the active Launch routes that Feedback to the User or the
+immediate parent Run.
 Standard Tasks route kickoff and gate to the human, while the owning Project
 conducts interactive iteration steps. `--headless` routes all three to the
 Project without skipping their skills.
 
-A Review is the current interactive flow step plus its live Launch and route;
-there is no Review id or disposition. `lf task steer` and `lf project steer`
-append durable direction before attempting live delivery. `lf work close`
-advances the interactive step under its current Basis fence. Interrupt and
+Feedback is the current flow step plus its live Launch and route; there is no
+Feedback id or disposition. `lf task steer` and `lf project steer` append
+durable direction before attempting live delivery. `lf work continue` advances
+past Feedback under its current Basis fence. Interrupt and
 replacement direction stay separate: interrupt the active boundary, then
 Steer normally.
 
-`lf work review` renders complete root Turn output and sends typed input as
-Basis-fenced Steers. `/continue` advances the current flow interval. Bare mode
-leaves the Review open on EOF; `--continue-on-success` advances on clean EOF;
-`--continue-on-exit` also advances after signals or a client crash, but only if
-the same Launch and Basis still own User attention.
+`lf work feedback` opens the current Feedback's recorded Launch presentation —
+the Launch's tmux attach route today. Bare mode leaves Feedback open when that
+presentation exits. `--continue-on-success`
+advances after exit status zero; `--continue-on-exit` advances after any exit or
+client crash, but only while the same Launch and Basis still own User attention.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
-tmux remains containment and read-only inspection; Review input never writes
-terminal bytes into the provider process.
+tmux remains containment and a presentation route, not product identity.
 
 ## Presenting an Opaque Launch
 
@@ -317,7 +317,7 @@ lf launch handback launch_... --outcome succeeded
 ```
 
 `present` is the generic presentation adapter for an opaque TUI Launch: it
-executes that Launch's attach route but does not create a Review or become its
+executes that Launch's attach route but does not create Feedback or become its
 identity. The descriptor carries stable Work and Wave identity, Home route,
 provider, cwd, attention route, explicit handback evidence, and optional attach
 argv; tmux or the provider owns terminal bytes.

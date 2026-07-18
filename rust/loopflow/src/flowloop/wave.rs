@@ -58,7 +58,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
-use crate::durable::{ChildReview, RunLease, WorkRef};
+use crate::durable::{ChildFeedback, RunLease, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
@@ -364,8 +364,11 @@ struct WaveControl {
     lease: RunLease,
 }
 
-fn child_key(child: &ChildReview) -> (crate::durable::LaunchId, u64) {
-    (child.review.launch_id.clone(), child.review.basis.revision)
+fn child_key(child: &ChildFeedback) -> (crate::durable::LaunchId, u64) {
+    (
+        child.feedback.launch_id.clone(),
+        child.feedback.basis.revision,
+    )
 }
 
 async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
@@ -591,7 +594,7 @@ impl WaveLoop {
         self.run_pass(content, answers, inbox_rx).await;
     }
 
-    async fn oldest_child(&mut self) -> Result<Option<ChildReview>> {
+    async fn oldest_child(&mut self) -> Result<Option<ChildFeedback>> {
         let Some(control) = &self.control else {
             return Ok(None);
         };
@@ -644,7 +647,7 @@ impl WaveLoop {
 
     async fn start_child_pass(
         &mut self,
-        child: ChildReview,
+        child: ChildFeedback,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let key = child_key(&child);
@@ -1768,7 +1771,7 @@ mod tests {
         seed[start..end].to_string()
     }
 
-    struct ReviewRig {
+    struct FeedbackRig {
         control: WaveControl,
         parent_lease: RunLease,
         child_lease: RunLease,
@@ -1776,7 +1779,7 @@ mod tests {
         child_launch: crate::durable::Launch,
     }
 
-    async fn review_rig(tmp: &tempfile::TempDir, route: bool) -> ReviewRig {
+    async fn feedback_rig(tmp: &tempfile::TempDir, route: bool) -> FeedbackRig {
         use crate::child_session::ChildRef;
         use crate::durable::{AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance};
         use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
@@ -1852,7 +1855,7 @@ mod tests {
                         account_id: None,
                     },
                     containment: Containment::Tmux {
-                        name: "child-review".to_string(),
+                        name: "child-feedback".to_string(),
                     },
                     cwd: tmp.path().join("child"),
                     surface: "headless".to_string(),
@@ -1886,10 +1889,10 @@ mod tests {
                     work: child_work.clone(),
                     epoch_id: child_basis.epoch_id,
                     flow: "project".to_string(),
-                    step: "review".to_string(),
+                    step: "feedback".to_string(),
                     step_index: 0,
                     iteration: 0,
-                    interactive: true,
+                    feedback: true,
                     updated_at: now,
                 },
             )
@@ -1897,7 +1900,7 @@ mod tests {
             .unwrap();
         if route {
             store
-                .route_review(
+                .route_feedback(
                     &child_lease,
                     &child_launch.id,
                     AttentionRoute::Parent(parent_lease.work.clone()),
@@ -1905,7 +1908,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        ReviewRig {
+        FeedbackRig {
             control: WaveControl {
                 store,
                 lease: parent_lease.clone(),
@@ -1920,7 +1923,7 @@ mod tests {
     #[tokio::test]
     async fn seed_only_wave_services_child_once_without_advancing_background() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let rig = review_rig(&tmp, true).await;
+        let rig = feedback_rig(&tmp, true).await;
         let store = rig.control.store.clone();
         let parent_lease = rig.parent_lease.clone();
         let child_work = rig.child_work.clone();
@@ -1950,7 +1953,7 @@ mod tests {
 
         let seed = loop_.next_seed().await;
         let wake = wake_of(&seed);
-        assert!(wake.contains("<lf:child-review"));
+        assert!(wake.contains("<lf:child-feedback"));
         assert!(wake.contains("Service this child before background parent work"));
         wait_for("seed-only control turn ends", || {
             loop_.runtime.thread_snapshot().iter().any(|turn| {
@@ -1988,10 +1991,10 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(store
-            .review(&child_work)
+            .feedback(&child_work)
             .await
             .unwrap()
-            .expect("Review stays open")
+            .expect("Feedback stays open")
             .attention_at
             .is_none());
     }
@@ -2079,7 +2082,7 @@ mod tests {
             .status()
             .expect("git init");
         assert!(status.success());
-        let rig = review_rig(&tmp, false).await;
+        let rig = feedback_rig(&tmp, false).await;
         let store = rig.control.store.clone();
         let parent_lease = rig.parent_lease.clone();
         let child_work = rig.child_work.clone();
@@ -2133,7 +2136,7 @@ mod tests {
         .await;
 
         store
-            .route_review(
+            .route_feedback(
                 &child_lease,
                 &child_launch_id,
                 crate::durable::AttentionRoute::Parent(parent_lease.work.clone()),
@@ -2144,7 +2147,7 @@ mod tests {
             inputs.lock().unwrap().len() == 2
         })
         .await;
-        assert!(inputs.lock().unwrap()[1].contains("<lf:child-review"));
+        assert!(inputs.lock().unwrap()[1].contains("<lf:child-feedback"));
         wait_for("repurposed background Turn is interrupted", || {
             loop_.runtime.thread_snapshot().iter().any(|turn| {
                 turn.role == ChatRole::Assistant && turn.status == Lifecycle::Interrupted

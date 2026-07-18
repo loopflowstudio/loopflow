@@ -73,7 +73,7 @@ final class TaskTerminalStore: ObservableObject {
 
 enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
-    case review = "Review"
+    case feedback = "Feedback"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -103,8 +103,8 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
-    @State private var reviewCommand: [String]?
-    @State private var reviewError: String?
+    @State private var feedbackCommand: [String]?
+    @State private var feedbackError: String?
 
     init(
         task: TaskPlanningSnapshot,
@@ -137,8 +137,8 @@ struct TaskWorkspaceView: View {
                 switch section {
                 case .changes:
                     changesView
-                case .review:
-                    reviewView
+                case .feedback:
+                    feedbackView
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskSessionId: runtime.sessionId,
@@ -158,7 +158,7 @@ struct TaskWorkspaceView: View {
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
         .task(id: runtime?.sessionId) { await loadChanges() }
-        .task(id: "review:\(runtime?.sessionId ?? "none")") { await prepareReview() }
+        .task(id: "feedback:\(runtime?.sessionId ?? "none")") { await prepareFeedback() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -239,34 +239,34 @@ struct TaskWorkspaceView: View {
     }
 
     @ViewBuilder
-    private var reviewView: some View {
-        if !canReview {
+    private var feedbackView: some View {
+        if !canFeedback {
             ContentUnavailableView(
-                "No Review needs you",
+                "No Feedback needs you",
                 systemImage: "checkmark.circle",
                 description: Text("This Task is not waiting for User attention.")
             )
-        } else if let reviewCommand, let workspace, let runtime {
+        } else if let feedbackCommand, let workspace, let runtime {
             GhosttyTerminalView(
                 workingDirectory: workspace.worktree,
-                argv: reviewCommand,
-                sessionId: "task-review-\(runtime.sessionId)"
+                argv: feedbackCommand,
+                sessionId: "task-feedback-\(runtime.sessionId)"
             )
             .id(runtime.sessionId)
             .background(LoopflowPalette.dark.background)
-        } else if let reviewError {
+        } else if let feedbackError {
             ContentUnavailableView(
-                "Review unavailable",
+                "Feedback unavailable",
                 systemImage: "exclamationmark.triangle",
-                description: Text(reviewError)
+                description: Text(feedbackError)
             )
         } else {
-            ProgressView("Preparing Review…")
+            ProgressView("Preparing Feedback…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var canReview: Bool {
+    private var canFeedback: Bool {
         attention.level == .blue
     }
 
@@ -381,24 +381,24 @@ struct TaskWorkspaceView: View {
     }
 
     @MainActor
-    private func prepareReview() async {
-        guard canReview else {
-            reviewCommand = nil
-            reviewError = nil
+    private func prepareFeedback() async {
+        guard canFeedback else {
+            feedbackCommand = nil
+            feedbackError = nil
             return
         }
         let repoPath = repoPath
         let taskId = task.id
         do {
-            reviewCommand = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.resolvedTaskReviewCommand(
+            feedbackCommand = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.resolvedTaskFeedbackCommand(
                     repoPath: repoPath,
                     taskId: taskId
                 )
             }.value
-            reviewError = nil
+            feedbackError = nil
         } catch {
-            reviewError = error.localizedDescription
+            feedbackError = error.localizedDescription
         }
     }
 

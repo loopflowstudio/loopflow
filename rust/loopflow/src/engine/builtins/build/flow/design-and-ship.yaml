@@ -1,6 +1,6 @@
 - step:
     name: design
-    review: true
+    feedback: true
 - implement
 - reduce
 - polish

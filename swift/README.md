@@ -58,7 +58,7 @@ and observation spans.
   reports through its Project Session; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json` and
-  opens blue Reviews through `lf work review task <id> --continue-on-exit`.
+  opens blue Feedback through `lf work feedback task <id> --continue-on-exit`.
   Lifecycle mutations remain `lf task run/resume/interrupt`.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app

@@ -27,12 +27,12 @@ Read its durable state before restarting anything:
 ```bash
 lf task status INF-123 --json
 lf queue
-lf work review task task_...
+lf work feedback task task_...
 ```
 
-The Review client does not write bytes into a provider terminal. Send direction
-as a Steer, continue the flow, or resume a stopped process through the same
-Task Work:
+`feedback` opens the recorded provider session. Send durable direction without
+opening it via Steer, continue past the boundary, or resume a stopped process
+through the same Task Work:
 
 ```bash
 lf task steer INF-123 "address the latest review"

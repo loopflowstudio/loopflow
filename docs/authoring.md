@@ -62,11 +62,11 @@ Declare conversation on the flow step that owns it:
 - kickoff
 - step:
     name: review-design
-    review: true
+    feedback: true
 - implement
 ```
 
-The skill itself does not make every flow that references it stop for Review.
+The skill itself does not make every flow that references it wait for Feedback.
 
 Mechanical git/PR operations ride along as `op:` steps:
 

@@ -385,7 +385,7 @@ private struct LaunchAttachSheet: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Text(launch.attention?.kind == "user" ? "Review" : "Interactive launch")
+            Text(launch.attention?.kind == "user" ? "Feedback" : "Interactive launch")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             if let fallbackNotice {
@@ -431,13 +431,13 @@ private struct LaunchAttachSheet: View {
     private var content: some View {
         if let attach, surface == .ghostty {
             let command = launch.attention?.kind == "user"
-                ? LaunchTargetLauncher.reviewCommand(for: attach, home: launch.home)
+                ? LaunchTargetLauncher.feedbackCommand(for: attach)
                 : LaunchTargetLauncher.command(for: attach, home: launch.home)
             GhosttyTerminalView(
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "review-\(attach.sessionId)"
+                sessionId: "feedback-\(attach.sessionId)"
             )
             .id(attach.sessionId)
         } else if let surface, let externalNote {

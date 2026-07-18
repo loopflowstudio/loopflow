@@ -315,7 +315,7 @@ pub struct LocalProgressEvidence {
 struct TaskAttentionEvidence {
     process: TaskProcessEvidence,
     local_progress: LocalProgressEvidence,
-    user_review: bool,
+    user_feedback: bool,
 }
 
 /// A Task's shared attention projection and the evidence that proves it.
@@ -1339,7 +1339,7 @@ async fn snapshot_task_detail(
             latest,
         )
     });
-    let (action_evidence, user_review) = match session {
+    let (action_evidence, user_feedback) = match session {
         Some(session) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
@@ -1348,11 +1348,10 @@ async fn snapshot_task_detail(
             let work = store
                 .work_for_child(&ChildRef::Task(session.id.clone()))
                 .await?;
-            let review = store.review(&work).await?;
-            let user_review = review
+            let feedback = store.feedback(&work).await?;
+            let user_feedback = feedback
                 .as_ref()
-                .is_some_and(|review| review.attention == AttentionRoute::User);
-            let review_gate = review.map(|_| ReviewGateState::Active);
+                .is_some_and(|feedback| feedback.attention == AttentionRoute::User);
             (
                 Some(TaskActionEvidence {
                     status: session.status,
@@ -1369,11 +1368,11 @@ async fn snapshot_task_detail(
                     ci: active.and_then(|pr| pr.fresh_ci()),
                     process_alive: process.alive,
                     predecessor_phase,
-                    review_gate,
+                    review_gate: None,
                     abandon_intent: session.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
                 }),
-                user_review,
+                user_feedback,
             )
         }
         None => (None, false),
@@ -1385,7 +1384,7 @@ async fn snapshot_task_detail(
         TaskAttentionEvidence {
             process,
             local_progress,
-            user_review,
+            user_feedback,
         },
         action_evidence.as_ref(),
         observed_at,
@@ -1564,7 +1563,7 @@ fn derive_task_attention(
     let TaskAttentionEvidence {
         process,
         local_progress,
-        user_review,
+        user_feedback,
     } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
@@ -1577,10 +1576,10 @@ fn derive_task_attention(
     let failed = runtime.is_some_and(|runtime| runtime.status == TaskSessionStatus::Failed);
     let (level, reason) = if failed {
         (TaskAttentionLevel::Red, next_move.reason.clone())
-    } else if user_review {
+    } else if user_feedback {
         (
             TaskAttentionLevel::Blue,
-            "Waiting for your Review".to_string(),
+            "Waiting for your feedback".to_string(),
         )
     } else if live && human_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())
@@ -3189,7 +3188,7 @@ mod tests {
             TaskAttentionEvidence {
                 process,
                 local_progress,
-                user_review: false,
+                user_feedback: false,
             },
             action_evidence.as_ref(),
             now(),
@@ -3258,7 +3257,7 @@ mod tests {
             TaskAttentionEvidence {
                 process,
                 local_progress,
-                user_review: false,
+                user_feedback: false,
             },
             action_evidence.as_ref(),
             now(),
@@ -3293,13 +3292,13 @@ mod tests {
             TaskAttentionEvidence {
                 process: process(TaskProcessEvidenceState::Observed, Some(true)),
                 local_progress: local_progress(Some(false), Some(false), Some(false), Some(false)),
-                user_review: true,
+                user_feedback: true,
             },
             None,
             now(),
         );
         assert_eq!(blue.level, TaskAttentionLevel::Blue);
-        assert_eq!(blue.reason, "Waiting for your Review");
+        assert_eq!(blue.reason, "Waiting for your feedback");
 
         let failed = task_runtime(TaskSessionStatus::Failed, "provider failed", at(30), false);
         let red_over_blue = derive_task_attention(
@@ -3312,7 +3311,7 @@ mod tests {
             TaskAttentionEvidence {
                 process: process(TaskProcessEvidenceState::Observed, Some(false)),
                 local_progress: local_progress(Some(false), Some(false), Some(false), Some(false)),
-                user_review: true,
+                user_feedback: true,
             },
             None,
             now(),

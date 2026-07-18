@@ -1338,15 +1338,10 @@ fn main() -> anyhow::Result<()> {
                 epoch_id,
                 *revision,
             ),
-            Some(Commands::TaskRunner {
-                session_id,
-                generation,
-            }) => {
+            Some(Commands::TaskRunner { session_id }) => {
                 let session_id = session_id.parse()?;
-                tokio::runtime::Runtime::new()?.block_on(loopflow::task::runner::run_task_session(
-                    session_id,
-                    *generation,
-                ))
+                tokio::runtime::Runtime::new()?
+                    .block_on(loopflow::task::runner::run_task_session(session_id))
             }
             Some(Commands::ProjectRunner { session_id }) => {
                 let session_id = session_id.parse()?;

@@ -332,13 +332,9 @@ pub enum Commands {
         epoch_id: String,
         revision: u64,
     },
-    /// Internal: run one durable Task Session process generation
+    /// Internal: run the Task body holding the ambient Run lease
     #[command(name = "__task", hide = true)]
-    TaskRunner {
-        session_id: String,
-        #[arg(long)]
-        generation: u32,
-    },
+    TaskRunner { session_id: String },
     /// Internal: run the Project body holding the ambient Run lease
     #[command(name = "__project", hide = true)]
     ProjectRunner { session_id: String },

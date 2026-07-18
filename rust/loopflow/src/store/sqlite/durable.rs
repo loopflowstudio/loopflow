@@ -2831,6 +2831,7 @@ fn insert_child_control_launch(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn activate_run_for_child(
     tx: &Transaction<'_>,
     target: &ChildRef,

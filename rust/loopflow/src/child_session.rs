@@ -10,9 +10,6 @@ use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
 use crate::task::{TaskEvent, TaskEventKind, TaskSessionId};
 
-pub(crate) const TASK_LEASE_TOKEN_ENV: &str = "LF_TASK_LEASE_TOKEN";
-pub(crate) const TASK_GENERATION_ENV: &str = "LF_TASK_GENERATION";
-
 macro_rules! prefixed_uuid_id {
     ($name:ident, $prefix:literal, $error:ty, $invalid:path) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -71,8 +68,6 @@ pub enum ChildSessionDataError {
     InvalidId(String),
     #[error("invalid child lease state: {0}")]
     InvalidLeaseState(String),
-    #[error("invalid child write lease: {0}")]
-    InvalidWriteLease(String),
 }
 
 /// Opaque capability held only by the body allowed to write for a Session.
@@ -86,15 +81,6 @@ pub(crate) struct ChildLeaseToken(String);
 impl ChildLeaseToken {
     pub(crate) fn new() -> Self {
         Self(format!("cl_{}", uuid::Uuid::new_v4().simple()))
-    }
-
-    pub(crate) fn parse(value: &str) -> Result<Self, ChildSessionDataError> {
-        let suffix = value.strip_prefix("cl_").ok_or_else(|| {
-            ChildSessionDataError::InvalidId("expected child lease token".to_string())
-        })?;
-        uuid::Uuid::parse_str(suffix)
-            .map_err(|error| ChildSessionDataError::InvalidId(error.to_string()))?;
-        Ok(Self(value.to_string()))
     }
 
     pub(crate) fn as_str(&self) -> &str {
@@ -141,36 +127,6 @@ impl std::fmt::Debug for ChildWriteLease {
             .field("token", &self.token)
             .finish()
     }
-}
-
-pub(crate) fn task_write_lease_from_env() -> Result<ChildWriteLease, ChildSessionDataError> {
-    child_write_lease_from_env("Task", TASK_GENERATION_ENV, TASK_LEASE_TOKEN_ENV)
-}
-
-fn child_write_lease_from_env(
-    kind: &str,
-    generation_env: &str,
-    token_env: &str,
-) -> Result<ChildWriteLease, ChildSessionDataError> {
-    let generation = std::env::var(generation_env)
-        .map_err(|_| {
-            ChildSessionDataError::InvalidWriteLease(format!("{kind} body has no generation"))
-        })?
-        .parse::<u32>()
-        .map_err(|_| {
-            ChildSessionDataError::InvalidWriteLease(format!(
-                "{kind} body generation is not an unsigned integer"
-            ))
-        })?;
-    let token = std::env::var(token_env).map_err(|_| {
-        ChildSessionDataError::InvalidWriteLease(format!("{kind} body has no lease token"))
-    })?;
-    Ok(ChildWriteLease {
-        generation,
-        token: ChildLeaseToken::parse(&token).map_err(|_| {
-            ChildSessionDataError::InvalidWriteLease(format!("{kind} body lease token is invalid"))
-        })?,
-    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

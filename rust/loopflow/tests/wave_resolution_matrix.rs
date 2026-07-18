@@ -432,14 +432,6 @@ const COMMANDS: &[Cmd] = &[
         kind: Kind::Mutation,
         special: Special::NONE,
     },
-    Cmd {
-        id: "home start",
-        path: &["home", "start"],
-        base_args: &["home", "start", "--json"],
-        wave_form: WaveForm::Positional,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
 ];
 
 // ─── Environments ───────────────────────────────────────────────────────
@@ -522,8 +514,7 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // are transport names, not managed Wave selections. All intentionally
     // bypass managed-selection validation.
     if env.id == "explicit-unknown"
-        && (matches!(cmd.id, "pm init" | "home start")
-            || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
+        && (cmd.id == "pm init" || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
     {
         return Outcome::Resolved;
     }
@@ -780,26 +771,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
     command.output().expect("lf runs")
 }
 
-fn _stop_started_homes(home: &Path, repo: &Path) {
-    // `lf home start` launches the Wave resident out of process. Stop every
-    // name this matrix can resolve before the temp Home disappears so the
-    // test never leaves resident processes behind on the host.
-    for wave in ["product", "ghost", "unknown-explicit"] {
-        let _ = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["stop", wave])
-            .current_dir(repo)
-            .env("LF_HOME", home)
-            .env("HOME", home)
-            .env_remove("LF_DB_PATH")
-            .env_remove("LF_CONTROL_HOME")
-            .env_remove("LF_CONTROL_DB_PATH")
-            .env_remove("LF_TRACE_ID")
-            .env_remove("LF_CHANNEL")
-            .env_remove("LF_WAVE_ID")
-            .output();
-    }
-}
-
 // ─── Matrix test ────────────────────────────────────────────────────────
 
 /// Every Wave-scoped command × every environment. The expected outcome is
@@ -848,9 +819,6 @@ fn matrix_every_command_every_environment() {
 
             total += 1;
             let output = run_lf(&home, &repo, cmd, env);
-            if cmd.id == "home start" {
-                _stop_started_homes(&home, &repo);
-            }
             let outcome = classify(&output);
             let expected = expected_outcome(cmd, env);
 

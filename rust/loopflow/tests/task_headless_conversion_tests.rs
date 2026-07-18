@@ -62,15 +62,6 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
             .await
             .expect("resolve Task Work");
         let boundary = task.store.boundary_seed(&work).await.expect("read Basis");
-        let home = task
-            .store
-            .observe_home(&loopflow::durable::HomeId::new(), "ssh://test@host")
-            .await
-            .expect("observe Home");
-        task.store
-            .place_work(&work, &home.id)
-            .await
-            .expect("place Work");
         let (_run, lease) = task
             .store
             .reserve_run(&work, RunTrigger::User)

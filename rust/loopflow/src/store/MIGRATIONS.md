@@ -41,6 +41,12 @@ Only the merged release commit is canonical migration authority. Between release
 ordinary merges add drafts, so main's canonical set does not move and a branch
 that is merely behind main — adding only drafts — stays green.
 
+Rust CI materializes the draft set in its disposable checkout before running the
+test suite. This exercises the same deterministic schema and generated registry
+the release cut would produce without publishing either one. The checkout is
+discarded after the job; source builds and the shared store still see only
+canonical migrations from a merged release.
+
 The runner temporarily disables foreign-key actions around the transaction so a
 SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a

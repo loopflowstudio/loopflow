@@ -1603,44 +1603,10 @@ mod tests {
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap(),
-            vec![
-                "0.10.001_initial".to_string(),
-                "0.10.002_session_execution_context".to_string(),
-                "0.11.001_task_prs".to_string(),
-                "0.11.002_project_session_successors".to_string(),
-                "0.11.003_child_body_lease".to_string(),
-                "0.11.004_task_pr_ci_state".to_string(),
-                "0.11.005_provider_accounts".to_string(),
-                "0.11.006_context_launch_work".to_string(),
-                "0.11.007_task_pr_parent".to_string(),
-                "0.11.008_interactive_handoffs".to_string(),
-                "0.11.009_context_pressure".to_string(),
-                "0.11.010_context_input_normalization".to_string(),
-                "0.11.011_profiles".to_string(),
-                "0.11.012_provider_account_lifecycle".to_string(),
-                "0.11.013_task_review_state".to_string(),
-                "0.11.014_task_lifecycle".to_string(),
-                "0.11.015_interaction_reviews".to_string(),
-                "0.11.016_task_linear_observations".to_string(),
-                "0.11.017_migration_provenance".to_string(),
-                "0.11.018_session_body_provenance".to_string(),
-                "0.11.019_task_pr_github_observation".to_string(),
-                "0.11.020_task_pr_linear_linkage".to_string(),
-                "0.11.021_provider_deliveries".to_string(),
-                "0.11.022_task_session_successors".to_string(),
-                "0.11.023_capture_pruned_state".to_string(),
-                "0.11.024_ci_incidents".to_string(),
-                "0.11.025_usage_deltas".to_string(),
-                "0.11.026_lineage_boundary".to_string(),
-                "0.11.027_accounts_first".to_string(),
-                "0.11.029_ci_incident_repaired_head".to_string(),
-                "0.11.030_one_spend_grain".to_string(),
-                "0.11.031_durable_input_spine".to_string(),
-                "0.11.032_run_launch_attention".to_string(),
-                "0.11.033_launch_attention_only".to_string(),
-                "0.11.034_typed_ci_runs".to_string(),
-                "0.11.035_drop_child_commands".to_string()
-            ]
+            MIGRATIONS
+                .iter()
+                .map(Migration::version)
+                .collect::<Vec<_>>()
         );
     }
 

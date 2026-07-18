@@ -239,6 +239,22 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     assert "-disableAutomaticPackageResolution" in ci
 
 
+def test_rust_ci_materializes_drafts_before_running_tests():
+    ci = yaml.load(
+        (ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    steps = ci["jobs"]["rust-test"]["steps"]
+    names = [step.get("name") for step in steps]
+
+    materialize = names.index("Materialize draft migrations for tests")
+    test = names.index("Run Rust tests")
+    command = steps[materialize]["run"]
+
+    assert materialize < test
+    assert "scripts/canonicalize_migrations.py" in command
+    assert '["workspace"]["package"]["version"]' in command
+
+
 def test_changed_aware_runner_includes_ci_static_checks():
     result = subprocess.run(
         [

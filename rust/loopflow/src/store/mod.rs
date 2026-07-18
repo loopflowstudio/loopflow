@@ -252,15 +252,43 @@ fn guard_development_database(
     ))
 }
 
+/// Whether an open is the authorized owner of the shared migration frontier.
+///
+/// Advancing `~/.lf/loopflow.db` past the frontier the installed `lf` knows must
+/// never be a side effect of an ordinary command: on 2026-07-17 a published
+/// candidate at `target/release/lf` did exactly that and stranded the installed
+/// binary. Only `lf install promote` — under the exclusive promotion lock and
+/// the drained live-body fence — opens the store as `Authorized`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrontierAdvance {
+    /// An ordinary open: the shared frontier is read, never advanced.
+    Forbidden,
+    /// The promotion boundary: it may apply the pending migration.
+    Authorized,
+}
+
+/// Whether this open may apply migrations to `path`.
+///
+/// A private store (any path that is not the machine's shared `~/.lf/loopflow.db`)
+/// is always the caller's to initialize and advance — that is the isolated dev
+/// database. The shared release store is exclusive to the promotion boundary: a
+/// validation-only build never writes to it, and an ordinary (`Forbidden`) open
+/// neither initializes nor advances it. Bootstrapping a missing or empty shared
+/// store to the candidate's head can strand an older installed binary exactly as
+/// advancing an existing frontier would, so both belong to `Authorized` alone.
 fn may_apply_migrations(
     path: &Path,
     authority: crate::build_info::MigrationAuthority,
     home: &Path,
+    advance: FrontierAdvance,
 ) -> Result<bool, std::io::Error> {
-    if authority == crate::build_info::MigrationAuthority::Published {
+    if !same_database_file(path, &home.join(".lf/loopflow.db"))? {
         return Ok(true);
     }
-    Ok(!same_database_file(path, &home.join(".lf/loopflow.db"))?)
+    if authority != crate::build_info::MigrationAuthority::Published {
+        return Ok(false);
+    }
+    Ok(advance == FrontierAdvance::Authorized)
 }
 
 fn same_database_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
@@ -1073,21 +1101,29 @@ mod tests {
     }
 
     #[test]
-    fn only_published_builds_migrate_the_release_database() {
+    fn advancing_the_shared_frontier_is_exclusive_to_the_promotion_boundary() {
+        use super::FrontierAdvance::{Authorized, Forbidden};
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path();
         let production = home.join(".lf/loopflow.db");
+        let published = MigrationAuthority::Published;
+        let validation_only = MigrationAuthority::ValidationOnly;
 
-        assert!(
-            !may_apply_migrations(&production, MigrationAuthority::ValidationOnly, home,).unwrap()
-        );
-        assert!(may_apply_migrations(&production, MigrationAuthority::Published, home,).unwrap());
-        assert!(may_apply_migrations(
-            &home.join(".lf-dev/branch/loopflow.db"),
-            MigrationAuthority::ValidationOnly,
-            home,
-        )
-        .unwrap());
+        // A validation-only build never writes migrations to the shared store,
+        // boundary or not.
+        assert!(!may_apply_migrations(&production, validation_only, home, Forbidden).unwrap());
+        assert!(!may_apply_migrations(&production, validation_only, home, Authorized).unwrap());
+
+        // A published build's ordinary open neither initializes nor advances the
+        // shared store; only the promotion boundary owns both.
+        assert!(!may_apply_migrations(&production, published, home, Forbidden).unwrap());
+        assert!(may_apply_migrations(&production, published, home, Authorized).unwrap());
+
+        // A private/isolated store is always the caller's to initialize and
+        // advance, regardless of authority or boundary.
+        let isolated = home.join(".lf-dev/branch/loopflow.db");
+        assert!(may_apply_migrations(&isolated, validation_only, home, Forbidden).unwrap());
+        assert!(may_apply_migrations(&isolated, published, home, Forbidden).unwrap());
     }
 
     #[cfg(unix)]

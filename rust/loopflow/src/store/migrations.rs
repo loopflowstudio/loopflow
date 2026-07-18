@@ -426,6 +426,27 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_sqlite_transaction(conn, |_| Ok(()))
 }
 
+/// Stage a fresh connection one migration behind the binary's known head. The
+/// store-level shared-frontier regressions use it to build a database the running
+/// binary could advance but an ordinary open must leave alone; the resulting
+/// frontier is `MIGRATIONS[len - 2]` (today `0.11.027_accounts_first`).
+#[cfg(test)]
+pub(crate) fn apply_all_but_head(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_set(conn, &MIGRATIONS[..MIGRATIONS.len() - 1])
+}
+
+/// Whether the old reader — a binary whose head is the prior migration — still
+/// recognizes the store as exactly its own frontier (nothing pending). It is
+/// `false` if the store was advanced to the newer head, which is what makes the
+/// shared-frontier regression sabotage-sensitive.
+#[cfg(test)]
+pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
+    let prior = &MIGRATIONS[..MIGRATIONS.len() - 1];
+    applied_versions(conn)
+        .and_then(|applied| pending_migrations(&applied, prior).map(<[_]>::is_empty))
+        .unwrap_or(false)
+}
+
 /// Validate the schema this binary already understands without advancing it.
 /// Branch builds use this against the release-owned database: they can reuse
 /// compatible state, but an unpublished migration never becomes durable there.
@@ -1168,6 +1189,21 @@ pub fn latest_known_version() -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+/// The next migration this binary knows that the store has not applied, or
+/// `None` when the store is exactly at this binary's frontier.
+///
+/// Call only after [`validate_sqlite`] has confirmed the applied history is a
+/// clean recognized prefix; then `pending_migrations` cannot error and this is a
+/// pure "is the store behind me?" question. An ordinary open of the shared store
+/// refuses when this is `Some`: the running binary's code may query columns that
+/// pending migration adds, so reusing the older schema would only fail later.
+pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    let applied = applied_versions(conn)?;
+    Ok(pending_migrations(&applied, MIGRATIONS)?
+        .first()
+        .map(Migration::version))
+}
+
 pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
     if !user_tables(conn)?
         .iter()
@@ -1222,8 +1258,9 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, product_schema, validate_foreign_keys,
-        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, pending_migrations, product_schema,
+        validate_foreign_keys, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
     use crate::task::TaskEventKind;
 
@@ -1483,6 +1520,57 @@ mod tests {
             .unwrap(),
             Some("proc_ghost".to_string()),
             "a validation-only open must not run the tail's backfill"
+        );
+    }
+
+    /// The validation primitive underneath the shared-store gate: with the store
+    /// at the frontier the installed `lf` knows (`0.11.027`) and the candidate one
+    /// migration ahead (`0.11.029`), `validate_sqlite` recognizes the applied
+    /// prefix and pins `pending_shared_migration` to the exact head the ordinary
+    /// store open then refuses on — the frontier never advances, and the old
+    /// reader still recognizes the store.
+    #[test]
+    fn validate_recognizes_a_shorter_frontier_and_names_the_pending_head() {
+        let installed = &MIGRATIONS[..MIGRATIONS.len() - 1];
+        let candidate = MIGRATIONS;
+
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        // Bring the store to the frontier the installed binary shipped with.
+        apply_set(&conn, installed).unwrap();
+        let installed_frontier = latest_applied_version_sqlite(&conn).unwrap().unwrap();
+        assert_eq!(installed_frontier, "0.11.027_accounts_first");
+
+        // The candidate is ahead by one migration. `validate_sqlite` runs the
+        // full (candidate) set the ordinary runtime trusts and must leave the
+        // frontier untouched — no unpublished migration becomes durable — while
+        // reporting the exact pending head the store open refuses on.
+        validate_sqlite(&conn).unwrap();
+        assert_eq!(
+            super::pending_shared_migration(&conn).unwrap().as_deref(),
+            Some(latest_known_version().as_str()),
+            "the pending head the ordinary shared open refuses on"
+        );
+        assert_eq!(
+            latest_applied_version_sqlite(&conn).unwrap().unwrap(),
+            installed_frontier,
+            "validation must not advance the shared frontier"
+        );
+
+        // The installed binary — whose set ends at the store's frontier — still
+        // opens the store: it is exactly the recognized prefix, nothing pending.
+        assert!(
+            pending_migrations(&applied_versions(&conn).unwrap(), installed)
+                .unwrap()
+                .is_empty(),
+            "the installed binary must keep reading the store the candidate left alone"
+        );
+
+        // Only the promotion boundary advances the frontier to the head.
+        apply_set(&conn, candidate).unwrap();
+        assert_eq!(
+            latest_applied_version_sqlite(&conn).unwrap().unwrap(),
+            latest_known_version()
         );
     }
 

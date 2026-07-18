@@ -1,5 +1,71 @@
 # Open implementation notes
 
+## Resume point verified 2026-07-17 (HEAD 5119f1791, tree clean)
+
+Green baseline this run: `cargo build -p loopflow`, `cargo fmt --all --check`,
+`cargo clippy -p loopflow --all-targets -D warnings`, and 1,555 lib tests all
+pass on the committed tree. The "add code in the working tree pending" phrasing
+in `architecture.md`/`implementation-plan.md` is now stale: the Review handshake,
+parent scheduling, and exact Run lease are **committed**, not uncommitted, and
+proven by tests already in the tree —
+
+- handshake: `store/mod.rs` proves parent Steer clears only `attention_at`,
+  re-entering the flow does not re-arm, the child's next terminal Turn re-arms
+  once and allocates exactly one parent evidence revision, and `close_review`
+  clears the route; `only_the_active_parent_run_can_steer_child_work` fences the
+  stale/wrong lease.
+- scheduling: `flowloop/wave.rs` `seed_only_wave_services_child_once_without_advancing_background`
+  and `live_wave_preempts_background_for_child_and_preserves_playhead`;
+  `task/runner.rs` routes user vs parent attention.
+- exact lease + settlement: `LF_RUN_LEASE` resolves the active Run; CI settlement
+  records the first fresh repaired head.
+
+**The one remaining cut is the Session/body controller deletion, and it has no
+safe separable sub-slice for a headless pass.** Confirmed this run:
+
+- `advance_run`/`reserve_run`/`stop_run` drive only Wave (`flowloop/wave.rs`) and
+  the durable store API. `task/runner.rs` and `project_session/runner.rs` never
+  call them — Task/Project execution is still entirely the legacy `ChildWriteLease`
+  Session-generation path.
+- `ChildWriteLease` and its env readers are load-bearing across every live child
+  store op (`store/child_sessions.rs`, `store/sqlite/child_sessions.rs`,
+  `task/runner.rs`, `project_session/runner.rs`, `ops/task.rs`). Not vestigial.
+- `child_control.rs` (incl. `absorb_run_control`, `send_outstanding_steers`) is
+  the live bridge both runners call — not dead, not separable.
+- Already at zero, do not recreate: `Sleeping`, `HandleId`, `Actor`, `Ack`,
+  `finish(run)`, and all Interaction/Handoff/ChildCommand nouns.
+
+Precise resume plan for the next (supervised, non-headless) pass, in order:
+1. Make `task/runner.rs` execute one boundary through `reserve_run`/`advance_run`/
+   `stop_run` instead of the Session generation, keeping domain closure/PR/CI/flow
+   selection behind a `WorkRef` match. Delete its `ChildWriteLease` threading.
+2. Repeat for `project_session/runner.rs` behind the same shared controller.
+3. Collapse `ops/task.rs`/`ops/project.rs` Session-shaped control DTOs onto Run
+   controls; drop the ambient `*_write_lease_from_env` authority.
+4. Delete `child_session.rs` lease machinery, `store/child_sessions.rs`, and
+   `store/sqlite/child_sessions.rs` once no live writer needs them; the final
+   schema cut copies retained domain facts and drops the Session lifecycle/process
+   columns.
+5. Restore the CI claim/preemption focused proofs the deleted 2,767-line suite
+   covered (exact-Run claim rejects an overlapping repair Run; stale/land-time
+   incidents do not preempt; a parked Review is preempted at most once).
+
+This is a live-execution-path replacement of the two most critical runners; a
+partial version is exactly the dual-write checkpoint the design forbids and is
+unsafe to land unsupervised. Do it as one supervised cut, not a headless slice.
+
+## Migration DRAFTS reality (verified 2026-07-17)
+
+There is no runtime `DRAFTS` registry. `store/migrations.rs` is a hardcoded
+`Migration { include_str!(...) }` array applied by canonical ordinal;
+`store/migrations/drafts/` holds only a README. This branch's `0.11.029`–`0.11.035`
+are embedded as canonical ordinals in that array (note: `0.11.028` is absent — a
+real ordinal gap to reconcile). Main introduced the drafts release model but never
+landed its Rust side. Reconciling the two — turning `0.11.029`–`0.11.035` into
+dependency-ordered drafts that fresh test DBs can still apply — is coupled to the
+release cut and to step 4 above; do not invent a second durable migration ledger,
+and do not rewrite these ordinals independently of the controller deletion.
+
 - Review route and pending attention are now separate without another table:
   `attention_kind/work` stays for the interactive flow interval while
   `attention_at` clears after the routed Steer. A later terminal child Turn

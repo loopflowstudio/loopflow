@@ -55,7 +55,8 @@ session, preserving partial work; the backoff ladder tops out at 30 seconds.
 
 Managed-account subscription exhaustion takes a different path: Loopflow marks
 the account unavailable until its reported reset and immediately tries the next
-account in the route. An explicitly selected `LF_ACCOUNT` never fails over.
+account in the grant. `--account` retains the normal route as fallback;
+`--only-account` stays inside the accounts it names.
 
 If the retries exhaust, resume a durable Session on another provider:
 

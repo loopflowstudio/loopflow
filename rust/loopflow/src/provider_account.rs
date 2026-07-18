@@ -143,7 +143,6 @@ pub(crate) struct ProviderAccountRoute {
     provider: Provider,
     account_id: ProviderAccountId,
     resume_requested_session: bool,
-    allows_failover: bool,
     authority: AccountRouteAuthority,
 }
 
@@ -158,7 +157,6 @@ impl std::fmt::Debug for ProviderAccountRoute {
             .field("account_id", &self.account_id)
             .field("credential", &credential)
             .field("resume_requested_session", &self.resume_requested_session)
-            .field("allows_failover", &self.allows_failover)
             .finish()
     }
 }
@@ -170,13 +168,6 @@ impl ProviderAccountRoute {
 
     pub(crate) fn resume_requested_session(&self) -> bool {
         self.resume_requested_session
-    }
-
-    /// Whether this route was chosen by the automatic router and may be
-    /// replaced by another routed account on exhaustion. Explicit and leased
-    /// selections pin one account and never fail over.
-    pub(crate) fn allows_failover(&self) -> bool {
-        self.allows_failover
     }
 
     pub(crate) fn uses_native_home(&self) -> bool {
@@ -254,26 +245,19 @@ impl ProviderAccountRoute {
             return Ok(());
         }
         let route = self.clone();
-        std::thread::Builder::new()
-            .name(format!("lf-{}-account-record", self.provider.as_str()))
-            .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-                runtime.block_on(async {
-                    if let Some(signal) = signal {
-                        route.record_rate_limit(&signal).await?;
+        _run_blocking_account(self.provider, "record", move |runtime| {
+            runtime.block_on(async {
+                if let Some(signal) = signal {
+                    route.record_rate_limit(&signal).await?;
+                }
+                if let Some(provider_session_id) = provider_session_id {
+                    if let Err(error) = route.pin_session(&provider_session_id).await {
+                        tracing::warn!(%error, "failed to pin provider session account");
                     }
-                    if let Some(provider_session_id) = provider_session_id {
-                        route.pin_session(&provider_session_id).await?;
-                    }
-                    Ok(())
-                })
+                }
+                Ok(())
             })
-            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
-            .join()
-            .map_err(|_| ProviderAccountError::Runtime("account worker panicked".to_string()))?
+        })
     }
 }
 
@@ -459,7 +443,6 @@ pub(crate) async fn resolve_provider_account(
             provider,
             account_id: resolution.account_id.clone(),
             resume_requested_session: resolution.resume_requested_session,
-            allows_failover: false,
             authority: AccountRouteAuthority::Lease {
                 client,
                 access_token: resolution.access_token().to_string(),
@@ -521,7 +504,6 @@ pub(crate) async fn resolve_provider_account(
         provider,
         account_id,
         resume_requested_session: selection.resume_requested_session,
-        allows_failover: true,
         authority: AccountRouteAuthority::Local { store, home },
     }))
 }
@@ -625,21 +607,31 @@ pub(crate) fn resolve_provider_account_blocking(
     provider: Provider,
     provider_session_id: Option<String>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    _run_blocking_account(provider, "route", move |runtime| {
+        runtime.block_on(resolve_provider_account(
+            provider,
+            provider_session_id.as_deref(),
+        ))
+    })
+}
+
+fn _run_blocking_account<T: Send + 'static>(
+    provider: Provider,
+    action: &'static str,
+    operation: impl FnOnce(&tokio::runtime::Runtime) -> Result<T, ProviderAccountError> + Send + 'static,
+) -> Result<T, ProviderAccountError> {
     std::thread::Builder::new()
-        .name(format!("lf-{}-account-route", provider.as_str()))
+        .name(format!("lf-{}-account-{action}", provider.as_str()))
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-            runtime.block_on(resolve_provider_account(
-                provider,
-                provider_session_id.as_deref(),
-            ))
+            operation(&runtime)
         })
         .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?
         .join()
-        .map_err(|_| ProviderAccountError::Runtime("account resolver panicked".to_string()))?
+        .map_err(|_| ProviderAccountError::Runtime(format!("account {action} worker panicked")))?
 }
 
 async fn route_store() -> Result<Option<SharedStore>, ProviderAccountError> {
@@ -871,7 +863,6 @@ mod tests {
             provider: Provider::Codex,
             account_id: parse_account_id("reserve").unwrap(),
             resume_requested_session: false,
-            allows_failover: false,
             authority: AccountRouteAuthority::Local {
                 store,
                 home: temp.path().join("codex-reserve"),
@@ -935,7 +926,6 @@ mod tests {
                     provider: Provider::Claude,
                     account_id: parse_account_id("primary").unwrap(),
                     resume_requested_session: false,
-                    allows_failover: false,
                     authority: AccountRouteAuthority::Local {
                         store: store.clone(),
                         home: claude_home.clone(),
@@ -949,7 +939,6 @@ mod tests {
                     provider: Provider::Codex,
                     account_id: parse_account_id("reserve").unwrap(),
                     resume_requested_session: false,
-                    allows_failover: false,
                     authority: AccountRouteAuthority::Local {
                         store,
                         home: codex_home.clone(),
@@ -994,7 +983,6 @@ mod tests {
             provider: Provider::Claude,
             account_id: account_id.clone(),
             resume_requested_session: false,
-            allows_failover: false,
             authority: AccountRouteAuthority::Local {
                 store: store.clone(),
                 home: temp.path().join("primary"),
@@ -1125,7 +1113,6 @@ mod account_first_tests {
             .expect("default route should select a managed account");
 
         assert_eq!(selection.account_id, selected.account_id);
-        assert!(selection.allows_failover());
         assert!(store
             .get_provider_account(Provider::Claude.as_str(), &selected.account_id)
             .await
@@ -1168,7 +1155,6 @@ mod account_first_tests {
             .unwrap()
             .expect("first routed account");
         assert_eq!(route.account_id, first.account_id);
-        assert!(route.allows_failover());
         route
             .record_rate_limit(&RateLimitSignal {
                 utilization_percent: Some(100),

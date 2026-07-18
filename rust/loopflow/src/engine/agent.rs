@@ -576,52 +576,24 @@ const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
 const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
 const FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TransientFailure {
-    /// The selected model or provider has no current serving capacity.
-    Capacity,
-    /// A request-level rate limit may clear after backoff.
-    RateLimit,
-    /// The provider reported temporary service unavailability.
-    Unavailable,
-    /// The provider process reported a retryable connection failure.
-    Transport,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum AgentFailure {
-    /// Retryable provider pressure or transport failure.
-    Transient(TransientFailure),
+    /// The selected model or provider has no current serving capacity.
+    #[error("provider capacity")]
+    Capacity,
+    /// A request-level rate limit may clear after backoff.
+    #[error("provider rate limit")]
+    RateLimit,
+    /// The provider reported temporary service unavailability.
+    #[error("provider unavailable")]
+    Unavailable,
+    /// The provider process reported a retryable connection failure.
+    #[error("provider transport")]
+    Transport,
     /// The selected managed account exhausted a subscription window.
+    #[error("account subscription limit")]
     AccountSubscriptionLimit { resets_at: Option<i64> },
-}
-
-impl AgentFailure {
-    fn label(&self) -> &'static str {
-        match self {
-            Self::Transient(failure) => failure.label(),
-            Self::AccountSubscriptionLimit { .. } => "account subscription limit",
-        }
-    }
-}
-
-impl std::fmt::Display for AgentFailure {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.label())
-    }
-}
-
-impl TransientFailure {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Capacity => "provider capacity",
-            Self::RateLimit => "provider rate limit",
-            Self::Unavailable => "provider unavailable",
-            Self::Transport => "provider transport",
-        }
-    }
 }
 
 /// Build `thread/start` params for Codex app-server sessions.
@@ -966,9 +938,12 @@ pub fn launch_agent(
 }
 
 #[derive(Debug)]
-struct AgentAttempt {
-    result: LaunchResult,
-    account_failover: bool,
+enum AgentAttempt {
+    Finished {
+        result: LaunchResult,
+        can_failover: bool,
+    },
+    AccountUnavailable(CoreError),
 }
 
 fn _launch_with_transient_retries(
@@ -980,26 +955,35 @@ fn _launch_with_transient_retries(
 ) -> Result<LaunchResult, CoreError> {
     let mut attempt_config = launch.clone();
     let mut attempt = 1;
+    let mut subscription_failure = None;
 
     loop {
-        let AgentAttempt {
-            mut result,
-            account_failover,
-        } = run(&attempt_config)?;
+        let (mut result, can_failover) = match run(&attempt_config)? {
+            AgentAttempt::Finished {
+                result,
+                can_failover,
+            } => (result, can_failover),
+            AgentAttempt::AccountUnavailable(error) => {
+                let Some(result) = subscription_failure else {
+                    return Err(error);
+                };
+                tracing::warn!(%error, "alternate provider account unavailable");
+                return Ok(result);
+            }
+        };
         let (harness, _) = parse_agent(attempt_config.agent.as_deref().unwrap_or("claude:opus"));
         let failure = if process.auto {
             result
                 .failure
-                .clone()
                 .or_else(|| _classify_agent_failure(&harness, &result))
         } else {
             None
         };
-        result.failure = failure.clone();
+        result.failure = failure;
         let Some(failure) = failure else {
             return Ok(result);
         };
-        if matches!(failure, AgentFailure::AccountSubscriptionLimit { .. }) && !account_failover {
+        if matches!(failure, AgentFailure::AccountSubscriptionLimit { .. }) && !can_failover {
             return Ok(result);
         }
         let Some(transient_delay) = retry_delays.get(attempt - 1).copied() else {
@@ -1007,19 +991,21 @@ fn _launch_with_transient_retries(
         };
         let limit_resets_at = match &failure {
             AgentFailure::AccountSubscriptionLimit { resets_at } => *resets_at,
-            AgentFailure::Transient(_) => None,
+            _ => None,
         };
 
         attempt_config = launch.clone();
         let (delay, failover) = match &failure {
             AgentFailure::AccountSubscriptionLimit { .. } => {
+                subscription_failure = Some(result.clone());
                 attempt_config.task_prompt = format!(
                     "{FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
                 );
                 (Duration::ZERO, true)
             }
-            AgentFailure::Transient(_) => {
+            _ => {
+                subscription_failure = None;
                 let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
                 if matches!(harness.as_str(), "claude" | "codex") {
                     if let Some(resume_token) = resume_token {
@@ -1032,7 +1018,7 @@ fn _launch_with_transient_retries(
         };
 
         tracing::warn!(
-            failure = failure.label(),
+            failure = %failure,
             attempt,
             next_attempt = attempt + 1,
             max_attempts = retry_delays.len() + 1,
@@ -1047,10 +1033,10 @@ fn _launch_with_transient_retries(
             if failover {
                 capture.set_provider_session_id(None);
             }
-            if let Err(error) = capture
+            let trace_result = capture
                 .finish_turn("failed")
-                .and_then(|()| capture.begin_turn("message", &attempt_config.task_prompt))
-            {
+                .and_then(|()| capture.begin_turn("message", &attempt_config.task_prompt));
+            if let Err(error) = trace_result {
                 tracing::warn!(error = %error, "failed to record agent retry turn");
             }
         }
@@ -1067,7 +1053,7 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
             resets_at: signal.resets_at,
         });
     }
-    _classify_transient_failure(result).map(AgentFailure::Transient)
+    _find_provider_error(result, _classify_transient_text)
 }
 
 fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T>) -> Option<T> {
@@ -1090,22 +1076,24 @@ fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T
 }
 
 fn _is_provider_error(value: &serde_json::Value) -> bool {
-    let event_type = value
+    match value
         .get("type")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    matches!(event_type, "turn.failed" | "error")
-        || (event_type == "result"
-            && (value
+        .unwrap_or_default()
+    {
+        "turn.failed" | "error" => true,
+        "result" => {
+            value
                 .get("is_error")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
                 || value
                     .get("subtype")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|subtype| {
-                        matches!(subtype, "failed" | "error") || subtype.contains("error")
-                    })))
+                    .is_some_and(|subtype| subtype == "failed" || subtype.contains("error"))
+        }
+        _ => false,
+    }
 }
 
 fn _classify_provider_error_value<T>(
@@ -1124,21 +1112,17 @@ fn _classify_provider_error_value<T>(
     }
 }
 
-fn _classify_transient_failure(result: &LaunchResult) -> Option<TransientFailure> {
-    _find_provider_error(result, _classify_transient_text)
-}
-
-fn _classify_transient_text(text: &str) -> Option<TransientFailure> {
+fn _classify_transient_text(text: &str) -> Option<AgentFailure> {
     let text = text.to_ascii_lowercase();
     if text.contains("at capacity") || text.contains("capacity temporarily unavailable") {
-        Some(TransientFailure::Capacity)
+        Some(AgentFailure::Capacity)
     } else if text.contains("rate limit")
         || text.contains("rate_limit")
         || text.contains("too many requests")
         || text.contains("status 429")
         || text.contains("status code 429")
     {
-        Some(TransientFailure::RateLimit)
+        Some(AgentFailure::RateLimit)
     } else if text.contains("temporarily unavailable")
         || text.contains("service unavailable")
         || text.contains("server is busy")
@@ -1149,7 +1133,7 @@ fn _classify_transient_text(text: &str) -> Option<TransientFailure> {
         || text.contains("status 503")
         || text.contains("status 504")
     {
-        Some(TransientFailure::Unavailable)
+        Some(AgentFailure::Unavailable)
     } else if text.contains("connection reset")
         || text.contains("connection closed")
         || text.contains("connection refused")
@@ -1157,7 +1141,7 @@ fn _classify_transient_text(text: &str) -> Option<TransientFailure> {
         || text.contains("request timed out")
         || text.contains("request timeout")
     {
-        Some(TransientFailure::Transport)
+        Some(AgentFailure::Transport)
     } else {
         None
     }
@@ -1176,7 +1160,8 @@ fn _account_limit_signal(harness: &str, result: &LaunchResult) -> Option<RateLim
         })
         .max_by_key(|signal| (signal.limited, signal.utilization_percent.unwrap_or(0)));
 
-    if result.exit_code != 0 && _has_subscription_limit_error(result) {
+    if result.exit_code != 0 && _find_provider_error(result, _classify_subscription_limit).is_some()
+    {
         signal = Some(RateLimitSignal {
             utilization_percent: Some(100),
             resets_at: signal.as_ref().and_then(|signal| signal.resets_at),
@@ -1186,10 +1171,6 @@ fn _account_limit_signal(harness: &str, result: &LaunchResult) -> Option<RateLim
         });
     }
     signal
-}
-
-fn _has_subscription_limit_error(result: &LaunchResult) -> bool {
-    _find_provider_error(result, _classify_subscription_limit).is_some()
 }
 
 fn _classify_subscription_limit(text: &str) -> Option<()> {
@@ -1282,13 +1263,17 @@ fn _launch_agent_once(
         "codex" => Some(Provider::Codex),
         _ => None,
     };
-    let account_route = managed_provider
+    let account_route = match managed_provider
         .map(|provider| resolve_provider_account_blocking(provider, launch.resume_token.clone()))
         .transpose()
-        .map_err(|error| {
-            CoreError::ExecutionFailed(format!("failed to select provider account: {error}"))
-        })?
-        .flatten();
+    {
+        Ok(route) => route.flatten(),
+        Err(error) => {
+            return Ok(AgentAttempt::AccountUnavailable(
+                CoreError::ExecutionFailed(format!("failed to select provider account: {error}")),
+            ));
+        }
+    };
     if account_route
         .as_ref()
         .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
@@ -1300,7 +1285,6 @@ fn _launch_agent_once(
         tracing::info!(
             provider = %harness,
             account_id = %route.account_id(),
-            failover = route.allows_failover(),
             "selected provider account"
         );
         route.apply(&mut cmd);
@@ -1359,9 +1343,7 @@ fn _launch_agent_once(
         // Interactive mode: inherit stdio
         launch_interactive(&mut cmd, process.timeout)
     };
-    let mut account_failover = account_route
-        .as_ref()
-        .is_some_and(crate::provider_account::ProviderAccountRoute::allows_failover);
+    let mut can_failover = account_route.is_some();
     if let (Some(route), Ok(result)) = (&account_route, &result) {
         let resume_token = _provider_resume_token(result);
         let signal = _account_limit_signal(&harness, result);
@@ -1369,7 +1351,7 @@ fn _launch_agent_once(
         if let Err(error) = route.record_launch_blocking(resume_token, signal) {
             tracing::warn!(%error, "failed to record provider account launch");
             if limited {
-                account_failover = false;
+                can_failover = false;
             }
         }
     }
@@ -1382,9 +1364,9 @@ fn _launch_agent_once(
             .finish(outcome, !process.auto)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    result.map(|result| AgentAttempt {
+    result.map(|result| AgentAttempt::Finished {
         result,
-        account_failover,
+        can_failover,
     })
 }
 
@@ -2534,6 +2516,21 @@ trust_level = "trusted"
         assert!(cmd.contains(&unknown_model.to_string()));
     }
 
+    fn managed_attempt(result: LaunchResult) -> AgentAttempt {
+        AgentAttempt::Finished {
+            result,
+            can_failover: true,
+        }
+    }
+
+    fn failed_result(message: &str) -> LaunchResult {
+        LaunchResult {
+            exit_code: 1,
+            stdout: format!(r#"{{"type":"turn.failed","error":{{"message":"{message}"}}}}"#),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn transient_capacity_failure_resumes_and_finishes() {
         let launch = AgentConfig {
@@ -2568,10 +2565,9 @@ trust_level = "trusted"
             &[Duration::ZERO],
             |config| {
                 attempts.push(config.clone());
-                Ok(AgentAttempt {
-                    result: results.next().expect("scripted launch result"),
-                    account_failover: true,
-                })
+                Ok(managed_attempt(
+                    results.next().expect("scripted launch result"),
+                ))
             },
             |delay| waits.push(delay),
         )
@@ -2628,10 +2624,9 @@ trust_level = "trusted"
             &[Duration::from_secs(30)],
             |config| {
                 attempts.push(config.clone());
-                Ok(AgentAttempt {
-                    result: results.next().expect("scripted launch result"),
-                    account_failover: true,
-                })
+                Ok(managed_attempt(
+                    results.next().expect("scripted launch result"),
+                ))
             },
             |delay| waits.push(delay),
         )
@@ -2646,30 +2641,57 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn pinned_subscription_limit_remains_a_typed_failure() {
+    fn unavailable_account_failover_returns_the_typed_failure() {
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
             ..default_launch()
         };
         let process = auto_process();
+        let mut attempts = 0;
 
         let result = _launch_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
             |_| {
-                Ok(AgentAttempt {
-                    result: LaunchResult {
-                        exit_code: 1,
-                        stdout: "{\"type\":\"turn.failed\",\"error\":{\"message\":\"You've hit your usage limit\"}}\n"
-                            .to_string(),
-                        stderr: String::new(),
-                        failure: None,
-                    },
-                    account_failover: false,
+                attempts += 1;
+                if attempts > 1 {
+                    return Ok(AgentAttempt::AccountUnavailable(
+                        CoreError::ExecutionFailed("no eligible account".to_string()),
+                    ));
+                }
+                Ok(managed_attempt(failed_result(
+                    "You've hit your usage limit",
+                )))
+            },
+            |_| {},
+        )
+        .expect("typed launch failure is returned");
+
+        assert!(matches!(
+            result.failure,
+            Some(AgentFailure::AccountSubscriptionLimit { .. })
+        ));
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn unrecorded_subscription_limit_is_not_retried() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            ..default_launch()
+        };
+        let result = _launch_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::ZERO],
+            |_| {
+                Ok(AgentAttempt::Finished {
+                    result: failed_result("You've hit your usage limit"),
+                    can_failover: false,
                 })
             },
-            |_| panic!("pinned account must not retry"),
+            |_| panic!("unsafe failover must not retry"),
         )
         .expect("typed launch failure is returned");
 
@@ -2694,17 +2716,7 @@ trust_level = "trusted"
             &[Duration::ZERO],
             |_| {
                 attempts += 1;
-                Ok(AgentAttempt {
-                    result: LaunchResult {
-                        exit_code: 1,
-                        stdout:
-                            "{\"type\":\"turn.failed\",\"error\":{\"message\":\"invalid request\"}}\n"
-                                .to_string(),
-                        stderr: String::new(),
-                        failure: None,
-                    },
-                    account_failover: true,
-                })
+                Ok(managed_attempt(failed_result("invalid request")))
             },
             |_| panic!("permanent failure must not wait"),
         )
@@ -2730,26 +2742,16 @@ trust_level = "trusted"
             &[Duration::ZERO, Duration::ZERO],
             |_| {
                 attempts += 1;
-                Ok(AgentAttempt {
-                    result: LaunchResult {
-                        exit_code: attempts,
-                        stdout: "{\"type\":\"turn.failed\",\"error\":{\"message\":\"service unavailable\"}}\n"
-                            .to_string(),
-                        stderr: String::new(),
-                        failure: None,
-                    },
-                    account_failover: true,
-                })
+                let mut result = failed_result("service unavailable");
+                result.exit_code = attempts;
+                Ok(managed_attempt(result))
             },
             |_| waits += 1,
         )
         .expect("last launch result is returned");
 
         assert_eq!(result.exit_code, 3);
-        assert_eq!(
-            result.failure,
-            Some(AgentFailure::Transient(TransientFailure::Unavailable))
-        );
+        assert_eq!(result.failure, Some(AgentFailure::Unavailable));
         assert_eq!(attempts, 3);
         assert_eq!(waits, 2);
     }

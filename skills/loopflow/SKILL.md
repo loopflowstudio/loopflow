@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Operate a repository through loopflow (`lf`) — persistent waves, delegated task sessions, PRs, and the agent bus. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
+description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and the agent bus. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
 ---
 
 # Operating Through Loopflow
@@ -22,6 +22,16 @@ Check availability; install only if the human asks:
 lf --version || echo "not installed"
 # install: curl -fsSL https://loopflow.studio/install.sh | sh && lf init
 ```
+
+## Caller Authority
+
+An external harness opened by a person acts as a Loopflow **User**. It may read
+status and use `lf chat` when the human asks it to inspect or steer a Wave. It
+does not become a Wave, Project, or Task worker.
+
+An agent launched by Loopflow is an internal participant. It receives
+`LOOPFLOW.md` automatically, reports through an established `lf radio` channel,
+and never impersonates the User in chat.
 
 ## Git, Worktrees, GitHub → `lf`
 
@@ -68,10 +78,44 @@ lf task wait <issue-id> --until terminal
 When work feels slow or stuck, run `lf top` before guessing — it shows
 last-hour provider throughput and live processes.
 
+## Inspect
+
+When the human asks about Loopflow state, read the shared surfaces instead of
+reconstructing it from processes, worktrees, or Linear:
+
+```bash
+lf ls --json              # every durable Wave and its Home/runtime evidence
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json         # current plan across Waves joined to runtime truth
+```
+
+These are read surfaces. `lf status` is the focused operational view;
+`lf roadmap` is the planning overlay, not a second runtime model.
+
+## Place And Run
+
+Execution placement is durable state, not authored goal text. A Work names one
+stable Home authority; the Home's SSH route may change without moving the Work.
+
+```bash
+lf home id                                      # this machine's HomeId
+lf work place wave <wave-id> <home-id>          # only while no Run is live
+lf start <wave>                                 # route to its placed Home
+lf stop <wave>                                  # leave the Home keeper and siblings running
+lf ssh <home-id> --remote-native -- lf status <wave> --json
+```
+
+Use `--remote-native` for durable remote lifecycle. It forwards no provider,
+GitHub, PM, or secret authority; the remote Home uses its installed authority.
+Use ordinary `lf ssh <host> -- <command>` only for foreground work that should
+borrow the origin's short-lived credential lease.
+
 ## Speak
 
-`lf chat` is the human surface; agents never post there. Report on the bus
-only when the prompt establishes an exact wave or channel — never guess one:
+`lf chat` is the User surface. An external harness acting for the human may use
+it; Loopflow-launched agents never post there. Internal participants report on
+the bus only when the prompt establishes an exact wave or channel — never guess
+one:
 
 ```bash
 lf radio pub --channel <channel> "landed PR #91, tests green"

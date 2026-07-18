@@ -61,9 +61,8 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
-        #expect(detail.wave.home.address == "ssh://jack@mini-heart")
-        #expect(detail.wave.home.owner == "jack")
-        #expect(detail.wave.home.location == .ssh(host: "mini-heart", port: nil))
+        #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
+        #expect(detail.wave.home.route == "ssh://jack@mini-heart")
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.homeRuntime.state == .running)
         #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
@@ -153,7 +152,7 @@ struct DTOFixtureTests {
         let surface = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: data)
 
         #expect(surface.id == "launch_00000000000000000000000000000001")
-        #expect(surface.work.kind == "task")
+        #expect(surface.work.kind == .task)
         #expect(surface.status == .live)
         #expect(surface.attention?.kind == "user")
         #expect(surface.attentionAt == "2026-07-17T12:01:00Z")
@@ -162,6 +161,48 @@ struct DTOFixtureTests {
         let encoded = try JSONEncoder().encode(surface)
         let decoded = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: encoded)
         #expect(decoded == surface)
+    }
+
+    @Test("Work status fixture preserves every status and wait kind")
+    func workStatusFixtureRoundTrips() throws {
+        let data = try loadFixtureData("work_statuses.json")
+        let statuses = try JSONDecoder().decode([WorkStatus].self, from: data)
+        func wait(at index: Int) -> WorkWait? {
+            guard case .waiting(let wait) = statuses[index] else { return nil }
+            return wait
+        }
+
+        #expect(statuses[0] == .ready)
+        #expect(statuses[1] == .running(runID: "run_00000000000000000000000000000001"))
+        #expect(try #require(wait(at: 2)).on == .input(after: WorkBasis(
+            epochID: "epoch_00000000000000000000000000000004",
+            revision: 7
+        )))
+        #expect(try #require(wait(at: 3)).on == .time(notBefore: "2026-07-17T13:00:00Z"))
+        #expect(try #require(wait(at: 4)).on == .event(WorkEventReference(
+            source: "github",
+            id: "check-42"
+        )))
+        #expect(try #require(wait(at: 5)).on == .child(WorkReference(
+            kind: .task,
+            id: "task_0000000000000000000000000000000e"
+        )))
+        #expect(try #require(wait(at: 6)).on == .capability(WorkCapabilityReference(
+            kind: "deploy",
+            key: "production"
+        )))
+        let effectWait = try #require(wait(at: 7))
+        #expect(effectWait.on == .effect(WorkEffectReference(
+            kind: "message",
+            idempotencyKey: "release-ready"
+        )))
+        #expect(effectWait.resolvedAt == "2026-07-17T12:06:00Z")
+        #expect(statuses[8] == .done)
+        #expect(statuses[9] == .abandoned)
+
+        let encoded = try JSONEncoder().encode(statuses)
+        let decoded = try JSONDecoder().decode([WorkStatus].self, from: encoded)
+        #expect(decoded == statuses)
     }
 
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {

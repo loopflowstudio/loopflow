@@ -9,12 +9,12 @@ written.
 listener.
 
 **Cause:** No resident process is serving the Wave — nothing starts one
-automatically except the app, `lf home start`, or a cron wake.
+automatically except the app, `lf start`, or a cron wake.
 
 ```bash
 lf status <wave> --json    # current registry + runtime evidence
 lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf home start <wave>       # idempotently start the Wave on its Home
+lf start <wave>            # idempotently start the Wave on its placed Home
 ```
 
 ## Task Session stops advancing

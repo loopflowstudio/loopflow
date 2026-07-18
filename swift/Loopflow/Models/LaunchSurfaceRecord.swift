@@ -1,10 +1,5 @@
 import Foundation
 
-public struct LaunchWorkReference: Codable, Sendable, Hashable {
-    public let kind: String
-    public let id: String
-}
-
 public struct LaunchRouteRecord: Codable, Sendable, Hashable {
     public let provider: String
     public let model: String?
@@ -13,16 +8,6 @@ public struct LaunchRouteRecord: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case provider, model
         case accountId = "account_id"
-    }
-}
-
-public struct LaunchBasisRecord: Codable, Sendable, Hashable {
-    public let epochId: String
-    public let revision: UInt64
-
-    enum CodingKeys: String, CodingKey {
-        case revision
-        case epochId = "epoch_id"
     }
 }
 
@@ -75,7 +60,7 @@ public struct LaunchRecord: Codable, Sendable, Hashable {
     public let surface: String
     public let state: LaunchLifecycleState
     public let containment: LaunchContainmentRecord
-    public let opaqueBasis: LaunchBasisRecord?
+    public let opaqueBasis: WorkBasis?
     public let resumeToken: String?
     public let startedAt: String
     public let endedAt: String?
@@ -93,14 +78,14 @@ public struct LaunchRecord: Codable, Sendable, Hashable {
 
 public struct LaunchAttentionRecord: Codable, Sendable, Hashable {
     public let kind: String
-    public let work: LaunchWorkReference?
+    public let work: WorkReference?
 }
 
 /// `lf launch list|attach --json`. Reopening reads this projection and does not
 /// mutate Launch liveness; explicit handback is a separate control.
 public struct LaunchSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
     public let launch: LaunchRecord
-    public let work: LaunchWorkReference
+    public let work: WorkReference
     public let waveId: String
     public let homeRoute: String
     public let attention: LaunchAttentionRecord?
@@ -110,7 +95,7 @@ public struct LaunchSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
 
     public var id: String { launch.id }
     public var sessionId: String { launch.id }
-    public var parentKind: String { work.kind }
+    public var parentKind: String { work.kind.rawValue }
     public var parentId: String { work.id }
     public var status: LaunchLifecycleState { launch.state }
     public var provider: String { launch.route.provider }

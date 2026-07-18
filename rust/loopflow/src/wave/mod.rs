@@ -124,7 +124,7 @@ pub fn stop(name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
+pub(crate) async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
     let Some(endpoint) = server::live_endpoint(repo_root, wave).await else {
         return Ok(false);
     };
@@ -274,7 +274,7 @@ fn resident_spawner(
 /// server without a registry store; `force` rides separately because the
 /// endpoint-file floor must honor it even when there is no registry config at
 /// all.
-async fn run_listener(
+pub(crate) async fn run_listener(
     repo_root: PathBuf,
     wave: String,
     registry_config: Option<registry::RegistryConfig>,
@@ -316,10 +316,9 @@ async fn run_listener(
         match registry_config.as_ref() {
             Some(config) => {
                 let work = crate::durable::WorkRef::Wave(config.wave.id().clone());
-                let home = config.store.home("local").await?;
                 let (_, lease) = config
                     .store
-                    .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+                    .reserve_run(&work, crate::durable::RunTrigger::User)
                     .await?;
                 Some((config.store.clone(), lease))
             }

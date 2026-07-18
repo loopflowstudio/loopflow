@@ -31,6 +31,15 @@ The Mac app — wave chat, the machine-wide roadmap, every task's worktree — i
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
 It bundles `lf`; `lf` (bare) opens it.
 
+Give an external agent harness the Loopflow operating skill:
+
+```bash
+npx skills add loopflowstudio/loopflow --skill loopflow -g -y
+```
+
+The harness acts as a User over the same `lf` API. See
+[The Agent API](docs/agent-api.md).
+
 ## A taste
 
 Fix a bug from the clipboard:
@@ -51,7 +60,7 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf wave designer                            # one persistent Wave, until Ctrl-C
+lf start designer                           # serve it from this Home's one keeper
 lf chat --steer "ship the button audit first"
 lf memory add "buttons: variants unified" --receipt chat_turn:turn-3
 lf stop designer
@@ -69,6 +78,7 @@ lf pr land -c                                         # merge the PR, complete t
 Watch the whole machine:
 
 ```bash
+lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across every wave, bucketed by need
 lf status designer     # one wave's live Project → Task hierarchy
 lf trace <exec-id>     # what one agent did — and exactly what it was told
@@ -84,7 +94,7 @@ lf usage               # subscription state and spend, per account and repo
 | **Wave** | Durable operating context: memory, cadence, chat, project selection | `wave/<name>/` |
 | **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
 | **Task** | Concrete work; its Session owns the only delivery worktree | Linear, via `lf pm` |
-| **Home** | Where a wave's work executes — owner plus location, local or `ssh://` | `GOAL.md` frontmatter |
+| **Home** | Stable execution authority; its route may move without changing identity | local SQLite |
 
 | Built-in | What it does |
 |----------|--------------|
@@ -105,7 +115,7 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
 | [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
-| [Architecture](docs/architecture.md) | No server: the store, the journal, Homes, `lf ssh`, `lfd` |
+| [Architecture](docs/architecture.md) | Decentralized stores, Home residents, journals, `lf ssh`, `lfd` |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |

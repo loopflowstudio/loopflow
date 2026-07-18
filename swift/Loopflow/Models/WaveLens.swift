@@ -93,11 +93,11 @@ public struct WaveLens: Sendable, Hashable {
     /// - black: off and clean — no live body, no active work.
     public static func forWave(
         live: Bool,
-        status: WaveStatus,
+        status: WorkStatus,
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
-        let hasLiveBody = live || status == .running
+        let hasLiveBody = live || status.isRunning
         if hasLiveBody {
             return WaveLens(color: .green, reason: "Running · a body is advancing")
         }

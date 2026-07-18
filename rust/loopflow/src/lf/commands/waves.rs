@@ -23,8 +23,8 @@ use crate::child_session::{
 };
 #[cfg(test)]
 use crate::child_session::{BodyCategory, BodyControl, BodyOwner};
-use crate::durable::AttentionRoute;
-use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState, WaveHomeDto};
+use crate::durable::{AttentionRoute, Home, WorkRef, WorkStatus};
+use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject};
@@ -36,30 +36,6 @@ use crate::task::{
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WavePresence {
-    Idle,
-    Running,
-    Paused,
-}
-
-impl WavePresence {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Idle => "idle",
-            Self::Running => "running",
-            Self::Paused => "paused",
-        }
-    }
-}
-
-impl std::fmt::Display for WavePresence {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
 /// One wave's registry snapshot — the `lf ls` row and the `wave` field of
 /// `lf status`. Wire type consumed by Loopflow: every field is required or
 /// explicitly Optional, no serde defaults.
@@ -67,10 +43,8 @@ impl std::fmt::Display for WavePresence {
 pub struct WaveSnapshot {
     pub id: String,
     pub name: String,
-    /// Wave presence (`idle | running | paused`). Detailed resident condition
-    /// is reported separately by `WaveDetailSnapshot::loop_state`.
-    pub status: WavePresence,
-    pub paused: bool,
+    /// Current Work lifecycle derived from Epoch, Run, and Wait facts.
+    pub status: WorkStatus,
     pub goal: String,
     /// Primary repo path.
     pub repo: String,
@@ -86,9 +60,8 @@ pub struct WaveSnapshot {
     pub created_at: Option<String>,
     /// Parent wave id in the chord tree, `null` for a root wave.
     pub parent_wave_id: Option<String>,
-    /// Execution home: `local` or one SSH target. Lets a consumer distinguish a
-    /// local Wave from a remote-home one without owning transport.
-    pub home: WaveHomeDto,
+    /// Stable execution authority and its currently observed route.
+    pub home: Home,
 }
 
 /// `lf status <wave>` snapshot: native work hierarchy, the wave's runs, what
@@ -108,7 +81,7 @@ pub struct WaveDetailSnapshot {
     pub attention: Evidence<AttentionItem>,
     /// The Wave's Home probed for liveness: state, evidence, attach endpoint, and
     /// the one contextual action a conductor surface should offer. Probed for the
-    /// focused Wave only — `lf ls` stays address-only.
+    /// focused Wave only — `lf ls` stays placement-only.
     pub home_runtime: HomeRuntimeDto,
 }
 
@@ -558,9 +531,8 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let attention = Evidence::complete(attention(&projects, now(), liveness.liveness()));
         // Probe the focused Wave's Home once so the detail carries live evidence
         // and the single contextual action (Open/Attach, Start, or reason).
-        let home = crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name());
         let home_runtime =
-            crate::ops::home::probe_home(wave.name(), &home, Path::new(wave.repo())).await;
+            crate::ops::home::probe_home(wave.name(), &snapshot.home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
             runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
             attention,
@@ -961,7 +933,7 @@ fn now() -> time::OffsetDateTime {
 
 /// Build the registry snapshot for one wave, probing its discovery endpoint
 /// for liveness.
-async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
+pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
     let endpoint = if repo.is_empty() {
         None
@@ -982,27 +954,23 @@ async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot>
         .into_iter()
         .filter(|session| !session.status.is_terminal())
         .count() as u32;
-    let config = crate::engine::wave_config::read_wave_config(Path::new(&repo), wave.name());
-    let home = WaveHomeDto::from(
-        &config
-            .as_ref()
-            .and_then(|config| config.home_authored())
-            .unwrap_or_else(|| crate::engine::wave_config::default_local_home(Path::new(&repo))),
-    );
-    let paused = config.and_then(|config| config.paused).unwrap_or(false);
-    let live = endpoint.is_some();
-    let status = if paused {
-        WavePresence::Paused
-    } else if live {
-        WavePresence::Running
-    } else {
-        WavePresence::Idle
-    };
+    let placement = store
+        .placement(&WorkRef::Wave(wave.id().clone()))
+        .await
+        .map_err(|error| anyhow!("failed to read Wave Home placement: {error}"))?;
+    let home = store
+        .home_by_id(&placement.home_id)
+        .await
+        .map_err(|error| anyhow!("failed to read Wave Home: {error}"))?
+        .ok_or_else(|| anyhow!("Home {} was not found", placement.home_id))?;
+    let status = store
+        .work_status(&WorkRef::Wave(wave.id().clone()))
+        .await
+        .map_err(|error| anyhow!("failed to read Wave Work status: {error}"))?;
     Ok(WaveSnapshot {
         id: wave.id().to_string(),
         name: wave.name().to_string(),
         status,
-        paused,
         goal: crate::engine::wave_config::read_wave_summary(Path::new(&repo), wave.name())
             .unwrap_or_else(|_| wave.name().to_string()),
         repo,
@@ -1903,13 +1871,23 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
         println!(
             "{name:<16}  {status:<8}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
-            status = wave.status,
+            status = work_status_label(&wave.status),
             live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
             projects = wave.active_projects,
-            home = truncate(&wave.home.address, 16),
+            home = truncate(&wave.home.route, 16),
             endpoint = wave.endpoint.as_deref().unwrap_or("-"),
         );
+    }
+}
+
+fn work_status_label(status: &WorkStatus) -> &'static str {
+    match status {
+        WorkStatus::Ready => "ready",
+        WorkStatus::Running { .. } => "running",
+        WorkStatus::Waiting { .. } => "waiting",
+        WorkStatus::Done => "done",
+        WorkStatus::Abandoned => "abandoned",
     }
 }
 
@@ -1926,7 +1904,7 @@ fn home_state_label(state: HomeState) -> &'static str {
 fn home_action_label(action: &HomeActionDto) -> String {
     match action {
         HomeActionDto::Attach { endpoint } => format!("Attach ({endpoint})"),
-        HomeActionDto::Start { home } => format!("Start on {home}"),
+        HomeActionDto::Start { home_id } => format!("Start on {home_id}"),
         HomeActionDto::Reason { message } => message.clone(),
     }
 }
@@ -1939,7 +1917,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
-        status = wave.status,
+        status = work_status_label(&wave.status),
         loop_state = status
             .loop_state
             .as_deref()
@@ -1948,8 +1926,9 @@ fn print_status(status: &WaveDetailSnapshot) {
     );
     println!("  goal      {}", wave.goal);
     println!(
-        "  home      {}  [{}]",
-        wave.home.address,
+        "  home      {} ({})  [{}]",
+        wave.home.id,
+        wave.home.route,
         home_state_label(status.home_runtime.state)
     );
     println!(
@@ -2171,7 +2150,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             bold = colors.bold,
             reset = colors.reset,
             name = wave.wave.name,
-            status = wave.wave.status,
+            status = work_status_label(&wave.wave.status),
         );
         let details = match &wave.projects {
             Evidence::Unavailable { reason } => {
@@ -2298,6 +2277,15 @@ mod tests {
     };
     use crate::store::{open_store, PmSnapshotRow, StorageConfig};
     use crate::task::{PmWritebackState, TaskLifecyclePhase, TaskLifecyclePlan, TaskSessionId};
+
+    fn test_home(id: &str, route: &str) -> Home {
+        Home {
+            id: crate::durable::HomeId::parse(id).unwrap(),
+            route: route.to_string(),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
 
     fn ci(state: CiState, failing: &[&str]) -> CiObservation {
         CiObservation {
@@ -2926,8 +2914,10 @@ mod tests {
         let snapshot = WaveSnapshot {
             id: "wave-1".into(),
             name: "goals".into(),
-            status: WavePresence::Running,
-            paused: false,
+            status: WorkStatus::Running {
+                run_id: crate::durable::RunId::parse("run_00000000000000000000000000000001")
+                    .unwrap(),
+            },
             goal: "ship the roadmap".into(),
             repo: "/repo".into(),
             active_tasks: 2,
@@ -2936,22 +2926,24 @@ mod tests {
             endpoint: Some("127.0.0.1:5678".into()),
             created_at: Some("2026-07-06T00:00:00Z".into()),
             parent_wave_id: None,
-            home: WaveHomeDto::from(
-                &crate::engine::wave_home::WaveHome::parse("ssh://jack@mini-heart").unwrap(),
+            home: test_home(
+                "home_00000000000000000000000000000001",
+                "ssh://jack@mini-heart",
             ),
         };
         let value: serde_json::Value = serde_json::to_value(&snapshot).expect("serialize");
         assert_eq!(value["name"], "goals");
-        assert_eq!(value["status"], "running");
+        assert_eq!(
+            value["status"],
+            serde_json::json!({
+                "running": {"run_id": "run_00000000000000000000000000000001"}
+            })
+        );
         assert_eq!(value["live"], true);
         assert_eq!(value["endpoint"], "127.0.0.1:5678");
         assert_eq!(value["active_tasks"], 2);
-        // A remote-home wave is distinguishable in the wire shape: the canonical
-        // address plus structured owner/location.
-        assert_eq!(value["home"]["address"], "ssh://jack@mini-heart");
-        assert_eq!(value["home"]["owner"], "jack");
-        assert_eq!(value["home"]["location"]["kind"], "ssh");
-        assert_eq!(value["home"]["location"]["host"], "mini-heart");
+        assert_eq!(value["home"]["id"], "home_00000000000000000000000000000001");
+        assert_eq!(value["home"]["route"], "ssh://jack@mini-heart");
         // Explicitly-null Optional stays present (no serde skip): a stopped
         // wave's endpoint is `null`, not absent — one stable shape.
         assert!(value.as_object().unwrap().contains_key("parent_wave_id"));
@@ -2964,8 +2956,7 @@ mod tests {
             wave: WaveSnapshot {
                 id: "wave-1".into(),
                 name: "goals".into(),
-                status: WavePresence::Idle,
-                paused: false,
+                status: WorkStatus::Ready,
                 goal: "g".into(),
                 repo: "/repo".into(),
                 active_tasks: 0,
@@ -2974,15 +2965,13 @@ mod tests {
                 endpoint: None,
                 created_at: None,
                 parent_wave_id: None,
-                home: WaveHomeDto::from(
-                    &crate::engine::wave_home::WaveHome::parse("jack@local").unwrap(),
-                ),
+                home: test_home("home_00000000000000000000000000000001", "local"),
             },
             loop_state: None,
             runs: Evidence::complete(Vec::new()),
             attention: Evidence::complete(Vec::new()),
             home_runtime: HomeRuntimeDto::new(
-                &crate::engine::wave_home::WaveHome::parse("jack@local").unwrap(),
+                &test_home("home_00000000000000000000000000000001", "local"),
                 HomeState::Stopped,
                 "reachable (local); no resident is serving this Wave".into(),
                 None,

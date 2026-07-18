@@ -389,6 +389,12 @@ credential files on the remote host. Detached remote sessions are rejected —
 their lease would vanish when SSH exits — so authenticate on the remote host
 for long-running work.
 
+`lf ssh <HomeId> -- <cmd>` resolves the Home's current SSH route from the
+durable store and makes the target prove that identity. Add `--remote-native`
+to forward no provider, GitHub, PM, or secret authority. Use that mode for Home
+lifecycle commands that rely on credentials installed on the remote machine
+and outlive the SSH process.
+
 ### External Skills
 
 Loopflow has two primary skill channels plus one compatibility shim. No config needed.

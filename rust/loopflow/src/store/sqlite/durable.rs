@@ -8,9 +8,9 @@ use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, ChildFeedback,
     Containment, ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId,
     EpochReceipt, EpochState, Feedback, FlowPosition, Home, HomeId, InterruptReceipt, Launch,
-    LaunchId, LaunchRoute, LaunchState, LaunchSurface, ProjectId, Run, RunAdvance, RunId, RunLease,
-    RunLeaseToken, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId,
-    SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
+    LaunchId, LaunchRoute, LaunchState, LaunchSurface, Placement, ProjectId, Run, RunAdvance,
+    RunId, RunLease, RunLeaseToken, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer,
+    SteerId, SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
     ToolResponseWrite, Turn, TurnId, UserFeedback, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
@@ -47,7 +47,17 @@ impl SqliteStore {
         }))
     }
 
-    pub fn home(&self, route: &str) -> StoreResult<Home> {
+    pub fn home_by_id(&self, home_id: &HomeId) -> StoreResult<Option<Home>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        map_home_by_id(&conn, home_id)
+    }
+
+    pub fn local_home(&self) -> StoreResult<Home> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        map_local_home(&conn)
+    }
+
+    pub fn observe_home(&self, home_id: &HomeId, route: &str) -> StoreResult<Home> {
         let route = route.trim();
         if route.is_empty() {
             return Err(StoreError::InvalidData(
@@ -55,37 +65,89 @@ impl SqliteStore {
             ));
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
+        if map_home_by_id(&conn, home_id)?
+            .is_some_and(|home| home.route == "local" && route != "local")
+        {
+            return Err(StoreError::InvalidData(format!(
+                "cannot replace local Home {home_id} with remote route {route:?}"
+            )));
+        }
+        let existing_id = conn
+            .query_row("SELECT id FROM homes WHERE route=?1", [route], |row| {
+                row.get::<_, String>(0)
+            })
+            .optional()?;
+        if existing_id
+            .as_deref()
+            .is_some_and(|id| id != home_id.as_str())
+        {
+            return Err(StoreError::InvalidData(format!(
+                "Home route {route:?} is already observed for {}",
+                existing_id.expect("checked as present")
+            )));
+        }
         let now = now_unix();
         conn.execute(
             "INSERT INTO homes (id, route, created_at, observed_at)
              VALUES (?1, ?2, ?3, ?3)
-             ON CONFLICT(route) DO UPDATE SET observed_at=excluded.observed_at",
-            params![HomeId::new().as_str(), route, now],
+             ON CONFLICT(id) DO UPDATE SET
+                route=excluded.route, observed_at=excluded.observed_at",
+            params![home_id.as_str(), route, now],
         )?;
-        map_home(&conn, route)
+        map_home_by_id(&conn, home_id)?.ok_or(StoreError::NotFound)
     }
 
-    pub fn reserve_run(
-        &self,
-        work: &WorkRef,
-        home_id: &HomeId,
-        trigger: &RunTrigger,
-    ) -> StoreResult<(Run, RunLease)> {
+    pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        placement_in(&conn, work)
+    }
+
+    pub(crate) fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let epoch = current_epoch_in(&tx, work)?;
+        current_epoch_in(&tx, work)?;
         tx.query_row(
             "SELECT 1 FROM homes WHERE id=?1",
             [home_id.as_str()],
             |_| Ok(()),
         )?;
+        if let Some(current) = find_placement_in(&tx, work)? {
+            if current.home_id == *home_id {
+                tx.commit()?;
+                return Ok(current);
+            }
+        }
+        if let Some(run) = current_run_for_work_in(&tx, work)? {
+            return Err(StoreError::InvalidData(format!(
+                "cannot move {} {} while Run {} is {:?}",
+                work.kind(),
+                work.id(),
+                run.id,
+                run.state
+            )));
+        }
+        write_placement(&tx, work, home_id, now_unix())?;
+        let placement = placement_in(&tx, work)?;
+        tx.commit()?;
+        Ok(placement)
+    }
+
+    pub fn reserve_run(
+        &self,
+        work: &WorkRef,
+        trigger: &RunTrigger,
+    ) -> StoreResult<(Run, RunLease)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let epoch = current_epoch_in(&tx, work)?;
+        let home_id = reserving_home_in(&tx, work)?;
         resolve_wait_for_trigger(&tx, &epoch, trigger)?;
         let token = RunLeaseToken::new();
         let run = Run {
             id: RunId::new(),
             work: work.clone(),
             epoch_id: epoch.id.clone(),
-            home_id: home_id.clone(),
+            home_id,
             state: RunState::Reserved,
             trigger: trigger.clone(),
             retry_of: match trigger {
@@ -1274,10 +1336,10 @@ impl SqliteStore {
     }
 }
 
-fn map_home(conn: &Connection, route: &str) -> StoreResult<Home> {
+fn map_local_home(conn: &Connection) -> StoreResult<Home> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at FROM homes WHERE route=?1",
-        [route],
+        "SELECT id, route, created_at, observed_at FROM homes WHERE route='local'",
+        [],
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -1297,6 +1359,133 @@ fn map_home(conn: &Connection, route: &str) -> StoreResult<Home> {
                 .map_err(invalid_durable)?,
         })
     })
+}
+
+fn map_home_by_id(conn: &Connection, home_id: &HomeId) -> StoreResult<Option<Home>> {
+    conn.query_row(
+        "SELECT id, route, created_at, observed_at FROM homes WHERE id=?1",
+        [home_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(StoreError::from)?
+    .map(|(id, route, created_at, observed_at)| {
+        Ok(Home {
+            id: HomeId::parse(&id).map_err(invalid_durable)?,
+            route,
+            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
+            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
+                .map_err(invalid_durable)?,
+        })
+    })
+    .transpose()
+}
+
+fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
+    find_placement_in(conn, work)?.ok_or_else(|| {
+        StoreError::InvalidData(format!(
+            "{} {} has no Home placement",
+            work.kind(),
+            work.id()
+        ))
+    })
+}
+
+fn reserving_home_in(conn: &Connection, work: &WorkRef) -> StoreResult<HomeId> {
+    let placed = placement_in(conn, work)?.home_id;
+    let local = map_local_home(conn)?.id;
+    if placed != local {
+        return Err(StoreError::InvalidData(format!(
+            "cannot reserve {} {} on local Home {local}; it is placed on {placed}",
+            work.kind(),
+            work.id()
+        )));
+    }
+    Ok(local)
+}
+
+fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
+    let row = match work {
+        WorkRef::Wave(id) => conn.query_row(
+            "SELECT home_id, placed_at FROM work_placements WHERE wave_id=?1",
+            [id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        ),
+        WorkRef::Project(id) => conn.query_row(
+            "SELECT home_id, placed_at FROM work_placements WHERE project_id=?1",
+            [id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        ),
+        WorkRef::Task(id) => conn.query_row(
+            "SELECT home_id, placed_at FROM work_placements WHERE task_id=?1",
+            [id.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        ),
+    }
+    .optional()?;
+    row.map(|(home_id, placed_at)| {
+        Ok(Placement {
+            work: work.clone(),
+            home_id: HomeId::parse(&home_id).map_err(invalid_durable)?,
+            placed_at: OffsetDateTime::from_unix_timestamp(placed_at).map_err(invalid_durable)?,
+        })
+    })
+    .transpose()
+}
+
+fn write_placement(
+    tx: &Transaction<'_>,
+    work: &WorkRef,
+    home_id: &HomeId,
+    placed_at: i64,
+) -> StoreResult<()> {
+    match work {
+        WorkRef::Wave(id) => tx.execute(
+            "INSERT INTO work_placements (wave_id, home_id, placed_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(wave_id) DO UPDATE SET
+                home_id=excluded.home_id, placed_at=excluded.placed_at",
+            params![id.as_str(), home_id.as_str(), placed_at],
+        )?,
+        WorkRef::Project(id) => tx.execute(
+            "INSERT INTO work_placements (project_id, home_id, placed_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(project_id) DO UPDATE SET
+                home_id=excluded.home_id, placed_at=excluded.placed_at",
+            params![id.as_str(), home_id.as_str(), placed_at],
+        )?,
+        WorkRef::Task(id) => tx.execute(
+            "INSERT INTO work_placements (task_id, home_id, placed_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(task_id) DO UPDATE SET
+                home_id=excluded.home_id, placed_at=excluded.placed_at",
+            params![id.as_str(), home_id.as_str(), placed_at],
+        )?,
+    };
+    Ok(())
+}
+
+fn inherit_placement(
+    tx: &Transaction<'_>,
+    work: &WorkRef,
+    parent: Option<&WorkRef>,
+    placed_at: i64,
+) -> StoreResult<()> {
+    if find_placement_in(tx, work)?.is_some() {
+        return Ok(());
+    }
+    let home_id = match parent {
+        Some(parent) => placement_in(tx, parent)?.home_id,
+        None => map_local_home(tx)?.id,
+    };
+    write_placement(tx, work, &home_id, placed_at)
 }
 
 fn resolve_wait_for_trigger(
@@ -2255,6 +2444,8 @@ pub(crate) fn create_wave_spine(
     repo: &str,
     created_at: i64,
 ) -> StoreResult<()> {
+    let work = WorkRef::Wave(wave_id.clone());
+    inherit_placement(tx, &work, None, created_at)?;
     let exists: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM epochs WHERE wave_id=?1)",
         [wave_id.as_str()],
@@ -2301,6 +2492,14 @@ pub(crate) fn create_project_spine(
             session.launch.project.id.as_str(),
             session.created_at.unix_timestamp(),
         ],
+    )?;
+    let work = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
+    let parent = WorkRef::Wave(session.wave_id.clone());
+    inherit_placement(
+        tx,
+        &work,
+        Some(&parent),
+        session.created_at.unix_timestamp(),
     )?;
     let epoch_id = EpochId::new();
     let number: i64 = tx.query_row(
@@ -2368,6 +2567,14 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> 
             session.launch.issue.identifier,
             session.created_at.unix_timestamp(),
         ],
+    )?;
+    let work = WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?);
+    let parent = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
+    inherit_placement(
+        tx,
+        &work,
+        Some(&parent),
+        session.created_at.unix_timestamp(),
     )?;
     let epoch_id = EpochId::new();
     let number: i64 = tx.query_row(
@@ -2439,11 +2646,7 @@ fn import_run_for_child(
     };
     let work = work_for_child_in(tx, target)?;
     let epoch = current_epoch_in(tx, &work)?;
-    let home_id: String = tx.query_row(
-        "SELECT id FROM homes ORDER BY created_at LIMIT 1",
-        [],
-        |row| row.get(0),
-    )?;
+    let home_id = reserving_home_in(tx, &work)?;
     let trigger_json = serde_json::to_string(&RunTrigger::Input {
         basis: epoch.current_basis,
     })
@@ -2461,7 +2664,7 @@ fn import_run_for_child(
         params![
             run_id.as_str(),
             epoch.id.as_str(),
-            home_id,
+            home_id.as_str(),
             state,
             trigger_json,
             lease_hash,
@@ -2483,11 +2686,7 @@ pub(crate) fn reserve_run_for_child(
 ) -> StoreResult<crate::durable::RunLeaseToken> {
     let work = work_for_child_in(tx, target)?;
     let epoch = current_epoch_in(tx, &work)?;
-    let home_id: String = tx.query_row(
-        "SELECT id FROM homes ORDER BY created_at LIMIT 1",
-        [],
-        |row| row.get(0),
-    )?;
+    let home_id = reserving_home_in(tx, &work)?;
     let default_trigger = RunTrigger::Input {
         basis: epoch.current_basis.clone(),
     };
@@ -2504,7 +2703,7 @@ pub(crate) fn reserve_run_for_child(
         params![
             run_id.as_str(),
             epoch.id.as_str(),
-            home_id,
+            home_id.as_str(),
             trigger_json,
             lease_hash,
             i64::from(process.generation),

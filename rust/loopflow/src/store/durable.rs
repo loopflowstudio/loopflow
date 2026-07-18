@@ -2,8 +2,8 @@ use crate::child_session::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildFeedback,
     ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, Feedback, FlowPosition, Home,
-    HomeId, InterruptReceipt, LaunchId, LaunchSurface, Run, RunAdvance, RunControl, RunLease,
-    RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
+    HomeId, InterruptReceipt, LaunchId, LaunchSurface, Placement, Run, RunAdvance, RunControl,
+    RunLease, RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
     ToolResponseReceipt, ToolResponseWrite, UserFeedback, WorkRef, WorkStatus,
 };
 
@@ -28,21 +28,47 @@ impl Store {
         .await
     }
 
-    pub async fn home(&self, route: &str) -> StoreResult<Home> {
+    pub async fn home_by_id(&self, home_id: &HomeId) -> StoreResult<Option<Home>> {
+        let home_id = home_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.home_by_id(&home_id)).await
+    }
+
+    pub async fn local_home(&self) -> StoreResult<Home> {
+        run_sqlite(&self.sqlite, move |store| store.local_home()).await
+    }
+
+    pub async fn observe_home(&self, home_id: &HomeId, route: &str) -> StoreResult<Home> {
+        let home_id = home_id.clone();
         let route = route.to_string();
-        run_sqlite(&self.sqlite, move |store| store.home(&route)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.observe_home(&home_id, &route)
+        })
+        .await
+    }
+
+    pub async fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
+    }
+
+    pub(crate) async fn place_work(
+        &self,
+        work: &WorkRef,
+        home_id: &HomeId,
+    ) -> StoreResult<Placement> {
+        let work = work.clone();
+        let home_id = home_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await
     }
 
     pub async fn reserve_run(
         &self,
         work: &WorkRef,
-        home_id: &HomeId,
         trigger: RunTrigger,
     ) -> StoreResult<(Run, RunLease)> {
         let work = work.clone();
-        let home_id = home_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_run(&work, &home_id, &trigger)
+            store.reserve_run(&work, &trigger)
         })
         .await
     }
@@ -407,7 +433,7 @@ mod tests {
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
 
-    async fn wave_work() -> (super::Store, WorkRef, crate::durable::Home) {
+    async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
         let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
             .await
@@ -418,8 +444,7 @@ mod tests {
             directory.display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let home = store.home("test-home").await.unwrap();
-        (store, WorkRef::Wave(wave.id().clone()), home)
+        (store, WorkRef::Wave(wave.id().clone()))
     }
 
     fn project_session(wave_id: WaveId) -> ProjectSession {
@@ -455,13 +480,9 @@ mod tests {
     async fn start_launch(
         store: &super::Store,
         work: &WorkRef,
-        home: &crate::durable::Home,
         opaque: bool,
     ) -> (crate::durable::RunLease, crate::durable::Launch) {
-        let (_run, lease) = store
-            .reserve_run(work, &home.id, RunTrigger::User)
-            .await
-            .unwrap();
+        let (_run, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
         let receipt = store
             .advance_run(
                 &lease,
@@ -502,8 +523,8 @@ mod tests {
 
     #[tokio::test]
     async fn feedback_is_current_flow_launch_and_attention_not_a_stored_decision() {
-        let (store, work, home) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, &home, false).await;
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, false).await;
         let initial = store.current_epoch(&work).await.unwrap().current_basis;
         store
             .set_flow_position(
@@ -574,8 +595,8 @@ mod tests {
 
     #[tokio::test]
     async fn exit_guard_continues_only_the_exact_user_feedback() {
-        let (store, work, home) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, &home, false).await;
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, false).await;
         let basis = store.current_epoch(&work).await.unwrap().current_basis;
         store
             .set_flow_position(
@@ -636,7 +657,7 @@ mod tests {
 
     #[tokio::test]
     async fn active_parent_run_can_escalate_only_its_current_child_feedback() {
-        let (store, parent, home) = wave_work().await;
+        let (store, parent) = wave_work().await;
         let project = project_session(match &parent {
             WorkRef::Wave(id) => id.clone(),
             _ => unreachable!(),
@@ -646,8 +667,8 @@ mod tests {
             .work_for_child(&crate::child_session::ChildRef::Project(project.id))
             .await
             .unwrap();
-        let (parent_lease, _) = start_launch(&store, &parent, &home, false).await;
-        let (child_lease, child_launch) = start_launch(&store, &child, &home, false).await;
+        let (parent_lease, _) = start_launch(&store, &parent, false).await;
+        let (child_lease, child_launch) = start_launch(&store, &child, false).await;
         let basis = store.current_epoch(&child).await.unwrap().current_basis;
         store
             .set_flow_position(
@@ -688,8 +709,8 @@ mod tests {
 
     #[tokio::test]
     async fn unprovable_containment_keeps_the_run_slot_fenced() {
-        let (store, work, home) = wave_work().await;
-        let (lease, _launch) = start_launch(&store, &work, &home, false).await;
+        let (store, work) = wave_work().await;
+        let (lease, _launch) = start_launch(&store, &work, false).await;
         let stopped = store
             .stop_run(
                 &lease,
@@ -699,10 +720,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stopped.run.state, RunState::Stopping);
-        assert!(store
-            .reserve_run(&work, &home.id, RunTrigger::User)
-            .await
-            .is_err());
+        assert!(store.reserve_run(&work, RunTrigger::User).await.is_err());
 
         let reaped = store
             .stop_run(&lease, StopCause::Recovery, ContainmentObservation::Absent)
@@ -712,7 +730,6 @@ mod tests {
         let (recovery, _) = store
             .reserve_run(
                 &work,
-                &home.id,
                 RunTrigger::Recovery {
                     prior_run_id: reaped.run.id,
                 },
@@ -723,9 +740,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_the_placed_home_can_reserve_and_live_work_cannot_move() {
+        let (store, work) = wave_work().await;
+        let local = store.placement(&work).await.unwrap();
+        assert_eq!(local.home_id, store.local_home().await.unwrap().id);
+
+        let remote = store
+            .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
+            .await
+            .unwrap();
+        let placed = store.place_work(&work, &remote.id).await.unwrap();
+        assert_eq!(placed.home_id, remote.id);
+        assert!(matches!(
+            store.reserve_run(&work, RunTrigger::User).await,
+            Err(StoreError::InvalidData(message)) if message.contains("it is placed on")
+        ));
+
+        let moved = store.place_work(&work, &local.home_id).await.unwrap();
+        assert_eq!(moved.home_id, local.home_id);
+        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        assert_eq!(run.home_id, local.home_id);
+        assert!(matches!(
+            store.place_work(&work, &remote.id).await,
+            Err(StoreError::InvalidData(message)) if message.contains("cannot move wave")
+        ));
+
+        store
+            .stop_run(&lease, StopCause::Requested, ContainmentObservation::Absent)
+            .await
+            .unwrap();
+        let moved = store.place_work(&work, &remote.id).await.unwrap();
+        assert_eq!(moved.home_id, remote.id);
+    }
+
+    #[tokio::test]
+    async fn local_home_route_cannot_be_observed_as_remote() {
+        let (store, _) = wave_work().await;
+        let local = store.local_home().await.unwrap();
+
+        assert!(matches!(
+            store.observe_home(&local.id, "ssh://jack@elsewhere").await,
+            Err(StoreError::InvalidData(message)) if message.contains("cannot replace local Home")
+        ));
+        assert_eq!(store.local_home().await.unwrap(), local);
+    }
+
+    #[tokio::test]
     async fn opaque_launch_success_is_a_completion_basis() {
-        let (store, work, home) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, &home, true).await;
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, true).await;
         let basis = launch.opaque_basis.clone().unwrap();
         store
             .advance_run(
@@ -743,8 +806,8 @@ mod tests {
 
     #[tokio::test]
     async fn launch_surface_reopens_without_owning_liveness_and_handback_clears_attention() {
-        let (store, work, home) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, &home, true).await;
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, true).await;
         let basis = launch.opaque_basis.clone().unwrap();
         store
             .set_flow_position(

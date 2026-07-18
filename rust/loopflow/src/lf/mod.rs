@@ -231,7 +231,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: PmCommand,
     },
-    /// A Wave's execution Home: resolve, probe, and start it on its Home
+    /// Inspect this Home and observe routes to other Homes
     Home {
         #[command(subcommand)]
         cmd: HomeCommand,
@@ -262,6 +262,16 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Start one or more Waves on their authoritative Homes.
+    Start {
+        /// Wave names. With none, starts every Wave in the current repo.
+        waves: Vec<String>,
+        /// Internal identity bindings used when one Home dispatches to another.
+        #[arg(long = "wave-id", value_name = "NAME=ID", hide = true)]
+        wave_ids: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Stop a served wave gracefully
     Stop {
         /// Wave name
@@ -274,6 +284,9 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
+    /// Internal: one machine-local keeper serving every Wave on a Home.
+    #[command(name = "__home-resident", hide = true)]
+    HomeResident { home_id: crate::durable::HomeId },
     /// Internal resident primitive: execute one expanded top-level flow step.
     #[command(name = "__flow-step", hide = true)]
     FlowStep {
@@ -573,15 +586,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ReceiptCommand,
     },
-    /// Run a command on a remote host carrying your local credentials.
+    /// Run a command on a Home or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
     /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh mini-heart -- lf pr open`.
+    /// to resolve them locally. Example: `lf ssh <home-id> -- lf pr open`.
     Ssh {
-        /// Remote host (ssh alias or user@host)
-        host: String,
+        /// HomeId (preferred), SSH alias, or user@host
+        target: String,
         /// Repository path on the remote, relative to $HOME
         #[arg(long = "repo")]
         repo: Option<String>,
@@ -593,6 +606,11 @@ pub enum Commands {
         /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
         #[arg(long = "forward-agent")]
         forward_agent: bool,
+        /// Use credentials already installed on the remote Home. For detached
+        /// product lifecycle only; forwards no provider, GitHub, PM, or secret
+        /// authority.
+        #[arg(long = "remote-native")]
+        remote_native: bool,
         /// Command to run on the remote (after `--`)
         #[arg(last = true)]
         cmd: Vec<String>,
@@ -710,6 +728,15 @@ pub enum WorkCommand {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move Wave Work to a Home. Refuses while the Work has a live Run.
+    Place {
+        #[arg(value_parser = ["wave"])]
+        kind: String,
+        id: String,
+        home_id: crate::durable::HomeId,
         #[arg(long)]
         json: bool,
     },
@@ -1442,25 +1469,27 @@ pub enum PmTaskCommand {
     },
 }
 
-/// `lf home` — the shared Home control path a conductor surface drives.
+/// Inspect and observe durable Homes.
 #[derive(Debug, Subcommand)]
 pub enum HomeCommand {
-    /// Probe a Wave's Home for liveness and the one contextual action.
-    ///
-    /// Prints the Home address, its state (unreachable/stopped/running/unknown)
-    /// with the evidence, the attach endpoint when running, and the action to
-    /// offer. `--json` emits the `HomeRuntimeDto` a UI consumes.
-    Probe {
-        /// Wave name; defaults to the ambient wave.
-        wave: Option<String>,
+    /// Print this machine's stable local Home identity.
+    Id {
         #[arg(long)]
         json: bool,
     },
-    /// Idempotently start a Wave on its configured Home and return the attach
-    /// identity. Safe to repeat: an already-running Home is returned as-is rather
-    /// than launched twice. Targets the Home, not the machine running this
-    /// command.
-    Start {
+    /// Record the current route for a known Home identity.
+    Observe {
+        home_id: crate::durable::HomeId,
+        route: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Probe a Wave's Home for liveness and the one contextual action.
+    ///
+    /// Prints the Home route, its state (unreachable/stopped/running/unknown)
+    /// with the evidence, the attach endpoint when running, and the action to
+    /// offer. `--json` emits the `HomeRuntimeDto` a UI consumes.
+    Probe {
         /// Wave name; defaults to the ambient wave.
         wave: Option<String>,
         #[arg(long)]
@@ -2587,6 +2616,32 @@ mod tests {
             "task_1",
             "--continue-on-success",
             "--continue-on-exit",
+        ])
+        .is_err());
+
+        let place = Cli::try_parse_from([
+            "lf",
+            "work",
+            "place",
+            "wave",
+            "wave_00000000000000000000000000000001",
+            "home_00000000000000000000000000000001",
+            "--json",
+        ])
+        .expect("parse Work placement");
+        assert!(matches!(
+            place.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Place { kind, id, json: true, .. }
+            }) if kind == "wave" && id == "wave_00000000000000000000000000000001"
+        ));
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "place",
+            "task",
+            "task_00000000000000000000000000000001",
+            "home_00000000000000000000000000000001",
         ])
         .is_err());
     }

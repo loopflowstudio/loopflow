@@ -8,27 +8,32 @@ struct WaveLensTests {
 
     @Test("green when a body is live")
     func greenWhenLive() {
-        let lens = WaveLens.forWave(live: true, status: .idle, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(live: true, status: .ready, activeTasks: 0, activeProjects: 0)
         #expect(lens.color == .green)
         #expect(lens.reason.contains("Running"))
     }
 
     @Test("green when running even without an explicit live flag")
     func greenWhenRunning() {
-        let lens = WaveLens.forWave(live: false, status: .running, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(
+            live: false,
+            status: .running(runID: "run_test"),
+            activeTasks: 0,
+            activeProjects: 0
+        )
         #expect(lens.color == .green)
     }
 
     @Test("red when stopped with outstanding work")
     func redWhenOutstanding() {
-        let lens = WaveLens.forWave(live: false, status: .idle, activeTasks: 2, activeProjects: 1)
+        let lens = WaveLens.forWave(live: false, status: .ready, activeTasks: 2, activeProjects: 1)
         #expect(lens.color == .red)
         #expect(lens.reason.contains("3"))
     }
 
     @Test("black when off and clean")
     func blackWhenClean() {
-        let lens = WaveLens.forWave(live: false, status: .idle, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(live: false, status: .ready, activeTasks: 0, activeProjects: 0)
         #expect(lens.color == .black)
         #expect(!lens.color.isLit)
     }
@@ -167,9 +172,14 @@ struct WaveLensTests {
     @Test("every lens carries a reason for VoiceOver")
     func everyLensHasReason() throws {
         let lenses = [
-            WaveLens.forWave(live: true, status: .running, activeTasks: 0, activeProjects: 0),
-            WaveLens.forWave(live: false, status: .idle, activeTasks: 1, activeProjects: 0),
-            WaveLens.forWave(live: false, status: .idle, activeTasks: 0, activeProjects: 0),
+            WaveLens.forWave(
+                live: true,
+                status: .running(runID: "run_test"),
+                activeTasks: 0,
+                activeProjects: 0
+            ),
+            WaveLens.forWave(live: false, status: .ready, activeTasks: 1, activeProjects: 0),
+            WaveLens.forWave(live: false, status: .ready, activeTasks: 0, activeProjects: 0),
             WaveLens.forTask(try makeAttention(level: "unknown", reason: "unread")),
             WaveLens.forProject(runtime: nil, tasks: []),
         ]

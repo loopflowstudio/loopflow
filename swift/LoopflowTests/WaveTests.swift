@@ -1,4 +1,3 @@
-import SwiftUI
 import Testing
 @testable import Loopflow
 
@@ -10,7 +9,7 @@ struct WaveTests {
             id: "wave-123",
             name: "infrastructure",
             repo: "/tmp/repo",
-            status: .running,
+            status: .running(runID: "run_test"),
             live: true
         ))
 
@@ -28,7 +27,7 @@ struct WaveTests {
                 id: "authored:/tmp/repo#infrastructure",
                 name: "infrastructure",
                 repo: "/tmp/repo",
-                status: .idle
+                status: .ready
             ),
             isRegistered: false
         )
@@ -47,18 +46,11 @@ struct WaveTests {
                 id: "wave-123",
                 name: "infrastructure",
                 repo: "/tmp/repo",
-                status: .idle
+                status: .ready
             ),
             plan: WavePlan(objective: "\nMake releases boring.\nKeep them observable.")
         )
 
         #expect(wave.objectiveTagline == "Make releases boring.")
-    }
-
-    @Test("status owns its visual treatment")
-    func statusOwnsVisualTreatment() {
-        #expect(WaveStatus.running.icon == "circle.fill")
-        #expect(WaveStatus.running.color == .statusSuccess)
-        #expect(WaveStatus.paused.icon == "pause.circle")
     }
 }

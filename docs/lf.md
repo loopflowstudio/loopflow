@@ -248,8 +248,9 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ## Running Waves, Projects, and Tasks
 
 ```bash
-lf wave designer                                   # start the named Wave
-lf stop designer                                   # stop its listener and resident
+lf start designer                                  # serve it from its placed Home
+lf wave designer                                   # foreground development mode
+lf stop designer                                   # stop it; leave the Home keeper running
 lf project run <linear-project-id>                  # durable Project Session
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
@@ -268,11 +269,13 @@ lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
 lf work continue task task_...                      # advance past current Feedback
+lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-`lf wave <name>` starts the durable Wave listener, resident, and persistent
-playhead. A Project Session pursues one Linear Project's KRs without a worktree.
+`lf start <name>` asks the placed Home's shared keeper to serve the Wave.
+`lf wave <name>` runs that Wave listener and resident in the foreground for
+development. A Project Session pursues one Linear Project's KRs without a worktree.
 Each Project has at most one current Session; terminal Sessions remain readable
 history and the next pursuit creates a successor. Every Task requires the
 current Project Session; `task start/run` ensures it before reserving the Task.
@@ -306,6 +309,28 @@ client crash, but only while the same Launch and Basis still own User attention.
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
 tmux remains containment and a presentation route, not product identity.
+
+## Placing Work and Reaching Homes
+
+```bash
+lf home id --json
+lf home observe <home-id> ssh://jack@mini.local
+lf work place wave <wave-id> <home-id>
+lf start shipper --json
+lf stop shipper
+lf ssh <home-id> --remote-native -- lf status shipper --json
+```
+
+`lf start` returns the same Wave rows as `lf ls --json`; it does not define a
+second launch-result model. With no names it starts every Wave in the current
+repo. `lf stop` stops the selected Wave while the Home keeper and sibling Waves
+continue.
+
+`lf ssh <HomeId>` resolves the Home's current observed route and makes the
+target prove that identity. Add `--remote-native` for durable lifecycle: no
+origin provider, GitHub, PM, account, or secret authority crosses SSH. Raw
+`lf ssh <host> -- <command>` keeps the foreground credential-forwarding
+behavior.
 
 ## Presenting an Opaque Launch
 
@@ -401,6 +426,9 @@ woke, the miss is announced in its thread rather than passed over in silence.
 ## Reading the Local Ledger
 
 ```bash
+lf ls --json                    # every durable Wave and its Home/runtime evidence
+lf status <wave> --json         # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json               # current plan across Waves joined to runtime truth
 lf runs                         # one row per skill call: context, tokens, cost
 lf execs                        # one row per lf process
 lf trace 66863649               # select an exec or trace; render its process tree
@@ -417,6 +445,10 @@ lf top                          # persisted last-hour Turn throughput + live pro
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
+
+`lf ls` reads the Wave registry. `lf status` focuses one Wave's operational
+truth. `lf roadmap` overlays the current Linear-backed plan without creating a
+second runtime model.
 
 ```bash
 lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route

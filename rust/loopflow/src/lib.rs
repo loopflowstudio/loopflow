@@ -6,6 +6,7 @@ pub mod durable;
 pub mod engine;
 pub mod flowloop;
 pub mod harness;
+pub mod home_resident;
 pub mod id;
 pub mod journal;
 pub mod lf;

@@ -4,7 +4,7 @@ use std::process::Command;
 use anyhow::{anyhow, Context};
 
 use crate::durable::{BoundaryState, LaunchId, LaunchSurface};
-use crate::engine::wave_home::WaveHome;
+use crate::engine::wave_home::HomeRoute;
 use crate::lf::LaunchCommand;
 use crate::store::{open_store, storage_config_from_env, Store};
 
@@ -105,7 +105,7 @@ fn present(surface: &LaunchSurface) -> anyhow::Result<()> {
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| anyhow!("Launch {} has an empty attach route", surface.launch.id))?;
-    let home = WaveHome::parse(&surface.home_route)
+    let home = HomeRoute::parse(&surface.home_route)
         .ok_or_else(|| anyhow!("invalid Home route {:?}", surface.home_route))?;
     let mut command = if let Some(destination) = home.ssh_destination() {
         let mut command = Command::new("ssh");

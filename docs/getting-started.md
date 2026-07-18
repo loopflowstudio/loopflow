@@ -17,8 +17,8 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf home start <name>` → `lf chat --steer` / `lf status` |
-| Run on another machine | Set the wave's `home:` and run `lf home start <name>` ([Go Remote](#go-remote)) |
+| Steer and inspect from terminal | `lf start <name>` → `lf chat --steer` / `lf status` |
+| Run on another machine | Observe its HomeId, place the Wave, then `lf start <name>` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -165,7 +165,7 @@ frontmatter sets machine config such as `crons:` and `pm:`), then open it in
 **Loopflow** (macOS) — the home for running waves. Select the repository and
 the Wave to get its persistent conversation beside the Linear-backed
 Project → Task work map; the app starts the Wave's resident process when
-needed. From the CLI, `lf home start shipper` does the same start.
+needed. From the CLI, `lf start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
 <issue-id>`, and stays steerable while the Task Session works in its immutable
@@ -193,23 +193,25 @@ Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
 ## Go Remote
 
-Run agents while you sleep. A wave's **Home** — set in `GOAL.md` frontmatter —
-is where its work executes:
-
-```yaml
-home: ssh://jack@mini.local
-```
+Run agents while you sleep. A Home is stable execution authority; its SSH
+route is a mutable observation. Bootstrap the remote identity once:
 
 ```bash
-lf home probe shipper    # reachable? stopped? running?
-lf home start shipper    # idempotently start the Wave on its Home
+lf ssh jack@mini.local --remote-native -- lf home id --json
+lf home observe <home-id> ssh://jack@mini.local
+lf ls --json
+lf work place wave <wave-id> <home-id>
+lf start shipper
 ```
 
-Project and Task launches inherit the Home. There is no machine-wide service
-to install and nothing to register: the remote host needs `lf` and SSH.
-Credentials are resolved on your machine and forwarded per-invocation with
-`lf ssh` — they live only as long as the remote process, so the remote host
-stays a stateless compute surface.
+The remote host needs `lf`, SSH, and its own credentials. `lf start` routes
+through `lf ssh <home-id> --remote-native`: it forwards no origin credentials,
+and the remote Home verifies that the addressed HomeId is its own before
+changing lifecycle state. One Home keeper serves every placed Wave.
+
+Use ordinary `lf ssh <host> -- <command>` for foreground work that should borrow
+the origin's short-lived credential lease. Use `--remote-native` for durable
+remote work that must outlive SSH.
 
 Auth connects your providers locally:
 

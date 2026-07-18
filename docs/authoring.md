@@ -172,7 +172,10 @@ when to design first, what never to touch.
 | `crons` | Supplementary flow schedules, fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
 | `pm.linear_team` | Linear team id owning the Wave's Project and Task prefixes |
-| `home` | The Wave's execution Home — owner plus location, local or `ssh://` |
+
+Execution placement is durable runtime state, not authored goal intent. Use
+`lf work place wave <wave-id> <home-id>`; do not put a hostname or Home in
+`GOAL.md`.
 
 ### Writing KRs
 

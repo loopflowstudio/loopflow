@@ -101,6 +101,38 @@ reported output-token throughput for the last hour and the currently running
 `lf` and provider processes; use it as machine-health evidence, not as a
 lifecycle control.
 
+## Inspect
+
+When the human asks about Loopflow state, use the shared read surfaces instead
+of reconstructing it from processes, worktrees, or Linear:
+
+```bash
+lf ls --json              # every durable Wave and its Home/runtime evidence
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json         # current plan across Waves joined to runtime truth
+```
+
+`lf status` is the focused operational view. `lf roadmap` is the planning
+overlay, not a second runtime model.
+
+## Place And Run
+
+Execution placement is durable state, not authored goal text. A Work names one
+stable Home authority; the Home's SSH route may change without moving the Work.
+
+```bash
+lf home id                                      # this machine's HomeId
+lf work place wave <wave-id> <home-id>          # only while no Run is live
+lf start <wave>                                 # route to its placed Home
+lf stop <wave>                                  # leave the Home keeper and siblings running
+lf ssh <home-id> --remote-native -- lf status <wave> --json
+```
+
+Use `--remote-native` for durable remote lifecycle. It forwards no provider,
+GitHub, PM, or secret authority; the remote Home uses its installed authority.
+Use ordinary `lf ssh <host> -- <command>` only for foreground work that should
+borrow the origin's short-lived credential lease.
+
 ## Speak
 
 Answer a human message in your turn text. Use `lf radio pub` for proactive progress,
@@ -111,7 +143,7 @@ channel, or when the active skill requires it. Never guess a channel.
 one and a live wave is available. A stopped server must not block the assigned
 work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
 
-`lf chat` is the human surface. Agents use `lf radio pub`.
+`lf chat` is the User surface. Loopflow-launched agents use `lf radio pub`.
 
 ## Where To Write
 

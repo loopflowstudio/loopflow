@@ -55,13 +55,15 @@ enum MockWaveFixture {
     /// (parent set) to exercise future-ancestry row indentation.
     static var waves: [Wave] {
         [
-            Wave(id: "wave-1", name: "infrastructure", repo: repoPath, status: .running,
+            Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
+                 status: .running(runID: "run_infrastructure"),
                  live: true, activeTasks: 1, activeProjects: 1),
-            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .idle,
+            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  live: false, activeTasks: 2, activeProjects: 1),
-            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .idle,
+            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
                  live: false, activeTasks: 0, activeProjects: 0),
-            Wave(id: "wave-4", name: "cadenza", repo: repoPath, status: .running,
+            Wave(id: "wave-4", name: "cadenza", repo: repoPath,
+                 status: .running(runID: "run_cadenza"),
                  live: true, activeTasks: 0, activeProjects: 0, parentWaveId: "wave-1"),
         ]
     }
@@ -123,8 +125,7 @@ enum MockWaveFixture {
       "wave": {
         "id": "wave-1",
         "name": "infrastructure",
-        "status": "running",
-        "paused": false,
+        "status": {"running":{"run_id":"run_00000000000000000000000000000004"}},
         "goal": "Make releases boring.",
         "repo": "/src/loopflow",
         "active_tasks": 1,
@@ -134,9 +135,10 @@ enum MockWaveFixture {
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+          "id": "home_00000000000000000000000000000001",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "2026-07-01T00:00:00Z",
+          "observed_at": "2026-07-17T00:00:00Z"
         }
       },
       "loop_state": "idle",
@@ -333,9 +335,10 @@ enum MockWaveFixture {
       },
       "home_runtime": {
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+          "id": "home_00000000000000000000000000000001",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "2026-07-01T00:00:00Z",
+          "observed_at": "2026-07-17T00:00:00Z"
         },
         "state": "running",
         "reason": "resident is serving on the Home",

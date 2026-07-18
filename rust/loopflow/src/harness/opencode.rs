@@ -15,8 +15,7 @@ use crate::engine::agent::{register_interrupt_cleanup, AgentConfig};
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
-    opencode_mapping, opencode_runtime, ApprovalPolicy, Capabilities, Harness, HarnessError,
-    RawProviderEvent,
+    opencode_mapping, opencode_runtime, ApprovalPolicy, Harness, HarnessError, RawProviderEvent,
 };
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
@@ -470,15 +469,6 @@ impl Harness for OpenCodeHarness {
         self.server_base_url = None;
 
         Ok(())
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            // opencode queues mid-turn messages server-side rather than
-            // steering the running turn; send_input reports
-            // TurnAlreadyInProgress and the caller queues.
-            supports_steer: false,
-        }
     }
 
     fn provider_session_id(&self) -> Option<String> {

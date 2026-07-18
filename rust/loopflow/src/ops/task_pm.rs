@@ -186,28 +186,6 @@ pub async fn complete_task(
     Ok(())
 }
 
-/// Observe the owning team's *actual* Linear completion for one issue, forcing a
-/// live refresh. The PR's `CompleteTask` publication is only an intent, and its
-/// write can fail (ENG-29/ENG-75) — so a reconciliation that must prove the Task
-/// truly landed consults the issue's own workflow state, never the publication.
-/// `Ok(false)` when the issue is absent from the refreshed snapshot or sits in a
-/// non-completed state; `Err` when Linear cannot be reached (fail closed).
-pub async fn issue_is_complete(repo: &Path, wave: &str, item_id: &str) -> OpsResult<bool> {
-    #[cfg(test)]
-    {
-        test_hooks::record_root(repo);
-        if let Some(verdict) = test_hooks::issue_complete_override() {
-            return Ok(verdict);
-        }
-    }
-    let snapshot = load_wave_async(repo, wave, PmRefresh::Force).await?;
-    Ok(snapshot
-        .items
-        .iter()
-        .find(|item| item.id == item_id)
-        .is_some_and(|item| item.completed))
-}
-
 pub async fn retry_complete_task(
     repo: &Path,
     wave: &str,
@@ -275,41 +253,4 @@ fn project_for_item(snapshot: &PmShowResult, item: &PmItem) -> OpsResult<PmProje
                 item.identifier, snapshot.wave
             ))
         })
-}
-
-/// Test-only override for [`issue_is_complete`], so reconciliation regressions run
-/// without a live Linear read. Serialized by the PM/env test lock its callers
-/// already hold; a global (not thread-local) atomic because `block_on_task` polls
-/// the future on a worker thread.
-#[cfg(test)]
-pub(crate) mod test_hooks {
-    use std::path::Path;
-    use std::sync::atomic::{AtomicI8, Ordering};
-    use std::sync::Mutex;
-
-    static OVERRIDE: AtomicI8 = AtomicI8::new(-1);
-    static LAST_ROOT: Mutex<Option<String>> = Mutex::new(None);
-
-    pub(crate) fn set_issue_complete_override(value: Option<bool>) {
-        OVERRIDE.store(value.map_or(-1, i8::from), Ordering::SeqCst);
-    }
-
-    pub(crate) fn issue_complete_override() -> Option<bool> {
-        match OVERRIDE.load(Ordering::SeqCst) {
-            0 => Some(false),
-            1 => Some(true),
-            _ => None,
-        }
-    }
-
-    /// Record the PM root the last `issue_is_complete` was asked to read, so a
-    /// test can prove reconciliation resolves it from the Wave, not a dead
-    /// worktree.
-    pub(crate) fn record_root(root: &Path) {
-        *LAST_ROOT.lock().expect("root mutex") = Some(root.display().to_string());
-    }
-
-    pub(crate) fn last_root() -> Option<String> {
-        LAST_ROOT.lock().expect("root mutex").clone()
-    }
 }

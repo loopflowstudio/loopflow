@@ -185,6 +185,41 @@ async fn resolve_registry(main_repo: &Path, wave: &str) -> Option<registry::Regi
     }
 }
 
+struct WaveRunGuard(Option<(SharedStore, crate::durable::RunLease)>);
+
+impl WaveRunGuard {
+    fn as_ref(&self) -> Option<&(SharedStore, crate::durable::RunLease)> {
+        self.0.as_ref()
+    }
+
+    fn take(&mut self) -> Option<(SharedStore, crate::durable::RunLease)> {
+        self.0.take()
+    }
+}
+
+impl Drop for WaveRunGuard {
+    fn drop(&mut self) {
+        let Some((store, lease)) = self.0.take() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        runtime.spawn(async move {
+            if let Err(error) = store
+                .stop_run(
+                    &lease,
+                    crate::durable::StopCause::Requested,
+                    crate::durable::ContainmentObservation::Absent,
+                )
+                .await
+            {
+                tracing::warn!(%error, "failed to roll back Wave Run authority");
+            }
+        });
+    }
+}
+
 /// The production resident spawner: `lf __resident <wave>`, run by this
 /// same executable, endpoint + token + Wave context in env. The
 /// resident's stdout/stderr inherit — one `lf wave` terminal shows both
@@ -210,6 +245,14 @@ fn resident_spawner(
             .env(wire::RESIDENT_TOKEN_ENV, &token)
             // The resident's children must resolve `lf` to this binary.
             .env("PATH", crate::flowloop::wave::path_for_children())
+            .env_remove(crate::durable::RUN_CONTEXT_ENV)
+            .env_remove(crate::durable::RUN_LEASE_ENV)
+            .env_remove("LF_PROJECT_SESSION_ID")
+            .env_remove("LF_PROJECT_GENERATION")
+            .env_remove("LF_PROJECT_LEASE_TOKEN")
+            .env_remove("LF_TASK_SESSION_ID")
+            .env_remove("LF_TASK_GENERATION")
+            .env_remove("LF_TASK_LEASE_TOKEN")
             .stdin(std::process::Stdio::null());
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
@@ -218,6 +261,8 @@ fn resident_spawner(
         for (key, value) in &session_env {
             command.env(key, value);
         }
+        #[cfg(unix)]
+        command.process_group(0);
         command.spawn()
     })
 }
@@ -267,7 +312,23 @@ async fn run_listener(
     let registered = registry_config
         .as_ref()
         .map(|config| (config.store.clone(), config.wave.id().clone()));
-    let session_env = registry_config
+    let mut wave_run = WaveRunGuard(if spawn_resident {
+        match registry_config.as_ref() {
+            Some(config) => {
+                let work = crate::durable::WorkRef::Wave(config.wave.id().clone());
+                let home = config.store.home("local").await?;
+                let (_, lease) = config
+                    .store
+                    .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+                    .await?;
+                Some((config.store.clone(), lease))
+            }
+            None => None,
+        }
+    } else {
+        None
+    });
+    let mut session_env = registry_config
         .as_ref()
         .map(|config| {
             vec![
@@ -282,6 +343,18 @@ async fn run_listener(
             ]
         })
         .unwrap_or_default();
+    if let Some((_, lease)) = wave_run.as_ref() {
+        session_env.extend([
+            (
+                crate::durable::RUN_CONTEXT_ENV.to_string(),
+                "agent".to_string(),
+            ),
+            (
+                crate::durable::RUN_LEASE_ENV.to_string(),
+                lease.env_value().to_string(),
+            ),
+        ]);
+    }
 
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
@@ -400,6 +473,18 @@ async fn run_listener(
     }
     if let Some(task) = bus_task {
         task.abort();
+    }
+    if let Some((store, lease)) = wave_run.take() {
+        if let Err(error) = store
+            .stop_run(
+                &lease,
+                crate::durable::StopCause::Requested,
+                crate::durable::ContainmentObservation::Absent,
+            )
+            .await
+        {
+            tracing::warn!(%error, "failed to release Wave Run authority");
+        }
     }
     server::remove_endpoint(&repo_root, &wave, &own_addr);
     server::remove_resident_token(&repo_root, &wave, &token);

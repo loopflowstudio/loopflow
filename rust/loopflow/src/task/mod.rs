@@ -11,21 +11,15 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    prefixed_uuid_id, AbandonIntent, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildDirectiveId,
-    ChildLeaseState, ChildProcessGeneration, DirectiveKind,
+    prefixed_uuid_id, AbandonIntent, ChildLeaseState, ChildProcessGeneration,
 };
+use crate::durable::RunId;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
-    InteractionReviewMessageAuthor,
-};
 use crate::project_session::ProjectSessionId;
 use crate::session_context::TaskLaunchReceipt;
 
 pub mod actions;
-pub(crate) mod interactive_rendezvous;
 pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -348,7 +342,7 @@ impl CiObservation {
     ///
     /// This asks only about legality. Whether a wake has already fired for this
     /// exact failure is a separate question with a separate owner — the durable
-    /// `ChildCommandKind::CiFix` ledger, keyed on the incident identity. Those
+    /// CI incident, keyed on the incident identity and claimed by one Run. Those
     /// two questions used to be conflated in one mutable JSON marker on this
     /// struct, which meant the wake was deduplicated by a value re-derived on
     /// every reconcile and committed only once a body had already been born.
@@ -415,7 +409,9 @@ pub struct CiIncident {
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    pub trigger_command_id: Option<ChildCommandId>,
+    /// Active or most recent Run selected to repair this incident. A successor
+    /// may replace it only after the prior Run lost execution authority.
+    pub claimed_run_id: Option<RunId>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,
     pub merged_at: Option<OffsetDateTime>,
@@ -736,8 +732,6 @@ pub struct TaskSession {
     /// Required runtime parent. Every Task reports through one durable Project
     /// Session; its Wave retains root inspection and override authority.
     pub project_session_id: ProjectSessionId,
-    pub current_directive_version: u32,
-    pub incorporated_directive_version: u32,
     pub status: TaskSessionStatus,
     pub status_reason: String,
     pub status_at: OffsetDateTime,
@@ -818,9 +812,8 @@ impl TaskSession {
     /// current-head failure evidence — never a blind wake over passing or pending
     /// work, and never past the terminal, abandon, or publishing bars.
     ///
-    /// The bar answers legality only. "Have we already woken for this failure?"
-    /// is the command ledger's question, answered once by the incident identity
-    /// on `ChildCommandKind::CiFix` — not asked again here.
+    /// The bar answers legality only. The incident's Run claim answers whether
+    /// this failure already owns execution.
     pub fn ci_fix_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
             return Some(bar);
@@ -937,11 +930,6 @@ impl TaskSession {
                 }
             }
         }
-        if self.incorporated_directive_version > self.current_directive_version {
-            return Err(TaskDataError::InvalidInvariant(
-                "incorporated directive version exceeds current direction".to_string(),
-            ));
-        }
         Ok(())
     }
 
@@ -1057,58 +1045,8 @@ pub enum TaskEventKind {
         to: TaskSessionStatus,
         reason: String,
     },
-    CommandChanged {
-        command_id: ChildCommandId,
-        state: ChildCommandState,
-        effect: Option<ChildCommandEffect>,
-        error: Option<String>,
-    },
-    DirectiveChanged {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        directive_kind: DirectiveKind,
-    },
-    DirectiveIncorporated {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        summary: String,
-    },
-    /// An out-of-band Wave/Operator attestation that closed a merged, complete
-    /// Task's applied-but-unincorporated final directive. Distinct from
-    /// `DirectiveIncorporated`, which is the body's own acknowledgement — this
-    /// records who attested the semantic handoff from outside the Session, so
-    /// the trail never reads as a forged body acknowledgement.
-    DirectiveReconciled {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        summary: String,
-        attested_by: ChildCommandSource,
-    },
-    DecisionRequested {
-        decision_id: ChildDecisionId,
-        prompt: String,
-        options: Vec<String>,
-    },
-    DecisionResolved {
-        decision_id: ChildDecisionId,
-        choice: String,
-        message: Option<String>,
-    },
     Progress {
         summary: String,
-    },
-    InteractionReviewRequested {
-        review: Box<InteractionReview>,
-    },
-    InteractionReviewMessage {
-        review_id: InteractionReviewId,
-        author: InteractionReviewMessageAuthor,
-        text: String,
-    },
-    InteractionReviewCompleted {
-        review_id: InteractionReviewId,
-        disposition: InteractionReviewDisposition,
-        outcome: String,
     },
     PrStarted {
         pr_id: TaskPrId,
@@ -1143,16 +1081,10 @@ impl TaskEventKind {
     pub fn is_project_observable(&self) -> bool {
         match self {
             Self::Started | Self::Progress { .. } => false,
-            Self::InteractionReviewMessage {
-                author: InteractionReviewMessageAuthor::Reviewer,
-                ..
-            }
-            | Self::InteractionReviewCompleted { .. } => false,
             Self::BodyLeaseChanged { process } => matches!(
                 process.state,
                 ChildLeaseState::Revoked | ChildLeaseState::Finished
             ),
-            Self::CommandChanged { state, .. } => state.is_terminal(),
             _ => true,
         }
     }
@@ -1162,14 +1094,6 @@ impl TaskEventKind {
     /// escalates by emitting its own `DecisionRequested` event.
     pub fn is_root_wave_observable(&self) -> bool {
         self.is_project_observable()
-            && !matches!(
-                self,
-                Self::DecisionRequested { .. }
-                    | Self::DecisionResolved { .. }
-                    | Self::InteractionReviewRequested { .. }
-                    | Self::InteractionReviewMessage { .. }
-                    | Self::InteractionReviewCompleted { .. }
-            )
     }
 }
 
@@ -1186,7 +1110,6 @@ pub struct TaskObservation {
     pub session_id: TaskSessionId,
     pub issue_identifier: String,
     pub event_id: i64,
-    pub control_source: Option<crate::child_session::ChildCommandSource>,
     pub event: TaskEventKind,
 }
 
@@ -1196,11 +1119,8 @@ impl TaskObservation {
     }
 
     pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&serde_json::json!({
-            "control_source": self.control_source,
-            "event": self.event,
-        }))
-        .expect("Task observation always serializes to structured JSON");
+        let payload = serde_json::to_string(&self.event)
+            .expect("Task observation always serializes to structured JSON");
         format!(
             "<task_observation session_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
             self.session_id, self.issue_identifier, self.event_id, payload
@@ -1239,9 +1159,8 @@ pub struct LinearObservationApply {
     pub title: String,
     pub description: String,
     pub observed_at: OffsetDateTime,
-    /// A title/description edit to persist: the Steer command and its
-    /// replacement directive. `None` when title and description are unchanged.
-    pub directive: Option<(ChildCommand, ChildDirective)>,
+    /// A title/description edit to persist as one authored Steer.
+    pub content_steer: Option<String>,
     /// Human comments observed this pass, oldest first.
     pub follow_ups: Vec<LinearFollowUp>,
 }
@@ -1249,7 +1168,7 @@ pub struct LinearObservationApply {
 #[derive(Debug, Clone)]
 pub struct LinearFollowUp {
     pub comment_id: String,
-    pub command: ChildCommand,
+    pub text: String,
 }
 
 /// What one [`LinearObservationApply`] actually wrote — enough for the caller to
@@ -1259,9 +1178,8 @@ pub struct LinearObservationOutcome {
     /// The Session had no cursor yet: this observation seeded the baseline and
     /// emitted no direction (existing comments are marked seen, not replayed).
     pub baselined: bool,
-    pub directive_applied: bool,
-    pub superseded: Vec<ChildCommandId>,
-    pub follow_ups_created: Vec<ChildCommandId>,
+    pub content_steer_applied: bool,
+    pub follow_ups_created: Vec<crate::durable::SteerId>,
 }
 
 /// The result of carrying a terminal Task Session's direction onto a successor.
@@ -1270,8 +1188,8 @@ pub struct LinearObservationOutcome {
 /// Linear observation cursor and ingested-comment ledger onto it; `false` when a
 /// non-terminal successor already existed (a concurrent or retried run), in
 /// which case the carry transaction was a no-op and the existing Session is
-/// returned. Historical receipts (`child_commands`, `child_directives`) stay on
-/// the predecessor for attribution in both cases.
+/// returned. Historical authored Steers stay on the predecessor for attribution
+/// in both cases.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSessionSuccession {
     pub session: TaskSession,
@@ -1281,12 +1199,10 @@ pub struct TaskSessionSuccession {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, ChildCommandId, ChildCommandState, GithubPr, PmWritebackOperation,
-        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskGateProposal,
-        TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId, TaskSession,
-        TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication,
+        TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
-    use crate::child_session::ChildDecisionId;
     use crate::session_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         TaskLaunchReceipt,
@@ -1314,8 +1230,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_session_id: crate::project_session::ProjectSessionId::new(),
-            current_directive_version: 1,
-            incorporated_directive_version: 0,
             status: TaskSessionStatus::Created,
             status_reason: "created".to_string(),
             status_at: now,
@@ -1353,7 +1267,6 @@ mod tests {
             session_id: TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
-            control_source: None,
             event: super::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,
@@ -1371,47 +1284,6 @@ mod tests {
         assert!(TaskSessionStatus::Abandoned.is_terminal());
         assert!(!TaskSessionStatus::Waiting.is_terminal());
         assert!(!TaskSessionStatus::Failed.is_terminal());
-    }
-
-    #[test]
-    fn project_observes_command_outcomes_not_transport_chatter() {
-        let event = |state| TaskEventKind::CommandChanged {
-            command_id: ChildCommandId::new(),
-            state,
-            effect: None,
-            error: None,
-        };
-
-        assert!(!event(ChildCommandState::Persisted).is_project_observable());
-        assert!(!event(ChildCommandState::Claimed).is_project_observable());
-        assert!(!event(ChildCommandState::Delivering).is_project_observable());
-        assert!(event(ChildCommandState::Accepted).is_project_observable());
-        assert!(event(ChildCommandState::Failed).is_project_observable());
-        assert!(event(ChildCommandState::Uncertain).is_project_observable());
-    }
-
-    #[test]
-    fn project_supervision_keeps_routine_task_decisions_out_of_the_root_wave() {
-        let requested = TaskEventKind::DecisionRequested {
-            decision_id: ChildDecisionId::new(),
-            prompt: "Which parser shape?".to_string(),
-            options: vec!["strict".to_string(), "permissive".to_string()],
-        };
-        let resolved = TaskEventKind::DecisionResolved {
-            decision_id: ChildDecisionId::new(),
-            choice: "strict".to_string(),
-            message: None,
-        };
-
-        assert!(requested.is_project_observable());
-        assert!(resolved.is_project_observable());
-        assert!(!requested.is_root_wave_observable());
-        assert!(!resolved.is_root_wave_observable());
-        assert!(TaskEventKind::Failed {
-            error: "provider stopped".to_string(),
-            resumable: true,
-        }
-        .is_root_wave_observable());
     }
 
     #[test]

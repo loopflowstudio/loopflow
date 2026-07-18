@@ -60,6 +60,23 @@ convention (`<repo>.<name>`) is load-bearing, so never use raw `git worktree`.
 The current process and worktree are the default execution surface. Do the
 assigned work here with direct reads, edits, commands, and tests.
 
+## Evidence Loop
+
+Make the finish line explicit before acting: the observable result, the proof
+that distinguishes it from a plausible story, and the near-misses that do not
+count. When uncertainty is material, keep observed facts separate from the
+current hypothesis in a durable artifact outside the provider transcript.
+
+Prefer the smallest safe check whose possible outcomes distinguish the leading
+explanations. Verify a candidate against all relevant recorded evidence, not
+only the latest case. Treat unexpected tool, test, or user output as a
+counterexample: stop dependent steps, revise the model or plan, then continue.
+Never rewrite an observation to preserve a favored explanation.
+
+Move cheap search into code, tests, fixtures, or a local sandbox when possible.
+Cross a side-effect boundary only after the candidate survives the available
+checks, then record the consequential result durably.
+
 Delegation must make the problem smaller. Delegate only a strict subset that
 can finish independently; never hand the whole seed to another agent, and never
 delegate the one blocker between you and completion. Resolve that blocker

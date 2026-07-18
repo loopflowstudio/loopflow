@@ -2,16 +2,16 @@ import Foundation
 
 /// The Active Sessions census: a machine-wide reading of every live body —
 /// Wave, Project Session, Task Session, direct execution, and interactive
-/// handoff — grouped by Wave. It is a **pure projection** over three
-/// already-merged contracts (`lf roadmap`, `lf runs`, `lf handoff list`),
+/// launch — grouped by Wave. It is a **pure projection** over three
+/// already-merged contracts (`lf roadmap`, `lf runs`, `lf launch list`),
 /// indexed by the ids each contract declares. It performs no filesystem
 /// inference and reconstructs no parentage; it reads the parent each row states.
 ///
 /// The rules that live here, and nowhere in the view:
 /// - **View-only by default.** Ordinary bodies expose no controls. Only an
-///   active interactive handoff exposes `.open`, which re-attaches the exact
-///   durable Session through `lf handoff attach`.
-/// - **Red propagation.** A handoff waiting on the human tints its Task, its
+///   active interactive launch exposes `.open`, which re-attaches the exact
+///   durable Session through `lf launch attach`.
+/// - **Red propagation.** A launch waiting on the human tints its Task, its
 ///   Project, and its Wave red even while their bodies are alive.
 /// - **Honest evidence.** Missing, stale, unreachable, stopped, and unavailable
 ///   stay distinguishable from a healthy empty state; a broken source never
@@ -40,7 +40,7 @@ public enum ActiveSessionKind: String, Sendable, Hashable {
     case project
     case task
     case directExecution
-    case handoff
+    case launch
 }
 
 /// One body in the census. Fields the contract does not carry are `nil`, never
@@ -64,9 +64,8 @@ public struct ActiveSessionRow: Sendable, Hashable, Identifiable {
     public let tint: AttentionTint
     public let evidence: SessionEvidence
     public let actions: [SessionAction]
-    /// Set only on an interactive handoff row: the durable Session id that Open
-    /// re-attaches. `nil` everywhere else, which is why nothing else is mutable.
-    public let handoffSessionId: String?
+    /// Set only when a Launch exposes a User-openable attach route.
+    public let launchId: String?
 
     public var isOpenable: Bool { actions.contains(.open) }
 
@@ -89,7 +88,7 @@ public struct ActiveSessionRow: Sendable, Hashable, Identifiable {
         case .project: "Project session"
         case .task: "Task session"
         case .directExecution: "Direct execution"
-        case .handoff: "Interactive handoff"
+        case .launch: "Interactive launch"
         }
     }
 
@@ -131,15 +130,15 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
     public init(
         roadmap: RoadmapSnapshot,
         runs: [SkillRunEntry],
-        handoffs: [InteractiveHandoffListRow],
+        launches: [LaunchSurfaceRecord],
         staleThresholdSecs: Int = 300
     ) {
         // Index the two side contracts by the identity each already carries:
-        // handoffs by their declared wave id, runs by their wave name. Only
+        // launches by their declared wave id, runs by their wave name. Only
         // active bodies enter the census.
-        var handoffsByWave: [String: [InteractiveHandoffListRow]] = [:]
-        for handoff in handoffs where handoff.status.isActive {
-            handoffsByWave[handoff.waveId, default: []].append(handoff)
+        var launchesByWave: [String: [LaunchSurfaceRecord]] = [:]
+        for launch in launches where launch.status.isActive {
+            launchesByWave[launch.waveId, default: []].append(launch)
         }
         var runsByWave: [String: [SkillRunEntry]] = [:]
         for run in runs where run.ended == nil {
@@ -154,34 +153,34 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             let wave = waveRoadmap.wave
             seenWaveIds.insert(wave.id)
             seenWaveNames.insert(wave.name)
-            let waveHandoffs = handoffsByWave[wave.id] ?? []
+            let waveLaunches = launchesByWave[wave.id] ?? []
             let waveRuns = runsByWave[wave.name] ?? []
             groups.append(
                 Self.buildGroup(
                     wave: wave,
                     projects: waveRoadmap.projects,
                     runs: waveRuns,
-                    handoffs: waveHandoffs,
+                    launches: waveLaunches,
                     staleThresholdSecs: staleThresholdSecs
                 )
             )
         }
 
-        // Nothing gets dropped: handoffs and runs whose Wave is absent from the
+        // Nothing gets dropped: launches and runs whose Wave is absent from the
         // roadmap still surface, under an explicit unattributed group.
-        var orphanHandoffs: [InteractiveHandoffListRow] = []
-        for (waveId, list) in handoffsByWave where !seenWaveIds.contains(waveId) {
-            orphanHandoffs.append(contentsOf: list)
+        var orphanLaunches: [LaunchSurfaceRecord] = []
+        for (waveId, list) in launchesByWave where !seenWaveIds.contains(waveId) {
+            orphanLaunches.append(contentsOf: list)
         }
         var orphanRuns: [SkillRunEntry] = []
         for (name, list) in runsByWave where !seenWaveNames.contains(name) {
             orphanRuns.append(contentsOf: list)
         }
-        if !orphanHandoffs.isEmpty || !orphanRuns.isEmpty {
+        if !orphanLaunches.isEmpty || !orphanRuns.isEmpty {
             var rows = orphanRuns.map { Self.directExecutionRow($0) }
             rows.append(
-                contentsOf: orphanHandoffs.map {
-                    Self.handoffRow($0, parentRowId: nil, staleThresholdSecs: staleThresholdSecs)
+                contentsOf: orphanLaunches.map {
+                    Self.launchRow($0, parentRowId: nil, staleThresholdSecs: staleThresholdSecs)
                 }
             )
             let red = rows.contains { $0.tint == .red }
@@ -208,21 +207,21 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         wave: WaveSnapshot,
         projects: WorkEvidence<RoadmapProject>,
         runs: [SkillRunEntry],
-        handoffs: [InteractiveHandoffListRow],
+        launches: [LaunchSurfaceRecord],
         staleThresholdSecs: Int
     ) -> ActiveSessionWaveGroup {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
-        // Every handoff here is active — waiting *or* attached — and so still
-        // unresolved: the human has not completed or cancelled it, and the parent
-        // stays blocked. Index those parent ids so the parent chain tints red
-        // until the handoff reaches a terminal outcome, not merely until a human
-        // first attaches.
-        let blockingParentIds = Set(handoffs.map(\.parentId))
-        let waveLevelBlocking = handoffs.contains { $0.parentKind == "wave" }
+        // Only User-routed attention paints the external attention queue red.
+        // Parent-routed Reviews remain on the parent's control lane.
+        let userLaunches = launches.filter {
+            $0.attention?.kind == "user" && $0.attentionAt != nil
+        }
+        let blockingParentIds = Set(userLaunches.map(\.parentId))
+        let waveLevelBlocking = userLaunches.contains { $0.parentKind == "wave" }
 
         var rows: [ActiveSessionRow] = []
         var anyRed = waveLevelBlocking
-        var handledHandoffIds: Set<String> = []
+        var handledLaunchIds: Set<String> = []
 
         if case let .available(projectItems, _) = projects {
             for project in projectItems {
@@ -238,9 +237,9 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                         !isTerminal(taskRuntime.status)
                     else { continue }
                     let taskRowId = taskRuntime.sessionId
-                    let blockingHandoff = blockingParentIds.contains(taskRuntime.sessionId)
+                    let blockingLaunch = blockingParentIds.contains(taskRuntime.sessionId)
                     var tint = tint(for: task.attention.level)
-                    if blockingHandoff { tint = .red }
+                    if blockingLaunch { tint = .red }
                     if tint == .red { projectRed = true }
                     childRows.append(
                         ActiveSessionRow(
@@ -265,18 +264,18 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                                 staleThresholdSecs: staleThresholdSecs
                             ),
                             actions: [],
-                            handoffSessionId: nil
+                            launchId: nil
                         )
                     )
-                    for handoff in handoffs where handoff.parentId == taskRuntime.sessionId {
+                    for launch in launches where launch.parentId == taskRuntime.sessionId {
                         childRows.append(
-                            handoffRow(
-                                handoff,
+                            launchRow(
+                                launch,
                                 parentRowId: taskRowId,
                                 staleThresholdSecs: staleThresholdSecs
                             )
                         )
-                        handledHandoffIds.insert(handoff.sessionId)
+                        handledLaunchIds.insert(launch.sessionId)
                     }
                 }
 
@@ -304,19 +303,19 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                             remoteUnreachable: remoteUnreachable
                         ),
                         actions: [],
-                        handoffSessionId: nil
+                        launchId: nil
                     )
                 )
                 rows.append(contentsOf: childRows)
-                for handoff in handoffs where handoff.parentId == runtime.sessionId {
+                for launch in launches where launch.parentId == runtime.sessionId {
                     rows.append(
-                        handoffRow(
-                            handoff,
+                        launchRow(
+                            launch,
                             parentRowId: projectRowId,
                             staleThresholdSecs: staleThresholdSecs
                         )
                     )
-                    handledHandoffIds.insert(handoff.sessionId)
+                    handledLaunchIds.insert(launch.sessionId)
                 }
             }
         }
@@ -324,10 +323,10 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         for run in runs {
             rows.append(directExecutionRow(run))
         }
-        // Wave-level and orphaned handoffs (parent not found in this roadmap).
-        for handoff in handoffs where !handledHandoffIds.contains(handoff.sessionId) {
-            let row = handoffRow(
-                handoff,
+        // Wave-level and orphaned launches (parent not found in this roadmap).
+        for launch in launches where !handledLaunchIds.contains(launch.sessionId) {
+            let row = launchRow(
+                launch,
                 parentRowId: nil,
                 staleThresholdSecs: staleThresholdSecs
             )
@@ -369,33 +368,31 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
 
     // MARK: - Row builders
 
-    private static func handoffRow(
-        _ handoff: InteractiveHandoffListRow,
+    private static func launchRow(
+        _ launch: LaunchSurfaceRecord,
         parentRowId: String?,
         staleThresholdSecs: Int
     ) -> ActiveSessionRow {
-        // Only active handoffs are censused, and an active handoff — waiting or
-        // already attached — is still owed a human resolution, so it stays red
-        // and keeps naming the human as the next owner until it completes, hands
-        // back, or fails.
+        let userAttention = launch.attention?.kind == "user" && launch.attentionAt != nil
+        let openable = userAttention && !launch.argv.isEmpty
         return ActiveSessionRow(
-            id: "handoff:\(handoff.sessionId)",
-            kind: .handoff,
-            title: handoff.reason,
-            subtitle: "\(handoff.parentKind) handoff · \(handoff.provider)",
+            id: "launch:\(launch.sessionId)",
+            kind: .launch,
+            title: launch.reason,
+            subtitle: "\(launch.parentKind) launch · \(launch.provider)",
             parentRowId: parentRowId,
-            provider: handoff.provider,
+            provider: launch.provider,
             model: nil,
-            home: handoff.home,
+            home: launch.home,
             worktree: nil,
             step: nil,
-            ageSecs: handoff.ageSecs,
-            reason: handoff.reason,
-            nextOwner: .human,
-            tint: .red,
-            evidence: isStale(handoff.ageSecs, staleThresholdSecs) ? .stale : .observed,
-            actions: [.open],
-            handoffSessionId: handoff.sessionId
+            ageSecs: launch.ageSecs,
+            reason: launch.reason,
+            nextOwner: userAttention ? .human : nil,
+            tint: userAttention ? .red : .green,
+            evidence: isStale(launch.ageSecs, staleThresholdSecs) ? .stale : .observed,
+            actions: openable ? [.open] : [],
+            launchId: openable ? launch.id : nil
         )
     }
 
@@ -417,7 +414,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             tint: .green,
             evidence: .observed,
             actions: [],
-            handoffSessionId: nil
+            launchId: nil
         )
     }
 

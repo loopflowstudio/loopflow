@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::engine::config::parse_agent;
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
-use crate::engine::stream::{format_event, ParseResult, StreamEvent, StreamFormat, StreamParser};
+use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::resolve_provider_account_blocking;
 use crate::provider_auth::Provider;
@@ -956,11 +956,6 @@ pub fn launch_agent(
         route.apply(&mut cmd);
     }
     apply_harness_env(&harness, &mut cmd, process);
-    // Name this launch's agent. Set both fields even when one is absent so a
-    // later launch cannot inherit the previous launch's attribution.
-    let provider =
-        crate::harness::HarnessKind::parse(&harness).map(crate::harness::HarnessKind::as_str);
-    crate::journal::record_agent(provider, model.as_deref());
 
     // Callers that already assembled semantic assets supply a capture handle.
     // Small internal agent launches (PR copy, commit copy, ops fallback) still
@@ -987,6 +982,8 @@ pub fn launch_agent(
                         gather_ms: 0,
                         render_ms: 0,
                         raw_provider: process.auto,
+                        basis: None,
+                        control: None,
                     },
                 )
             })
@@ -1079,7 +1076,6 @@ fn launch_batch(
             capture.record_raw("stdout", line);
             if let ParseResult::Events(events) = parser.feed_line(line) {
                 for event in &events {
-                    record_stream_usage(event);
                     capture.record_stream_event(event);
                 }
             }
@@ -1130,23 +1126,6 @@ fn launch_interactive(
         stdout: String::new(),
         stderr: String::new(),
     })
-}
-
-/// Feed token/cost stream events into the run ledger for the current run.
-fn record_stream_usage(event: &StreamEvent) {
-    match event {
-        StreamEvent::Usage {
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-        } => crate::journal::record_usage(*input_tokens, *output_tokens, *cache_read_tokens),
-        StreamEvent::Result {
-            cost_usd,
-            duration_secs,
-            ..
-        } => crate::journal::record_result(*cost_usd, *duration_secs),
-        _ => {}
-    }
 }
 
 fn launch_streaming(
@@ -1229,7 +1208,6 @@ fn launch_streaming(
                             match parser.feed_line(&line) {
                                 ParseResult::Events(events) => {
                                     for event in &events {
-                                        record_stream_usage(event);
                                         if let Some(capture) = capture {
                                             capture.record_stream_event(event);
                                         }
@@ -1242,7 +1220,6 @@ fn launch_streaming(
                         } else {
                             if let ParseResult::Events(events) = parser.feed_line(&line) {
                                 for event in &events {
-                                    record_stream_usage(event);
                                     if let Some(capture) = capture {
                                         capture.record_stream_event(event);
                                     }

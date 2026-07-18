@@ -62,7 +62,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 ```bash
 lf task run INF-123                                   # durable Task Session, own worktree
 lf task steer INF-123 "take the smaller approach"     # redirect the active turn
-lf task receipt CMD_ID --until incorporated --json    # prove the steer landed
+lf task status INF-123 --json                         # inspect durable state
 lf pr land -c                                         # merge the PR, complete the Task
 ```
 

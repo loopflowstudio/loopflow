@@ -525,6 +525,8 @@ fn begin_capture(built: &PromptBuild, surface: &str) -> Result<crate::trace::Cap
             gather_ms: built.context_gather_ms,
             render_ms: built.context_render_ms,
             raw_provider: surface == "headless",
+            basis: None,
+            control: None,
         },
     )
     .map_err(|error| anyhow!("failed to establish trace capture before agent launch: {error}"))

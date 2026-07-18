@@ -41,13 +41,6 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         skill: None,
         step_index: None,
         error: None,
-        input_tokens: None,
-        output_tokens: None,
-        cache_read_tokens: None,
-        cost_usd: None,
-        duration_secs: None,
-        provider: None,
-        model: None,
     };
     store
         .insert_run_event(&event(0, now - 120, "started"))
@@ -114,6 +107,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         provider_session_path: None,
         conversation_event_count: 2,
         conversation_bytes: 10,
+        control: None,
     };
     let turn = AgentTurnRow {
         id: "turn-wave-mutate".to_string(),
@@ -145,6 +139,8 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         context_persist_ms: 1,
         first_event_seq: None,
         last_event_seq: None,
+        root_output: None,
+        basis: None,
     };
     store
         .insert_trace_capture(&launch, &turn, &[], &[])
@@ -163,7 +159,7 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = ambient_wave_id {

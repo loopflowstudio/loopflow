@@ -1352,7 +1352,6 @@ mod tests {
             session_id: crate::task::TaskSessionId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
-            control_source: None,
             event: crate::task::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,

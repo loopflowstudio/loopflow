@@ -253,19 +253,17 @@ lf stop designer                                   # stop its listener and resid
 lf project run <linear-project-id>                  # durable Project Session
 lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
 lf task run DES-123 --directive "fix the parser before the docs"
-lf task run DES-125 --headless                       # Project reviews every interactive step
+lf task run DES-125 --headless                       # route Reviews to the Project
 lf task run DES-124 --stack-on DES-123
-lf task status DES-123                               # review id appears in the status reason
-lf task review message ir_... "Show the real sign-in path"
-lf task review complete ir_... --disposition approved --outcome "Done When proof holds"
+lf task status DES-123
 lf task steer DES-123 "rename the flag"
-lf task interrupt DES-123 --message "take the smaller approach"
-lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
-lf task acknowledge DES-123 --directive 2 --summary "the smaller parser path is active"
-lf task decide DES-123 DECISION_ID approve
+lf task interrupt DES-123                            # no replacement direction
+lf task steer DES-123 "take the smaller approach"
 lf task wait DES-123
 lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
+lf work status task task_... --json                  # stable Work projection
+lf work close task task_...                         # advance the current Review
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
@@ -275,94 +273,51 @@ Each Project has at most one current Session; terminal Sessions remain readable
 history and the next pursuit creates a successor. Every Task requires the
 current Project Session; `task start/run` ensures it before reserving the Task.
 The Task starts only after its Linear issue exists and owns one stable worktree.
-Its provider process and transcript are a replaceable body generation: plain
+Its provider process and transcript are replaceable execution state: plain
 `resume` keeps compatible history; `resume --model <agent>` preserves the same
-Session, directive, worktree, and PR chain while selecting another provider.
+Work, durable Steers, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
 Every Task runs `kickoff → iterate N → gate`. Standard Tasks conduct interactive
 kickoff and gate steps with the human in the existing provider transcript, while
 the owning Project conducts interactive iteration steps. `--headless` assigns
-all three phases to the Project without skipping their skills. Approval exits a
-Gate; `changes-requested` sends the same Task back to Iterate.
+all three phases to the Project without skipping their skills.
 
-`lf task attach` is the live attended-review prototype. Bare attached input and
-`lf task review message` become FIFO follow-ups, so the provider answers in the
-same session rather than losing a one-shot batch process. `/interrupt` remains
-an explicit interruption. The human closes the durable checkpoint with
-`lf task review complete`; the worker records its replies with
-`lf task review reply`.
-
-Run a manual Wave catch-up after headless work accumulates review or integration
-debt:
-
-```bash
-lf reviews catch-up --wave product --plan
-lf reviews catch-up --wave product --skill demo
-lf reviews catch-up --wave product --skill code-review
-```
-
-The command assembles completed and still-open parent reviews with their Task,
-Project, commit, worktree, PR, disposition, and outcome evidence. `demo` proves
-each relevant design-doc Done When through the product, code, admin state, logs,
-stats, or metrics, including real sign-in when authentication is in scope.
-`code-review` reviews the combined architecture and integration seams. Catch-up
-never rewrites the original lifecycle decisions; it files follow-up work.
+A Review is the current interactive flow step plus its live Launch and route;
+there is no Review id or disposition. `lf task steer` and `lf project steer`
+append durable direction before attempting live delivery. `lf work close`
+advances the interactive step under its current Basis fence. Interrupt and
+replacement direction stay separate: interrupt the active boundary, then
+Steer normally.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
-`lf task attach` exposes a writable prompt that records structured commands;
-terminal bytes never drive the provider directly.
+`lf task attach` attaches to the active tmux process. Prefer `steer` for durable
+direction; raw terminal input is provider transport, not the control ledger.
 
 ## Handing Interactive Work to a Human
 
-Create the durable Session after the runtime has prepared the provider-backed
-terminal, then let any presentation read the same attach descriptor:
+List the Launches the Run controller already owns, inspect one generic attach
+descriptor, and reopen it:
 
 ```bash
-lf handoff open \
-  --parent task:ts_0123456789abcdef0123456789abcdef \
-  --home jack@local \
-  --cwd /src/loopflow.auth \
-  --provider codex \
-  --provider-session 0190abcd \
-  --generation 3 \
-  --reason "OAuth login requires a human" \
-  --env LF_HOME=/Users/jack/.lf \
-  --json \
-  -- tmux attach-session -t lf-auth-interactive
-
-lf handoff present ih_0123456789abcdef0123456789abcdef   # attach + exec into the terminal
-lf handoff list --active --json        # every handoff still waiting on a human
-lf handoff complete ih_0123456789abcdef0123456789abcdef \
-  --summary "login complete; auth tests pass"
-lf handoff back ih_0123456789abcdef0123456789abcdef \
-  --summary "finish the review fixes headlessly"
+lf launch list --active --json
+lf launch status launch_... --json
+lf launch present launch_...                 # exec the tmux/provider attach route
+lf launch handback launch_... --outcome succeeded
 ```
 
-The shared store allows one unresolved handoff per Wave, Project Session, or
-Task Session. Repeating `open` returns that Session; repeating `attach` returns
-the same structured `{session_id,status,cwd,host,environment,argv}` descriptor.
-`present` is the CLI presentation adapter: it records first-attach evidence then
-replaces the `lf` process with the `argv` (typically `tmux attach-session`),
-passing the descriptor's environment and cwd. When the terminal exits, control
-returns to the shell and the human can complete, hand back, or fail the handoff.
-`complete`, `back`, and `fail` are terminal. The first terminal result wins and
-creates one wake for the same parent Session.
+`attach` prints the same descriptor as `status` without changing Launch state;
+`present` replaces `lf` with that route. Closing the app or terminal does not
+end the Launch. For an opaque TUI, record the observed boundary result with
+`handback --outcome succeeded|failed|interrupted|unknown`; process exit alone
+does not claim success.
 
-`list` enumerates durable handoffs across the machine — each row carries
-identity, the declared parent (`wave`/`project`/`task`), Home, provider, reason,
-and age, but never argv or environment. A census (the Mac's Active Sessions)
-reads `--active` to list only handoffs still waiting on or attached to a human,
-then re-`attach`es the one a human chooses to Open. `--parent <ref>` scopes the
-list to one parent.
-
-This contract carries presentation instructions, not a terminal stream. tmux
-or the vendor owns terminal bytes. The handoff references the parent's existing
-body generation; it does not create a second process lease or generic Session
-catalog. It can present a human interaction review, but the review remains the
-only record that can approve the Task or return it to Iterate.
+The descriptor carries stable Work and Wave identity, Home route, provider,
+cwd, attention route, explicit handback evidence, and optional attach argv.
+tmux or the provider owns terminal bytes. Loopflow does not create a separate
+Handoff or Review record around the Launch.
 
 ## Speaking to Waves
 
@@ -448,10 +403,10 @@ lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # subscription % per account + spend by repo/provider
 lf usage --refresh              # poll every account's provider now
-lf usage --json --days 30       # additive skill/run boundary rows
+lf usage --json --days 30       # one additive row per measured provider Turn
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
-lf top                          # last-hour provider throughput + live sessions
+lf top                          # persisted last-hour Turn throughput + live processes
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
@@ -479,7 +434,7 @@ from stored observations (harness streams report them mid-run) topped up by a
 live poll when older than 15 minutes. `--refresh` polls everything now;
 `--cached` skips polling. A revoked credential shows the fix
 (`lf auth connect <provider>`), not a blank. The spend table below it sums
-per-boundary delta rows; TOTAL is input+output with cache reads their own
+provider-measured Turn rows; TOTAL is input+output with cache reads their own
 column, and `% TOKENS` is each row's slice of all tokens in the window — a
 distribution across repos, not a subscription measure.
 

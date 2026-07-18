@@ -274,20 +274,20 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ProjectCommand,
     },
-    /// Review accumulated parent-reviewed work across one Wave
-    Reviews {
-        #[command(subcommand)]
-        cmd: ReviewsCommand,
-    },
     /// Linear-backed Task Session lifecycle
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Durable interactive work handed from an agent to a human
-    Handoff {
+    /// Inspect, attach, and hand back provider or opaque process Launches
+    Launch {
         #[command(subcommand)]
-        cmd: HandoffCommand,
+        cmd: LaunchCommand,
+    },
+    /// Inspect and control stable Wave, Project, or Task Work
+    Work {
+        #[command(subcommand)]
+        cmd: WorkCommand,
     },
     /// Internal: run one durable Task Session process generation
     #[command(name = "__task", hide = true)]
@@ -314,7 +314,7 @@ pub enum Commands {
     },
     /// Show subscription state per account and token spend by repo/provider
     Usage {
-        /// Emit per-boundary spend (skill, provider:model, repo) as JSON
+        /// Emit one additive row per provider-measured Turn as JSON
         #[arg(long)]
         json: bool,
         /// Spend window, in days
@@ -643,89 +643,84 @@ pub enum RadioCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum HandoffCommand {
-    /// Open or return the parent's one unresolved interactive handoff
-    Open {
-        /// Parent reference: wave:<id>, project:<id>, or task:<id>
-        #[arg(long)]
-        parent: String,
-        /// Canonical execution Home, e.g. jack@local or ssh://jack@host
-        #[arg(long)]
-        home: String,
-        /// Absolute worktree/current directory on that Home
-        #[arg(long)]
-        cwd: PathBuf,
-        /// Provider that owns the resumed history
-        #[arg(long)]
-        provider: String,
-        /// Provider transcript/session id, when one exists
-        #[arg(long = "provider-session")]
-        provider_session: Option<String>,
-        /// Existing parent body generation being handed off
-        #[arg(long)]
-        generation: u32,
-        /// Why human interaction is required
-        #[arg(long)]
-        reason: String,
-        /// Required environment entry as KEY=VALUE (repeatable)
-        #[arg(long = "env")]
-        environment: Vec<String>,
-        /// Emit the durable Session as JSON
-        #[arg(long)]
-        json: bool,
-        /// Structured attach argv after `--`
-        #[arg(last = true, required = true)]
-        attach_argv: Vec<String>,
-    },
-    /// List durable interactive handoffs across the machine
+pub enum LaunchCommand {
+    /// List Launches backed by the normalized Run controller
     List {
-        /// Only handoffs still waiting on or attached to a human
+        /// Include only Launches whose containment may still be live
         #[arg(long)]
         active: bool,
-        /// Restrict to one parent: wave:<id>, project:<id>, or task:<id>
-        #[arg(long)]
-        parent: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show one durable handoff Session
+    /// Show one Launch and its generic attach route
     Status {
-        session_id: String,
+        launch_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record first attach and return its descriptor; never streams terminal bytes
+    /// Return the generic attach descriptor without changing Launch state
     Attach {
-        session_id: String,
+        launch_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record successful completion
-    Complete {
-        session_id: String,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Hand unfinished work back to the parent agent
-    Back {
-        session_id: String,
-        #[arg(long)]
-        summary: String,
+    /// Record explicit terminal evidence for an opaque Launch boundary
+    Handback {
+        launch_id: String,
+        #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
+        outcome: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record terminal interactive-body failure
-    Fail {
-        session_id: String,
+    /// Exec the Launch's generic attach route
+    Present { launch_id: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorkCommand {
+    /// Show current Epoch, Basis, Run, Wait, and Review projection
+    Status {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Append authored direction through User or active parent Run authority
+    Steer {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Advance the current interactive flow step without recording a disposition
+    Close {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Interrupt the current Turn or opaque Launch boundary
+    Interrupt {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Abandon the current Epoch from an authenticated User surface
+    Abandon {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
         #[arg(long)]
         reason: String,
         #[arg(long)]
         json: bool,
     },
-    /// Attach and exec into the interactive terminal session
-    Present { session_id: String },
 }
 
 fn reject_retired_sub(_: &str) -> Result<String, String> {
@@ -821,27 +816,6 @@ pub enum ReceiptCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum ProjectReviewCommand {
-    /// Ask the reviewed Task a FIFO follow-up question
-    Message {
-        review_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Complete the review with an explicit disposition and findings
-    Complete {
-        review_id: String,
-        #[arg(long, value_parser = ["approved", "changes-requested"])]
-        disposition: String,
-        #[arg(long)]
-        outcome: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
     /// Create a Linear Project first, then start its durable Project Session
     Start {
@@ -869,13 +843,6 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Queue an audited instruction for exactly the next provider turn
-    FollowUp {
-        project_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Redirect Project work now, relaunching the Session when needed
     Steer {
         project_id: String,
@@ -883,61 +850,11 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active Project turn and optionally replace its next instruction
+    /// Interrupt the active Project turn
     Interrupt {
         project_id: String,
-        #[arg(long = "message")]
-        message: Option<String>,
         #[arg(long)]
         json: bool,
-    },
-    /// Read or wait for one durable Project command receipt
-    Receipt {
-        command_id: String,
-        #[arg(long, value_enum)]
-        until: Option<crate::ops::ChildReceiptUntil>,
-        #[arg(long, default_value = "30s")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Confirm that this Project incorporated its current direction
-    Acknowledge {
-        project_id: String,
-        #[arg(long)]
-        directive: u32,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resolve a durable Project decision request
-    Decide {
-        project_id: String,
-        decision_id: String,
-        choice: String,
-        #[arg(long)]
-        message: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Ask the owning Wave to choose while preserving this Project Session
-    RequestDecision {
-        project_id: String,
-        prompt: String,
-        #[arg(long = "option", required = true)]
-        options: Vec<String>,
-        #[arg(long)]
-        wait: bool,
-        #[arg(long, default_value = "30m")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Conduct an interactive exercise assigned by a child Task
-    Review {
-        #[command(subcommand)]
-        command: ProjectReviewCommand,
     },
     /// Wait without polling an LM
     Wait {
@@ -952,7 +869,6 @@ pub enum ProjectCommand {
     /// Resume the same Project Session, optionally handing its next body to another agent
     Resume {
         project_id: String,
-        message: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long, requires = "model")]
@@ -977,46 +893,6 @@ pub enum ProjectCommand {
         /// Parent wave (default: ambient wave)
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum TaskReviewCommand {
-    /// Send the human reviewer's next FIFO message to the existing Task session
-    Message {
-        review_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Reply to the reviewer without replacing the current Task direction
-    Reply {
-        review_id: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Finish a human review with an explicit disposition and evidence
-    Complete {
-        review_id: String,
-        #[arg(long, value_parser = ["approved", "changes-requested"])]
-        disposition: String,
-        #[arg(long)]
-        outcome: String,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ReviewsCommand {
-    /// Run one human catch-up exercise over the Wave's deferred reviews
-    CatchUp {
-        #[arg(long, default_value = "demo", value_parser = ["demo", "code-review"])]
-        skill: String,
-        /// Print the assembled review evidence without launching an agent
-        #[arg(long)]
-        plan: bool,
     },
 }
 
@@ -1096,13 +972,6 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Queue an audited instruction for exactly the next provider turn
-    FollowUp {
-        issue: String,
-        message: String,
-        #[arg(long)]
-        json: bool,
-    },
     /// Redirect the active provider turn, interrupting when live steer is unavailable
     Steer {
         issue: String,
@@ -1110,74 +979,11 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the active provider turn and optionally replace its next instruction
+    /// Interrupt the active provider turn
     Interrupt {
         issue: String,
-        #[arg(long = "message")]
-        message: Option<String>,
         #[arg(long)]
         json: bool,
-    },
-    /// Read or wait for one durable command receipt
-    Receipt {
-        command_id: String,
-        #[arg(long, value_enum)]
-        until: Option<crate::ops::ChildReceiptUntil>,
-        #[arg(long, default_value = "30s")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Confirm that this Task incorporated its current direction
-    Acknowledge {
-        issue: String,
-        #[arg(long)]
-        directive: u32,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Settle a merged, complete Task whose applied final directive was never
-    /// acknowledged, by an out-of-band Wave/Operator attestation. Records the
-    /// summary as the incorporation evidence, completes the Task, and clears its
-    /// orphaned recovery command — no provider turn, no new PR.
-    Reconcile {
-        issue: String,
-        #[arg(long)]
-        directive: u32,
-        #[arg(long)]
-        summary: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Resolve a durable Task decision request
-    Decide {
-        issue: String,
-        decision_id: String,
-        choice: String,
-        #[arg(long)]
-        message: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Ask the Task's Project Session to choose while preserving this Task Session
-    RequestDecision {
-        issue: String,
-        prompt: String,
-        #[arg(long = "option", required = true)]
-        options: Vec<String>,
-        #[arg(long)]
-        wait: bool,
-        #[arg(long, default_value = "30m")]
-        timeout: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Continue the dialogue for the current interactive exercise
-    Review {
-        #[command(subcommand)]
-        command: TaskReviewCommand,
     },
     /// Wait without polling an LM
     Wait {
@@ -1192,7 +998,6 @@ pub enum TaskCommand {
     /// Resume the same Task Session, optionally handing its next body to another agent
     Resume {
         issue: String,
-        message: Option<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long, requires = "model")]
@@ -2366,136 +2171,6 @@ mod tests {
     }
 
     #[test]
-    fn interaction_review_dialogue_commands_parse() {
-        let project = Cli::try_parse_from([
-            "lf",
-            "project",
-            "review",
-            "complete",
-            "ir_review",
-            "--disposition",
-            "changes-requested",
-            "--outcome",
-            "Cover the empty state",
-        ])
-        .expect("parse Project review completion");
-        assert!(matches!(
-            project.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Review {
-                    command: ProjectReviewCommand::Complete {
-                        review_id,
-                        disposition,
-                        outcome,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review"
-                && disposition == "changes-requested"
-                && outcome == "Cover the empty state"
-        ));
-
-        let task = Cli::try_parse_from([
-            "lf",
-            "task",
-            "review",
-            "reply",
-            "ir_review",
-            "The empty state is now visible",
-        ])
-        .expect("parse Task review reply");
-        assert!(matches!(
-            task.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Review {
-                    command: TaskReviewCommand::Reply {
-                        review_id,
-                        message,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review" && message == "The empty state is now visible"
-        ));
-
-        let human_message = Cli::try_parse_from([
-            "lf",
-            "task",
-            "review",
-            "message",
-            "ir_review",
-            "Show me the empty state",
-        ])
-        .expect("parse human review message");
-        assert!(matches!(
-            human_message.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Review {
-                    command: TaskReviewCommand::Message {
-                        review_id,
-                        message,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review" && message == "Show me the empty state"
-        ));
-
-        let human_complete = Cli::try_parse_from([
-            "lf",
-            "task",
-            "review",
-            "complete",
-            "ir_review",
-            "--disposition",
-            "approved",
-            "--outcome",
-            "The empty state is proven",
-        ])
-        .expect("parse human review completion");
-        assert!(matches!(
-            human_complete.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Review {
-                    command: TaskReviewCommand::Complete {
-                        review_id,
-                        disposition,
-                        outcome,
-                        ..
-                    }
-                }
-            }) if review_id == "ir_review"
-                && disposition == "approved"
-                && outcome == "The empty state is proven"
-        ));
-    }
-
-    #[test]
-    fn wave_review_catch_up_selects_a_bounded_human_exercise() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "--wave",
-            "product",
-            "reviews",
-            "catch-up",
-            "--skill",
-            "code-review",
-            "--plan",
-        ])
-        .expect("parse Wave review catch-up");
-
-        assert_eq!(cli.wave.as_deref(), Some("product"));
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Reviews {
-                cmd: ReviewsCommand::CatchUp {
-                    skill,
-                    plan: true,
-                }
-            }) if skill == "code-review"
-        ));
-        assert!(Cli::try_parse_from(["lf", "reviews", "catch-up", "--skill", "design",]).is_err());
-    }
-
-    #[test]
     fn task_completion_and_pr_dispositions_parse() {
         let complete = Cli::try_parse_from([
             "lf",
@@ -2585,8 +2260,18 @@ mod tests {
     }
 
     #[test]
-    fn task_interrupt_requires_explicit_message_flag() {
-        let cli = Cli::try_parse_from([
+    fn task_interrupt_authors_no_direction() {
+        let cli = Cli::try_parse_from(["lf", "task", "interrupt", "INF-123"])
+            .expect("parse task interrupt");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Interrupt { issue, json },
+        }) = cli.command
+        else {
+            panic!("expected task interrupt command");
+        };
+        assert_eq!(issue, "INF-123");
+        assert!(!json);
+        assert!(Cli::try_parse_from([
             "lf",
             "task",
             "interrupt",
@@ -2594,122 +2279,11 @@ mod tests {
             "--message",
             "take the smaller approach",
         ])
-        .expect("parse task interrupt");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::Interrupt {
-                    issue,
-                    message,
-                    json,
-                },
-        }) = cli.command
-        else {
-            panic!("expected task interrupt command");
-        };
-        assert_eq!(issue, "INF-123");
-        assert_eq!(message.as_deref(), Some("take the smaller approach"));
-        assert!(!json);
+        .is_err());
     }
 
     #[test]
-    fn task_receipt_and_decision_commands_parse_the_durable_ids() {
-        let receipt = Cli::try_parse_from([
-            "lf",
-            "task",
-            "receipt",
-            "cc_00000000000000000000000000000000",
-            "--until",
-            "incorporated",
-            "--timeout",
-            "30s",
-            "--json",
-        ])
-        .expect("parse task receipt");
-        assert!(matches!(
-            receipt.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Receipt {
-                    until: Some(crate::ops::ChildReceiptUntil::Incorporated),
-                    timeout,
-                    json: true,
-                    ..
-                }
-            }) if timeout == "30s"
-        ));
-
-        let acknowledge = Cli::try_parse_from([
-            "lf",
-            "task",
-            "acknowledge",
-            "INF-123",
-            "--directive",
-            "2",
-            "--summary",
-            "parser work is now first",
-        ])
-        .expect("parse task acknowledgement");
-        assert!(matches!(
-            acknowledge.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Acknowledge {
-                    issue,
-                    directive: 2,
-                    ..
-                }
-            }) if issue == "INF-123"
-        ));
-
-        let decide = Cli::try_parse_from([
-            "lf",
-            "task",
-            "decide",
-            "INF-123",
-            "cd_00000000000000000000000000000000",
-            "revise",
-            "--message",
-            "cover the race",
-            "--json",
-        ])
-        .expect("parse task decide");
-        assert!(matches!(
-            decide.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Decide {
-                    issue,
-                    choice,
-                    json: true,
-                    ..
-                }
-            }) if issue == "INF-123" && choice == "revise"
-        ));
-    }
-
-    #[test]
-    fn task_steering_verbs_are_distinct_and_support_json_receipts() {
-        let follow_up = Cli::try_parse_from([
-            "lf",
-            "task",
-            "follow-up",
-            "INF-123",
-            "audit retry callers",
-            "--json",
-        ])
-        .expect("parse task follow-up");
-        let Some(Commands::Task {
-            cmd:
-                TaskCommand::FollowUp {
-                    issue,
-                    message,
-                    json,
-                },
-        }) = follow_up.command
-        else {
-            panic!("expected task follow-up command");
-        };
-        assert_eq!(issue, "INF-123");
-        assert_eq!(message, "audit retry callers");
-        assert!(json);
-
+    fn task_steer_is_the_only_authored_direction_command() {
         let steer = Cli::try_parse_from([
             "lf",
             "task",
@@ -2732,6 +2306,13 @@ mod tests {
         assert_eq!(issue, "INF-123");
         assert_eq!(message, "take the smaller approach");
         assert!(!json);
+
+        for removed in ["follow-up", "acknowledge", "decide", "request-decision"] {
+            assert!(
+                Cli::try_parse_from(["lf", "task", removed, "INF-123"]).is_err(),
+                "{removed} must not remain as a compatibility command"
+            );
+        }
     }
 
     #[test]
@@ -2760,7 +2341,7 @@ mod tests {
     }
 
     #[test]
-    fn project_session_controls_parse_durable_ids_and_waits() {
+    fn project_steer_parses() {
         let steer = Cli::try_parse_from([
             "lf",
             "project",
@@ -2779,29 +2360,6 @@ mod tests {
                     json: true,
                 },
             }) if project_id == "project-uuid" && message == "prioritize the CLI path"
-        ));
-
-        let receipt = Cli::try_parse_from([
-            "lf",
-            "project",
-            "receipt",
-            "cc_00000000000000000000000000000000",
-            "--until",
-            "applied",
-            "--timeout",
-            "30s",
-        ])
-        .expect("parse project receipt");
-        assert!(matches!(
-            receipt.command,
-            Some(Commands::Project {
-                cmd: ProjectCommand::Receipt {
-                    command_id,
-                    until: Some(crate::ops::ChildReceiptUntil::Applied),
-                    timeout,
-                    ..
-                },
-            }) if command_id.starts_with("cc_") && timeout == "30s"
         ));
     }
 
@@ -2887,117 +2445,61 @@ mod tests {
             }) if issue == "PRD-9" && reason == "the abandoned work is still valid"
         ));
     }
+    #[test]
+    fn cli_parses_generic_launch_contract() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "launch",
+            "handback",
+            "launch_1",
+            "--outcome",
+            "unknown",
+            "--json",
+        ])
+        .expect("parse Launch handback");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Launch {
+                cmd: LaunchCommand::Handback {
+                    launch_id,
+                    outcome,
+                    json: true,
+                }
+            }) if launch_id == "launch_1" && outcome == "unknown"
+        ));
+    }
 
     #[test]
-    fn cli_parses_interactive_handoff_contract() {
-        let open = Cli::try_parse_from([
+    fn cli_parses_stable_work_controls() {
+        let cli = Cli::try_parse_from([
             "lf",
-            "handoff",
-            "open",
-            "--parent",
-            "task:ts_00000000000000000000000000000000",
-            "--home",
-            "jack@local",
-            "--cwd",
-            "/src/loopflow.task",
-            "--provider",
-            "codex",
-            "--provider-session",
-            "thread-1",
-            "--generation",
-            "3",
-            "--reason",
-            "OAuth login required",
-            "--env",
-            "LF_HOME=/tmp/lf",
-            "--json",
-            "--",
-            "tmux",
-            "attach-session",
-            "-t",
-            "lf-task-interactive",
-        ])
-        .expect("parse handoff open");
-        assert!(matches!(
-            open.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::Open {
-                    generation: 3,
-                    json: true,
-                    attach_argv,
-                    ..
-                }
-            }) if attach_argv == ["tmux", "attach-session", "-t", "lf-task-interactive"]
-        ));
-
-        let back = Cli::try_parse_from([
-            "lf",
-            "handoff",
-            "back",
-            "ih_00000000000000000000000000000000",
-            "--summary",
-            "finish the review fixes headlessly",
+            "work",
+            "steer",
+            "task",
+            "task_1",
+            "inspect the failure",
             "--json",
         ])
-        .expect("parse handoff back");
+        .expect("parse Work steer");
         assert!(matches!(
-            back.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::Back {
-                    summary,
+            cli.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Steer {
+                    kind,
+                    id,
+                    message,
                     json: true,
-                    ..
                 }
-            }) if summary == "finish the review fixes headlessly"
+            }) if kind == "task" && id == "task_1" && message == "inspect the failure"
         ));
 
-        let list = Cli::try_parse_from([
-            "lf",
-            "handoff",
-            "list",
-            "--active",
-            "--parent",
-            "wave:00000000-0000-4000-8000-000000000001",
-            "--json",
-        ])
-        .expect("parse handoff list");
+        let close = Cli::try_parse_from(["lf", "work", "close", "project", "project_1"])
+            .expect("parse Work close");
         assert!(matches!(
-            list.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::List {
-                    active: true,
-                    json: true,
-                    parent: Some(parent),
-                }
-            }) if parent == "wave:00000000-0000-4000-8000-000000000001"
-        ));
-
-        let bare_list = Cli::try_parse_from(["lf", "handoff", "list"]).expect("parse bare list");
-        assert!(matches!(
-            bare_list.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::List {
-                    active: false,
-                    json: false,
-                    parent: None,
-                }
-            })
-        ));
-
-        let present = Cli::try_parse_from([
-            "lf",
-            "handoff",
-            "present",
-            "ih_00000000000000000000000000000000",
-        ])
-        .expect("parse handoff present");
-        assert!(matches!(
-            present.command,
-            Some(Commands::Handoff {
-                cmd: HandoffCommand::Present {
-                    session_id,
-                }
-            }) if session_id == "ih_00000000000000000000000000000000"
+            close.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Close { kind, id, json: false }
+            }) if kind == "project" && id == "project_1"
         ));
     }
 

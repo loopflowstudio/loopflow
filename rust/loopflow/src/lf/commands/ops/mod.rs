@@ -897,21 +897,18 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
 
     if !result.deferrals.is_empty() {
         println!(
-            "  deferred — protected writing Task body ({}):",
+            "  deferred — protected active Task Run ({}):",
             result.deferrals.len()
         );
         for deferral in &result.deferrals {
             println!(
-                "    {}  {}  (Session {})",
+                "    {}  {}  ({})",
                 deferral.identifier, deferral.title, deferral.reason
             );
         }
     }
-    if result.session_updates > 0 {
-        println!(
-            "  reconciled Task Session identifiers: {}",
-            result.session_updates
-        );
+    if result.task_updates > 0 {
+        println!("  reconciled Task identifiers: {}", result.task_updates);
     }
     if result.already > 0 {
         println!("  already in team: {} (skipped)", result.already);
@@ -1916,6 +1913,8 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
             gather_ms: 0,
             render_ms: 0,
             raw_provider: true,
+            basis: None,
+            control: None,
         },
     )?;
 

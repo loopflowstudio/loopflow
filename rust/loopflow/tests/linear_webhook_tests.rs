@@ -1,6 +1,6 @@
 mod support;
 
-use loopflow::child_session::{ChildCommandKind, ChildRef};
+use loopflow::child_session::ChildRef;
 use loopflow::webhook::{ingest_event, WebhookEvent, WebhookOutcome};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 const VIEWER: &str = "user-loopflow";
 
 /// One verified webhook maps onto Task control through the durable substrate: an
-/// issue edit becomes a directive (once), a human comment becomes a follow-up
+/// issue edit becomes a Steer (once), a user comment becomes another Steer
 /// (once), Loopflow's own change is skipped, and an issue with no Session is a
 /// no-op.
 #[test]
@@ -44,7 +44,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         author_id: Some(author.to_string()),
     };
 
-    // Issue edit → directive; a redelivery applies nothing.
+    // Issue edit → Steer; a redelivery applies nothing.
     let outcome = rt
         .block_on(ingest_event(
             &task.store,
@@ -56,7 +56,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     assert_eq!(
         outcome,
         WebhookOutcome::Edit {
-            directive_applied: true
+            steer_applied: true
         }
     );
     let outcome = rt
@@ -70,11 +70,11 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     assert_eq!(
         outcome,
         WebhookOutcome::Edit {
-            directive_applied: false
+            steer_applied: false
         }
     );
 
-    // Human comment → one follow-up; a redelivery delivers nothing.
+    // User comment → one Steer; a redelivery delivers nothing.
     let outcome = rt
         .block_on(ingest_event(
             &task.store,
@@ -121,15 +121,14 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .expect("no target");
     assert_eq!(outcome, WebhookOutcome::NoTarget);
 
-    // Exactly one directive + one follow-up landed.
-    let commands = rt
-        .block_on(task.store.list_child_commands(&target))
-        .expect("commands");
-    assert_eq!(commands.len(), 2);
-    assert!(commands
-        .iter()
-        .any(|c| matches!(&c.kind, ChildCommandKind::Steer { .. })));
-    assert!(commands
-        .iter()
-        .any(|c| matches!(&c.kind, ChildCommandKind::FollowUp { .. })));
+    // Exactly two ordered Steers landed.
+    let work = rt
+        .block_on(task.store.work_for_child(&target))
+        .expect("work");
+    let seed = rt
+        .block_on(task.store.boundary_seed(&work))
+        .expect("boundary seed");
+    assert_eq!(seed.steers.len(), 2);
+    assert!(seed.steers[0].text.contains("New title"));
+    assert!(seed.steers[1].text.contains("please prioritize"));
 }

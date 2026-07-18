@@ -1,6 +1,40 @@
-# Prompt Style Guide
+---
+layout: default
+title: Prompt Authoring
+---
+
+# Prompt Guide
 
 How to write prompts for loopflow. Prompts are instructions for LLM sessions—human-readable, but optimized for agents to follow.
+
+## Audience and delivery
+
+This is the canonical long-form guide for two authors:
+
+- **Loopflow maintainers** writing builtin skills, goals, directions, operating
+  guidance, and prompt assembly.
+- **Loopflow customers** writing repo-local `.lf/skills/*.md`,
+  `.lf/directions/*.md`, and `wave/<name>/GOAL.md` files.
+
+Agents executing ordinary work do not need this whole document. `PROMPTS.md` is
+not auto-injected into normal runs and should not be added to repo-wide
+`context:`. That would make every task pay for authoring doctrine it is not
+using.
+
+The guide reaches each audience deliberately:
+
+| Surface | Who reads it | When |
+| --- | --- | --- |
+| `PROMPTS.md` and `/docs/prompts` | Human and agent prompt authors | While creating or auditing prompt assets |
+| `lf prompt` | Customer prompt authors with an idea or existing file | On demand; the bundled skill carries the compressed authoring method |
+| `LOOPFLOW.md` | Every standard Loopflow run | Once per launch; universal execution invariants only |
+| Selected skill or goal | The agent doing that kind of work | At execution time; specialized doctrine only |
+| Runtime tools and receipts | Agents and operators | At action boundaries; enforce what prose cannot |
+
+In this repository, `STYLE.md` points maintainers here, the website publishes
+this file, and a compile-time test protects its load-bearing sections. The
+bundled `prompt` skill is self-contained; it does not depend on customer repos
+having this file.
 
 ## Structure
 
@@ -23,6 +57,117 @@ produces: simplified code
 ---
 Simplify code touched by this branch while preserving user behavior.
 ```
+
+## Contract
+
+Define the finish line before the procedure. A strong prompt makes five things
+computable:
+
+1. **Task** — the exact problem, in the domain's own terms.
+2. **Success** — the observable condition that ends the run.
+3. **Insufficient outcomes** — plausible near-misses that do not count.
+4. **Boundaries** — relevant edge cases, permissions, surfaces, and exclusions.
+5. **Proof** — the command, observation, or artifact that distinguishes success
+   from a convincing story about success.
+
+Repeat a load-bearing condition when ambiguity would be expensive. The Cycle
+Double Cover prompt states the target, restates its exact generality, then names
+special cases and reductions that are insufficient. That repetition narrows the
+model's search; it is not filler.
+
+State priors without weakening proof. “Assume a complete solution exists” can
+keep a search from stopping at conventional wisdom, but it cannot make an
+unverified result true. Never require an affirmative conclusion regardless of
+evidence.
+
+## Evidence loop
+
+Use this loop when the work contains hidden state, uncertain causality, or
+expensive actions:
+
+1. **Observe** — preserve raw facts separately from interpretation.
+2. **Model** — externalize the current explanation in the cheapest useful form:
+   a design, invariant list, causal chain, test, prototype, or executable model.
+3. **Discriminate** — choose the smallest safe probe whose outcomes separate
+   the leading explanations.
+4. **Verify** — test the candidate against all relevant recorded evidence, not
+   only the latest or friendliest case.
+5. **Act** — cross the real side-effect boundary only after the candidate
+   survives the available checks.
+6. **Record** — keep the evidence and durable conclusion outside the provider
+   transcript; prune stale hypotheses, never observations.
+
+Schema Harness makes this literal: an append-only transition timeline is the
+ground truth, an editable program carries the current world representation and
+transition rules, complete-history backtests certify candidate models, and
+actions flow through one commit boundary. A prediction mismatch drops the
+remaining action queue and returns the agent to deliberation.
+
+Translate the mechanism, not the game implementation:
+
+- In debugging, preserve the reproduction, write the causal prediction, run a
+  discriminating check, then replay the original workflow after the fix.
+- In implementation, treat the design and tests as the working model. An
+  unexpected tool or test result invalidates dependent steps; revise the plan
+  before continuing.
+- In research, keep claims tied to sources or experiments and test the
+  uncertainty that would change the recommendation.
+- In operations, stage and validate locally before the irreversible or external
+  action.
+
+Do not demand executable simulators, exhaustive replay, or formal search where
+the domain cannot support them. Ask for the strongest cheap evidence the task
+can actually produce.
+
+## Search portfolios
+
+Use a portfolio when the task is both genuinely uncertain and safely
+parallelizable. Delegation must already be authorized; this technique does not
+grant it.
+
+- Start with approaches that differ by mechanism, not wording.
+- Preserve independence early. Broadcasting the favored route collapses the
+  search onto its assumptions.
+- Keep an explicit registry by approach family. Track mechanism, evidence,
+  exact gap, and status.
+- Mark a route blocked when its remaining lemma or dependency is as hard as the
+  original problem. Reopen it only for a materially new mechanism.
+- Require concrete returns: patches, reproductions, lemmas, equations,
+  measurements, or counterexamples. Reject status-only reports.
+- Keep incompatible routes alive long enough to expose their real strengths and
+  gaps, then cross-pollinate.
+- Audit surviving candidates adversarially against the contract's edge cases and
+  insufficiency list.
+- Synthesize, challenge, redirect, and repeat. Fixed fan-out is weaker than
+  allocating attention from the evidence as it changes.
+
+```markdown
+| Family | Mechanism | Best evidence | Exact gap | Status |
+| --- | --- | --- | --- | --- |
+| event replay | reconstruct state from durable events | fixture round-trip | recovery ambiguity | active |
+| transcript resume | reuse provider history | lower prompt cost | account locality | blocked |
+```
+
+Match persistence to the task's actual budget and stakes. A minimum wall-clock
+duration can prevent premature surrender in a benchmark, but it is not a
+general substitute for evidence-based stopping.
+
+## Prompt layers
+
+Put doctrine at the narrowest layer that exercises it:
+
+- **`LOOPFLOW.md`** — the small execution floor that every normal loopflow run
+  needs: explicit finish line, durable evidence, discriminating checks, and
+  replan-on-counterexample.
+- **Skill prompt** — task-specific method: complete-history research,
+  root-cause debugging, adversarial QA, or portfolio coordination.
+- **Task prompt** — domain definitions, edge cases, exclusions, and exact proof.
+- **Artifacts and tools** — enforce what prose should not merely request:
+  append-only receipts, schemas, test runners, permission boundaries, and
+  commit gates.
+
+Do not paste this guide into every skill. Universal guidance should ride once;
+specialized guidance belongs only where it changes the work.
 
 ## Sections
 
@@ -147,7 +292,7 @@ output comes down to five marks.
 5. **A stop discipline.** Tell the loop when *not* to invent work: "if no safe
    move remains, record the blocker instead of inventing work"; "done for now when
    the next move costs more than the entropy it removes." A goal with no off-ramp
-   manufacts busywork forever.
+   manufactures busywork forever.
 
 ```markdown
 # Thin — technically valid, but it can't steer a loop
@@ -289,9 +434,27 @@ Before committing a prompt:
 
 - [ ] Frontmatter has `requires:` and `produces:`
 - [ ] Opening line states the purpose directly
+- [ ] Success, insufficient outcomes, boundaries, and proof are explicit when
+      ambiguity would change the result
 - [ ] No identity framing ("You are...", "Your role is...")
 - [ ] Language works for both human readers and LLM executors
 - [ ] Workflow steps are concrete and numbered
+- [ ] Uncertain work separates observations from hypotheses and says what to do
+      when evidence contradicts the plan
+- [ ] Parallel search, when authorized and useful, preserves independent
+      approach families and requires concrete returns
+- [ ] Candidate results face an adversarial audit of the named edge cases
 - [ ] Output format is specified if the prompt produces artifacts
 - [ ] Gate prompts have clear verdicts
 - [ ] Big prompts produce documentation, not just observations
+
+## Sources
+
+- [Schema Harness](https://schema-harness.github.io/) — executable world
+  models, complete-history backtests, discriminating actions, and
+  abort-on-misprediction execution.
+- [Schema released traces](https://huggingface.co/datasets/schema-harness/arc-agi-3-schema-traces)
+  — persistent notes, event timelines, model snapshots, and session artifacts.
+- [OpenAI Cycle Double Cover prompt](https://cdn.openai.com/pdf/04d1d1e4-bc75-476a-97cf-49055cd98d31/cdc_prompt.pdf)
+  — exact completion criteria, dynamic search portfolios, blocked-route
+  discipline, concrete returns, and adversarial proof audit.

@@ -29,27 +29,21 @@ lf task status INF-123 --json
 lf task attach INF-123
 ```
 
-`attach` opens the audited Task control prompt; it does not write bytes into a
-provider terminal. Answer a pending decision, send a follow-up, or resume a
-stopped process through the same Task Session:
+`attach` opens the active tmux process. Use durable Steer for direction, or
+resume a stopped process through the same Task Work:
 
 ```bash
-lf task decide INF-123 cd_123 approve
-lf task follow-up INF-123 "address the latest review"
-lf task resume INF-123 "continue from the failure"
+lf task steer INF-123 "address the latest review"
+lf task interrupt INF-123
+lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Session, directive, worktree, and active PR, but gives the next body generation
-to the selected agent. It refuses while another body is still writing; interrupt
-that body first.
-
-If a control returned a command id, inspect or wait for its durable receipt:
-
-```bash
-lf task receipt cc_123 --until incorporated --timeout 30s --json
-```
+Work, Steers, worktree, and active PR, but gives the next Launch to the selected
+agent. It refuses while another executor is still writing; interrupt that
+boundary first. A Steer is durable before live delivery is attempted. Provider
+acceptance is not incorporation; the Basis of a later successful boundary is.
 
 ## Rate limits
 

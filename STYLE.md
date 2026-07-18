@@ -315,7 +315,7 @@ Start features with a design doc under `scratch/`. After implementation, `lf rev
 
 ## User-Facing Documentation
 
-User docs follow the same principles as prompts (see PROMPT_STYLE.md):
+User docs follow the same principles as prompts (see PROMPTS.md):
 
 **Direct and imperative.** State what something does, not what it is. "Runs a prompt with assembled context" beats "A skill is a markdown file containing instructions."
 

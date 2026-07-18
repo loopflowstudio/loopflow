@@ -44,10 +44,16 @@ its available status/next owner.
 
 ## Work
 
-- Acknowledge the seed's current directive before pursuit with its exact `lf
-  project acknowledge` command. State the resulting priority or plan change.
+- Honor every Steer included in the seed and state the resulting priority or
+  plan change. The boundary Basis is fixed; delivery is not application.
 - Read the filed backlog before creating work. File a concrete task when the
   KR needs it; no rule requires every filed task to start immediately.
+- When one uncertain KR warrants parallel investigation, file independent Tasks
+  by approach family rather than duplicate assignments. Keep a compact registry
+  of each mechanism, concrete evidence, exact gap, and status. Redirect
+  convergence, mark theorem-strength or dependency-strength gaps blocked, and
+  reopen a route only for a materially new mechanism. Cross-pollinate only
+  after the independent Tasks have exposed their own strengths and failures.
 - Every file-writing task must already have a Linear identity. Start it with
   `lf task run <issue-id> --directive "<delegation brief>"` and supervise the
   same Task Session through review and merge.
@@ -58,12 +64,13 @@ its available status/next owner.
 - The Project Session owns no worktree or PR branch. Never edit, commit,
   test, or open a PR from the canonical main checkout; delegate every
   repository mutation to a Task Session.
-- Use `lf task follow-up`, `steer`, `interrupt`, `wait`, and `resume`. Do not
-  create another worktree or session for review feedback or CI repair.
-- Answer routine Task decisions with `lf task decide`. When the choice needs
-  Wave judgment, call `lf project request-decision <project-id> <prompt>
-  --option <choice> --option <choice> --wait`, then continue the same Project
-  and Task transcripts from the answer.
+- Use `lf task steer`, `interrupt`, `wait`, and `resume`. Do not create another
+  worktree or session for review feedback or CI repair.
+- Service a pending child Review before background KR work. Reply with the
+  exact `lf work steer ...` command embedded in `<lf:child-review>`, or use its
+  `lf work close ...` command when the interactive step is finished. When the
+  choice needs Wave judgment, state the exact question in the Project's own
+  interactive step so its parent Review can route it.
 - Never start another Project or Wave from Project pursuit, and never collapse
   the remaining Project into one anonymous task.
 - Discovered debt becomes a task under an existing KR unless it

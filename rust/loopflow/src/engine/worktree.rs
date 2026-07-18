@@ -113,6 +113,7 @@ mod tests {
 
     #[test]
     fn remove_worktree_deletes_branch_from_main_repo() {
+        let _env_lock = crate::journal::test_env_lock();
         let tmp = tempdir().expect("tempdir");
         let repo = tmp.path().join("repo");
         std::fs::create_dir_all(&repo).expect("repo dir");

@@ -13,11 +13,11 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    AbandonIntent, BoundaryResult, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome,
-    ChildCommand, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDirective, ChildDirectiveId, ChildLeaseState, ChildLeaseToken,
-    ChildProcessGeneration, ChildRef, ChildWriteLease, DirectiveKind, ObservationRecipient,
+    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
+    ChildLeaseToken, ChildProcessGeneration, ChildProcessReservation, ChildRef, ChildWriteLease,
+    ObservationRecipient,
 };
+use crate::durable::Author;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::project_session::{
@@ -36,6 +36,10 @@ use crate::task::{
     TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
 };
 
+use super::durable::{
+    activate_run_for_child, create_project_spine, create_task_spine, end_run_for_child,
+    fence_run_for_child, reserve_run_for_child, work_for_child_in,
+};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -50,17 +54,18 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn reserve_task_session_with_directive(
+    pub fn insert_task_session_with_steer(
         &self,
         session: &TaskSession,
         pr: &TaskPr,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<()> {
-        ensure_directive_target(directive, "task", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, session, pr)?;
-        insert_child_directive(&transaction, directive)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(session.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
     }
@@ -69,16 +74,15 @@ impl SqliteStore {
     /// transaction with the successor's own creation.
     ///
     /// Inserts the successor Session, its sequence-1 Working PR, and its initial
-    /// directive; then transactionally re-keys the Linear observation cursor and
+    /// Steer; then transactionally re-keys the Linear observation cursor and
     /// the ingested-comment ledger from the predecessor onto the successor. The
     /// cursor is re-keyed (moved) rather than copied, so the successor resumes
     /// polling from the predecessor's last revision and a webhook redelivery of
     /// an already-applied edit cannot re-emit it; if the predecessor had no
     /// cursor row, the successor is seeded from its launch snapshot instead. The
-    /// ledger re-key makes a comment already turned into a follow-up by the
+    /// ledger re-key makes a comment already turned into a Steer by the
     /// predecessor land zero times on the successor. Historical receipts
-    /// (`child_commands`, `child_directives`) stay on the predecessor for
-    /// attribution; the successor is soft-linked to it via
+    /// stay on the predecessor for attribution; the successor is soft-linked to it via
     /// `predecessor_session_id`.
     ///
     /// Idempotent: if a non-terminal Session for the same Linear issue already
@@ -89,9 +93,9 @@ impl SqliteStore {
         predecessor: &TaskSession,
         successor: &TaskSession,
         pr: &TaskPr,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<TaskSessionSuccession> {
-        ensure_directive_target(directive, "task", successor.id.as_str())?;
         validate_task_session(successor)?;
         validate_initial_task_pr(successor, pr)?;
         let issue_id = successor.launch.issue.id.as_str().to_string();
@@ -112,8 +116,10 @@ impl SqliteStore {
             TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
+        create_task_spine(&transaction, successor)?;
         insert_task_pr(&transaction, pr)?;
-        insert_child_directive(&transaction, directive)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(successor.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         _carry_task_session_state(&transaction, predecessor, successor)?;
         transaction.commit()?;
         Ok(TaskSessionSuccession {
@@ -134,7 +140,8 @@ impl SqliteStore {
         &self,
         predecessor: &TaskSession,
         successor: &TaskSession,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<TaskSessionSuccession> {
         if predecessor.status != TaskSessionStatus::Abandoned {
             return Err(StoreError::InvalidData(format!(
@@ -169,7 +176,6 @@ impl SqliteStore {
                 "a recovered Task successor must begin waiting without a live body".to_string(),
             ));
         }
-        ensure_directive_target(directive, "task", successor.id.as_str())?;
         validate_task_session(successor)?;
         let issue_id = successor.launch.issue.id.as_str().to_string();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -198,6 +204,7 @@ impl SqliteStore {
             TASK_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
+        create_task_spine(&transaction, successor)?;
         let moved = transaction.execute(
             "UPDATE task_prs SET task_session_id=?1, updated_at=?2 WHERE task_session_id=?3",
             params![successor.id.as_str(), now_unix(), predecessor.id.as_str()],
@@ -208,16 +215,8 @@ impl SqliteStore {
                 predecessor.id
             )));
         }
-        insert_child_directive(&transaction, directive)?;
-        insert_task_event_in(
-            &transaction,
-            successor,
-            &TaskEventKind::DirectiveChanged {
-                directive_id: directive.id.clone(),
-                version: directive.version,
-                directive_kind: directive.kind,
-            },
-        )?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(successor.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         _carry_task_session_state(&transaction, predecessor, successor)?;
         transaction.commit()?;
         Ok(TaskSessionSuccession {
@@ -228,16 +227,19 @@ impl SqliteStore {
 
     pub fn update_task_session(&self, session: &TaskSession) -> StoreResult<()> {
         validate_task_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        validate_task_project_session(&conn, session)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project_session(&transaction, session)?;
         let parameters = task_session_control_params(session);
-        let changed = conn.execute(
+        let changed = transaction.execute(
             TASK_SESSION_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        close_task_epoch_if_quiescent(&transaction, session)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -247,57 +249,56 @@ impl SqliteStore {
         old_identifier: &str,
         new_identifier: &str,
     ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        // A team migration rebinds the *current* successor for an issue, not a
-        // terminal predecessor kept as history. `issue_id` can now match several
-        // rows (one live successor plus completed/abandoned predecessors), so
-        // resolve the current one through the same rule as the operational
-        // lookups rather than `query_row`, which errors on the second row.
-        let query = format!("{TASK_SESSION_COLUMNS} WHERE issue_id=?1");
-        let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![issue_id], map_task_session_row)?;
-        let mut sessions = Vec::new();
-        for row in rows {
-            sessions.push(row?);
-        }
-        let Some(current) = resolve_current_task_session(issue_id, sessions)? else {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let Some((task_id, current_identifier)) = tx
+            .query_row(
+                "SELECT id, issue_identifier FROM tasks WHERE external_issue_id=?1",
+                [issue_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
             return Ok(false);
         };
-        let session_id = current.id.as_str().to_string();
-        let current_identifier = current.launch.issue.identifier.as_str();
-        let status = current.status.as_str();
-        let lease_state = current.latest_process.as_ref().map(|process| process.state);
         if current_identifier == new_identifier {
             return Ok(false);
         }
         if current_identifier != old_identifier {
             return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
+                "Task {task_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
             )));
         }
-        if matches!(status, "starting" | "running")
-            || matches!(
-                lease_state,
-                Some(ChildLeaseState::Reserved) | Some(ChildLeaseState::Active)
+        let active_run: Option<String> = tx
+            .query_row(
+                "SELECT r.id
+                 FROM epochs e JOIN runs r ON r.epoch_id=e.id
+                 WHERE e.task_id=?1 AND e.state='open' AND r.state != 'ended'
+                 ORDER BY r.created_at DESC LIMIT 1",
+                [&task_id],
+                |row| row.get(0),
             )
-        {
+            .optional()?;
+        if let Some(run_id) = active_run {
             return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} has an active body; stop it before changing {old_identifier} to {new_identifier}"
+                "Task {task_id} has active Run {run_id}; stop it before changing {old_identifier} to {new_identifier}"
             )));
         }
-        let changed = conn.execute(
-            "UPDATE task_sessions
-             SET issue_identifier=?3, updated_at=?4
-             WHERE id=?1 AND issue_identifier=?2
-               AND status NOT IN ('starting', 'running')
-               AND COALESCE(process_lease_state, 'finished') NOT IN ('reserved', 'active')",
-            params![session_id, old_identifier, new_identifier, now_unix()],
+        let changed = tx.execute(
+            "UPDATE tasks SET issue_identifier=?3 WHERE id=?1 AND issue_identifier=?2",
+            params![task_id, old_identifier, new_identifier],
         )?;
         if changed == 0 {
             return Err(StoreError::InvalidData(format!(
-                "Task Session for {old_identifier} became active during its team migration"
+                "Task {task_id} changed during its team migration"
             )));
         }
+        tx.execute(
+            "UPDATE task_sessions SET issue_identifier=?2, updated_at=?3
+             WHERE epoch_id IN (SELECT id FROM epochs WHERE task_id=?1 AND state='open')",
+            params![task_id, new_identifier, now_unix()],
+        )?;
+        tx.commit()?;
         Ok(true)
     }
 
@@ -332,6 +333,11 @@ impl SqliteStore {
             &TaskEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        activate_run_for_child(
+            &transaction,
+            &ChildRef::Task(session.id.clone()),
+            lease.generation,
         )?;
         transaction.commit()?;
         Ok(())
@@ -381,6 +387,12 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Task(session.id.clone()),
+            lease.generation,
+        )?;
+        close_task_epoch_if_quiescent(&transaction, session)?;
         transaction.commit()?;
         Ok(())
     }
@@ -435,6 +447,11 @@ impl SqliteStore {
             &TaskEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        fence_run_for_child(
+            &transaction,
+            &ChildRef::Task(session_id.clone()),
+            process.generation,
         )?;
         transaction.commit()?;
         Ok(process)
@@ -509,6 +526,11 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        fence_run_for_child(
+            &transaction,
+            &ChildRef::Task(session_id.clone()),
+            generation,
+        )?;
         transaction.commit()?;
         Ok(Some(process))
     }
@@ -554,6 +576,11 @@ impl SqliteStore {
             &TaskEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Task(session_id.clone()),
+            generation,
         )?;
         transaction.commit()?;
         Ok(process)
@@ -643,7 +670,8 @@ impl SqliteStore {
         &self,
         session: &TaskSession,
         expected_status: TaskSessionStatus,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+        trigger: Option<&crate::durable::RunTrigger>,
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         validate_task_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
             StoreError::InvalidData("Task process reservation requires a generation".to_string())
@@ -694,6 +722,12 @@ impl SqliteStore {
         if changed == 0 {
             return Ok(None);
         }
+        let run_token = reserve_run_for_child(
+            &transaction,
+            &ChildRef::Task(session.id.clone()),
+            process,
+            trigger,
+        )?;
         insert_task_event_in(
             &transaction,
             session,
@@ -711,9 +745,12 @@ impl SqliteStore {
             },
         )?;
         transaction.commit()?;
-        Ok(Some(ChildWriteLease {
-            generation: process.generation,
-            token,
+        Ok(Some(ChildProcessReservation {
+            write_lease: ChildWriteLease {
+                generation: process.generation,
+                token,
+            },
+            run_token,
         }))
     }
 
@@ -1065,225 +1102,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_child_command(&self, command: &ChildCommand) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        insert_child_command(&conn, command)
-    }
-
-    /// Queue an Abandon command and stamp the Session's abandon intent in the
-    /// same transaction.
-    ///
-    /// These two writes must not be separable. The intent is what every launch
-    /// path reads to refuse a restart; if the command could land without it, the
-    /// window between "abandon queued" and "runner consumed it" would still be a
-    /// window in which a supervisor revives the Session.
-    pub fn insert_child_abandon_command(
-        &self,
-        command: &ChildCommand,
-        intent: &AbandonIntent,
-    ) -> StoreResult<()> {
-        let ChildCommandKind::Abandon { .. } = &command.kind else {
-            return Err(StoreError::InvalidData(
-                "abandon command required".to_string(),
-            ));
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_child_command(&transaction, command)?;
-        let table = match command.target {
-            ChildRef::Project(_) => "project_sessions",
-            ChildRef::Task(_) => "task_sessions",
-        };
-        let updated = transaction.execute(
-            &format!(
-                "UPDATE {table} SET abandon_requested_at=?2, abandon_reason=?3, updated_at=?4
-                 WHERE id=?1"
-            ),
-            params![
-                command.target.target_id(),
-                intent.requested_at.unix_timestamp(),
-                intent.reason,
-                now_unix(),
-            ],
-        )?;
-        if updated == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "{} {} not found",
-                command.target.target_kind(),
-                command.target.target_id()
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn ensure_child_decision_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<(ChildCommand, bool)> {
-        let ChildCommandKind::Decide { decision_id, .. } = &command.kind else {
-            return Err(StoreError::InvalidData(
-                "decision command required".to_string(),
-            ));
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![command.target.target_kind(), command.target.target_id()],
-                map_child_command_row,
-            )?;
-            let mut existing = None;
-            for row in rows {
-                let candidate = row?;
-                if matches!(
-                    &candidate.kind,
-                    ChildCommandKind::Decide {
-                        decision_id: candidate_id,
-                        ..
-                    } if candidate_id == decision_id
-                ) {
-                    existing = Some(candidate);
-                    break;
-                }
-            }
-            existing
-        };
-        if let Some(existing) = existing {
-            return Ok((existing, false));
-        }
-        insert_child_command(&transaction, command)?;
-        transaction.commit()?;
-        Ok((command.clone(), true))
-    }
-
-    /// Insert a `ci-fix` wake unless one already exists for the same incident
-    /// identity, in which case return the existing row and `false`.
-    ///
-    /// This is the whole dedup: one (repo, PR, failed head, failure set) wakes
-    /// exactly one body, and the fact is a durable row written before any process
-    /// starts rather than a marker stamped once one has. A repeated observation,
-    /// a coalesced multi-check delivery, and a restart between observation and
-    /// arming all land here and all find the same command.
-    ///
-    /// State is *not* consulted, terminal included: an identity that already has
-    /// a wake must never mint a second, however that wake settled. Re-arming is
-    /// the job of a new identity — a moved head or a changed failure set.
-    pub fn ensure_child_ci_fix_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<(ChildCommand, bool)> {
-        let ChildCommandKind::CiFix {
-            incident_identity, ..
-        } = &command.kind
-        else {
-            return Err(StoreError::InvalidData(
-                "ci-fix command required".to_string(),
-            ));
-        };
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![command.target.target_kind(), command.target.target_id()],
-                map_child_command_row,
-            )?;
-            let mut existing = None;
-            for row in rows {
-                let candidate = row?;
-                if matches!(
-                    &candidate.kind,
-                    ChildCommandKind::CiFix {
-                        incident_identity: candidate_identity,
-                        ..
-                    } if candidate_identity == incident_identity
-                ) {
-                    existing = Some(candidate);
-                    break;
-                }
-            }
-            existing
-        };
-        if let Some(existing) = existing {
-            return Ok((existing, false));
-        }
-        insert_child_command(&transaction, command)?;
-        transaction.commit()?;
-        Ok((command.clone(), true))
-    }
-
-    pub fn supersede_and_insert_child_command(
-        &self,
-        command: &ChildCommand,
-    ) -> StoreResult<Vec<ChildCommandId>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let superseded = supersede_child_commands(
-            &transaction,
-            command.target.target_kind(),
-            command.target.target_id(),
-        )?;
-        insert_child_command(&transaction, command)?;
-        transaction.commit()?;
-        Ok(superseded)
-    }
-
-    pub fn insert_child_command_with_directive(
-        &self,
-        command: &ChildCommand,
-        directive: &ChildDirective,
-    ) -> StoreResult<Vec<ChildCommandId>> {
-        ensure_directive_target(
-            directive,
-            command.target.target_kind(),
-            command.target.target_id(),
-        )?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let superseded = supersede_child_commands(
-            &transaction,
-            command.target.target_kind(),
-            command.target.target_id(),
-        )?;
-        insert_child_command(&transaction, command)?;
-        insert_child_directive(&transaction, directive)?;
-        let table = match command.target {
-            ChildRef::Project(_) => "project_sessions",
-            ChildRef::Task(_) => "task_sessions",
-        };
-        transaction.execute(
-            &format!("UPDATE {table} SET current_directive_version=?2, updated_at=?3 WHERE id=?1"),
-            params![
-                command.target.target_id(),
-                i64::from(directive.version),
-                OffsetDateTime::now_utc().unix_timestamp(),
-            ],
-        )?;
-        transaction.commit()?;
-        Ok(superseded)
-    }
-
-    pub fn child_command(&self, command_id: &ChildCommandId) -> StoreResult<Option<ChildCommand>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            &format!("{CHILD_COMMAND_COLUMNS} WHERE id=?1"),
-            params![command_id.as_str()],
-            map_child_command_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
     pub fn task_linear_observation(
         &self,
         session_id: &TaskSessionId,
@@ -1303,17 +1121,15 @@ impl SqliteStore {
     /// Persist one Linear observation as Task direction, atomically. Exactly-once
     /// lives here: a first observation seeds the baseline and emits nothing; a
     /// stale (older-revision) response is dropped; a title/description edit
-    /// becomes a directive only if the stored content still differs; and a
-    /// comment becomes a follow-up only on its first entry into the ledger.
+    /// becomes a Steer only if the stored content still differs; and a comment
+    /// becomes a Steer only on its first entry into the ledger.
     pub fn apply_linear_observation(
         &self,
         apply: &LinearObservationApply,
     ) -> StoreResult<LinearObservationOutcome> {
-        if let Some((_, directive)) = &apply.directive {
-            ensure_directive_target(directive, "task", apply.session_id.as_str())?;
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(apply.session_id.clone()))?;
 
         let existing = transaction
             .query_row(
@@ -1358,8 +1174,7 @@ impl SqliteStore {
             transaction.commit()?;
             return Ok(LinearObservationOutcome {
                 baselined: true,
-                directive_applied: false,
-                superseded: Vec::new(),
+                content_steer_applied: false,
                 follow_ups_created: Vec::new(),
             });
         };
@@ -1370,41 +1185,16 @@ impl SqliteStore {
             transaction.commit()?;
             return Ok(LinearObservationOutcome {
                 baselined: false,
-                directive_applied: false,
-                superseded: Vec::new(),
+                content_steer_applied: false,
                 follow_ups_created: Vec::new(),
             });
         }
 
-        // Title/description edit → replacement directive, but only if the stored
-        // content still differs (a racing observer may have applied it already).
-        let mut directive_applied = false;
-        let mut superseded = Vec::new();
-        if let Some((command, directive)) = &apply.directive {
+        let mut content_steer_applied = false;
+        if let Some(text) = &apply.content_steer {
             if last_title != apply.title || last_description != apply.description {
-                // The version is stamped here, inside the transaction, from the
-                // authoritative `current_directive_version` — not from the
-                // caller's earlier session read. A concurrent webhook or a racing
-                // `lf task steer` that bumped the version in the gap would
-                // otherwise collide on UNIQUE(target, version) and fail the whole
-                // apply.
-                let current: i64 = transaction.query_row(
-                    "SELECT current_directive_version FROM task_sessions WHERE id=?1",
-                    params![apply.session_id.as_str()],
-                    |row| row.get(0),
-                )?;
-                let next = current + 1;
-                let mut directive = directive.clone();
-                directive.version = next as u32;
-                superseded =
-                    supersede_child_commands(&transaction, "task", apply.session_id.as_str())?;
-                insert_child_command(&transaction, command)?;
-                insert_child_directive(&transaction, &directive)?;
-                transaction.execute(
-                    "UPDATE task_sessions SET current_directive_version=?2, updated_at=?3 WHERE id=?1",
-                    params![apply.session_id.as_str(), next, observed_at],
-                )?;
-                directive_applied = true;
+                Self::append_steer_in(&transaction, &work, &Author::User, text)?;
+                content_steer_applied = true;
             }
         }
 
@@ -1415,7 +1205,8 @@ impl SqliteStore {
                 &transaction,
                 apply.session_id.as_str(),
                 &follow_up.comment_id,
-                &follow_up.command,
+                &work,
+                &follow_up.text,
                 observed_at,
             )? {
                 follow_ups_created.push(id);
@@ -1438,33 +1229,34 @@ impl SqliteStore {
         transaction.commit()?;
         Ok(LinearObservationOutcome {
             baselined: false,
-            directive_applied,
-            superseded,
+            content_steer_applied,
             follow_ups_created,
         })
     }
 
-    /// Persist one human Linear comment as a FIFO Task follow-up, exactly once.
+    /// Persist one human Linear comment as a FIFO Task Steer, exactly once.
     /// Webhook comments arrive one at a time (unlike the snapshot edit path), and
     /// Linear delivers at-least-once — so the `task_linear_ingested_comments`
-    /// ledger is the guard: the follow-up command is created only on the comment
-    /// id's first insertion. Returns the created command id, or `None` for a
+    /// ledger is the guard: the Steer is created only on the comment id's first
+    /// insertion. Returns the created Steer id, or `None` for a
     /// duplicate delivery.
     pub fn apply_linear_comment(
         &self,
         session_id: &TaskSessionId,
         comment_id: &str,
-        command: &ChildCommand,
+        text: &str,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<ChildCommandId>> {
+    ) -> StoreResult<Option<crate::durable::SteerId>> {
         let observed_at = observed_at.unix_timestamp();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(session_id.clone()))?;
         let created = ingest_linear_comment(
             &transaction,
             session_id.as_str(),
             comment_id,
-            command,
+            &work,
+            text,
             observed_at,
         )?;
         if created.is_some() {
@@ -1498,107 +1290,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn child_commands(&self, target: &ChildRef) -> StoreResult<Vec<ChildCommand>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(&format!(
-            "{CHILD_COMMAND_COLUMNS}
-             WHERE target_kind=?1 AND session_id=?2
-             ORDER BY created_at, id"
-        ))?;
-        let rows = statement.query_map(
-            params![target.target_kind(), target.target_id()],
-            map_child_command_row,
-        )?;
-        let mut commands = Vec::new();
-        for row in rows {
-            commands.push(row?);
-        }
-        Ok(commands)
-    }
-
-    pub fn claim_child_commands(
-        &self,
-        target: &ChildRef,
-        generation: u32,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        claim_child_commands_in(&transaction, target, generation)?;
-        let commands = read_claimed_child_commands(&transaction, target, generation)?;
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub(crate) fn claim_child_commands_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        claim_child_commands_in(&transaction, target, lease.generation)?;
-        let commands = read_claimed_child_commands(&transaction, target, lease.generation)?;
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub fn claim_task_commands_or_stop(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-        stopped_status: TaskSessionStatus,
-        reason: &str,
-    ) -> StoreResult<BoundaryResult<TaskSession>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                TASK_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_task_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        if session
-            .latest_process
-            .as_ref()
-            .map(|process| process.generation)
-            != Some(generation)
-            || !session.status.is_process_active()
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} generation {generation} is not active"
-            )));
-        }
-        let target = ChildRef::Task(session_id.clone());
-        claim_child_commands_in(&transaction, &target, generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
-
-        session.set_status(stopped_status, reason);
-        let parameters = task_session_control_params(&session);
-        let changed = transaction.execute(
-            TASK_SESSION_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
-    }
-
-    pub(crate) fn claim_task_commands_or_stop_for_lease(
+    pub(crate) fn stop_task_for_lease(
         &self,
         session_id: &TaskSessionId,
         lease: &ChildWriteLease,
         stopped_status: TaskSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult<TaskSession>> {
+    ) -> StoreResult<TaskSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let target = ChildRef::Task(session_id.clone());
@@ -1611,12 +1309,6 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        claim_child_commands_in(&transaction, &target, lease.generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, lease.generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
         session.set_status(stopped_status, reason);
         if update_task_session_for_lease_in(&transaction, &session, lease, ChildLeaseState::Active)?
             == 0
@@ -1624,388 +1316,7 @@ impl SqliteStore {
             return Err(lease_revoked("Task Session", session_id.as_str(), lease));
         }
         transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
-    }
-
-    pub fn accept_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let accepted_at = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
-             WHERE id = ?3 AND state IN ('persisted', 'claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                accepted_at,
-                command_id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            let exists: bool = transaction.query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM child_commands
-                    WHERE id = ?1
-                 )",
-                params![command_id.as_str()],
-                |row| row.get(0),
-            )?;
-            return if exists {
-                Err(StoreError::InvalidData(format!(
-                    "child command {command_id} is already resolved"
-                )))
-            } else {
-                Err(StoreError::NotFound)
-            };
-        }
-        transaction.execute(
-            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
-             WHERE command_id=?2",
-            params![accepted_at, command_id.as_str()],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub(crate) fn accept_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let accepted_at = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state = 'accepted', effect = ?1, accepted_at = ?2, error = NULL
-             WHERE id = ?3 AND target_kind=?4 AND session_id=?5
-               AND state IN ('persisted', 'claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                accepted_at,
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved or belongs to another Session"
-            )));
-        }
-        transaction.execute(
-            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
-             WHERE command_id=?2",
-            params![accepted_at, command_id.as_str()],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn mark_child_command_delivering(
-        &self,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands SET state='delivering', effect=?1
-             WHERE id=?2 AND state='claimed'",
-            params![effect.as_str(), command_id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not claimed"
-            )));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn mark_child_command_delivering_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let changed = transaction.execute(
-            "UPDATE child_commands SET state='delivering', effect=?1
-             WHERE id=?2 AND target_kind=?3 AND session_id=?4 AND state='claimed'",
-            params![
-                effect.as_str(),
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not claimed by this Session"
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn mark_stale_child_deliveries_uncertain(
-        &self,
-        target: &ChildRef,
-        generation: u32,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut commands = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-                   AND claimed_by_generation<>?3
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(generation)
-                ],
-                map_child_command_row,
-            )?;
-            let mut commands = Vec::new();
-            for row in rows {
-                commands.push(row?);
-            }
-            commands
-        };
-        if commands.is_empty() {
-            transaction.commit()?;
-            return Ok(commands);
-        }
-        let error = "provider delivery outcome is unknown after process restart; inspect the child transcript before retrying";
-        transaction.execute(
-            "UPDATE child_commands
-             SET state='uncertain',
-                 error=?4
-             WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-               AND claimed_by_generation<>?3",
-            params![
-                target.target_kind(),
-                target.target_id(),
-                i64::from(generation),
-                error
-            ],
-        )?;
-        for command in &mut commands {
-            command.state = ChildCommandState::Uncertain;
-            command.error = Some(error.to_string());
-        }
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub(crate) fn mark_stale_child_deliveries_uncertain_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-    ) -> StoreResult<Vec<ChildCommand>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let mut commands = {
-            let mut statement = transaction.prepare(&format!(
-                "{CHILD_COMMAND_COLUMNS}
-                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-                   AND claimed_by_generation<>?3
-                 ORDER BY created_at, id"
-            ))?;
-            let rows = statement.query_map(
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(lease.generation)
-                ],
-                map_child_command_row,
-            )?;
-            let mut commands = Vec::new();
-            for row in rows {
-                commands.push(row?);
-            }
-            commands
-        };
-        let error = "provider delivery outcome is unknown after process restart; inspect the child transcript before retrying";
-        if !commands.is_empty() {
-            transaction.execute(
-                "UPDATE child_commands SET state='uncertain', error=?4
-                 WHERE target_kind=?1 AND session_id=?2 AND state='delivering'
-                   AND claimed_by_generation<>?3",
-                params![
-                    target.target_kind(),
-                    target.target_id(),
-                    i64::from(lease.generation),
-                    error
-                ],
-            )?;
-            for command in &mut commands {
-                command.state = ChildCommandState::Uncertain;
-                command.error = Some(error.to_string());
-            }
-        }
-        transaction.commit()?;
-        Ok(commands)
-    }
-
-    pub fn set_child_command_effect(
-        &self,
-        command_id: &ChildCommandId,
-        effect: ChildCommandEffect,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands SET effect = ?1
-             WHERE id = ?2 AND state = 'claimed'",
-            params![effect.as_str(), command_id.as_str()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not claimed"
-            )));
-        }
-        Ok(())
-    }
-
-    pub fn fail_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-        error: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands
-             SET state = 'failed', effect = COALESCE(?1, effect), error = ?2
-             WHERE id = ?3 AND state IN ('claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                error,
-                command_id.as_str()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Pre-delivery rejection: transition a still-`persisted` command to
-    /// `failed`, recording `error`. Distinct from [`fail_child_command`], which
-    /// owns the post-delivery `claimed`/`delivering` → `failed` transition. The
-    /// `WHERE state = 'persisted'` clause means this can only terminalize a
-    /// command that was never claimed, so it never races a body that has since
-    /// taken ownership — a `changed == 0` is a genuine "no longer persisted".
-    pub fn reject_persisted_child_command(
-        &self,
-        command_id: &ChildCommandId,
-        error: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_commands
-             SET state = 'failed', error = ?2
-             WHERE id = ?1 AND state = 'persisted'",
-            params![command_id.as_str(), error],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is not persisted; cannot pre-delivery reject"
-            )));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn fail_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-        effect: Option<ChildCommandEffect>,
-        error: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state='failed', effect=COALESCE(?1, effect), error=?2
-             WHERE id=?3 AND target_kind=?4 AND session_id=?5
-               AND state IN ('claimed', 'delivering')",
-            params![
-                effect.map(ChildCommandEffect::as_str),
-                error,
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is already resolved or belongs to another Session"
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    /// Displace one undelivered command that circumstances made moot.
-    ///
-    /// Distinct from `fail_child_command_for_lease`: nothing went wrong, so the
-    /// `error` column stays null and `lf task status` does not report a fault.
-    /// The reason rides the event instead.
-    ///
-    /// `delivering` is deliberately **not** superseded. That state means a
-    /// provider call is in flight and a crash from here is genuinely ambiguous;
-    /// resolving it is `reconcile_stale_deliveries`' job, which moves it to
-    /// `uncertain` so a human inspects the transcript before anything retries.
-    /// Superseding it instead would erase that ambiguity — recording "this never
-    /// mattered" about input the provider may well have received. No caller needs
-    /// it: the only command kind that supersedes from a moot state is `CiFix`,
-    /// which never enters `delivering` at all.
-    pub(crate) fn supersede_child_command_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        command_id: &ChildCommandId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let changed = transaction.execute(
-            "UPDATE child_commands
-             SET state='superseded'
-             WHERE id=?1 AND target_kind=?2 AND session_id=?3
-               AND state IN ('persisted', 'claimed')",
-            params![
-                command_id.as_str(),
-                target.target_kind(),
-                target.target_id()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "child command {command_id} is resolved, mid-delivery, or belongs to another Session"
-            )));
-        }
-        transaction.commit()?;
-        Ok(())
+        Ok(session)
     }
 
     pub(crate) fn validate_child_write_lease(
@@ -2142,8 +1453,9 @@ impl SqliteStore {
 
     pub fn insert_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
         validate_project_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute(
             PROJECT_SESSION_INSERT,
             rusqlite::params_from_iter(
                 project_session_params(session)
@@ -2151,16 +1463,18 @@ impl SqliteStore {
                     .map(|value| value.as_ref()),
             ),
         )?;
+        create_project_spine(&transaction, session)?;
+        transaction.commit()?;
         Ok(())
     }
 
-    pub fn insert_project_session_with_directive(
+    pub fn insert_project_session_with_steer(
         &self,
         session: &ProjectSession,
-        directive: &ChildDirective,
+        author: &Author,
+        text: &str,
     ) -> StoreResult<()> {
         validate_project_session(session)?;
-        ensure_directive_target(directive, "project", session.id.as_str())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_session_params(session);
@@ -2168,22 +1482,27 @@ impl SqliteStore {
             PROJECT_SESSION_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
-        insert_child_directive(&transaction, directive)?;
+        create_project_spine(&transaction, session)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Project(session.id.clone()))?;
+        Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn update_project_session(&self, session: &ProjectSession) -> StoreResult<()> {
         validate_project_session(session)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let parameters = project_session_control_params(session);
-        let changed = conn.execute(
+        let changed = transaction.execute(
             PROJECT_SESSION_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         if changed == 0 {
             return Err(StoreError::NotFound);
         }
+        close_project_epoch_if_quiescent(&transaction, session)?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -2218,6 +1537,11 @@ impl SqliteStore {
             &ProjectEventKind::BodyLeaseChanged {
                 process: process.clone(),
             },
+        )?;
+        activate_run_for_child(
+            &transaction,
+            &ChildRef::Project(session.id.clone()),
+            lease.generation,
         )?;
         transaction.commit()?;
         Ok(())
@@ -2272,6 +1596,12 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Project(session.id.clone()),
+            lease.generation,
+        )?;
+        close_project_epoch_if_quiescent(&transaction, session)?;
         transaction.commit()?;
         Ok(())
     }
@@ -2329,6 +1659,11 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        fence_run_for_child(
+            &transaction,
+            &ChildRef::Project(session_id.clone()),
+            process.generation,
+        )?;
         transaction.commit()?;
         Ok(process)
     }
@@ -2375,6 +1710,11 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
+        end_run_for_child(
+            &transaction,
+            &ChildRef::Project(session_id.clone()),
+            generation,
+        )?;
         transaction.commit()?;
         Ok(process)
     }
@@ -2383,7 +1723,8 @@ impl SqliteStore {
         &self,
         session: &ProjectSession,
         expected_status: ProjectSessionStatus,
-    ) -> StoreResult<Option<ChildWriteLease>> {
+        trigger: Option<&crate::durable::RunTrigger>,
+    ) -> StoreResult<Option<ChildProcessReservation>> {
         validate_project_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
             StoreError::InvalidData("Project process reservation requires a generation".to_string())
@@ -2433,6 +1774,12 @@ impl SqliteStore {
         if changed == 0 {
             return Ok(None);
         }
+        let run_token = reserve_run_for_child(
+            &transaction,
+            &ChildRef::Project(session.id.clone()),
+            process,
+            trigger,
+        )?;
         insert_project_event_in(
             &transaction,
             session,
@@ -2450,9 +1797,12 @@ impl SqliteStore {
             },
         )?;
         transaction.commit()?;
-        Ok(Some(ChildWriteLease {
-            generation: process.generation,
-            token,
+        Ok(Some(ChildProcessReservation {
+            write_lease: ChildWriteLease {
+                generation: process.generation,
+                token,
+            },
+            run_token,
         }))
     }
 
@@ -2559,58 +1909,13 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    pub fn claim_project_commands_or_stop(
-        &self,
-        session_id: &ProjectSessionId,
-        generation: u32,
-        stopped_status: ProjectSessionStatus,
-        reason: &str,
-    ) -> StoreResult<BoundaryResult<ProjectSession>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                PROJECT_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_project_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        if session
-            .latest_process
-            .as_ref()
-            .map(|process| process.generation)
-            != Some(generation)
-            || !session.status.is_process_active()
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Project Session {session_id} generation {generation} is not active"
-            )));
-        }
-        let target = ChildRef::Project(session_id.clone());
-        claim_child_commands_in(&transaction, &target, generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
-        session.set_status(stopped_status, reason);
-        let parameters = project_session_control_params(&session);
-        transaction.execute(
-            PROJECT_SESSION_UPDATE,
-            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
-        )?;
-        transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
-    }
-
-    pub(crate) fn claim_project_commands_or_stop_for_lease(
+    pub(crate) fn stop_project_for_lease(
         &self,
         session_id: &ProjectSessionId,
         lease: &ChildWriteLease,
         stopped_status: ProjectSessionStatus,
         reason: &str,
-    ) -> StoreResult<BoundaryResult<ProjectSession>> {
+    ) -> StoreResult<ProjectSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let target = ChildRef::Project(session_id.clone());
@@ -2623,12 +1928,6 @@ impl SqliteStore {
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        claim_child_commands_in(&transaction, &target, lease.generation)?;
-        let commands = read_claimed_child_commands(&transaction, &target, lease.generation)?;
-        if !commands.is_empty() {
-            transaction.commit()?;
-            return Ok(BoundaryResult::Commands(commands));
-        }
         session.set_status(stopped_status, reason);
         if update_project_session_for_lease_in(
             &transaction,
@@ -2640,7 +1939,7 @@ impl SqliteStore {
             return Err(lease_revoked("Project Session", session_id.as_str(), lease));
         }
         transaction.commit()?;
-        Ok(BoundaryResult::Stopped(session))
+        Ok(session)
     }
 
     pub fn append_project_event(
@@ -2897,186 +2196,6 @@ impl SqliteStore {
         transaction.commit()?;
         Ok(!exists)
     }
-
-    pub fn child_directives(&self, target: &ChildRef) -> StoreResult<Vec<ChildDirective>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT id, target_kind, target_id, version, kind, text, source_json,
-                    command_id, issued_at, applied_at, incorporated_at, incorporated_summary
-             FROM child_directives
-             WHERE target_kind=?1 AND target_id=?2
-             ORDER BY version",
-        )?;
-        let rows = statement.query_map(
-            params![target.target_kind(), target.target_id()],
-            map_child_directive_row,
-        )?;
-        let mut directives = Vec::new();
-        for row in rows {
-            directives.push(row?);
-        }
-        Ok(directives)
-    }
-
-    pub fn child_directive_for_command(
-        &self,
-        command_id: &ChildCommandId,
-    ) -> StoreResult<Option<ChildDirective>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT id, target_kind, target_id, version, kind, text, source_json,
-                    command_id, issued_at, applied_at, incorporated_at, incorporated_summary
-             FROM child_directives WHERE command_id=?1",
-            params![command_id.as_str()],
-            map_child_directive_row,
-        )
-        .optional()
-        .map_err(StoreError::from)
-    }
-
-    pub fn mark_child_directive_applied(&self, target: &ChildRef, version: u32) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
-             WHERE target_kind=?2 AND target_id=?3 AND version=?4",
-            params![
-                OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
-                target.target_kind(),
-                target.target_id(),
-                i64::from(version),
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub(crate) fn mark_child_directive_applied_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        version: u32,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, target, lease)?;
-        let changed = transaction.execute(
-            "UPDATE child_directives SET applied_at=COALESCE(applied_at, ?1)
-             WHERE target_kind=?2 AND target_id=?3 AND version=?4",
-            params![
-                OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,
-                target.target_kind(),
-                target.target_id(),
-                i64::from(version),
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn incorporate_child_directive(
-        &self,
-        target: &ChildRef,
-        version: u32,
-        summary: &str,
-    ) -> StoreResult<(ChildDirective, bool)> {
-        self.incorporate_child_directive_with_lease(target, version, summary, None)
-    }
-
-    pub(crate) fn incorporate_child_directive_for_lease(
-        &self,
-        target: &ChildRef,
-        lease: &ChildWriteLease,
-        version: u32,
-        summary: &str,
-    ) -> StoreResult<(ChildDirective, bool)> {
-        self.incorporate_child_directive_with_lease(target, version, summary, Some(lease))
-    }
-
-    fn incorporate_child_directive_with_lease(
-        &self,
-        target: &ChildRef,
-        version: u32,
-        summary: &str,
-        lease: Option<&ChildWriteLease>,
-    ) -> StoreResult<(ChildDirective, bool)> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(lease) = lease {
-            require_child_write_lease(&transaction, target, lease)?;
-        }
-        let mut directive = transaction
-            .query_row(
-                "SELECT id, target_kind, target_id, version, kind, text, source_json,
-                        command_id, issued_at, applied_at, incorporated_at, incorporated_summary
-                 FROM child_directives
-                 WHERE target_kind=?1 AND target_id=?2 AND version=?3",
-                params![target.target_kind(), target.target_id(), i64::from(version)],
-                map_child_directive_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let (table, current): (&str, i64) = match target {
-            ChildRef::Project(_) => (
-                "project_sessions",
-                transaction.query_row(
-                    "SELECT current_directive_version FROM project_sessions WHERE id=?1",
-                    params![target.target_id()],
-                    |row| row.get(0),
-                )?,
-            ),
-            ChildRef::Task(_) => (
-                "task_sessions",
-                transaction.query_row(
-                    "SELECT current_directive_version FROM task_sessions WHERE id=?1",
-                    params![target.target_id()],
-                    |row| row.get(0),
-                )?,
-            ),
-        };
-        if current != i64::from(version) {
-            return Err(StoreError::InvalidData(format!(
-                "directive v{version} is not current; {table} {} is at v{current}",
-                target.target_id()
-            )));
-        }
-        if directive.incorporated_at.is_some() {
-            return Ok((directive, false));
-        }
-        let now = OffsetDateTime::now_utc();
-        transaction.execute(
-            "UPDATE child_directives
-             SET incorporated_at=?1, incorporated_summary=?2
-             WHERE target_kind=?3 AND target_id=?4 AND version=?5",
-            params![
-                now.unix_timestamp_nanos() as i64,
-                summary,
-                target.target_kind(),
-                target.target_id(),
-                i64::from(version),
-            ],
-        )?;
-        match target {
-            ChildRef::Project(_) => transaction.execute(
-                "UPDATE project_sessions
-                 SET incorporated_directive_version=?2, updated_at=?3 WHERE id=?1",
-                params![target.target_id(), i64::from(version), now.unix_timestamp()],
-            )?,
-            ChildRef::Task(_) => transaction.execute(
-                "UPDATE task_sessions
-                 SET incorporated_directive_version=?2, updated_at=?3 WHERE id=?1",
-                params![target.target_id(), i64::from(version), now.unix_timestamp()],
-            )?,
-        };
-        transaction.commit()?;
-        directive.incorporated_at = Some(now);
-        directive.incorporated_summary = Some(summary.to_string());
-        Ok((directive, true))
-    }
 }
 
 fn validate_task_session(session: &TaskSession) -> StoreResult<()> {
@@ -3207,7 +2326,11 @@ fn validate_initial_task_pr(session: &TaskSession, pr: &TaskPr) -> StoreResult<(
     Ok(())
 }
 
-fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) -> StoreResult<()> {
+fn insert_initial_task(
+    conn: &rusqlite::Transaction<'_>,
+    session: &TaskSession,
+    pr: &TaskPr,
+) -> StoreResult<()> {
     validate_task_session(session)?;
     validate_initial_task_pr(session, pr)?;
     validate_task_project_session(conn, session)?;
@@ -3216,8 +2339,64 @@ fn insert_initial_task(conn: &Connection, session: &TaskSession, pr: &TaskPr) ->
         TASK_SESSION_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
+    create_task_spine(conn, session)?;
     insert_task_pr(conn, pr)?;
     seed_task_linear_observation(conn, session)
+}
+
+fn close_task_epoch_if_quiescent(conn: &Connection, session: &TaskSession) -> StoreResult<()> {
+    if !session
+        .latest_process
+        .as_ref()
+        .is_none_or(|process| process.state == ChildLeaseState::Finished)
+    {
+        return Ok(());
+    }
+    let state = match session.status {
+        TaskSessionStatus::Completed => "done",
+        TaskSessionStatus::Abandoned => "abandoned",
+        _ => return Ok(()),
+    };
+    conn.execute(
+        "UPDATE epochs SET state=?2, terminal_at=?3
+         WHERE id=(SELECT epoch_id FROM task_sessions WHERE id=?1)
+           AND state='open'",
+        params![
+            session.id.as_str(),
+            state,
+            session.updated_at.unix_timestamp()
+        ],
+    )?;
+    Ok(())
+}
+
+fn close_project_epoch_if_quiescent(
+    conn: &Connection,
+    session: &ProjectSession,
+) -> StoreResult<()> {
+    if !session
+        .latest_process
+        .as_ref()
+        .is_none_or(|process| process.state == ChildLeaseState::Finished)
+    {
+        return Ok(());
+    }
+    let state = match session.status {
+        ProjectSessionStatus::Completed => "done",
+        ProjectSessionStatus::Abandoned => "abandoned",
+        _ => return Ok(()),
+    };
+    conn.execute(
+        "UPDATE epochs SET state=?2, terminal_at=?3
+         WHERE id=(SELECT epoch_id FROM project_sessions WHERE id=?1)
+           AND state='open'",
+        params![
+            session.id.as_str(),
+            state,
+            session.updated_at.unix_timestamp()
+        ],
+    )?;
+    Ok(())
 }
 
 /// Seed the Linear observation cursor from the launch snapshot, in the Session's
@@ -3331,7 +2510,6 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     process_tmux_name, process_started_at, created_at, updated_at,
     pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
-    current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
     iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
     process_group_id, process_agent, process_provider,
@@ -3340,10 +2518,9 @@ const TASK_SESSION_INSERT: &str = "INSERT INTO task_sessions (
     lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json,
     process_provenance_json
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-    ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-    ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
-    ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+    ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36,
+    ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51
 )";
 const TASK_SESSION_COLUMNS: &str = "SELECT
     id, issue_id, issue_identifier, issue_title, issue_description,
@@ -3353,7 +2530,6 @@ const TASK_SESSION_COLUMNS: &str = "SELECT
     process_tmux_name, process_started_at, created_at, updated_at,
     pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
-    current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
     iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
     process_group_id, process_agent, process_provider,
@@ -3370,7 +2546,6 @@ pub(super) const TASK_SESSION_SELECT: &str = "SELECT
     process_tmux_name, process_started_at, created_at, updated_at,
     pm_snapshot_synced_at,
     pm_writeback_json, project_session_id,
-    current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
     iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
     process_group_id, process_agent, process_provider,
@@ -3388,13 +2563,11 @@ const TASK_SESSION_UPDATE: &str = "UPDATE task_sessions SET
     created_at=?23, updated_at=?24,
     pm_snapshot_synced_at=?25, pm_writeback_json=?26,
     project_session_id=?27,
-    current_directive_version=MAX(current_directive_version, ?28),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?29),
-    lf_bin=?30, db_path=?31, lf_home=?32,
-    abandon_requested_at=?33, abandon_reason=?34,
-    iterate_flow=?35, iterate_interaction_policy=?36,
-    kickoff_flow=?45, kickoff_interaction_policy=?46,
-    gate_flow=?47, gate_interaction_policy=?48
+    lf_bin=?28, db_path=?29, lf_home=?30,
+    abandon_requested_at=?31, abandon_reason=?32,
+    iterate_flow=?33, iterate_interaction_policy=?34,
+    kickoff_flow=?43, kickoff_interaction_policy=?44,
+    gate_flow=?45, gate_interaction_policy=?46
     WHERE id=?1";
 const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
     issue_id=?2, issue_identifier=?3, issue_title=?4, issue_description=?5,
@@ -3406,33 +2579,31 @@ const TASK_SESSION_LEASE_UPDATE: &str = "UPDATE task_sessions SET
     created_at=?23, updated_at=?24,
     pm_snapshot_synced_at=?25, pm_writeback_json=?26,
     project_session_id=?27,
-    current_directive_version=MAX(current_directive_version, ?28),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?29),
-    lf_bin=?30, db_path=?31, lf_home=?32,
-    abandon_requested_at=?33, abandon_reason=?34,
-    lifecycle_phase=CASE WHEN ?50>=phase_epoch THEN ?49 ELSE lifecycle_phase END,
+    lf_bin=?28, db_path=?29, lf_home=?30,
+    abandon_requested_at=?31, abandon_reason=?32,
+    lifecycle_phase=CASE WHEN ?48>=phase_epoch THEN ?47 ELSE lifecycle_phase END,
     phase_cursor=CASE
-        WHEN ?50>phase_epoch OR
-             (?50=phase_epoch AND (?38>phase_iteration OR
-                                   (?38=phase_iteration AND ?37>phase_cursor)))
-        THEN ?37 ELSE phase_cursor
+        WHEN ?48>phase_epoch OR
+             (?48=phase_epoch AND (?36>phase_iteration OR
+                                   (?36=phase_iteration AND ?35>phase_cursor)))
+        THEN ?35 ELSE phase_cursor
     END,
     phase_iteration=CASE
-        WHEN ?50>phase_epoch THEN ?38
-        WHEN ?50=phase_epoch THEN MAX(phase_iteration, ?38)
+        WHEN ?48>phase_epoch THEN ?36
+        WHEN ?48=phase_epoch THEN MAX(phase_iteration, ?36)
         ELSE phase_iteration
     END,
-    phase_epoch=MAX(phase_epoch, ?50),
-    gate_cycle=CASE WHEN ?50>=phase_epoch THEN ?51 ELSE gate_cycle END,
-    gate_proposal_json=CASE WHEN ?50>=phase_epoch THEN ?52 ELSE gate_proposal_json END,
-    process_group_id=?39, process_agent=?40, process_provider=?41,
-    process_provider_session_id=?42, process_lease_state=?43,
-    process_outcome_json=?44, process_provenance_json=?53
-    WHERE id=?1 AND process_generation=?54 AND process_lease_token=?55
-      AND process_lease_state=?56
+    phase_epoch=MAX(phase_epoch, ?48),
+    gate_cycle=CASE WHEN ?48>=phase_epoch THEN ?49 ELSE gate_cycle END,
+    gate_proposal_json=CASE WHEN ?48>=phase_epoch THEN ?50 ELSE gate_proposal_json END,
+    process_group_id=?37, process_agent=?38, process_provider=?39,
+    process_provider_session_id=?40, process_lease_state=?41,
+    process_outcome_json=?42, process_provenance_json=?51
+    WHERE id=?1 AND process_generation=?52 AND process_lease_token=?53
+      AND process_lease_state=?54
       AND (
         status NOT IN ('completed', 'abandoned') OR status=?11 OR
-        (status='completed' AND ?11='running' AND ?49='gate' AND ?50>phase_epoch)
+        (status='completed' AND ?11='running' AND ?47='gate' AND ?48>phase_epoch)
       )";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_session_id, sequence, slug, branch, base_commit,
@@ -3448,189 +2619,30 @@ const TASK_PR_SELECT: &str = "SELECT
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error
     FROM task_prs WHERE id=?1";
-const CHILD_COMMAND_COLUMNS: &str = "SELECT
-    id, target_kind, session_id, source_json, kind_json, created_at,
-    claimed_by_generation, accepted_at, state, effect, error
-    FROM child_commands";
-
-fn ensure_directive_target(
-    directive: &ChildDirective,
-    target_kind: &str,
-    target_id: &str,
-) -> StoreResult<()> {
-    if directive.target.target_kind() != target_kind || directive.target.target_id() != target_id {
-        return Err(StoreError::InvalidData(format!(
-            "directive {} targets {} {}, expected {target_kind} {target_id}",
-            directive.id,
-            directive.target.target_kind(),
-            directive.target.target_id()
-        )));
-    }
-    Ok(())
-}
-
-fn insert_child_directive(conn: &Connection, directive: &ChildDirective) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO child_directives (
-            id, target_kind, target_id, version, kind, text, source_json,
-            command_id, issued_at, applied_at, incorporated_at, incorporated_summary
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        params![
-            directive.id.as_str(),
-            directive.target.target_kind(),
-            directive.target.target_id(),
-            i64::from(directive.version),
-            directive.kind.as_str(),
-            directive.text,
-            serde_json::to_string(&directive.source)?,
-            directive.command_id.as_ref().map(ChildCommandId::as_str),
-            directive.issued_at.unix_timestamp_nanos() as i64,
-            directive
-                .applied_at
-                .map(|at| at.unix_timestamp_nanos() as i64),
-            directive
-                .incorporated_at
-                .map(|at| at.unix_timestamp_nanos() as i64),
-            directive.incorporated_summary,
-        ],
-    )?;
-    Ok(())
-}
-
-fn supersede_child_commands(
-    conn: &Connection,
-    target_kind: &str,
-    target_id: &str,
-) -> StoreResult<Vec<ChildCommandId>> {
-    let superseded = {
-        let mut statement = conn.prepare(
-            "SELECT id FROM child_commands
-             WHERE target_kind=?1 AND session_id=?2
-               AND state IN ('persisted', 'claimed')
-             ORDER BY created_at, id",
-        )?;
-        let rows = statement.query_map(params![target_kind, target_id], |row| {
-            Ok(ChildCommandId::from_raw(row.get::<_, String>(0)?))
-        })?;
-        let mut ids = Vec::new();
-        for row in rows {
-            ids.push(row?);
-        }
-        ids
-    };
-    conn.execute(
-        "UPDATE child_commands SET state='superseded', effect=NULL, error=NULL
-         WHERE target_kind=?1 AND session_id=?2
-           AND state IN ('persisted', 'claimed')",
-        params![target_kind, target_id],
-    )?;
-    Ok(superseded)
-}
-
-fn map_child_directive_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildDirective> {
-    let target_kind: String = row.get(1)?;
-    let target_id: String = row.get(2)?;
-    let target = match target_kind.as_str() {
-        "project" => ChildRef::Project(ProjectSessionId::from_raw(target_id)),
-        "task" => ChildRef::Task(TaskSessionId::from_raw(target_id)),
-        value => {
-            return Err(invalid_column(
-                1,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("unknown directive target {value:?}"),
-                ),
-            ))
-        }
-    };
-    let kind = match row.get::<_, String>(4)?.as_str() {
-        "initial" => DirectiveKind::Initial,
-        "replacement" => DirectiveKind::Replacement,
-        "work_revised" => DirectiveKind::WorkRevised,
-        value => {
-            return Err(invalid_column(
-                4,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("unknown directive kind {value:?}"),
-                ),
-            ))
-        }
-    };
-    let source_json: String = row.get(6)?;
-    let applied_at = row
-        .get::<_, Option<i64>>(9)?
-        .map(|value| task_command_datetime(9, value))
-        .transpose()?;
-    let incorporated_at = row
-        .get::<_, Option<i64>>(10)?
-        .map(|value| task_command_datetime(10, value))
-        .transpose()?;
-    Ok(ChildDirective {
-        id: ChildDirectiveId::from_raw(row.get::<_, String>(0)?),
-        target,
-        version: row.get::<_, i64>(3)? as u32,
-        kind,
-        text: row.get(5)?,
-        source: serde_json::from_str(&source_json).map_err(|error| invalid_column(6, error))?,
-        command_id: row
-            .get::<_, Option<String>>(7)?
-            .map(ChildCommandId::from_raw),
-        issued_at: task_command_datetime(8, row.get(8)?)?,
-        applied_at,
-        incorporated_at,
-        incorporated_summary: row.get(11)?,
-    })
-}
-
-/// Persist one Linear comment as a follow-up command, exactly once. The insert
+/// Persist one Linear comment as a Steer exactly once. The insert
 /// into `task_linear_ingested_comments` is the guard — the command is written
 /// only when the comment id is new to the ledger, so a redelivered webhook or an
 /// overlapping catch-up read cannot double-deliver. Shared by the snapshot apply
 /// loop and the single-comment webhook path.
 fn ingest_linear_comment(
-    conn: &Connection,
+    conn: &rusqlite::Transaction<'_>,
     session_id: &str,
     comment_id: &str,
-    command: &ChildCommand,
+    work: &crate::durable::WorkRef,
+    text: &str,
     observed_at: i64,
-) -> StoreResult<Option<ChildCommandId>> {
+) -> StoreResult<Option<crate::durable::SteerId>> {
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_linear_ingested_comments
             (session_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
         params![session_id, comment_id, observed_at],
     )?;
     if inserted == 1 {
-        insert_child_command(conn, command)?;
-        Ok(Some(command.id.clone()))
+        let receipt = SqliteStore::append_steer_in(conn, work, &Author::User, text)?;
+        Ok(Some(receipt.steer.id))
     } else {
         Ok(None)
     }
-}
-
-pub(super) fn insert_child_command(conn: &Connection, command: &ChildCommand) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO child_commands (
-            id, target_kind, session_id, source_json, kind_json, created_at,
-            claimed_by_generation, accepted_at, state, effect, error
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![
-            command.id.as_str(),
-            command.target.target_kind(),
-            command.target.target_id(),
-            serde_json::to_string(&command.source)?,
-            serde_json::to_string(&command.kind)?,
-            command.created_at.unix_timestamp_nanos() as i64,
-            command.claimed_by_generation.map(i64::from),
-            command
-                .accepted_at
-                .map(|at| at.unix_timestamp_nanos() as i64),
-            command.state.as_str(),
-            command.effect.map(ChildCommandEffect::as_str),
-            command.error.as_deref(),
-        ],
-    )?;
-    Ok(())
 }
 
 fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
@@ -3685,8 +2697,6 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
                 .expect("Task Session PM writeback state must serialize"),
         ),
         Box::new(session.project_session_id.as_str().to_string()),
-        Box::new(i64::from(session.current_directive_version)),
-        Box::new(i64::from(session.incorporated_directive_version)),
         // Legacy lf_bin/db_path/lf_home columns: a Session no longer pins a
         // binary. Launch resolves the current Home lf; BinaryProvenance on the
         // generation is the audit record. Written NULL, never read; the columns
@@ -3796,7 +2806,7 @@ fn task_session_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
 /// configuration; the lease statement owns execution state. Parameters
 /// ?37..?44 are bound but unreferenced because lease state is interleaved with
 /// the lifecycle configuration in `task_session_params`.
-const TASK_SESSION_CONTROL_PARAMS: usize = 48;
+const TASK_SESSION_CONTROL_PARAMS: usize = 46;
 
 fn task_session_control_params(session: &TaskSession) -> Vec<Box<dyn ToSql>> {
     let mut parameters = task_session_params(session);
@@ -4083,11 +3093,6 @@ fn invalid_column(
     rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, Box::new(error))
 }
 
-fn task_command_datetime(index: usize, value: i64) -> rusqlite::Result<time::OffsetDateTime> {
-    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(value))
-        .map_err(|error| invalid_column(index, error))
-}
-
 pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskSession> {
     let status_text: String = row.get(10)?;
     let status = status_text
@@ -4097,37 +3102,37 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
     let process_started_at: Option<i64> = row.get(21)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => {
-            let state_text: String = row.get(42)?;
-            let outcome_json: Option<String> = row.get(43)?;
-            let provenance_json: Option<String> = row.get(52)?;
+            let state_text: String = row.get(40)?;
+            let outcome_json: Option<String> = row.get(41)?;
+            let provenance_json: Option<String> = row.get(50)?;
             Some(ChildProcessGeneration {
                 generation: generation as u32,
                 pid: row.get::<_, Option<i64>>(19)?.map(|pid| pid as u32),
-                process_group_id: row.get::<_, Option<i64>>(38)?.map(|id| id as u32),
+                process_group_id: row.get::<_, Option<i64>>(36)?.map(|id| id as u32),
                 tmux_name: row.get::<_, Option<String>>(20)?.unwrap_or_default(),
-                agent: row.get(39)?,
-                provider: row.get(40)?,
-                provider_session_id: row.get(41)?,
+                agent: row.get(37)?,
+                provider: row.get(38)?,
+                provider_session_id: row.get(39)?,
                 started_at: crate::store::rows::unix_to_datetime(started_at),
                 state: ChildLeaseState::parse(&state_text)
-                    .map_err(|error| invalid_column(42, error))?,
+                    .map_err(|error| invalid_column(40, error))?,
                 outcome: outcome_json
                     .map(|json| serde_json::from_str(&json))
                     .transpose()
-                    .map_err(|error| invalid_column(43, error))?,
+                    .map_err(|error| invalid_column(41, error))?,
                 provenance: provenance_json
                     .map(|json| serde_json::from_str(&json))
                     .transpose()
-                    .map_err(|error| invalid_column(52, error))?,
+                    .map_err(|error| invalid_column(50, error))?,
             })
         }
         _ => None,
     };
-    // Columns 29/30/31 (lf_bin/db_path/lf_home) are legacy dead schema: a
+    // Columns 27/28/29 (lf_bin/db_path/lf_home) are legacy dead schema: a
     // Session no longer pins a binary, so they are not read into domain state.
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(32)?,
-        row.get::<_, Option<String>>(33)?,
+        row.get::<_, Option<i64>>(30)?,
+        row.get::<_, Option<String>>(31)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -4156,8 +3161,6 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
             .map_err(|error| invalid_column(25, error))?,
         wave_id: row.get(9)?,
         project_session_id: ProjectSessionId::from_raw(row.get::<_, String>(26)?),
-        current_directive_version: row.get::<_, i64>(27)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(28)? as u32,
         status,
         status_reason: row.get(11)?,
         status_at: crate::store::rows::unix_to_datetime(row.get(12)?),
@@ -4165,40 +3168,40 @@ pub(super) fn map_task_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         workspace_slug: row.get(14)?,
         lifecycle: TaskLifecyclePlan {
             kickoff: TaskPhasePlan {
+                flow: row.get(42)?,
+                interaction_policy: row
+                    .get::<_, String>(43)?
+                    .parse::<InteractionPolicy>()
+                    .map_err(|error| invalid_column(43, error))?,
+            },
+            iterate: TaskPhasePlan {
+                flow: row.get(32)?,
+                interaction_policy: row
+                    .get::<_, String>(33)?
+                    .parse::<InteractionPolicy>()
+                    .map_err(|error| invalid_column(33, error))?,
+            },
+            gate: TaskPhasePlan {
                 flow: row.get(44)?,
                 interaction_policy: row
                     .get::<_, String>(45)?
                     .parse::<InteractionPolicy>()
                     .map_err(|error| invalid_column(45, error))?,
             },
-            iterate: TaskPhasePlan {
-                flow: row.get(34)?,
-                interaction_policy: row
-                    .get::<_, String>(35)?
-                    .parse::<InteractionPolicy>()
-                    .map_err(|error| invalid_column(35, error))?,
-            },
-            gate: TaskPhasePlan {
-                flow: row.get(46)?,
-                interaction_policy: row
-                    .get::<_, String>(47)?
-                    .parse::<InteractionPolicy>()
-                    .map_err(|error| invalid_column(47, error))?,
-            },
         },
         lifecycle_phase: row
-            .get::<_, String>(48)?
+            .get::<_, String>(46)?
             .parse::<TaskLifecyclePhase>()
-            .map_err(|error| invalid_column(48, error))?,
-        phase_epoch: row.get::<_, i64>(49)? as u32,
-        phase_cursor: row.get::<_, i64>(36)? as u32,
-        phase_iteration: row.get::<_, i64>(37)? as u32,
-        gate_cycle: row.get::<_, i64>(50)? as u32,
+            .map_err(|error| invalid_column(46, error))?,
+        phase_epoch: row.get::<_, i64>(47)? as u32,
+        phase_cursor: row.get::<_, i64>(34)? as u32,
+        phase_iteration: row.get::<_, i64>(35)? as u32,
+        gate_cycle: row.get::<_, i64>(48)? as u32,
         gate_proposal: row
-            .get::<_, Option<String>>(51)?
+            .get::<_, Option<String>>(49)?
             .map(|json| serde_json::from_str(&json))
             .transpose()
-            .map_err(|error| invalid_column(51, error))?,
+            .map_err(|error| invalid_column(49, error))?,
         agent: row.get(15)?,
         provider: row.get(16)?,
         provider_session_id: row.get(17)?,
@@ -4291,46 +3294,6 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
     Ok(pr)
 }
 
-fn map_child_command_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildCommand> {
-    let target_id: String = row.get(2)?;
-    let target = match row.get::<_, String>(1)?.as_str() {
-        "project" => ChildRef::Project(ProjectSessionId::from_raw(target_id)),
-        "task" => ChildRef::Task(TaskSessionId::from_raw(target_id)),
-        value => {
-            return Err(invalid_column(
-                1,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("unknown child command target {value:?}"),
-                ),
-            ))
-        }
-    };
-    let source_json: String = row.get(3)?;
-    let kind_json: String = row.get(4)?;
-    let source: ChildCommandSource =
-        serde_json::from_str(&source_json).map_err(|error| invalid_column(3, error))?;
-    let kind: ChildCommandKind =
-        serde_json::from_str(&kind_json).map_err(|error| invalid_column(4, error))?;
-    let state = parse_command_state(row.get::<_, String>(8)?.as_str(), 8)?;
-    let effect = parse_command_effect(row.get::<_, Option<String>>(9)?.as_deref(), 9)?;
-    Ok(ChildCommand {
-        id: ChildCommandId::from_raw(row.get::<_, String>(0)?),
-        target,
-        source,
-        kind,
-        state,
-        effect,
-        created_at: task_command_datetime(5, row.get(5)?)?,
-        claimed_by_generation: row.get::<_, Option<i64>>(6)?.map(|value| value as u32),
-        accepted_at: row
-            .get::<_, Option<i64>>(7)?
-            .map(|value| task_command_datetime(7, value))
-            .transpose()?,
-        error: row.get(10)?,
-    })
-}
-
 fn map_task_linear_observation_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<TaskLinearObservation> {
@@ -4368,15 +3331,13 @@ const PROJECT_SESSION_INSERT: &str = "INSERT INTO project_sessions (
     last_state_fingerprint, agent, provider, provider_session_id,
     process_generation, process_pid, process_tmux_name,
     process_started_at, created_at, updated_at,
-    current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
     process_group_id, process_agent, process_provider,
     process_provider_session_id, process_lease_state, process_outcome_json,
     process_provenance_json
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-    ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22,
-    ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+    ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34
 )";
 const PROJECT_SESSION_COLUMNS: &str = "SELECT
     id, project_id, project_slug, project_name, project_prompt_context,
@@ -4384,7 +3345,6 @@ const PROJECT_SESSION_COLUMNS: &str = "SELECT
     status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
-    current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
     process_group_id, process_agent, process_provider,
     process_provider_session_id, process_lease_state, process_outcome_json,
@@ -4396,7 +3356,6 @@ const PROJECT_SESSION_SELECT: &str = "SELECT
     status_reason, status_at, iteration, observation_cursor, last_state_fingerprint,
     agent, provider, provider_session_id, process_generation, process_pid,
     process_tmux_name, process_started_at, created_at, updated_at,
-    current_directive_version, incorporated_directive_version,
     lf_bin, db_path, lf_home, abandon_requested_at, abandon_reason,
     process_group_id, process_agent, process_provider,
     process_provider_session_id, process_lease_state, process_outcome_json,
@@ -4409,10 +3368,8 @@ const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     observation_cursor=?12, last_state_fingerprint=?13, agent=?14, provider=?15,
     provider_session_id=?16, created_at=?21,
     updated_at=?22,
-    current_directive_version=MAX(current_directive_version, ?23),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?24),
-    lf_bin=?25, db_path=?26, lf_home=?27,
-    abandon_requested_at=?28, abandon_reason=?29
+    lf_bin=?23, db_path=?24, lf_home=?25,
+    abandon_requested_at=?26, abandon_reason=?27
     WHERE id=?1";
 const PROJECT_SESSION_LEASE_UPDATE: &str = "UPDATE project_sessions SET
     project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
@@ -4422,15 +3379,13 @@ const PROJECT_SESSION_LEASE_UPDATE: &str = "UPDATE project_sessions SET
     provider_session_id=?16, process_generation=?17, process_pid=?18,
     process_tmux_name=?19, process_started_at=?20, created_at=?21,
     updated_at=?22,
-    current_directive_version=MAX(current_directive_version, ?23),
-    incorporated_directive_version=MAX(incorporated_directive_version, ?24),
-    lf_bin=?25, db_path=?26, lf_home=?27,
-    abandon_requested_at=?28, abandon_reason=?29,
-    process_group_id=?30, process_agent=?31, process_provider=?32,
-    process_provider_session_id=?33, process_lease_state=?34,
-    process_outcome_json=?35, process_provenance_json=?36
-    WHERE id=?1 AND process_generation=?37 AND process_lease_token=?38
-      AND process_lease_state=?39
+    lf_bin=?23, db_path=?24, lf_home=?25,
+    abandon_requested_at=?26, abandon_reason=?27,
+    process_group_id=?28, process_agent=?29, process_provider=?30,
+    process_provider_session_id=?31, process_lease_state=?32,
+    process_outcome_json=?33, process_provenance_json=?34
+    WHERE id=?1 AND process_generation=?35 AND process_lease_token=?36
+      AND process_lease_state=?37
       AND (status NOT IN ('completed', 'abandoned') OR status=?8)";
 fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
     vec![
@@ -4476,8 +3431,6 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
         ),
         Box::new(session.created_at.unix_timestamp()),
         Box::new(session.updated_at.unix_timestamp()),
-        Box::new(i64::from(session.current_directive_version)),
-        Box::new(i64::from(session.incorporated_directive_version)),
         // Legacy lf_bin/db_path/lf_home columns: a Session no longer pins a
         // binary. Launch resolves the current Home lf; BinaryProvenance on the
         // generation is the audit record. Written NULL, never read; the columns
@@ -4550,7 +3503,7 @@ fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
 
 fn project_session_control_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
     let mut parameters = project_session_params(session);
-    parameters.truncate(29);
+    parameters.truncate(27);
     parameters
 }
 
@@ -4579,37 +3532,37 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
     let process_started_at: Option<i64> = row.get(19)?;
     let process = match (process_generation, process_started_at) {
         (Some(generation), Some(started_at)) => {
-            let state_text: String = row.get(33)?;
-            let outcome_json: Option<String> = row.get(34)?;
-            let provenance_json: Option<String> = row.get(35)?;
+            let state_text: String = row.get(31)?;
+            let outcome_json: Option<String> = row.get(32)?;
+            let provenance_json: Option<String> = row.get(33)?;
             Some(ChildProcessGeneration {
                 generation: generation as u32,
                 pid: row.get::<_, Option<i64>>(17)?.map(|pid| pid as u32),
-                process_group_id: row.get::<_, Option<i64>>(29)?.map(|id| id as u32),
+                process_group_id: row.get::<_, Option<i64>>(27)?.map(|id| id as u32),
                 tmux_name: row.get::<_, Option<String>>(18)?.unwrap_or_default(),
-                agent: row.get(30)?,
-                provider: row.get(31)?,
-                provider_session_id: row.get(32)?,
+                agent: row.get(28)?,
+                provider: row.get(29)?,
+                provider_session_id: row.get(30)?,
                 started_at: crate::store::rows::unix_to_datetime(started_at),
                 state: ChildLeaseState::parse(&state_text)
-                    .map_err(|error| invalid_column(33, error))?,
+                    .map_err(|error| invalid_column(31, error))?,
                 outcome: outcome_json
                     .map(|json| serde_json::from_str(&json))
                     .transpose()
-                    .map_err(|error| invalid_column(34, error))?,
+                    .map_err(|error| invalid_column(32, error))?,
                 provenance: provenance_json
                     .map(|json| serde_json::from_str(&json))
                     .transpose()
-                    .map_err(|error| invalid_column(35, error))?,
+                    .map_err(|error| invalid_column(33, error))?,
             })
         }
         _ => None,
     };
-    // Columns 24/25/26 (lf_bin/db_path/lf_home) are legacy dead schema: a
+    // Columns 22/23/24 (lf_bin/db_path/lf_home) are legacy dead schema: a
     // Session no longer pins a binary, so they are not read into domain state.
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(27)?,
-        row.get::<_, Option<String>>(28)?,
+        row.get::<_, Option<i64>>(25)?,
+        row.get::<_, Option<String>>(26)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -4629,8 +3582,6 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
             pm_snapshot_synced_at: row.get(6)?,
         },
         wave_id: row.get(5)?,
-        current_directive_version: row.get::<_, i64>(22)? as u32,
-        incorporated_directive_version: row.get::<_, i64>(23)? as u32,
         status,
         status_reason: row.get(8)?,
         status_at: crate::store::rows::unix_to_datetime(row.get(9)?),
@@ -4645,90 +3596,6 @@ fn map_project_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectS
         created_at: crate::store::rows::unix_to_datetime(row.get(20)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(21)?),
     })
-}
-
-fn claim_child_commands_in(
-    conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<()> {
-    conn.execute(
-        "UPDATE child_commands SET claimed_by_generation=?1, state='claimed'
-         WHERE target_kind=?2 AND session_id=?3
-           AND state IN ('persisted', 'claimed')
-           AND (claimed_by_generation IS NULL OR claimed_by_generation<>?1)",
-        params![
-            i64::from(generation),
-            target.target_kind(),
-            target.target_id()
-        ],
-    )?;
-    Ok(())
-}
-
-fn read_claimed_child_commands(
-    conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<Vec<ChildCommand>> {
-    let mut statement = conn.prepare(&format!(
-        "{CHILD_COMMAND_COLUMNS}
-         WHERE target_kind=?1 AND session_id=?2
-           AND claimed_by_generation=?3 AND state='claimed'
-         ORDER BY created_at, id"
-    ))?;
-    let rows = statement.query_map(
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
-        map_child_command_row,
-    )?;
-    let mut commands = Vec::new();
-    for row in rows {
-        commands.push(row?);
-    }
-    Ok(commands)
-}
-
-fn parse_command_state(value: &str, index: usize) -> rusqlite::Result<ChildCommandState> {
-    match value {
-        "persisted" => Ok(ChildCommandState::Persisted),
-        "claimed" => Ok(ChildCommandState::Claimed),
-        "delivering" => Ok(ChildCommandState::Delivering),
-        "accepted" => Ok(ChildCommandState::Accepted),
-        "failed" => Ok(ChildCommandState::Failed),
-        "superseded" => Ok(ChildCommandState::Superseded),
-        "uncertain" => Ok(ChildCommandState::Uncertain),
-        value => Err(invalid_column(
-            index,
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unknown command state {value:?}"),
-            ),
-        )),
-    }
-}
-
-fn parse_command_effect(
-    value: Option<&str>,
-    index: usize,
-) -> rusqlite::Result<Option<ChildCommandEffect>> {
-    match value {
-        None => Ok(None),
-        Some("live_steer") => Ok(Some(ChildCommandEffect::LiveSteer)),
-        Some("next_turn") => Ok(Some(ChildCommandEffect::NextTurn)),
-        Some("replacement") => Ok(Some(ChildCommandEffect::Replacement)),
-        Some("decision") => Ok(Some(ChildCommandEffect::Decision)),
-        Some(value) => Err(invalid_column(
-            index,
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("unknown command effect {value:?}"),
-            ),
-        )),
-    }
 }
 
 fn map_project_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectEvent> {

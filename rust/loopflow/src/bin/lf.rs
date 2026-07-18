@@ -7,10 +7,7 @@ use tracing::{debug, warn};
 use tracing_subscriber::EnvFilter;
 
 use loopflow::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::{
-    Cli, Commands, InstallCommand, ProjectCommand, ProjectReviewCommand, RunsCommand, TaskCommand,
-    TaskReviewCommand,
-};
+use loopflow::lf::{Cli, Commands, InstallCommand, ProjectCommand, RunsCommand, TaskCommand};
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -751,16 +748,11 @@ fn print_task_control(
     if json {
         println!("{}", serde_json::to_string_pretty(result)?);
     } else {
-        let effect = result
-            .effect
-            .map(|effect| effect.as_str())
-            .unwrap_or("none");
         println!(
-            "{} → {} (state={}, effect={})",
-            result.command_id,
+            "{} → {} ({})",
+            result.receipt.label(),
             result.issue_id,
-            result.state.as_str(),
-            effect
+            result.receipt.action(),
         );
         match &result.observation {
             loopflow::task::Observation::Cached { observed_at } => {
@@ -815,38 +807,24 @@ fn print_project_control(
     if json {
         println!("{}", serde_json::to_string_pretty(result)?);
     } else {
-        let effect = result
-            .effect
-            .map(|effect| effect.as_str())
-            .unwrap_or("none");
         println!(
-            "{} → {} (state={}, effect={})",
-            result.command_id,
+            "{} → {} ({})",
+            result.receipt.label(),
             result.project_id,
-            result.state.as_str(),
-            effect
+            result.receipt.action(),
         );
     }
     Ok(())
 }
 
-fn run_project_command(
-    repo: &Path,
-    command: &ProjectCommand,
-    authority: &loopflow::child_session::CallerAuthority,
-) -> anyhow::Result<()> {
+fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<()> {
     match command {
         ProjectCommand::Run {
             project_id,
             directive,
             json,
         } => {
-            let session = loopflow::ops::project::project_run(
-                repo,
-                project_id,
-                authority.clone(),
-                directive.clone(),
-            )?;
+            let session = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
             print_project_session(&session, *json)
         }
         ProjectCommand::Start {
@@ -859,7 +837,6 @@ fn run_project_command(
                 repo,
                 title,
                 wave.as_deref(),
-                authority.clone(),
                 directive.clone(),
             )?;
             print_project_session(&session, *json)
@@ -868,155 +845,18 @@ fn run_project_command(
             let session = loopflow::ops::project::project_status(project_id)?;
             print_project_session(&session, *json)
         }
-        ProjectCommand::FollowUp {
-            project_id,
-            message,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_follow_up(
-                project_id,
-                authority.clone(),
-                message.clone(),
-            )?;
-            print_project_control(&result, *json)
-        }
         ProjectCommand::Steer {
             project_id,
             message,
             json,
         } => {
-            let result = loopflow::ops::project::project_steer(
-                project_id,
-                authority.clone(),
-                message.clone(),
-            )?;
+            let result = loopflow::ops::project::project_steer(project_id, message.clone())?;
             print_project_control(&result, *json)
         }
-        ProjectCommand::Interrupt {
-            project_id,
-            message,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_interrupt(
-                project_id,
-                authority.clone(),
-                message.clone(),
-            )?;
+        ProjectCommand::Interrupt { project_id, json } => {
+            let result = loopflow::ops::project::project_interrupt(project_id)?;
             print_project_control(&result, *json)
         }
-        ProjectCommand::Receipt {
-            command_id,
-            until,
-            timeout,
-            json,
-        } => {
-            let read = loopflow::ops::project::project_receipt(
-                command_id,
-                *until,
-                parse_duration(timeout)?,
-            )?;
-            print_project_control(&read.receipt, *json)?;
-            if read.timed_out {
-                std::process::exit(124);
-            }
-            Ok(())
-        }
-        ProjectCommand::Acknowledge {
-            project_id,
-            directive,
-            summary,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_acknowledge(
-                project_id,
-                *directive,
-                summary.clone(),
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!("{} incorporated directive v{}", project_id, directive);
-            }
-            Ok(())
-        }
-        ProjectCommand::Decide {
-            project_id,
-            decision_id,
-            choice,
-            message,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_decide(
-                project_id,
-                authority.clone(),
-                decision_id,
-                choice.clone(),
-                message.clone(),
-            )?;
-            print_project_control(&result, *json)
-        }
-        ProjectCommand::RequestDecision {
-            project_id,
-            prompt,
-            options,
-            wait,
-            timeout,
-            json,
-        } => {
-            let result = loopflow::ops::project::project_request_decision(
-                project_id,
-                prompt.clone(),
-                options.clone(),
-                *wait,
-                parse_duration(timeout)?,
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else if result.resolved {
-                println!(
-                    "{} → {}",
-                    result.decision_id,
-                    result.choice.as_deref().unwrap_or("resolved")
-                );
-            } else {
-                println!("{} → pending", result.decision_id);
-            }
-            Ok(())
-        }
-        ProjectCommand::Review { command } => match command {
-            ProjectReviewCommand::Message {
-                review_id,
-                message,
-                json,
-            } => {
-                let command =
-                    loopflow::ops::project::project_review_message(review_id, message.clone())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&command)?);
-                } else {
-                    println!("{} → {}", review_id, command.id);
-                }
-                Ok(())
-            }
-            ProjectReviewCommand::Complete {
-                review_id,
-                disposition,
-                outcome,
-                json,
-            } => {
-                let review = loopflow::ops::project::project_review_complete(
-                    review_id,
-                    disposition,
-                    outcome.clone(),
-                )?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → {}", review.id, review.status.as_str());
-                }
-                Ok(())
-            }
-        },
         ProjectCommand::Wait {
             project_id,
             until,
@@ -1034,18 +874,12 @@ fn run_project_command(
         }
         ProjectCommand::Resume {
             project_id,
-            message,
             model,
             reason,
             json,
         } => {
-            let result = loopflow::ops::project::project_resume(
-                project_id,
-                authority.clone(),
-                message.clone(),
-                model.clone(),
-                reason.clone(),
-            )?;
+            let result =
+                loopflow::ops::project::project_resume(project_id, model.clone(), reason.clone())?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Attach { project_id } => {
@@ -1056,11 +890,7 @@ fn run_project_command(
             reason,
             json,
         } => {
-            let result = loopflow::ops::project::project_abandon(
-                project_id,
-                authority.clone(),
-                reason.clone(),
-            )?;
+            let result = loopflow::ops::project::project_abandon(project_id, reason.clone())?;
             print_project_control(&result, *json)
         }
         ProjectCommand::Promote { .. } => {
@@ -1069,25 +899,7 @@ fn run_project_command(
     }
 }
 
-fn resolve_project_command_authority(
-    command: &ProjectCommand,
-    explicit_wave: Option<&loopflow::wave::Wave>,
-) -> anyhow::Result<loopflow::child_session::CallerAuthority> {
-    let command_wave = match command {
-        ProjectCommand::Start {
-            wave: Some(wave), ..
-        } => Some(loopflow::engine::wave_context::resolve_explicit_wave(wave)?),
-        _ => None,
-    };
-    loopflow::ops::resolve_caller_authority(command_wave.as_ref().or(explicit_wave))
-        .map_err(anyhow::Error::from)
-}
-
-fn run_task_command(
-    repo: &Path,
-    command: &TaskCommand,
-    authority: &loopflow::child_session::CallerAuthority,
-) -> anyhow::Result<()> {
+fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run {
             issue,
@@ -1101,7 +913,6 @@ fn run_task_command(
             let session = loopflow::ops::task::task_run(
                 repo,
                 issue,
-                authority.clone(),
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
                     flow: flow.clone(),
@@ -1126,7 +937,6 @@ fn run_task_command(
                 repo,
                 title.clone(),
                 project_id,
-                authority.clone(),
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
                     flow: flow.clone(),
@@ -1201,178 +1011,18 @@ fn run_task_command(
             let session = loopflow::ops::task::task_complete(issue, summary.clone())?;
             print_task_session(&session, *json)
         }
-        TaskCommand::FollowUp {
-            issue,
-            message,
-            json,
-        } => {
-            let result =
-                loopflow::ops::task::task_follow_up(issue, authority.clone(), message.clone())?;
-            print_task_control(&result, *json)
-        }
         TaskCommand::Steer {
             issue,
             message,
             json,
         } => {
-            let result =
-                loopflow::ops::task::task_steer(issue, authority.clone(), message.clone())?;
+            let result = loopflow::ops::task::task_steer(issue, message.clone())?;
             print_task_control(&result, *json)
         }
-        TaskCommand::Interrupt {
-            issue,
-            message,
-            json,
-        } => {
-            let result =
-                loopflow::ops::task::task_interrupt(issue, authority.clone(), message.clone())?;
+        TaskCommand::Interrupt { issue, json } => {
+            let result = loopflow::ops::task::task_interrupt(issue)?;
             print_task_control(&result, *json)
         }
-        TaskCommand::Receipt {
-            command_id,
-            until,
-            timeout,
-            json,
-        } => {
-            let timeout = parse_duration(timeout)?;
-            let read = loopflow::ops::task::task_receipt(command_id, *until, timeout)?;
-            print_task_control(&read.receipt, *json)?;
-            if read.timed_out {
-                std::process::exit(124);
-            }
-            Ok(())
-        }
-        TaskCommand::Acknowledge {
-            issue,
-            directive,
-            summary,
-            json,
-        } => {
-            let result = loopflow::ops::task::task_acknowledge(issue, *directive, summary.clone())?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!("{} incorporated directive v{}", issue, directive);
-            }
-            Ok(())
-        }
-        TaskCommand::Reconcile {
-            issue,
-            directive,
-            summary,
-            json,
-        } => {
-            let result = loopflow::ops::task::task_reconcile(
-                issue,
-                authority.clone(),
-                *directive,
-                summary.clone(),
-            )?;
-            if *json {
-                print_task_session(&result.session, true)
-            } else {
-                let tail = match result.cleared_commands.len() {
-                    0 => String::new(),
-                    1 => ", 1 orphaned command cleared".to_string(),
-                    n => format!(", {n} orphaned commands cleared"),
-                };
-                println!(
-                    "{issue} reconciled: directive v{directive} incorporated by out-of-band \
-                     attestation, Task completed{tail}"
-                );
-                Ok(())
-            }
-        }
-        TaskCommand::Decide {
-            issue,
-            decision_id,
-            choice,
-            message,
-            json,
-        } => {
-            let result = loopflow::ops::task::task_decide(
-                issue,
-                authority.clone(),
-                decision_id,
-                choice.clone(),
-                message.clone(),
-            )?;
-            print_task_control(&result, *json)
-        }
-        TaskCommand::RequestDecision {
-            issue,
-            prompt,
-            options,
-            wait,
-            timeout,
-            json,
-        } => {
-            let result = loopflow::ops::task::task_request_decision(
-                issue,
-                prompt.clone(),
-                options.clone(),
-                *wait,
-                parse_duration(timeout)?,
-            )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else if result.resolved {
-                println!(
-                    "{} → {}",
-                    result.decision_id,
-                    result.choice.as_deref().unwrap_or("resolved")
-                );
-            } else {
-                println!("{} → pending", result.decision_id);
-            }
-            Ok(())
-        }
-        TaskCommand::Review { command } => match command {
-            TaskReviewCommand::Message {
-                review_id,
-                message,
-                json,
-            } => {
-                let review = loopflow::ops::task::task_review_message(review_id, message.clone())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → human message queued", review.id);
-                }
-                Ok(())
-            }
-            TaskReviewCommand::Reply {
-                review_id,
-                message,
-                json,
-            } => {
-                let review = loopflow::ops::task::task_review_reply(review_id, message.clone())?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → reply recorded", review.id);
-                }
-                Ok(())
-            }
-            TaskReviewCommand::Complete {
-                review_id,
-                disposition,
-                outcome,
-                json,
-            } => {
-                let review = loopflow::ops::task::task_review_complete(
-                    review_id,
-                    disposition,
-                    outcome.clone(),
-                )?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&review)?);
-                } else {
-                    println!("{} → {}", review.id, review.status.as_str());
-                }
-                Ok(())
-            }
-        },
         TaskCommand::Wait {
             issue,
             until,
@@ -1390,18 +1040,11 @@ fn run_task_command(
         }
         TaskCommand::Resume {
             issue,
-            message,
             model,
             reason,
             json,
         } => {
-            let result = loopflow::ops::task::task_resume(
-                issue,
-                authority.clone(),
-                message.clone(),
-                model.clone(),
-                reason.clone(),
-            )?;
+            let result = loopflow::ops::task::task_resume(issue, model.clone(), reason.clone())?;
             print_task_control(&result, *json)
         }
         TaskCommand::Recover {
@@ -1409,8 +1052,7 @@ fn run_task_command(
             reason,
             json,
         } => {
-            let session =
-                loopflow::ops::task::task_recover(issue, authority.clone(), reason.clone())?;
+            let session = loopflow::ops::task::task_recover(issue, reason.clone())?;
             print_task_session(&session, *json)
         }
         TaskCommand::Attach { issue } => {
@@ -1421,8 +1063,7 @@ fn run_task_command(
             reason,
             json,
         } => {
-            let result =
-                loopflow::ops::task::task_abandon(issue, authority.clone(), reason.clone())?;
+            let result = loopflow::ops::task::task_abandon(issue, reason.clone())?;
             print_task_control(&result, *json)
         }
     }
@@ -1651,34 +1292,16 @@ fn main() -> anyhow::Result<()> {
                 Ok(())
             }),
             Some(Commands::Project { cmd }) => {
-                let authority =
-                    resolve_project_command_authority(cmd, explicit_wave.as_ref())?;
-                in_repo_runtime(&args, |repo| run_project_command(repo, cmd, &authority))
+                in_repo_runtime(&args, |repo| run_project_command(repo, cmd))
             }
-            Some(Commands::Reviews { cmd }) => in_repo_runtime(&args, |repo| {
-                let plan = loopflow::lf::commands::reviews::prepare(cmd, cli.wave.as_deref())?;
-                if plan.preview {
-                    println!("{}", plan.prompt);
-                    return Ok(());
-                }
-                eprintln!(
-                    "catching up {} parent reviews with {}",
-                    plan.review_count, plan.skill
-                );
-                run_target_in_repo(
-                    repo,
-                    &plan.skill,
-                    Some(&plan.prompt),
-                    &cli,
-                    &args,
-                )
-            }),
             Some(Commands::Task { cmd }) => {
-                let authority = loopflow::ops::resolve_caller_authority(explicit_wave.as_ref())?;
-                in_repo_runtime(&args, |repo| run_task_command(repo, cmd, &authority))
+                in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }
-            Some(Commands::Handoff { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::handoff::run(cmd))
+            Some(Commands::Launch { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::launch::run(cmd))
+            }
+            Some(Commands::Work { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
             }
             Some(Commands::TaskRunner {
                 session_id,

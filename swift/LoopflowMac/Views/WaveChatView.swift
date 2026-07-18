@@ -142,11 +142,6 @@ struct WaveChatView: View {
                                         kind: activity.subject,
                                         id: activity.subjectId
                                     ))
-                                },
-                                choose: { option in
-                                    let decision = activity.decisionId.map { " \($0)" } ?? ""
-                                    composerText = "Resolve \(activity.subject.rawValue) \(activity.subjectId) decision\(decision): \(option)"
-                                    composerFocused = true
                                 }
                             )
                             .id(turn.id)
@@ -586,7 +581,6 @@ private struct WaveChatHistoryNotice: View {
 private struct ChildControlActivityCard: View {
     let activity: ChildControlActivity
     let select: () -> Void
-    let choose: (String) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -596,7 +590,7 @@ private struct ChildControlActivityCard: View {
                 HStack(alignment: .top, spacing: Spacing.md) {
                     Image(systemName: icon)
                         .foregroundStyle(
-                            activity.kind == .failed || activity.kind == .controlUncertain
+                            activity.kind == .failed
                                 ? Color.statusError
                                 : palette.accent
                         )
@@ -612,16 +606,6 @@ private struct ChildControlActivityCard: View {
                                 .foregroundStyle(palette.textSecondary)
                                 .lineLimit(3)
                         }
-                        if let version = activity.directiveVersion {
-                            Text("directive v\(version)\(activity.effect.map { " · \($0.rawValue)" } ?? "")")
-                                .font(Typography.caption(10))
-                                .foregroundStyle(palette.textSecondary)
-                        }
-                        if let source = activity.source {
-                            Text("Directed by \(source.label)")
-                                .font(Typography.caption(10))
-                                .foregroundStyle(palette.textSecondary)
-                        }
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -630,15 +614,6 @@ private struct ChildControlActivityCard: View {
                 }
             }
             .buttonStyle(.plain)
-            if !activity.options.isEmpty {
-                HStack(spacing: Spacing.xs) {
-                    ForEach(activity.options, id: \.self) { option in
-                        Button(option) { choose(option) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                }
-            }
         }
         .padding(Spacing.md)
         .background(palette.surfaceMuted)
@@ -648,15 +623,10 @@ private struct ChildControlActivityCard: View {
 
     private var icon: String {
         switch activity.kind {
-        case .directed: "arrow.triangle.turn.up.right.circle"
-        case .incorporated: "checkmark.circle.fill"
-        case .decisionRequired: "questionmark.circle.fill"
-        case .decisionResolved: "checkmark.bubble.fill"
         case .prOpened: "arrow.triangle.pull"
         case .completed: "checkmark.seal.fill"
         case .failed: "exclamationmark.triangle.fill"
-        case .controlUncertain: "questionmark.diamond.fill"
-        case .stateChanged, .controlApplied: "circle.dotted"
+        case .stateChanged: "circle.dotted"
         }
     }
 }

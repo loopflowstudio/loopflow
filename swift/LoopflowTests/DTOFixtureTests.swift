@@ -7,6 +7,27 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Turn spend fixture preserves additive identity and absent measurements")
+    func turnSpendFixtureRoundTrips() throws {
+        let data = try loadFixtureData("turn_spend.json")
+        let turns = try JSONDecoder().decode([TurnSpend].self, from: data)
+
+        #expect(turns.map(\.id) == ["turn-1", "turn-2"])
+        #expect(turns[0].launchId == "launch-1")
+        #expect(turns[0].traceId == "trace-1")
+        #expect(turns[0].execId == "exec-1")
+        #expect(turns[0].totalTokens == 1200)
+        #expect(turns[0].agent == "claude:opus")
+        #expect(turns[1].inputTokens == nil)
+        #expect(turns[1].outputTokens == 0)
+        #expect(turns[1].cacheReadTokens == 150)
+        #expect(turns[1].costUsd == nil)
+
+        let encoded = try JSONEncoder().encode(turns)
+        let decoded = try JSONDecoder().decode([TurnSpend].self, from: encoded)
+        #expect(decoded == turns)
+    }
+
     @Test("Context Lab fixture preserves missing coverage and trace identity")
     func contextLabFixturePreservesResearchTruth() throws {
         let data = try loadFixtureData("context_lab_snapshot.json")
@@ -116,61 +137,31 @@ struct DTOFixtureTests {
         #expect(decoded == fact)
     }
 
-    @Test("child control activity preserves typed command evidence")
-    func childControlActivityPreservesTypedCommandEvidence() throws {
+    @Test("child activity preserves typed delivery evidence")
+    func childActivityPreservesTypedDeliveryEvidence() throws {
         let data = try loadFixtureData("child_control_activity.json")
         let activity = try JSONDecoder().decode(ChildControlActivity.self, from: data)
 
         #expect(activity.subject == .task)
         #expect(activity.subjectId == "INF-123")
-        #expect(activity.kind == .controlApplied)
-        #expect(activity.directiveVersion == nil)
-        #expect(activity.effect == .liveSteer)
-        #expect(activity.source == .wave(id: "11111111-1111-4111-8111-111111111111"))
+        #expect(activity.kind == .prOpened)
+        #expect(activity.title == "Opened PR #1073")
     }
+    @Test("Launch surface fixture preserves attach and attention")
+    func launchSurfaceFixtureRoundTrips() throws {
+        let data = try loadFixtureData("launch_surface.json")
+        let surface = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: data)
 
-    @Test("interactive handoff attach fixture preserves presentation instructions")
-    func interactiveHandoffAttachFixtureRoundTrips() throws {
-        let data = try loadFixtureData("interactive_handoff_attach.json")
-        let attach = try JSONDecoder().decode(InteractiveHandoffAttach.self, from: data)
+        #expect(surface.id == "launch_00000000000000000000000000000001")
+        #expect(surface.work.kind == "task")
+        #expect(surface.status == .live)
+        #expect(surface.attention?.kind == "user")
+        #expect(surface.attentionAt == "2026-07-17T12:01:00Z")
+        #expect(surface.argv == ["tmux", "attach-session", "-t", "lf-task"])
 
-        #expect(attach.sessionId == "ih_00000000000000000000000000000001")
-        #expect(attach.status == .attached)
-        #expect(attach.cwd == "/src/loopflow.interactive-handoff")
-        #expect(attach.host == "localhost")
-        #expect(attach.environment["LF_HOME"] == "/Users/jack/.lf")
-        #expect(attach.argv == ["tmux", "attach-session", "-t", "lf-task-interactive"])
-
-        let encoded = try JSONEncoder().encode(attach)
-        let decoded = try JSONDecoder().decode(InteractiveHandoffAttach.self, from: encoded)
-        #expect(decoded == attach)
-    }
-
-    @Test("interactive handoff list fixture preserves census identity and age")
-    func interactiveHandoffListFixtureRoundTrips() throws {
-        let data = try loadFixtureData("interactive_handoff_list.json")
-        let rows = try JSONDecoder().decode([InteractiveHandoffListRow].self, from: data)
-
-        #expect(rows.count == 2)
-        let waiting = try #require(rows.first)
-        #expect(waiting.sessionId == "ih_00000000000000000000000000000001")
-        #expect(waiting.parentKind == "task")
-        #expect(waiting.parentId == "ts_00000000000000000000000000000002")
-        #expect(waiting.status == .waiting)
-        #expect(waiting.status.isActive)
-        #expect(waiting.home == "jack@local")
-        #expect(waiting.ageSecs == 90)
-
-        let attached = rows[1]
-        #expect(attached.parentKind == "project")
-        #expect(attached.providerSessionId == nil)
-        // An unreadable timestamp keeps age nil, never a fabricated zero.
-        #expect(attached.ageSecs == nil)
-        #expect(attached.status.isActive)
-
-        let encoded = try JSONEncoder().encode(rows)
-        let decoded = try JSONDecoder().decode([InteractiveHandoffListRow].self, from: encoded)
-        #expect(decoded == rows)
+        let encoded = try JSONEncoder().encode(surface)
+        let decoded = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: encoded)
+        #expect(decoded == surface)
     }
 
     private func loadFixture(_ name: String, sourceFile: String = #filePath) throws -> [String: Any] {

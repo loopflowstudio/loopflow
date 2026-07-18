@@ -5,7 +5,7 @@ use std::str::FromStr;
 use rusqlite::{params, types::Type};
 use time::OffsetDateTime;
 
-use crate::child_session::ChildCommandId;
+use crate::durable::RunId;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{CiIncident, TaskPrId, TaskSessionId, TaskSessionStatus};
@@ -22,26 +22,6 @@ fn datetime(index: usize, value: i64) -> rusqlite::Result<OffsetDateTime> {
 
 fn optional_datetime(index: usize, value: Option<i64>) -> rusqlite::Result<Option<OffsetDateTime>> {
     value.map(|value| datetime(index, value)).transpose()
-}
-
-/// Name the durable command that woke a body for this incident.
-///
-/// `COALESCE` keeps the first trigger: an identity wakes one body, so a second
-/// command claiming the same incident is a bug, not a newer truth. Returns
-/// whether the incident existed.
-pub(super) fn mark_ci_incident_triggered_on(
-    conn: &rusqlite::Connection,
-    identity: &str,
-    command_id: &ChildCommandId,
-    updated_at: OffsetDateTime,
-) -> StoreResult<bool> {
-    let at = timestamp(updated_at);
-    Ok(conn.execute(
-        "UPDATE ci_incidents
-         SET trigger_command_id=COALESCE(trigger_command_id, ?2), updated_at=MAX(updated_at, ?3)
-         WHERE identity=?1",
-        params![identity, command_id.as_str(), at],
-    )? > 0)
 }
 
 fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncidentReportRow> {
@@ -66,9 +46,13 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
             provider_completed_at: optional_datetime(7, row.get(7)?)?,
             poll_observed_at: optional_datetime(8, row.get(8)?)?,
             webhook_received_at: optional_datetime(9, row.get(9)?)?,
-            trigger_command_id: row
+            claimed_run_id: row
                 .get::<_, Option<String>>(10)?
-                .map(ChildCommandId::from_raw),
+                .map(|id| RunId::parse(&id))
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(10, Type::Text, Box::new(error))
+                })?,
             responded_at: optional_datetime(11, row.get(11)?)?,
             green_at: optional_datetime(12, row.get(12)?)?,
             merged_at: optional_datetime(13, row.get(13)?)?,
@@ -94,7 +78,7 @@ impl super::SqliteStore {
             "INSERT INTO ci_incidents (
                 identity, task_session_id, pr_id, repo, pr_number,
                 failed_head_sha, failure_set_json, provider_completed_at,
-                poll_observed_at, webhook_received_at, trigger_command_id,
+                poll_observed_at, webhook_received_at, claimed_run_id,
                 responded_at, green_at, merged_at, blocked_at, blocked_reason,
                 created_at, updated_at
              ) VALUES (
@@ -117,7 +101,7 @@ impl super::SqliteStore {
                     WHEN excluded.webhook_received_at IS NULL THEN ci_incidents.webhook_received_at
                     ELSE MIN(ci_incidents.webhook_received_at, excluded.webhook_received_at)
                 END,
-                trigger_command_id=COALESCE(ci_incidents.trigger_command_id, excluded.trigger_command_id),
+                claimed_run_id=COALESCE(ci_incidents.claimed_run_id, excluded.claimed_run_id),
                 updated_at=MAX(ci_incidents.updated_at, excluded.updated_at)",
             params![
                 incident.identity,
@@ -130,7 +114,7 @@ impl super::SqliteStore {
                 incident.provider_completed_at.map(timestamp),
                 incident.poll_observed_at.map(timestamp),
                 incident.webhook_received_at.map(timestamp),
-                incident.trigger_command_id.as_ref().map(ChildCommandId::as_str),
+                incident.claimed_run_id.as_ref().map(RunId::as_str),
                 incident.responded_at.map(timestamp),
                 incident.green_at.map(timestamp),
                 incident.merged_at.map(timestamp),
@@ -143,32 +127,33 @@ impl super::SqliteStore {
         Ok(())
     }
 
-    /// Stamp the moment a body was born to repair this incident. Keyed on the
-    /// identity the wake command carries, so the response lands on exactly the
-    /// incident that woke it.
-    pub fn mark_ci_incident_responded(
+    pub fn claim_ci_incident(
         &self,
         identity: &str,
+        run_id: &RunId,
         responded_at: OffsetDateTime,
     ) -> StoreResult<bool> {
         let at = timestamp(responded_at);
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
             "UPDATE ci_incidents
-             SET responded_at=COALESCE(responded_at, ?2), updated_at=MAX(updated_at, ?2)
-             WHERE identity=?1",
-            params![identity, at],
+             SET claimed_run_id=?2, responded_at=COALESCE(responded_at, ?3),
+                 updated_at=MAX(updated_at, ?3)
+             WHERE identity=?1
+               AND green_at IS NULL AND merged_at IS NULL AND blocked_at IS NULL
+               AND (
+                    claimed_run_id IS NULL OR claimed_run_id=?2 OR NOT EXISTS (
+                        SELECT 1 FROM runs
+                        WHERE runs.id=ci_incidents.claimed_run_id
+                          AND runs.state != 'ended'
+                    )
+               )
+               AND EXISTS (
+                    SELECT 1 FROM runs
+                    WHERE runs.id=?2 AND runs.state IN ('reserved', 'active')
+               )",
+            params![identity, run_id.as_str(), at],
         )? > 0)
-    }
-
-    pub fn mark_ci_incident_triggered(
-        &self,
-        identity: &str,
-        command_id: &ChildCommandId,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        mark_ci_incident_triggered_on(&conn, identity, command_id, updated_at)
     }
 
     /// Record the head a ci-fix body shipped for this incident. First-write only:
@@ -250,22 +235,23 @@ impl super::SqliteStore {
             "SELECT
                 ci.identity, ci.task_session_id, ci.pr_id, ci.repo, ci.pr_number,
                 ci.failed_head_sha, ci.failure_set_json, ci.provider_completed_at,
-                ci.poll_observed_at, ci.webhook_received_at, ci.trigger_command_id,
+                ci.poll_observed_at, ci.webhook_received_at, ci.claimed_run_id,
                 ci.responded_at, ci.green_at, ci.merged_at, ci.blocked_at,
                 ci.blocked_reason, ci.created_at, ci.updated_at,
                 w.name, ts.issue_identifier, ts.status, ts.status_reason,
                 ts.created_at,
                 EXISTS (
-                    SELECT 1 FROM child_commands cc
-                    WHERE cc.target_kind='task'
-                      AND cc.session_id=ci.task_session_id
-                      AND json_extract(cc.source_json, '$.kind') IN ('human', 'linear')
-                      AND cc.created_at >= CASE
+                    SELECT 1 FROM steers s
+                    JOIN epochs e ON e.id=s.epoch_id
+                    JOIN task_sessions steered ON steered.epoch_id=e.id
+                    WHERE steered.id=ci.task_session_id
+                      AND s.author_kind='user'
+                      AND s.issued_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN ci.webhook_received_at
                           WHEN ci.webhook_received_at IS NULL THEN ci.poll_observed_at
                           ELSE MIN(ci.poll_observed_at, ci.webhook_received_at)
                       END
-                      AND cc.created_at <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
+                      AND s.issued_at * 1000000000 <= COALESCE(ci.green_at, ci.merged_at, 9223372036854775807)
                 ),
                 ci.repaired_head_sha
              FROM ci_incidents ci

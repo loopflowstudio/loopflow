@@ -14,9 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::child_session::{
-    ChildBodyOutcome, ChildCommandEffect, ChildCommandState, ChildProcessGeneration,
-};
+use crate::child_session::{ChildBodyOutcome, ChildProcessGeneration};
 use crate::project_session::{ProjectEventKind, ProjectObservation};
 use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
@@ -40,12 +38,6 @@ pub enum ChildActivitySubject {
 #[serde(rename_all = "snake_case")]
 pub enum ChildActivityKind {
     StateChanged,
-    ControlApplied,
-    ControlUncertain,
-    Directed,
-    Incorporated,
-    DecisionRequired,
-    DecisionResolved,
     PrOpened,
     Completed,
     Failed,
@@ -60,12 +52,6 @@ pub struct ChildControlActivity {
     pub kind: ChildActivityKind,
     pub title: String,
     pub summary: String,
-    pub directive_version: Option<u32>,
-    pub command_id: Option<String>,
-    pub effect: Option<ChildCommandEffect>,
-    pub source: Option<crate::child_session::ChildCommandSource>,
-    pub decision_id: Option<String>,
-    pub options: Vec<String>,
 }
 
 impl ChildControlActivity {
@@ -79,12 +65,6 @@ impl ChildControlActivity {
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
-            directive_version: fields.directive_version,
-            command_id: fields.command_id,
-            effect: fields.effect,
-            source: observation.control_source.clone(),
-            decision_id: fields.decision_id,
-            options: fields.options,
         }
     }
 
@@ -98,12 +78,6 @@ impl ChildControlActivity {
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
-            directive_version: fields.directive_version,
-            command_id: fields.command_id,
-            effect: fields.effect,
-            source: observation.control_source.clone(),
-            decision_id: fields.decision_id,
-            options: fields.options,
         }
     }
 }
@@ -308,11 +282,6 @@ struct ActivityFields {
     kind: ChildActivityKind,
     title: String,
     summary: String,
-    directive_version: Option<u32>,
-    command_id: Option<String>,
-    effect: Option<ChildCommandEffect>,
-    decision_id: Option<String>,
-    options: Vec<String>,
 }
 
 fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
@@ -339,88 +308,9 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             &format!("Task is {}", to.as_str()),
             reason,
         ),
-        TaskEventKind::CommandChanged {
-            command_id,
-            state,
-            effect,
-            error,
-        } => ActivityFields {
-            command_id: Some(command_id.to_string()),
-            effect: *effect,
-            ..activity(
-                control_activity_kind(*state),
-                &format!("Control {}", state.as_str()),
-                error.as_deref().unwrap_or_default(),
-            )
-        },
-        TaskEventKind::DirectiveChanged { version, .. } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Directed,
-                &format!("Direction v{version}"),
-                "Waiting for incorporation",
-            )
-        },
-        TaskEventKind::DirectiveIncorporated {
-            version, summary, ..
-        } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Incorporated,
-                &format!("Incorporated direction v{version}"),
-                summary,
-            )
-        },
-        TaskEventKind::DirectiveReconciled {
-            version, summary, ..
-        } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Incorporated,
-                &format!("Reconciled direction v{version} by out-of-band attestation"),
-                summary,
-            )
-        },
-        TaskEventKind::DecisionRequested {
-            decision_id,
-            prompt,
-            options,
-        } => ActivityFields {
-            decision_id: Some(decision_id.to_string()),
-            options: options.clone(),
-            ..activity(
-                ChildActivityKind::DecisionRequired,
-                "Decision required",
-                prompt,
-            )
-        },
-        TaskEventKind::DecisionResolved { choice, .. } => activity(
-            ChildActivityKind::DecisionResolved,
-            "Decision resolved",
-            choice,
-        ),
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
-        TaskEventKind::InteractionReviewRequested { review } => activity(
-            ChildActivityKind::DecisionRequired,
-            &format!("{} review requested", review.step),
-            &review.reason,
-        ),
-        TaskEventKind::InteractionReviewMessage { author, text, .. } => activity(
-            ChildActivityKind::StateChanged,
-            &format!("Review message from {}", author.as_str()),
-            text,
-        ),
-        TaskEventKind::InteractionReviewCompleted {
-            disposition,
-            outcome,
-            ..
-        } => activity(
-            ChildActivityKind::DecisionResolved,
-            &format!("Review {}", disposition.as_str()),
-            outcome,
-        ),
         TaskEventKind::PrStarted {
             sequence, branch, ..
         } => activity(
@@ -466,57 +356,7 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             &format!("Project is {}", to.as_str()),
             reason,
         ),
-        ProjectEventKind::CommandChanged {
-            command_id,
-            state,
-            effect,
-            error,
-        } => ActivityFields {
-            command_id: Some(command_id.to_string()),
-            effect: *effect,
-            ..activity(
-                control_activity_kind(*state),
-                &format!("Control {}", state.as_str()),
-                error.as_deref().unwrap_or_default(),
-            )
-        },
-        ProjectEventKind::DirectiveChanged { version, .. } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Directed,
-                &format!("Direction v{version}"),
-                "Waiting for incorporation",
-            )
-        },
-        ProjectEventKind::DirectiveIncorporated {
-            version, summary, ..
-        } => ActivityFields {
-            directive_version: Some(*version),
-            ..activity(
-                ChildActivityKind::Incorporated,
-                &format!("Incorporated direction v{version}"),
-                summary,
-            )
-        },
         ProjectEventKind::TaskObserved { event, .. } => task_activity_fields(event),
-        ProjectEventKind::DecisionRequested {
-            decision_id,
-            prompt,
-            options,
-        } => ActivityFields {
-            decision_id: Some(decision_id.to_string()),
-            options: options.clone(),
-            ..activity(
-                ChildActivityKind::DecisionRequired,
-                "Decision required",
-                prompt,
-            )
-        },
-        ProjectEventKind::DecisionResolved { choice, .. } => activity(
-            ChildActivityKind::DecisionResolved,
-            "Decision resolved",
-            choice,
-        ),
         ProjectEventKind::IterationCompleted { summary, .. } => activity(
             ChildActivityKind::StateChanged,
             "Project iteration completed",
@@ -557,19 +397,6 @@ fn activity(kind: ChildActivityKind, title: &str, summary: &str) -> ActivityFiel
         kind,
         title: title.to_string(),
         summary: summary.to_string(),
-        directive_version: None,
-        command_id: None,
-        effect: None,
-        decision_id: None,
-        options: Vec::new(),
-    }
-}
-
-fn control_activity_kind(state: ChildCommandState) -> ChildActivityKind {
-    if state == ChildCommandState::Uncertain {
-        ChildActivityKind::ControlUncertain
-    } else {
-        ChildActivityKind::ControlApplied
     }
 }
 
@@ -613,12 +440,6 @@ mod tests {
             kind: ChildActivityKind::StateChanged,
             title: "Task started".to_string(),
             summary: String::new(),
-            directive_version: None,
-            command_id: None,
-            effect: None,
-            source: None,
-            decision_id: None,
-            options: Vec::new(),
         };
         let turn = ChatTurn::child_activity(
             "turn-activity".to_string(),
@@ -734,77 +555,5 @@ mod tests {
         }
 
         assert_eq!(turn.text, "hello world");
-    }
-
-    #[test]
-    fn decision_activity_keeps_options_and_lineage() {
-        let decision_id = crate::child_session::ChildDecisionId::new();
-        let observation = TaskObservation {
-            session_id: crate::task::TaskSessionId::new(),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 9,
-            control_source: None,
-            event: TaskEventKind::DecisionRequested {
-                decision_id: decision_id.clone(),
-                prompt: "Which parser mode?".to_string(),
-                options: vec!["strict".to_string(), "permissive".to_string()],
-            },
-        };
-
-        let activity = ChildControlActivity::from_task(&observation);
-        assert_eq!(activity.kind, ChildActivityKind::DecisionRequired);
-        assert_eq!(activity.decision_id.as_deref(), Some(decision_id.as_str()));
-        assert_eq!(activity.options, ["strict", "permissive"]);
-    }
-
-    #[test]
-    fn command_activity_keeps_the_applied_effect() {
-        let command_id = crate::child_session::ChildCommandId::new();
-        let wave_id = crate::id::WaveId::new();
-        let observation = TaskObservation {
-            session_id: crate::task::TaskSessionId::new(),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 10,
-            control_source: Some(crate::child_session::ChildCommandSource::Wave(
-                wave_id.clone(),
-            )),
-            event: TaskEventKind::CommandChanged {
-                command_id: command_id.clone(),
-                state: crate::child_session::ChildCommandState::Accepted,
-                effect: Some(ChildCommandEffect::LiveSteer),
-                error: None,
-            },
-        };
-
-        let activity = ChildControlActivity::from_task(&observation);
-        assert_eq!(activity.kind, ChildActivityKind::ControlApplied);
-        assert_eq!(activity.command_id.as_deref(), Some(command_id.as_str()));
-        assert_eq!(activity.effect, Some(ChildCommandEffect::LiveSteer));
-        assert_eq!(activity.directive_version, None);
-        assert_eq!(
-            activity.source,
-            Some(crate::child_session::ChildCommandSource::Wave(wave_id))
-        );
-    }
-
-    #[test]
-    fn ambiguous_provider_delivery_is_visibly_uncertain() {
-        let observation = TaskObservation {
-            session_id: crate::task::TaskSessionId::new(),
-            issue_identifier: "INF-123".to_string(),
-            event_id: 11,
-            control_source: Some(crate::child_session::ChildCommandSource::System),
-            event: TaskEventKind::CommandChanged {
-                command_id: crate::child_session::ChildCommandId::new(),
-                state: ChildCommandState::Uncertain,
-                effect: None,
-                error: Some("provider delivery outcome is unknown".to_string()),
-            },
-        };
-
-        let activity = ChildControlActivity::from_task(&observation);
-        assert_eq!(activity.kind, ChildActivityKind::ControlUncertain);
-        assert_eq!(activity.title, "Control uncertain");
-        assert!(activity.summary.contains("unknown"));
     }
 }

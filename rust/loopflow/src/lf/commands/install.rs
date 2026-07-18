@@ -4,12 +4,12 @@
 //! A branch-local build must never silently become the machine-global command:
 //! on 2026-07-17 a `--use` promotion repointed `~/.local/bin/lf` at a binary
 //! whose migration registry ended at `0.11.026` while the shared store was at
-//! `0.11.027`, and every subsequent invocation — including live bodies mid-turn
+//! `0.11.027`, and every subsequent invocation — including active Runs mid-turn
 //! — hit a store its own binary could not read.
 //!
 //! The candidate binary (the one running this command) reads the shared store's
-//! applied frontier and its own migration registry, counts live Task/Project
-//! bodies, and renders a verdict. `promote` consumes that verdict under the
+//! applied frontier and its own migration registry, counts active Runs, and
+//! renders a verdict. `promote` consumes that verdict under the
 //! machine-global reservation fence, retains immutable rollback bytes, and
 //! activates the candidate before any migration advances the frontier.
 //!
@@ -76,14 +76,13 @@ pub enum Compatibility {
     Unreadable { reason: String },
 }
 
-/// One live body that blocks a global replacement. Liveness is the lease state
-/// alone (`reserved`/`active`); projected Session status never appears here.
+/// One active Run that blocks a global replacement.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct LiveBody {
-    pub kind: &'static str,
-    pub session_id: String,
-    pub generation: Option<u32>,
-    pub lease_state: String,
+pub struct ActiveRun {
+    pub run_id: String,
+    pub work_kind: String,
+    pub work_id: String,
+    pub state: String,
 }
 
 /// The promotion decision. `Reject` carries every failing reason at once so one
@@ -102,18 +101,18 @@ pub struct PromotionPreview {
     pub candidate: CandidateIdentity,
     pub database_path: String,
     pub compatibility: Compatibility,
-    pub live_bodies: Vec<LiveBody>,
+    pub active_runs: Vec<ActiveRun>,
     pub verdict: Verdict,
 }
 
 /// The pure promotion decision. Given the candidate's authority, its
-/// compatibility with the store, and the live bodies, decide whether the global
+/// compatibility with the store, and the active Runs, decide whether the global
 /// command may be replaced. Pure over its inputs — no I/O — so every branch is
 /// unit-tested below.
 pub fn decide(
     authority: MigrationAuthority,
     compatibility: &Compatibility,
-    live_bodies: &[LiveBody],
+    active_runs: &[ActiveRun],
 ) -> Verdict {
     let mut reasons = Vec::new();
     let mut migrate = false;
@@ -139,15 +138,20 @@ pub fn decide(
         },
     }
 
-    if !live_bodies.is_empty() {
-        let named = live_bodies
+    if !active_runs.is_empty() {
+        let named = active_runs
             .iter()
-            .map(|body| format!("{} {} ({})", body.kind, body.session_id, body.lease_state))
+            .map(|run| {
+                format!(
+                    "{} {} via Run {} ({})",
+                    run.work_kind, run.work_id, run.run_id, run.state
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ");
         reasons.push(format!(
-            "{} live body/bodies make a global replacement unsafe; drain them first: {named}",
-            live_bodies.len()
+            "{} active Run(s) make a global replacement unsafe; stop them first: {named}",
+            active_runs.len()
         ));
     }
 
@@ -198,48 +202,40 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
     }
 }
 
-/// Every session whose write lease is `reserved` or `active` — the sole
-/// authority for "a body is live". Read-only against the two session tables;
-/// the lease columns exist since `0.11.003`, so this reads regardless of whether
-/// the candidate's registry matches the store's frontier.
-fn read_live_bodies(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<LiveBody>> {
-    let mut live = Vec::new();
-    for (table, kind) in [("task_sessions", "task"), ("project_sessions", "project")] {
-        let mut statement = conn.prepare(&format!(
-            "SELECT id, process_generation, process_lease_state FROM {table} \
-             WHERE process_lease_state IN ('reserved', 'active') ORDER BY id"
-        ))?;
-        let rows = statement.query_map([], |row| {
-            Ok(LiveBody {
-                kind,
-                session_id: row.get(0)?,
-                generation: row
-                    .get::<_, Option<i64>>(1)?
-                    .map(|generation| generation as u32),
-                lease_state: row.get(2)?,
+/// Every non-ended Run. A stopping Run remains active until containment is
+/// positively absent, so unreadable or unprovable cleanup evidence fails closed.
+fn read_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveRun>> {
+    let mut statement = conn.prepare(
+        "SELECT id, source_kind, source_id, state
+         FROM runs WHERE state != 'ended' ORDER BY created_at, id",
+    )?;
+    let runs = statement
+        .query_map([], |row| {
+            Ok(ActiveRun {
+                run_id: row.get(0)?,
+                work_kind: row.get(1)?,
+                work_id: row.get(2)?,
+                state: row.get(3)?,
             })
-        })?;
-        for row in rows {
-            live.push(row?);
-        }
-    }
-    Ok(live)
+        })?
+        .collect();
+    runs
 }
 
 /// Read the shared store's promotion evidence: how the candidate's registry
-/// relates to the store, and which bodies are live.
+/// relates to the store, and which Runs are active.
 ///
 /// An **absent** store, read under the exclusive promotion lock, is positive
-/// proof of zero persisted live leases — no body can have reserved against a
-/// store that does not exist — and an uninitialized frontier the authorized
-/// boundary may create. It classifies as `AheadPending` with no live bodies, so
+/// proof of zero persisted Runs — no Run can have reserved against a store that
+/// does not exist — and an uninitialized frontier the authorized boundary may
+/// create. It classifies as `AheadPending` with no active Runs, so
 /// a published candidate reaches `PromoteAndMigrate` and first initialization
 /// happens through the authorized open during activation.
 ///
-/// An **existing** store that cannot be opened, or whose live-body set cannot be
+/// An **existing** store that cannot be opened, or whose active-Run set cannot be
 /// read, resolves to `Unreadable` and fails closed — an empty or corrupt file is
 /// not the fresh-initialization case and never promotes.
-fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<LiveBody>) {
+fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<ActiveRun>) {
     if !store_path.exists() {
         return (
             Compatibility::AheadPending {
@@ -265,13 +261,13 @@ fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<LiveBody>) {
     };
 
     let compatibility = classify_compatibility(&conn);
-    // Cannot prove zero live bodies if the read fails: fail closed rather than
-    // pass an empty set that would read as "no bodies".
-    match read_live_bodies(&conn) {
-        Ok(live_bodies) => (compatibility, live_bodies),
+    // Cannot prove zero active Runs if the read fails: fail closed rather than
+    // pass an empty set that would read as "no Runs".
+    match read_active_runs(&conn) {
+        Ok(active_runs) => (compatibility, active_runs),
         Err(error) => (
             Compatibility::Unreadable {
-                reason: format!("cannot read live bodies: {error}"),
+                reason: format!("cannot read active Runs: {error}"),
             },
             Vec::new(),
         ),
@@ -283,13 +279,13 @@ fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<LiveBody>) {
 pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
-    let (compatibility, live_bodies) = read_store_evidence(store_path);
-    let verdict = decide(candidate.authority, &compatibility, &live_bodies);
+    let (compatibility, active_runs) = read_store_evidence(store_path);
+    let verdict = decide(candidate.authority, &compatibility, &active_runs);
     PromotionPreview {
         candidate,
         database_path,
         compatibility,
-        live_bodies,
+        active_runs,
         verdict,
     }
 }
@@ -319,14 +315,14 @@ fn render_human(preview: &PromotionPreview) {
         Compatibility::Incompatible { reason } => println!("  INCOMPATIBLE: {reason}"),
         Compatibility::Unreadable { reason } => println!("  UNREADABLE: {reason}"),
     }
-    if preview.live_bodies.is_empty() {
-        println!("  live bodies    none");
+    if preview.active_runs.is_empty() {
+        println!("  active Runs    none");
     } else {
-        println!("  live bodies    {}", preview.live_bodies.len());
-        for body in &preview.live_bodies {
+        println!("  active Runs    {}", preview.active_runs.len());
+        for run in &preview.active_runs {
             println!(
-                "    - {} {} ({})",
-                body.kind, body.session_id, body.lease_state
+                "    - {} {} via {} ({})",
+                run.work_kind, run.work_id, run.run_id, run.state
             );
         }
     }
@@ -368,7 +364,7 @@ pub fn preflight(json: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decide, read_live_bodies, read_store_evidence, Compatibility, LiveBody, Verdict};
+    use super::{decide, read_active_runs, read_store_evidence, ActiveRun, Compatibility, Verdict};
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
     use crate::store::migrations::latest_known_version;
 
@@ -385,17 +381,17 @@ mod tests {
         }
     }
 
-    fn body(kind: &'static str, id: &str) -> LiveBody {
-        LiveBody {
-            kind,
-            session_id: id.to_string(),
-            generation: Some(4),
-            lease_state: "active".to_string(),
+    fn run(kind: &str, work_id: &str) -> ActiveRun {
+        ActiveRun {
+            run_id: format!("run-{work_id}"),
+            work_kind: kind.to_string(),
+            work_id: work_id.to_string(),
+            state: "active".to_string(),
         }
     }
 
     #[test]
-    fn an_exact_frontier_promotes_for_either_authority_when_no_bodies_are_live() {
+    fn an_exact_frontier_promotes_for_either_authority_when_no_runs_are_active() {
         assert_eq!(decide(ValidationOnly, &exact(), &[]), Verdict::Promote);
         assert_eq!(decide(Published, &exact(), &[]), Verdict::Promote);
     }
@@ -436,33 +432,35 @@ mod tests {
     }
 
     #[test]
-    fn any_live_body_blocks_promotion_even_at_the_exact_frontier() {
-        let bodies = [body("task", "ts_a56be8a6")];
-        let Verdict::Reject { reasons } = decide(Published, &exact(), &bodies) else {
-            panic!("a live body must block replacement");
+    fn any_active_run_blocks_promotion_even_at_the_exact_frontier() {
+        let runs = [run("task", "task-a56be8a6")];
+        let Verdict::Reject { reasons } = decide(Published, &exact(), &runs) else {
+            panic!("an active Run must block replacement");
         };
-        assert!(reasons.iter().any(|reason| reason.contains("ts_a56be8a6")));
+        assert!(reasons
+            .iter()
+            .any(|reason| reason.contains("task-a56be8a6")));
     }
 
     #[test]
-    fn a_live_body_and_an_incompatible_store_are_reported_together() {
+    fn an_active_run_and_an_incompatible_store_are_reported_together() {
         let incompatible = Compatibility::Incompatible {
             reason: "unknown migration".to_string(),
         };
-        let bodies = [body("project", "ps_1db1324d")];
-        let Verdict::Reject { reasons } = decide(ValidationOnly, &incompatible, &bodies) else {
+        let runs = [run("project", "project-1db1324d")];
+        let Verdict::Reject { reasons } = decide(ValidationOnly, &incompatible, &runs) else {
             panic!("both blockers reject");
         };
         assert_eq!(reasons.len(), 2, "one preflight names every blocker");
     }
 
     #[test]
-    fn a_reserved_lease_with_no_process_still_counts_as_live() {
-        let reserved = LiveBody {
-            kind: "task",
-            session_id: "ts_reserved".to_string(),
-            generation: Some(1),
-            lease_state: "reserved".to_string(),
+    fn a_reserved_run_with_no_process_still_counts_as_active() {
+        let reserved = ActiveRun {
+            run_id: "run-reserved".to_string(),
+            work_kind: "task".to_string(),
+            work_id: "task-reserved".to_string(),
+            state: "reserved".to_string(),
         };
         assert!(matches!(
             decide(Published, &exact(), &[reserved]),
@@ -523,28 +521,23 @@ mod tests {
     }
 
     #[test]
-    fn live_bodies_are_read_from_active_and_reserved_leases_only() {
+    fn active_runs_are_read_until_their_containment_is_absent() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        // Minimal stand-ins carrying exactly the columns read_live_bodies reads.
-        // This isolates the lease-state filter and kind labeling from the full
-        // session schema; the real-schema proof is the two-worktree regression.
         conn.execute_batch(
-            "CREATE TABLE task_sessions (id TEXT, process_generation INTEGER, process_lease_state TEXT);
-             CREATE TABLE project_sessions (id TEXT, process_generation INTEGER, process_lease_state TEXT);
-             INSERT INTO task_sessions VALUES
-                 ('ts_active', 4, 'active'), ('ts_finished', 3, 'finished'), ('ts_revoked', 2, 'revoked');
-             INSERT INTO project_sessions VALUES ('ps_reserved', 1, 'reserved');",
+            "CREATE TABLE runs (
+                 id TEXT, source_kind TEXT, source_id TEXT, state TEXT, created_at INTEGER
+             );
+             INSERT INTO runs VALUES
+                 ('run-active', 'task', 'task-one', 'active', 1),
+                 ('run-stopping', 'project', 'project-one', 'stopping', 2),
+                 ('run-ended', 'task', 'task-done', 'ended', 3);",
         )
         .unwrap();
-        let live = read_live_bodies(&conn).unwrap();
-        let ids: Vec<&str> = live.iter().map(|body| body.session_id.as_str()).collect();
-        assert_eq!(
-            ids,
-            vec!["ts_active", "ps_reserved"],
-            "only active + reserved"
-        );
-        assert_eq!(live[0].kind, "task");
-        assert_eq!(live[1].kind, "project");
+        let active = read_active_runs(&conn).unwrap();
+        let ids: Vec<&str> = active.iter().map(|run| run.run_id.as_str()).collect();
+        assert_eq!(ids, vec!["run-active", "run-stopping"]);
+        assert_eq!(active[0].work_kind, "task");
+        assert_eq!(active[1].work_kind, "project");
     }
 }
 
@@ -552,7 +545,7 @@ mod tests {
 //
 // The mutating half consumes the merged `decide()` verdict and performs every
 // machine-global install mutation under the same exclusive promotion lock whose
-// shared side fences every Task and Project body reservation. Python stages
+// shared side fences every product Run reservation. Python stages
 // branch-local artifacts only; Rust owns CLI activation, app replacement,
 // migration advancement, rollback validation, and post-commit skill sync.
 
@@ -988,7 +981,7 @@ fn render_retained_prior(prior: &Path, cli_target: &Path) {
 }
 
 /// Run `lf install promote`. The candidate is the running binary; under the
-/// exclusive promotion lock it reads the shared store's frontier and live-body
+/// exclusive promotion lock it reads the shared store's frontier and active-Run
 /// count, decides via the merged `decide()`, and — unless refused or preview —
 /// content-addresses itself into `~/.lf/bin` and atomically repoints `cli_target`.
 /// A refusal leaves every target unchanged.
@@ -1082,7 +1075,7 @@ pub fn promote(
 
 /// Activate retained immutable bytes only when that binary's own preflight
 /// recognizes the current store exactly. The exclusive lock keeps the frontier
-/// and live-body set stable between the preflight and symlink commit.
+/// and active-Run set stable between the preflight and symlink commit.
 pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
@@ -1134,7 +1127,7 @@ mod promote_tests {
     #[test]
     fn staging_is_content_addressed_and_refuses_a_byte_mismatch() {
         let dir = tempfile::tempdir().unwrap();
-        let bin_dir = dir.path().join("bin");
+        let bin_dir = dir.path().canonicalize().unwrap().join("bin");
         let candidate = dir.path().join("lf");
         fs::write(&candidate, b"BINARY-A").unwrap();
 
@@ -1214,7 +1207,7 @@ mod promote_tests {
 
         let error = publish_cli(
             &Verdict::Reject {
-                reasons: vec!["a live body blocks replacement".to_string()],
+                reasons: vec!["an active Run blocks replacement".to_string()],
             },
             &CliPromotion {
                 candidate_binary: &candidate,
@@ -1442,7 +1435,7 @@ mod promote_tests {
         let bin_dir = dir.path().join("bin");
         let candidate = dir.path().join("lf");
         fs::write(&candidate, b"retained-bytes").unwrap();
-        let staged = stage_binary(&candidate, &bin_dir).unwrap();
+        let staged = fs::canonicalize(stage_binary(&candidate, &bin_dir).unwrap()).unwrap();
 
         // A correctly content-addressed member of the store resolves. Compare
         // against the canonicalized staged path so a symlinked TMPDIR

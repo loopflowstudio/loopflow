@@ -8,7 +8,7 @@
 
 mod support;
 
-use loopflow::child_session::{ChildCommandKind, ChildCommandState, ChildRef};
+use loopflow::child_session::ChildRef;
 use loopflow::ops::task::{task_stack, task_status};
 use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionStatus};
 use loopflow::webhook::{ingest_event, WebhookEvent, WebhookOutcome};
@@ -126,27 +126,25 @@ fn webhook_routes_control_to_the_live_successor() {
         .expect("comment");
     assert_eq!(outcome, WebhookOutcome::Comment { delivered: true });
 
-    // The follow-up landed on the live successor, not the completed predecessor.
-    let successor_commands = rt
+    // The webhook resolves the live successor Session, while control addresses
+    // the one stable Work and its current Epoch.
+    let successor_work = rt
+        .block_on(task.store.work_for_child(&ChildRef::Task(live.id.clone())))
+        .expect("successor work");
+    let successor_seed = rt
+        .block_on(task.store.boundary_seed(&successor_work))
+        .expect("successor seed");
+    assert_eq!(successor_seed.steers.len(), 1);
+    assert!(successor_seed.steers[0]
+        .text
+        .contains("steer the recovered attempt"));
+    let predecessor_work = rt
         .block_on(
             task.store
-                .list_child_commands(&ChildRef::Task(live.id.clone())),
+                .work_for_child(&ChildRef::Task(task.session.id.clone())),
         )
-        .expect("successor commands");
-    assert!(successor_commands.iter().any(|command| {
-        matches!(command.kind, ChildCommandKind::FollowUp { .. })
-            && command.state == ChildCommandState::Persisted
-    }));
-    let predecessor_commands = rt
-        .block_on(
-            task.store
-                .list_child_commands(&ChildRef::Task(task.session.id.clone())),
-        )
-        .expect("predecessor commands");
-    assert!(
-        predecessor_commands.is_empty(),
-        "the terminal predecessor must not receive control"
-    );
+        .expect("predecessor work");
+    assert_eq!(predecessor_work, successor_work);
 }
 
 /// Status/roadmap: `lf task status` resolves the live successor, not the

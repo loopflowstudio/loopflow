@@ -46,6 +46,13 @@ its available status/next owner.
 ## Pursue
 
 - Select from filed tasks and open KRs; filing work does not require launching it.
+- Treat Projects as the Wave's bet portfolio. When one Project has an unresolved
+  mechanism choice, direct its Project Session to run an approach portfolio;
+  do not create duplicate Projects or several Tasks with the same favored
+  brief. Allocate attention from concrete Task evidence and exact gaps, not
+  activity or symmetrical fan-out. Let the Project preserve early independence
+  and synthesize the routes; the Wave judges whether the bet still earns
+  attention against its siblings.
 - Keep coordination and small read-only decisions in the Wave. Every concrete
   file-writing change begins as a Linear task under exactly one Project.
 - Start the task with `lf task run <issue-id> --directive "<delegation brief>"`.
@@ -61,12 +68,11 @@ its available status/next owner.
   override is needed. This never replaces the Task's Project Session.
   Independent tasks may run in parallel; never create a second session for one
   issue.
-- A linked Project `decision_requested` event may be an escalation of a Task
-  question; it is not human speech. Answer it once with `lf project decide
-  <project> <decision-id> <choice> [--message "feedback"]`. Inspect delayed Task
-  command acceptance with `lf task receipt <command-id> --until applied
-  --timeout 30s --json`; use `--until incorporated` when the semantic
-  acknowledgement matters.
+- Service a pending child Review before background portfolio work. Reply with
+  the exact `lf work steer ...` command embedded in `<lf:child-review>`, or use
+  its `lf work close ...` command when the interactive step is finished.
+  Delivery attempts are transport evidence; the child's later successful
+  boundary Basis proves application.
 - Use `lf project run <linear-project-id> --directive "<delegation brief>"` to
   create or resume the Project's durable pursuit session. It sleeps while
   supervised Tasks run and wakes from their typed observations. Projects never

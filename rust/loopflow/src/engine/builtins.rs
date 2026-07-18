@@ -320,6 +320,34 @@ mod tests {
     }
 
     #[test]
+    fn builtin_skills_do_not_name_retired_child_controls() {
+        let retired = [
+            "lf handoff",
+            "lf reviews",
+            "lf task follow-up",
+            "lf task receipt",
+            "lf task acknowledge",
+            "lf task decide",
+            "lf task request-decision",
+            "lf task review",
+            "lf project follow-up",
+            "lf project receipt",
+            "lf project acknowledge",
+            "lf project decide",
+            "lf project request-decision",
+        ];
+
+        for (name, skill) in BUILTIN_STEPS.iter() {
+            for command in retired {
+                assert!(
+                    !skill.contains(command),
+                    "{name} still instructs agents to run retired `{command}`"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn task_design_and_multi_task_outputs_share_the_machine_contract() {
         let clarify = get_builtin_skill("task_clarify").expect("task clarify");
         for requirement in [

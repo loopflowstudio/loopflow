@@ -78,7 +78,7 @@ homepage:
             --project unified-sign-in
           lf task steer AUTH-12 \
             "prefer the middleware approach"
-          lf task receipt cmd_9f2 --until incorporated
+          lf task status AUTH-12 --json
           lf pr land -c
       - label: "A skill"
         filename: ".lf/skills/implement.md"

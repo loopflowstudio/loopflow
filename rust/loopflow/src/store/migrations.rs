@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
+use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
@@ -341,6 +342,60 @@ const MIGRATIONS: &[Migration] = &[
         name: "ci_incident_repaired_head",
         sql: include_str!("migrations/0.11.029_ci_incident_repaired_head.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 30,
+        },
+        name: "one_spend_grain",
+        sql: include_str!("migrations/0.11.030_one_spend_grain.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 31,
+        },
+        name: "durable_input_spine",
+        sql: include_str!("migrations/0.11.031_durable_input_spine.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 32,
+        },
+        name: "run_launch_attention",
+        sql: include_str!("migrations/0.11.032_run_launch_attention.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 33,
+        },
+        name: "launch_attention_only",
+        sql: include_str!("migrations/0.11.033_launch_attention_only.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 34,
+        },
+        name: "typed_ci_runs",
+        sql: include_str!("migrations/0.11.034_typed_ci_runs.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 35,
+        },
+        name: "drop_child_commands",
+        sql: include_str!("migrations/0.11.035_drop_child_commands.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -428,11 +483,15 @@ pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
 
 /// Stage a fresh connection one migration behind the binary's known head. The
 /// store-level shared-frontier regressions use it to build a database the running
-/// binary could advance but an ordinary open must leave alone; the resulting
-/// frontier is `MIGRATIONS[len - 2]` (today `0.11.027_accounts_first`).
+/// binary could advance but an ordinary open must leave alone.
 #[cfg(test)]
 pub(crate) fn apply_all_but_head(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_set(conn, &MIGRATIONS[..MIGRATIONS.len() - 1])
+}
+
+#[cfg(test)]
+pub(crate) fn prior_known_version() -> String {
+    MIGRATIONS[MIGRATIONS.len() - 2].version()
 }
 
 /// Whether the old reader — a binary whose head is the prior migration — still
@@ -711,6 +770,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     let applied = applied_versions(conn)?;
     for migration in pending_migrations(&applied, set)? {
         let parent_history = migration_prefix_fingerprint(&applied_versions(conn)?, set)?;
+        migration_preflight(conn, migration)?;
         conn.execute_batch(migration.sql)?;
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
@@ -718,6 +778,57 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
     validate_applied_checksums(conn, set)?;
     validate_schema(conn, set)
+}
+
+fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
+    if migration.name != "durable_input_spine" {
+        return Ok(());
+    }
+    let mut active = Vec::new();
+    for (kind, table) in [("Project", "project_sessions"), ("Task", "task_sessions")] {
+        let mut statement = conn.prepare(&format!(
+            "SELECT id FROM {table}
+             WHERE process_lease_state IN ('reserved', 'active', 'revoked')
+             ORDER BY id"
+        ))?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        active.extend(ids.into_iter().map(|id| format!("{kind} {id}")));
+    }
+    if !active.is_empty() {
+        return Err(StoreError::InvalidData(format!(
+            "durable input migration requires every writer to be quiescent and reaped; active: {}",
+            active.join(", ")
+        )));
+    }
+    let ambiguous_project: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM project_sessions
+             GROUP BY project_id HAVING COUNT(DISTINCT wave_id) > 1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(project) = ambiguous_project {
+        return Err(StoreError::InvalidData(format!(
+            "Project {project} appears under more than one Wave; repair parentage before durable input migration"
+        )));
+    }
+    let ambiguous_task: Option<String> = conn
+        .query_row(
+            "SELECT issue_id FROM task_sessions
+             GROUP BY issue_id HAVING COUNT(DISTINCT project_id) > 1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(task) = ambiguous_task {
+        return Err(StoreError::InvalidData(format!(
+            "Task {task} appears under more than one Project; repair parentage before durable input migration"
+        )));
+    }
+    Ok(())
 }
 
 fn migration_checksum(migration: &Migration) -> String {
@@ -1453,6 +1564,41 @@ mod tests {
             .unwrap()
             .iter()
             .any(|object| object.object_type == "table" && object.name == "task_sessions"));
+        for table in ["project_sessions", "task_sessions"] {
+            let names = columns(&conn, table);
+            assert!(!names.iter().any(|name| name == "current_directive_version"));
+            assert!(!names
+                .iter()
+                .any(|name| name == "incorporated_directive_version"));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_schema
+                 WHERE type='table' AND name IN (
+                    'child_directives', 'launches', 'turns',
+                    'interaction_reviews', 'interactive_handoffs'
+                 )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0,
+            "the durable spine has no compatibility or shadow lifecycle tables"
+        );
+        let turn_columns = columns(&conn, "agent_turns");
+        assert!(turn_columns.iter().any(|name| name == "epoch_id"));
+        assert!(turn_columns.iter().any(|name| name == "basis_rev"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('sends')
+                 WHERE \"table\"='agent_turns' AND \"from\"='turn_id' AND \"to\"='id'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+            "Send evidence belongs to the sole durable Turn row"
+        );
 
         apply_sqlite(&conn).unwrap();
         assert_eq!(
@@ -1487,48 +1633,53 @@ mod tests {
                 "0.11.025_usage_deltas".to_string(),
                 "0.11.026_lineage_boundary".to_string(),
                 "0.11.027_accounts_first".to_string(),
-                "0.11.029_ci_incident_repaired_head".to_string()
+                "0.11.029_ci_incident_repaired_head".to_string(),
+                "0.11.030_one_spend_grain".to_string(),
+                "0.11.031_durable_input_spine".to_string(),
+                "0.11.032_run_launch_attention".to_string(),
+                "0.11.033_launch_attention_only".to_string(),
+                "0.11.034_typed_ci_runs".to_string(),
+                "0.11.035_drop_child_commands".to_string()
             ]
         );
+    }
+
+    /// Everything up to but excluding `name`. A test whose subject is one
+    /// migration names it, so appending the next migration cannot silently
+    /// re-point the test at different SQL.
+    fn prefix_before(name: &str) -> &'static [Migration] {
+        let index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == name)
+            .expect("named migration is registered");
+        &MIGRATIONS[..index]
     }
 
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
-        // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
-        // row records. Its survival is what proves the tail stayed withheld.
-        conn.execute_batch(
-            "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
-             VALUES ('trace_a', 'proc_orphan', 'proc_ghost', 0, 100, 'run', 'started')",
-        )
-        .unwrap();
+        let published = prefix_before("durable_input_spine");
+        apply_set(&conn, published).unwrap();
 
         validate_sqlite(&conn).unwrap();
 
         assert_eq!(
-            latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.025_usage_deltas")
+            latest_applied_version_sqlite(&conn).unwrap(),
+            published.last().map(Migration::version),
+            "a validation-only open advances nothing"
         );
         assert!(capture_status_accepts(&conn, "pruned"));
-        assert_eq!(
-            conn.query_row(
-                "SELECT parent_process_id FROM run_events WHERE process_id = 'proc_orphan'",
-                [],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .unwrap(),
-            Some("proc_ghost".to_string()),
-            "a validation-only open must not run the tail's backfill"
+        // Bait for the withheld tail: the durable input migration creates the
+        // stable Work tables. Their absence proves validation stayed read-only.
+        assert!(
+            conn.prepare("SELECT id FROM projects LIMIT 0").is_err(),
+            "a validation-only open must not run the tail's schema change"
         );
     }
 
-    /// The validation primitive underneath the shared-store gate: with the store
-    /// at the frontier the installed `lf` knows (`0.11.027`) and the candidate one
-    /// migration ahead (`0.11.029`), `validate_sqlite` recognizes the applied
-    /// prefix and pins `pending_shared_migration` to the exact head the ordinary
-    /// store open then refuses on — the frontier never advances, and the old
-    /// reader still recognizes the store.
+    /// The validation primitive underneath the shared-store gate recognizes a
+    /// store one migration behind, names the exact pending head, and never
+    /// advances the frontier the old reader still recognizes.
     #[test]
     fn validate_recognizes_a_shorter_frontier_and_names_the_pending_head() {
         let installed = &MIGRATIONS[..MIGRATIONS.len() - 1];
@@ -1539,7 +1690,13 @@ mod tests {
         // Bring the store to the frontier the installed binary shipped with.
         apply_set(&conn, installed).unwrap();
         let installed_frontier = latest_applied_version_sqlite(&conn).unwrap().unwrap();
-        assert_eq!(installed_frontier, "0.11.027_accounts_first");
+        assert_eq!(
+            installed_frontier,
+            installed
+                .last()
+                .expect("installed set has a head")
+                .version()
+        );
 
         // The candidate is ahead by one migration. `validate_sqlite` runs the
         // full (candidate) set the ordinary runtime trusts and must leave the
@@ -1579,7 +1736,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 3]).unwrap();
+        apply_set(&conn, prefix_before("lineage_boundary")).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -1626,7 +1783,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 6]).unwrap();
+        apply_set(&conn, prefix_before("capture_pruned_state")).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"
@@ -1694,6 +1851,8 @@ mod tests {
         assert_eq!(
             indexes,
             vec![
+                "idx_agent_launches_attention",
+                "idx_agent_launches_one_control_live",
                 "idx_agent_launches_process",
                 "idx_agent_launches_project",
                 "idx_agent_launches_run",
@@ -1854,7 +2013,7 @@ mod tests {
     fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+        apply_set(&conn, prefix_before("accounts_first")).unwrap();
         conn.execute_batch(
             "INSERT INTO provider_accounts (
                 provider, account_id, home, login_email, credential_state,
@@ -2047,13 +2206,12 @@ mod tests {
                  id, project_id, project_slug, project_name,
                  project_prompt_context, wave_id, pm_snapshot_synced_at,
                  status, status_reason, status_at, iteration,
-                 observation_cursor, agent, provider, created_at, updated_at,
-                 current_directive_version, incorporated_directive_version
+                 observation_cursor, agent, provider, created_at, updated_at
              ) VALUES (
                  'ps_new', 'project-1', 'developer-efficiency',
                  'Developer Efficiency', 'Definition', 'w1', 3,
                  'created', 'successor', 3, 0, 0,
-                 'codex', 'codex', 3, 3, 1, 0
+                 'codex', 'codex', 3, 3
              );",
         )
         .unwrap();
@@ -2063,13 +2221,12 @@ mod tests {
                      id, project_id, project_slug, project_name,
                      project_prompt_context, wave_id, pm_snapshot_synced_at,
                      status, status_reason, status_at, iteration,
-                     observation_cursor, agent, provider, created_at, updated_at,
-                     current_directive_version, incorporated_directive_version
+                     observation_cursor, agent, provider, created_at, updated_at
                  ) VALUES (
                      'ps_parallel', 'project-1', 'developer-efficiency',
                      'Developer Efficiency', 'Definition', 'w1', 3,
                      'created', 'parallel', 3, 0, 0,
-                     'codex', 'codex', 3, 3, 1, 0
+                     'codex', 'codex', 3, 3
                  );"
             )
             .is_err());
@@ -2200,6 +2357,26 @@ mod tests {
         assert!(project_lease.0.starts_with("cl_"));
         assert_eq!(project_lease.1, "legacy");
         assert_eq!(project_lease.2, None);
+        let project_launch: (String, String, String, String) = conn
+            .query_row(
+                "SELECT agent_launches.launch_state, agent_launches.containment_kind,
+                        agent_launches.containment_id, agent_launches.provider
+                 FROM agent_launches
+                 JOIN runs ON runs.id = agent_launches.product_run_id
+                 WHERE runs.source_kind = 'project' AND runs.source_id = 'ps_legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            project_launch,
+            (
+                "live".to_string(),
+                "tmux".to_string(),
+                "project-legacy".to_string(),
+                "codex".to_string(),
+            )
+        );
         let task_lease: (String, String, String) = conn
             .query_row(
                 "SELECT process_lease_token, process_lease_state, process_outcome_json

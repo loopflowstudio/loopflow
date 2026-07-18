@@ -12,18 +12,18 @@ a person:
 ```bash
 lf task run INF-123                                  # start a durable Task Session
 lf task steer INF-123 "take the smaller approach"    # redirect its active turn
-lf task receipt CMD_ID --until incorporated --json   # prove the steer landed
+lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
 ```
 
 ## The nouns
 
-Delegation follows one supervision path: **Wave → Project Session → Task
-Session**. A Wave coordinates and remembers; a Project pursues measurable KRs;
-only a Task Session owns a worktree, and every file-writing change happens
-there, advancing through serial PRs to `main`. Tasks are Linear issues —
-durable delegated work starts from an existing issue, so the roadmap is the
-queue.
+Delegation follows one supervision path: **Wave → Project → Task**. Each is
+stable Work with an Epoch and at most one active Run. A Wave coordinates and
+remembers; a Project pursues measurable KRs; only Task Work owns a worktree,
+and every file-writing change happens there, advancing through serial PRs to
+`main`. Tasks are Linear issues — durable delegated work starts from an
+existing issue, so the roadmap is the queue.
 
 ## Delegate
 
@@ -47,31 +47,36 @@ merge, then replays only child-authored commits onto `main`.
 
 ## Steer
 
-Direction to a running Session is a protocol, not a hope. Directives are
-versioned, and receipts prove incorporation:
+Direction is appended before Loopflow attempts delivery. The same Steer stays
+available to the next execution boundary whether a provider accepts a live
+send, rejects it, or races the current Turn:
 
 ```bash
-lf task follow-up INF-123 "also audit retry callers"   # queue for the next turn
-lf task steer INF-123 "support passkeys too"           # redirect the active turn
-lf task interrupt INF-123 --message "stop; smaller PR" # interrupt now
-lf task receipt CMD_ID --until incorporated --timeout 30s --json
-lf task acknowledge INF-123 --directive 2 --summary "smaller approach active"
+lf task steer INF-123 "support passkeys too"       # durable direction
+lf task interrupt INF-123                          # end the current boundary only
+lf task steer INF-123 "stop; make this a smaller PR"
 ```
 
-Decisions flow the same way in both directions:
+The Task and Project wrappers resolve familiar Linear ids. Parent Runs use the
+same stable Work control surface:
 
 ```bash
-lf task request-decision INF-123 --option approve --option revise --wait
-lf task decide INF-123 DECISION_ID approve
+lf work status task task_... --json
+lf work steer task task_... "show the failing fixture" --json
+lf work close task task_...                         # finish the current Review
 ```
 
-A Session survives its process. `lf task resume INF-123 --model codex` leases
-the next body generation to another provider without losing the directive,
-worktree, or PR chain; `lf task recover` starts a linked successor
-on the same worktree.
+A Steer receipt reports immutable delivery attempts, not incorporation. A
+later successful boundary's Basis is the proof that the direction was applied.
+`interrupt` carries no replacement text and does not end the Run.
 
-`lf project` carries the same verbs one level up: `follow-up`, `steer`,
-`interrupt`, `receipt`, `acknowledge`, `decide`, `wait`, `resume`, `attach`.
+Work survives its provider process. `lf task resume INF-123 --model codex`
+selects another provider without losing durable direction, the worktree, or
+the PR chain; `lf task recover` restarts abandoned Task pursuit on the same
+worktree.
+
+`lf project` carries the same control verbs one level up: `steer`, `interrupt`,
+`wait`, `resume`, and `attach`.
 
 ## Speak: the radio
 

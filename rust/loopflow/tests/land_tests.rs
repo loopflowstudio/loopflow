@@ -110,6 +110,7 @@ fn claude_script() -> &'static str {
 
 #[test]
 fn land_local_squash_merges_to_main() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -148,6 +149,7 @@ fn land_local_squash_merges_to_main() {
 
 #[test]
 fn land_preserves_main_on_failure() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("conflict.txt", "feature");
@@ -195,6 +197,7 @@ fn land_preserves_main_on_failure() {
 
 #[test]
 fn land_cleans_up_remote_branch() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");
@@ -225,6 +228,7 @@ fn land_cleans_up_remote_branch() {
 
 #[test]
 fn land_clears_scratch_and_preserves_gitkeep() {
+    let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
     repo.create_file("feature.txt", "feature");

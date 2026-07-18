@@ -140,22 +140,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([SkillRunEntry].self, from: stdout)
     }
 
-    /// Every durable interactive handoff still waiting on or attached to a human,
-    /// across the machine. `lf handoff list --active` reads the shared store
-    /// directly; the census attaches each row to the parent it declares, never
-    /// inferring parentage. This does not record attach evidence — Open does.
-    public func activeHandoffs() async throws -> [InteractiveHandoffListRow] {
-        let stdout = try await run(["handoff", "list", "--active", "--json"], nil)
-        return try Self.decode([InteractiveHandoffListRow].self, from: stdout)
+    /// Every active normalized Launch across the machine.
+    public func activeLaunches() async throws -> [LaunchSurfaceRecord] {
+        let stdout = try await run(["launch", "list", "--active", "--json"], nil)
+        return try Self.decode([LaunchSurfaceRecord].self, from: stdout)
     }
 
-    /// Record first-attach evidence for one handoff and return its structured
-    /// descriptor (argv + environment). Replay-safe: the contract preserves the
-    /// first attach, so repeated Opens return the same Session. Terminal bytes
-    /// stay behind `argv`.
-    public func attachHandoff(sessionId: String) async throws -> InteractiveHandoffAttach {
-        let stdout = try await run(["handoff", "attach", sessionId, "--json"], nil)
-        return try Self.decode(InteractiveHandoffAttach.self, from: stdout)
+    /// Read the generic attach descriptor without changing Launch liveness.
+    public func attachLaunch(launchId: String) async throws -> LaunchSurfaceRecord {
+        let stdout = try await run(["launch", "attach", launchId, "--json"], nil)
+        return try Self.decode(LaunchSurfaceRecord.self, from: stdout)
     }
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
@@ -184,12 +178,11 @@ public struct RegistryQuery: Sendable {
         )
     }
 
-    /// Per-boundary spend over a window: what each skill, and each terminal run,
-    /// actually spent. `lf usage --json` applies the cumulative-diff rule, so
-    /// these rows are additive and sum to the totals `lf usage` prints.
-    public func spend(days: Int = 30) async throws -> [TraceSpan] {
+    /// Provider-measured Turn spend over a window. Rows are additive and sum
+    /// exactly to the totals `lf usage` prints.
+    public func spend(days: Int = 30) async throws -> [TurnSpend] {
         let stdout = try await run(["usage", "--json", "--days", String(days)], nil)
-        return try Self.decode([TraceSpan].self, from: stdout)
+        return try Self.decode([TurnSpend].self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -544,56 +537,47 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-/// One process in `lf trace --json`. Mirrors Rust `SpanDto` exactly.
-public struct TraceSpan: Decodable, Sendable, Identifiable {
-    /// A process contributes several boundaries. Their event sequence is the
-    /// stable discriminator even when one skill completes twice in one second.
-    public var id: String { "\(processId)-\(seq)" }
+/// One provider-measured Turn from `lf usage --json`. Mirrors Rust
+/// `TurnSpendRow` exactly; every absent provider measurement remains `nil`.
+public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { turnId }
 
-    public let runId: String
-    public let processId: String
-    public let parentProcessId: String?
-    public let seq: Int
-    public let node: String
-    public let name: String?
-    public let repo: String?
+    public let turnId: String
+    public let launchId: String
+    public let traceId: String
+    public let execId: String
+    public let repo: String
     public let wave: String?
     public let flow: String?
     public let skill: String?
-    public let startedAt: Int
-    public let endedAt: Int?
-    public let status: String
+    public let provider: String
+    public let model: String?
+    public let at: Int
     public let inputTokens: Int?
     public let outputTokens: Int?
     public let cacheReadTokens: Int?
     public let costUsd: Double?
-    public let durationSecs: Double?
-    public let provider: String?
-    public let model: String?
 
     /// `provider:model` — the harness and the model it drove.
     public var agent: String {
-        switch (provider, model) {
-        case let (provider?, model?): return "\(provider):\(model)"
-        case let (provider?, nil): return provider
-        default: return "unattributed"
+        switch model {
+        case let model?: return "\(provider):\(model)"
+        case nil: return provider
         }
     }
 
     public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
 
     enum CodingKeys: String, CodingKey {
-        case seq, node, name, status, provider, model, repo, wave, flow, skill
-        case runId = "run_id"
-        case processId = "process_id"
-        case parentProcessId = "parent_process_id"
-        case startedAt = "started_at"
-        case endedAt = "ended_at"
+        case repo, wave, flow, skill, provider, model, at
+        case turnId = "turn_id"
+        case launchId = "launch_id"
+        case traceId = "trace_id"
+        case execId = "exec_id"
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case cacheReadTokens = "cache_read_tokens"
         case costUsd = "cost_usd"
-        case durationSecs = "duration_secs"
     }
 }
 

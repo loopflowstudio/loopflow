@@ -15,68 +15,18 @@ use time::OffsetDateTime;
 use crate::chat::types::{ConversationEvent, TurnUsage};
 use crate::engine::prompt::{account_prompt_tokens, count_tokens};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
-use crate::id::{ProcessId, RunId};
+use crate::id::{ExecId, TraceId};
 use crate::store::{StoreError, StoreResult};
+
+pub use crate::durable::{LaunchId, TurnId};
 
 pub const TRACE_SCHEMA_VERSION: u32 = 1;
 pub const TOKENIZER: &str = "cl100k_base";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct AgentLaunchId(String);
-
-impl AgentLaunchId {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for AgentLaunchId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl Default for AgentLaunchId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct AgentTurnId(String);
-
-impl AgentTurnId {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for AgentTurnId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl Default for AgentTurnId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TraceCaptureContext {
-    pub run_id: RunId,
-    pub process_id: ProcessId,
+    pub run_id: TraceId,
+    pub process_id: ExecId,
     pub repo: PathBuf,
     pub worktree: PathBuf,
     pub wave: Option<String>,
@@ -684,7 +634,7 @@ pub struct RecordedConversationEvent {
     pub seq: u64,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
-    pub turn_id: Option<AgentTurnId>,
+    pub turn_id: Option<TurnId>,
     pub payload: RecordedConversationPayload,
 }
 
@@ -757,6 +707,17 @@ pub struct AgentLaunchRow {
     pub provider_session_path: Option<String>,
     pub conversation_event_count: i64,
     pub conversation_bytes: i64,
+    pub control: Option<ControlLaunch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ControlLaunch {
+    pub run_id: crate::durable::RunId,
+    pub home_id: crate::durable::HomeId,
+    pub account_id: Option<String>,
+    pub containment: crate::durable::Containment,
+    pub resume_token: Option<String>,
+    pub opaque_basis: Option<crate::durable::Basis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -790,6 +751,8 @@ pub struct AgentTurnRow {
     pub context_persist_ms: i64,
     pub first_event_seq: Option<i64>,
     pub last_event_seq: Option<i64>,
+    pub root_output: Option<String>,
+    pub basis: Option<crate::durable::Basis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -818,9 +781,23 @@ pub struct CaptureStart {
     pub gather_ms: u64,
     pub render_ms: u64,
     pub raw_provider: bool,
+    pub basis: Option<crate::durable::Basis>,
+    pub control: Option<ControlLaunch>,
 }
 
 impl CaptureHandle {
+    pub fn launch_id(&self) -> crate::durable::LaunchId {
+        let id = self
+            .0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .launch
+            .id
+            .clone();
+        crate::durable::LaunchId::parse(&id)
+            .expect("TraceCapture stores a generated durable Launch id")
+    }
+
     pub fn artifact_dir(&self) -> PathBuf {
         let relative = self
             .0
@@ -854,17 +831,49 @@ impl CaptureHandle {
     }
 
     pub fn begin_turn(&self, input_op: &str, text: &str) -> StoreResult<()> {
+        self.begin_turn_at(input_op, text, None)
+    }
+
+    pub fn begin_turn_at(
+        &self,
+        input_op: &str,
+        text: &str,
+        basis: Option<crate::durable::Basis>,
+    ) -> StoreResult<()> {
         let mut capture = self.0.lock().expect("trace capture mutex poisoned");
         if let Some(message) = &capture.failed {
             return Err(StoreError::InvalidData(format!(
                 "trace capture is already partial: {message}"
             )));
         }
-        let result = capture.begin_turn(input_op, PreparedTurnContext::provider_total_only(text));
+        let result = capture.begin_turn(
+            input_op,
+            PreparedTurnContext::provider_total_only(text),
+            basis,
+        );
         if let Err(error) = &result {
             capture.failed = Some(error.to_string());
         }
         result
+    }
+
+    pub fn finish_turn(&self, status: &str) -> StoreResult<()> {
+        if !matches!(status, "completed" | "failed" | "interrupted") {
+            return Err(StoreError::InvalidData(format!(
+                "invalid agent Turn outcome: {status}"
+            )));
+        }
+        let mut capture = self.0.lock().expect("trace capture mutex poisoned");
+        capture.finish_current_turn(status, OffsetDateTime::now_utc().unix_timestamp())
+    }
+
+    pub fn current_turn_id(&self) -> String {
+        self.0
+            .lock()
+            .expect("trace capture mutex poisoned")
+            .turn
+            .id
+            .clone()
     }
 
     pub fn set_provider_session_id(&self, session_id: Option<String>) {
@@ -918,8 +927,18 @@ impl TraceCapture {
     ) -> StoreResult<Self> {
         validate_input_op(&start.input_op)?;
         let persist_start = Instant::now();
-        let launch_id = AgentLaunchId::new();
-        let turn_id = AgentTurnId::new();
+        let ledger = crate::journal::open_ledger()?;
+        let registered_launch = start
+            .control
+            .as_ref()
+            .map(|control| ledger.control_launch_for_run(&control.run_id))
+            .transpose()?
+            .flatten();
+        let launch_id = registered_launch
+            .as_ref()
+            .map(|launch| launch.id.clone())
+            .unwrap_or_default();
+        let turn_id = TurnId::new();
         let root = trace_root();
         create_private_dir(&root)?;
         let process_dir = root
@@ -984,7 +1003,10 @@ impl TraceCapture {
             .as_ref()
             .map(|path| artifact_dir.join(path.strip_prefix(&staging_dir).expect("staged path")));
 
-        let started_at = OffsetDateTime::now_utc().unix_timestamp();
+        let started_at = registered_launch
+            .as_ref()
+            .map(|launch| launch.started_at.unix_timestamp())
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp());
         let system_tokens = prepared.system.as_ref().map_or(0, |channel| channel.tokens) as i64;
         let task_tokens = prepared.task.tokens as i64;
         let persist_ms = persist_start.elapsed().as_millis() as i64;
@@ -1017,6 +1039,7 @@ impl TraceCapture {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: initial_bytes as i64,
+            control: start.control,
         };
         let turn = AgentTurnRow {
             id: turn_id.to_string(),
@@ -1051,6 +1074,8 @@ impl TraceCapture {
             context_persist_ms: persist_ms,
             first_event_seq: Some(0),
             last_event_seq: Some(0),
+            root_output: None,
+            basis: start.basis,
         };
         let assets = prepared
             .assets()
@@ -1068,9 +1093,7 @@ impl TraceCapture {
                 decision,
             })
             .collect::<Vec<_>>();
-        if let Err(error) =
-            crate::journal::open_ledger()?.insert_trace_capture(&launch, &turn, &assets, &decisions)
-        {
+        if let Err(error) = ledger.insert_trace_capture(&launch, &turn, &assets, &decisions) {
             let _ = fs::remove_dir_all(&artifact_dir);
             return Err(error);
         }
@@ -1093,7 +1116,10 @@ impl TraceCapture {
             schema_version: TRACE_SCHEMA_VERSION,
             seq: self.event_seq,
             ts: OffsetDateTime::now_utc(),
-            turn_id: Some(AgentTurnId(self.turn.id.clone())),
+            turn_id: Some(
+                TurnId::parse(&self.turn.id)
+                    .expect("TraceCapture stores a generated durable Turn id"),
+            ),
             payload,
         };
         let bytes = append_json_line(&self.conversation_path, &event)?;
@@ -1104,14 +1130,19 @@ impl TraceCapture {
         Ok(())
     }
 
-    fn begin_turn(&mut self, input_op: &str, prepared: PreparedTurnContext) -> StoreResult<()> {
+    fn begin_turn(
+        &mut self,
+        input_op: &str,
+        prepared: PreparedTurnContext,
+        basis: Option<crate::durable::Basis>,
+    ) -> StoreResult<()> {
         validate_input_op(input_op)?;
         let now = OffsetDateTime::now_utc().unix_timestamp();
         self.finish_current_turn("partial", now)?;
 
         let persist_start = Instant::now();
         let ordinal = self.turn.ordinal + 1;
-        let turn_id = AgentTurnId::new();
+        let turn_id = TurnId::new();
         let provider_turn_id = self.turn.provider_turn_id.clone();
         let artifact_dir = resolve_artifact(&self.launch.artifact_dir)?;
         let turns_dir = artifact_dir.join("turns");
@@ -1156,6 +1187,8 @@ impl TraceCapture {
             context_persist_ms: persist_start.elapsed().as_millis() as i64,
             first_event_seq: Some(self.event_seq as i64),
             last_event_seq: None,
+            root_output: None,
+            basis,
         };
         let assets = prepared
             .assets()
@@ -1243,10 +1276,13 @@ impl TraceCapture {
 
     fn record_stream_event(&mut self, event: &StreamEvent) -> StoreResult<()> {
         let payload = match event {
-            StreamEvent::Text(text) => RecordedConversationPayload::LegacyText {
-                stream: "assistant".to_string(),
-                text: text.clone(),
-            },
+            StreamEvent::Text(text) => {
+                self.record_root_output(text)?;
+                RecordedConversationPayload::LegacyText {
+                    stream: "assistant".to_string(),
+                    text: text.clone(),
+                }
+            }
             StreamEvent::ToolUse { name, summary } => RecordedConversationPayload::LegacyTool {
                 name: name.clone(),
                 summary: summary.clone(),
@@ -1297,9 +1333,20 @@ impl TraceCapture {
                 self.usage_observed = true;
                 self.usage = usage.clone();
             }
+            ConversationEvent::TextDelta { content, .. } => {
+                self.record_root_output(content)?;
+            }
             _ => {}
         }
         self.append_payload(RecordedConversationPayload::Conversation { event })
+    }
+
+    fn record_root_output(&mut self, text: &str) -> StoreResult<()> {
+        self.turn
+            .root_output
+            .get_or_insert_with(String::new)
+            .push_str(text);
+        crate::journal::open_ledger()?.finish_agent_turn_capture(&self.turn)
     }
 
     fn finish(&mut self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
@@ -1548,7 +1595,7 @@ mod tests {
         ContextAssetKind, ContextAssetSpec, ContextChannel, ContextScope, PreparedTurnContext,
         TraceCaptureContext,
     };
-    use crate::id::{ProcessId, RunId};
+    use crate::id::{ExecId, TraceId};
 
     #[test]
     fn prompt_manifest_covers_exact_bytes_and_tokens() {
@@ -1795,10 +1842,10 @@ mod tests {
     #[test]
     fn capture_persists_private_artifacts_and_queryable_rows() {
         let guard = crate::journal::TestLedgerGuard::new();
-        let run_id = RunId::new();
+        let run_id = TraceId::new();
         let context = TraceCaptureContext {
             run_id: run_id.clone(),
-            process_id: ProcessId::new(),
+            process_id: ExecId::new(),
             repo: guard.home().to_path_buf(),
             worktree: guard.home().to_path_buf(),
             wave: Some("intelligence".to_string()),
@@ -1818,9 +1865,15 @@ mod tests {
                 gather_ms: 1,
                 render_ms: 2,
                 raw_provider: true,
+                basis: None,
+                control: None,
             },
         )
         .unwrap();
+        capture.record_conversation(crate::chat::types::ConversationEvent::TextDelta {
+            turn_id: "provider-turn-1".to_string(),
+            content: "partial child answer".to_string(),
+        });
         capture.begin_turn("message", "follow up").unwrap();
         capture.finish("completed", false).unwrap();
 
@@ -1838,6 +1891,10 @@ mod tests {
             .unwrap();
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].status, "partial");
+        assert_eq!(
+            turns[0].root_output.as_deref(),
+            Some("partial child answer")
+        );
         assert_eq!(turns[1].context_coverage, "provider_total_only");
         assert_eq!(turns[1].provider_input_tokens, None);
         #[cfg(unix)]
@@ -1850,6 +1907,125 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn capture_hydrates_the_registered_product_launch() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (run, launch) = runtime.block_on(async {
+            let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+                guard.home().join("loopflow.db"),
+            ))
+            .await
+            .unwrap();
+            let wave = crate::wave::Wave::new(
+                crate::id::WaveId::new(),
+                "capture-launch".to_string(),
+                guard.home().display().to_string(),
+            );
+            store.create_wave(&wave).await.unwrap();
+            let home = store.home("test-home").await.unwrap();
+            let work = crate::durable::WorkRef::Wave(wave.id().clone());
+            let (run, lease) = store
+                .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+                .await
+                .unwrap();
+            let receipt = store
+                .advance_run(
+                    &lease,
+                    crate::durable::RunAdvance::LaunchStarting {
+                        route: crate::durable::LaunchRoute {
+                            provider: "codex".to_string(),
+                            model: Some("gpt-5".to_string()),
+                            account_id: None,
+                        },
+                        containment: crate::durable::Containment::Tmux {
+                            name: "lf-capture-launch".to_string(),
+                        },
+                        cwd: guard.home().to_path_buf(),
+                        surface: "headless".to_string(),
+                        opaque: false,
+                        resume_token: None,
+                    },
+                )
+                .await
+                .unwrap();
+            let crate::durable::AdvanceReceipt::Launch(launch) = receipt else {
+                panic!("expected Launch receipt")
+            };
+            store
+                .advance_run(
+                    &lease,
+                    crate::durable::RunAdvance::LaunchLive {
+                        launch_id: launch.id.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            (run, launch)
+        });
+
+        let capture = CaptureHandle::begin(
+            TraceCaptureContext {
+                run_id: TraceId::new(),
+                process_id: ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("capture-launch".to_string()),
+                project: None,
+                task: None,
+                flow: Some("wave".to_string()),
+                skill: Some("pursue".to_string()),
+            },
+            PreparedTurnContext::from_prompts("system", "task"),
+            super::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+                basis: None,
+                control: Some(super::ControlLaunch {
+                    run_id: run.id.clone(),
+                    home_id: run.home_id.clone(),
+                    account_id: None,
+                    containment: launch.containment.clone(),
+                    resume_token: None,
+                    opaque_basis: None,
+                }),
+            },
+        )
+        .unwrap();
+        assert_eq!(capture.launch_id(), launch.id);
+        capture.finish("completed", false).unwrap();
+
+        let launches = crate::journal::open_ledger()
+            .unwrap()
+            .agent_launches_since(0)
+            .unwrap()
+            .into_iter()
+            .filter(|row| {
+                row.control
+                    .as_ref()
+                    .is_some_and(|control| control.run_id == run.id)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].id, launch.id.as_str());
+        assert_eq!(launches[0].capture_status, "complete");
+        let surface = crate::journal::open_ledger()
+            .unwrap()
+            .launch_surface(&launch.id)
+            .unwrap()
+            .expect("captured Launch remains historical evidence");
+        assert_eq!(surface.launch.state, crate::durable::LaunchState::Ended);
+        assert_eq!(
+            surface.handback,
+            Some(crate::durable::BoundaryState::Succeeded)
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, BusMessage, CredentialState, PmSnapshotRow, ProviderAccount,
     ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
-    StoreResult,
+    StoreResult, TurnSpendRow,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -23,8 +23,7 @@ use crate::wave::Wave;
 
 mod child_sessions;
 mod ci_incidents;
-mod interaction_reviews;
-mod interactive_handoffs;
+mod durable;
 mod provider_deliveries;
 
 #[derive(Debug, Clone)]
@@ -301,6 +300,17 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
+fn to_sqlite_conversion_error(error: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.to_string(),
+        )),
+    )
+}
+
 impl SqliteStore {
     /// Open the store for ordinary use. This never advances the shared release
     /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
@@ -485,13 +495,14 @@ impl SqliteStore {
     }
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
@@ -507,6 +518,8 @@ impl SqliteStore {
                 wave.parent_wave_id(),
             ],
         )?;
+        durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -514,9 +527,7 @@ impl SqliteStore {
 fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
         "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree,
-                wave, node, event, command, flow, skill, step_index, error,
-                input_tokens, output_tokens, cache_read_tokens, cost_usd,
-                duration_secs, provider, model
+                wave, node, event, command, flow, skill, step_index, error
          FROM run_events LIMIT 0",
     )?;
     Ok(())
@@ -1240,8 +1251,11 @@ impl SqliteStore {
     }
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM epochs WHERE wave_id = ?1", params![wave_id])?;
+        tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1382,9 +1396,8 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO run_events (
                 run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                flow, skill, step_index, error, input_tokens, output_tokens,
-                cache_read_tokens, cost_usd, duration_secs, provider, model
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                flow, skill, step_index, error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 row.run_id,
                 row.process_id,
@@ -1401,23 +1414,60 @@ impl SqliteStore {
                 row.skill,
                 row.step_index,
                 row.error,
-                row.input_tokens,
-                row.output_tokens,
-                row.cache_read_tokens,
-                row.cost_usd,
-                row.duration_secs,
-                row.provider,
-                row.model,
             ],
         )?;
         Ok(())
     }
 
+    /// Every provider-measured Turn's spend since `since_unix`, attributed by
+    /// the launch that ran it.
+    ///
+    /// Turns with no provider report at all are dropped: they carry no spend to
+    /// sum, and keeping them would let a reader mistake silence for zero. Any
+    /// one measurement is enough to keep the turn — a report of cache reads
+    /// alone is still something the provider measured.
+    pub fn turn_spend_since(&self, since_unix: i64) -> StoreResult<Vec<TurnSpendRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT t.id, l.id, l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill,
+                    l.provider, l.model, COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
+                    t.provider_output_tokens, t.cache_read_tokens, t.cost_usd
+             FROM agent_turns t
+             JOIN agent_launches l ON l.id = t.launch_id
+             WHERE COALESCE(t.ended_at, t.started_at) >= ?1
+               AND (t.provider_input_tokens IS NOT NULL
+                    OR t.provider_output_tokens IS NOT NULL
+                    OR t.cache_read_tokens IS NOT NULL
+                    OR t.cost_usd IS NOT NULL)
+             ORDER BY COALESCE(t.ended_at, t.started_at), l.process_id, t.ordinal",
+        )?;
+        let rows = stmt.query_map(params![since_unix], |row| {
+            Ok(TurnSpendRow {
+                turn_id: row.get(0)?,
+                launch_id: row.get(1)?,
+                trace_id: row.get(2)?,
+                exec_id: row.get(3)?,
+                repo: row.get(4)?,
+                wave: row.get(5)?,
+                flow: row.get(6)?,
+                skill: row.get(7)?,
+                provider: row.get(8)?,
+                model: row.get(9)?,
+                at: row.get(10)?,
+                input_tokens: row.get(11)?,
+                output_tokens: row.get(12)?,
+                cache_read_tokens: row.get(13)?,
+                cost_usd: row.get(14)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::from)
+    }
+
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
         )
@@ -1437,8 +1487,7 @@ impl SqliteStore {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1450,8 +1499,7 @@ impl SqliteStore {
         let prefix = format!("{}%", exec_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE process_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1481,13 +1529,6 @@ impl SqliteStore {
                 skill: row.get(12)?,
                 step_index: row.get(13)?,
                 error: row.get(14)?,
-                input_tokens: row.get(15)?,
-                output_tokens: row.get(16)?,
-                cache_read_tokens: row.get(17)?,
-                cost_usd: row.get(18)?,
-                duration_secs: row.get(19)?,
-                provider: row.get(20)?,
-                model: row.get(21)?,
             })
         })?;
         let mut events = Vec::new();
@@ -1505,44 +1546,155 @@ impl SqliteStore {
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        tx.execute(
-            "INSERT INTO agent_launches (
-                id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                skill, project, task, provider, model, surface, capture_status,
-                incomplete_reason, outcome, artifact_dir, conversation_path,
-                provider_events_path, provider_session_id, provider_session_path,
-                conversation_event_count, conversation_bytes
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
-            params![
-                launch.id,
-                launch.run_id,
-                launch.process_id,
-                launch.started_at,
-                launch.ended_at,
-                launch.repo,
-                launch.worktree,
-                launch.wave,
-                launch.flow,
-                launch.skill,
-                launch.project,
-                launch.task,
-                launch.provider,
-                launch.model,
-                launch.surface,
-                launch.capture_status,
-                launch.incomplete_reason,
-                launch.outcome,
-                launch.artifact_dir,
-                launch.conversation_path,
-                launch.provider_events_path,
-                launch.provider_session_id,
-                launch.provider_session_path,
-                launch.conversation_event_count,
-                launch.conversation_bytes,
-            ],
-        )?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (
+            product_run_id,
+            home_id,
+            account_id,
+            containment_kind,
+            containment_id,
+            resume_token,
+            opaque_epoch_id,
+            opaque_basis_rev,
+        ) = launch
+            .control
+            .as_ref()
+            .map(|control| {
+                let (kind, id) = control.containment.parts();
+                (
+                    Some(control.run_id.as_str()),
+                    Some(control.home_id.as_str()),
+                    control.account_id.as_deref(),
+                    Some(kind),
+                    Some(id),
+                    control.resume_token.as_deref(),
+                    control
+                        .opaque_basis
+                        .as_ref()
+                        .map(|basis| basis.epoch_id.as_str()),
+                    control
+                        .opaque_basis
+                        .as_ref()
+                        .map(|basis| basis.revision as i64),
+                )
+            })
+            .unwrap_or((None, None, None, None, None, None, None, None));
+        let registered = product_run_id.is_some()
+            && tx.query_row(
+                "SELECT EXISTS(
+                        SELECT 1 FROM agent_launches
+                        WHERE id=?1 AND product_run_id=?2
+                     )",
+                params![launch.id, product_run_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+        if registered {
+            tx.execute(
+                "UPDATE agent_launches SET
+                    run_id=?2, process_id=?3, repo=?4, worktree=?5, wave=?6,
+                    flow=?7, skill=?8, project=?9, task=?10, provider=?11,
+                    model=?12, surface=?13, capture_status=?14,
+                    incomplete_reason=?15, outcome=?16, artifact_dir=?17,
+                    conversation_path=?18, provider_events_path=?19,
+                    provider_session_id=?20, provider_session_path=?21,
+                    conversation_event_count=?22, conversation_bytes=?23
+                 WHERE id=?1 AND product_run_id=?24",
+                params![
+                    launch.id,
+                    launch.run_id,
+                    launch.process_id,
+                    launch.repo,
+                    launch.worktree,
+                    launch.wave,
+                    launch.flow,
+                    launch.skill,
+                    launch.project,
+                    launch.task,
+                    launch.provider,
+                    launch.model,
+                    launch.surface,
+                    launch.capture_status,
+                    launch.incomplete_reason,
+                    launch.outcome,
+                    launch.artifact_dir,
+                    launch.conversation_path,
+                    launch.provider_events_path,
+                    launch.provider_session_id,
+                    launch.provider_session_path,
+                    launch.conversation_event_count,
+                    launch.conversation_bytes,
+                    product_run_id,
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO agent_launches (
+                    id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                    ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
+                params![
+                    launch.id,
+                    launch.run_id,
+                    launch.process_id,
+                    launch.started_at,
+                    launch.ended_at,
+                    launch.repo,
+                    launch.worktree,
+                    launch.wave,
+                    launch.flow,
+                    launch.skill,
+                    launch.project,
+                    launch.task,
+                    launch.provider,
+                    launch.model,
+                    launch.surface,
+                    launch.capture_status,
+                    launch.incomplete_reason,
+                    launch.outcome,
+                    launch.artifact_dir,
+                    launch.conversation_path,
+                    launch.provider_events_path,
+                    launch.provider_session_id,
+                    launch.provider_session_path,
+                    launch.conversation_event_count,
+                    launch.conversation_bytes,
+                    product_run_id,
+                    home_id,
+                    account_id,
+                    product_run_id.map(|_| "live"),
+                    containment_kind,
+                    containment_id,
+                    resume_token,
+                    opaque_epoch_id,
+                    opaque_basis_rev,
+                ],
+            )?;
+        }
+        if let Some(run_id) = product_run_id.filter(|_| !registered) {
+            if tx.execute(
+                "UPDATE runs SET state='active' WHERE id=?1 AND state='reserved'",
+                [run_id],
+            )? == 0
+            {
+                let active: bool = tx.query_row(
+                    "SELECT state='active' FROM runs WHERE id=?1",
+                    [run_id],
+                    |row| row.get(0),
+                )?;
+                if !active {
+                    return Err(StoreError::InvalidAuthority(format!(
+                        "Run {run_id} cannot own a Launch"
+                    )));
+                }
+            }
+        }
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
@@ -1556,7 +1708,7 @@ impl SqliteStore {
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
@@ -1564,8 +1716,23 @@ impl SqliteStore {
     }
 
     pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        update_agent_turn(&conn, turn)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let was_running = tx
+            .query_row(
+                "SELECT status='running' FROM agent_turns WHERE id=?1",
+                [&turn.id],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        update_agent_turn(&tx, turn)?;
+        if was_running && turn.status != "running" {
+            let turn_id = crate::durable::TurnId::parse(&turn.id)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            durable::rearm_review_attention(&tx, &turn_id)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1573,7 +1740,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE agent_launches
-             SET provider_session_id = ?2, provider_session_path = ?3
+             SET provider_session_id = ?2, provider_session_path = ?3,
+                 resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?2 END
              WHERE id = ?1",
             params![
                 launch.id,
@@ -1595,7 +1763,17 @@ impl SqliteStore {
             "UPDATE agent_launches SET
                 ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
                 conversation_event_count = ?6, conversation_bytes = ?7,
-                provider_session_id = ?8, provider_session_path = ?9
+                provider_session_id = ?8, provider_session_path = ?9,
+                launch_state=CASE WHEN product_run_id IS NULL THEN launch_state ELSE 'ended' END,
+                handback_state=CASE
+                    WHEN product_run_id IS NULL THEN handback_state
+                    WHEN ?5='completed' THEN 'succeeded'
+                    WHEN ?5='interrupted' THEN 'interrupted'
+                    ELSE 'failed'
+                END,
+                attention_kind=NULL, attention_work_kind=NULL,
+                attention_work_id=NULL, attention_at=NULL,
+                resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?8 END
              WHERE id = ?1",
             params![
                 launch.id,
@@ -1642,15 +1820,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn trace_capture_required_after(&self) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT required_after FROM trace_capture_meta WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?)
-    }
-
     pub fn agent_launches_matching(&self, run_id: &str) -> StoreResult<Vec<AgentLaunchRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         // Launch timestamps use ledger-second precision. rowid preserves the
@@ -1660,7 +1829,9 @@ impl SqliteStore {
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
              FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
@@ -1672,7 +1843,9 @@ impl SqliteStore {
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
              FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
@@ -1712,6 +1885,48 @@ impl SqliteStore {
                 provider_session_path: row.get(22)?,
                 conversation_event_count: row.get(23)?,
                 conversation_bytes: row.get(24)?,
+                control: match (
+                    row.get::<_, Option<String>>(25)?,
+                    row.get::<_, Option<String>>(26)?,
+                    row.get::<_, Option<String>>(29)?,
+                    row.get::<_, Option<String>>(30)?,
+                    row.get::<_, Option<String>>(31)?,
+                ) {
+                    (Some(run_id), Some(home_id), Some(kind), Some(id), resume_token) => {
+                        let opaque_epoch_id = row.get::<_, Option<String>>(32)?;
+                        let opaque_basis_rev = row.get::<_, Option<i64>>(33)?;
+                        let opaque_basis = match (opaque_epoch_id, opaque_basis_rev) {
+                            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
+                                epoch_id: crate::durable::EpochId::parse(&epoch_id)
+                                    .map_err(to_sqlite_conversion_error)?,
+                                revision: revision as u64,
+                            }),
+                            (None, None) => None,
+                            _ => {
+                                return Err(to_sqlite_conversion_error(
+                                    "stored opaque Launch Basis is incomplete",
+                                ))
+                            }
+                        };
+                        Some(crate::trace::ControlLaunch {
+                            run_id: crate::durable::RunId::parse(&run_id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            home_id: crate::durable::HomeId::parse(&home_id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            account_id: row.get(27)?,
+                            containment: crate::durable::Containment::parse(&kind, id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            resume_token,
+                            opaque_basis,
+                        })
+                    }
+                    (None, None, None, None, None) => None,
+                    _ => {
+                        return Err(to_sqlite_conversion_error(
+                            "stored control Launch metadata is incomplete",
+                        ))
+                    }
+                },
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -1736,7 +1951,8 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq
+                    context_persist_ms, first_event_seq, last_event_seq, root_output,
+                    epoch_id, basis_rev
              FROM agent_turns WHERE launch_id IN ({placeholders})
              ORDER BY started_at, rowid, ordinal"
             );
@@ -1758,7 +1974,8 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq
+                    context_persist_ms, first_event_seq, last_event_seq, root_output,
+                    epoch_id, basis_rev
              FROM agent_turns WHERE id=?1",
         )?;
         let row = stmt.query_row(params![id], map_agent_turn).optional()?;
@@ -1926,10 +2143,10 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             provider_total_input_tokens, peak_input_tokens, context_window_tokens,
             provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
             cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
-            first_event_seq, last_event_seq
+            first_event_seq, last_event_seq, root_output, epoch_id, basis_rev
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
             ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29)",
+            ?28, ?29, ?30, ?31, ?32)",
         params![
             turn.id,
             turn.launch_id,
@@ -1960,8 +2177,14 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.context_persist_ms,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.root_output,
+            turn.basis.as_ref().map(|basis| basis.epoch_id.as_str()),
+            turn.basis.as_ref().map(|basis| basis.revision as i64),
         ],
     )?;
+    if let Some(basis) = &turn.basis {
+        durable::insert_seed_sends_for_turn(tx, &turn.id, basis)?;
+    }
     Ok(())
 }
 
@@ -2028,7 +2251,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             peak_input_tokens = ?7, context_window_tokens = ?8,
             provider_output_tokens = ?9, reasoning_tokens = ?10,
             cache_read_tokens = ?11, cache_write_tokens = ?12, cost_usd = ?13,
-            first_event_seq = ?14, last_event_seq = ?15
+            first_event_seq = ?14, last_event_seq = ?15, root_output = ?16
          WHERE id = ?1",
         params![
             turn.id,
@@ -2046,6 +2269,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             turn.cost_usd,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.root_output,
         ],
     )?;
     Ok(())
@@ -2082,6 +2306,30 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         context_persist_ms: row.get(26)?,
         first_event_seq: row.get(27)?,
         last_event_seq: row.get(28)?,
+        root_output: row.get(29)?,
+        basis: match (
+            row.get::<_, Option<String>>(30)?,
+            row.get::<_, Option<i64>>(31)?,
+        ) {
+            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
+                epoch_id: crate::durable::EpochId::parse(&epoch_id).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        30,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?,
+                revision: revision as u64,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(rusqlite::Error::InvalidColumnType(
+                    30,
+                    "epoch_id/basis_rev".to_string(),
+                    rusqlite::types::Type::Null,
+                ))
+            }
+        },
     })
 }
 
@@ -2091,6 +2339,7 @@ mod frontier_tests {
     use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
     use crate::store::migrations::{
         apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
+        prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
     use std::path::{Path, PathBuf};
@@ -2168,7 +2417,7 @@ mod frontier_tests {
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
         let installed_frontier = frontier(&path).unwrap();
-        assert_eq!(installed_frontier, "0.11.027_accounts_first");
+        assert_eq!(installed_frontier, prior_known_version());
         assert_ne!(installed_frontier, latest_known_version());
 
         // The candidate is one migration ahead; its ordinary open refuses rather
@@ -2227,7 +2476,7 @@ mod frontier_tests {
         seed_shared_store_at_prior_head(&advanced_path);
         assert_eq!(
             frontier(&advanced_path).as_deref(),
-            Some("0.11.027_accounts_first")
+            Some(prior_known_version().as_str())
         );
         open(&advanced_path, Published, &advanced.home, Authorized).expect("boundary advances");
         assert_eq!(

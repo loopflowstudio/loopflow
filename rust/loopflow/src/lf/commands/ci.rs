@@ -61,7 +61,7 @@ pub struct CiIncidentDto {
     /// is linked — an incident holding `responded_at` without one means a body was
     /// woken by something outside the ledger, which is the bypass this path
     /// exists to prevent.
-    pub trigger_command_id: Option<String>,
+    pub claimed_run_id: Option<String>,
     pub responded_at: Option<String>,
     pub green_at: Option<String>,
     pub merged_at: Option<String>,
@@ -207,8 +207,8 @@ fn incident_dto(
             .transpose()?,
         observed_at: format_time(observed_at)?,
         observer: observer.to_string(),
-        trigger_command_id: incident
-            .trigger_command_id
+        claimed_run_id: incident
+            .claimed_run_id
             .as_ref()
             .map(|id| id.as_str().to_string()),
         responded_at: incident.responded_at.map(format_time).transpose()?,
@@ -257,7 +257,7 @@ fn summarize(incidents: &[CiIncidentDto]) -> CiSummaryDto {
             .iter()
             .filter(|incident| {
                 matches!(incident.outcome.as_str(), "green" | "merged")
-                    && incident.trigger_command_id.is_some()
+                    && incident.claimed_run_id.is_some()
                     && incident.responded_at.is_some()
                     && !incident.human_assisted
             })
@@ -384,7 +384,7 @@ mod tests {
             provider_completed_at: None,
             observed_at: "2026-07-16T00:00:00Z".to_string(),
             observer: "poll".to_string(),
-            trigger_command_id: trigger.map(str::to_string),
+            claimed_run_id: trigger.map(str::to_string),
             responded_at: responded.map(str::to_string),
             green_at: Some("2026-07-16T00:10:00Z".to_string()),
             merged_at: None,
@@ -426,7 +426,7 @@ mod tests {
 
     /// The first row is PR #1034: a normal Task body pushed the fix, so no `ci-fix`
     /// wake owned the repair. The second is a green answered by something outside
-    /// the ledger, and it is what pins the `trigger_command_id` clause — #1034 alone
+    /// the ledger, and it is what pins the `claimed_run_id` clause — #1034 alone
     /// is excluded by the `responded_at` clause too, so it would pass without it.
     #[test]
     fn an_untriggered_green_is_not_autonomous() {

@@ -679,7 +679,7 @@ pub(crate) async fn start_lf_session_with_env(
 ) -> Result<()> {
     reject_detached_forwarded_account(crate::provider_account::lease::account_lease_active())?;
     let context = pinned_execution_context()?;
-    let inherited_context = ["LF_RUN_ID", "LF_PROCESS_ID"]
+    let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
         .into_iter()
         .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))
         .filter_map(|key| std::env::var(key).ok().map(|value| (key, value)))
@@ -766,7 +766,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
+    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -929,7 +929,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TASK_SESSION_ID'='task-1' 'LF_WAVE_ID'='infra' 'lf' '__task'"
         );
     }
 
@@ -941,7 +941,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
         );
     }
 
@@ -951,7 +951,7 @@ mod tests {
         let command = lf_session_shell_command(
             &argv,
             &[
-                ("LF_RUN_ID", "run-1"),
+                ("LF_TRACE_ID", "run-1"),
                 ("LF_PROCESS_ID", "process-1"),
                 ("LF_DB_PATH", "/tmp/current.db"),
                 ("LF_HOME", "/tmp/lf"),
@@ -960,7 +960,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_RUN_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
         );
     }
 

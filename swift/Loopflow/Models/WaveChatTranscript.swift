@@ -81,15 +81,11 @@ public func turnPresentation(_ turn: ChatTurn) -> TurnPresentation {
     return TurnPresentation(prose: prose, conclusion: conclusion, steps: steps)
 }
 
-/// Child activity a human reads (a decision, delivery, completion, or failure)
-/// versus lifecycle churn the Wave should summarize in its own prose.
+/// Child activity a human reads versus lifecycle churn the Wave summarizes.
 public func isConversational(_ activity: ChildControlActivity) -> Bool {
     switch activity.kind {
-    case .stateChanged, .controlApplied, .directed, .incorporated:
-        return false
-    case .controlUncertain, .decisionRequired, .decisionResolved,
-         .prOpened, .completed, .failed:
-        return true
+    case .stateChanged: false
+    case .prOpened, .completed, .failed: true
     }
 }
 

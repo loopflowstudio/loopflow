@@ -15,9 +15,9 @@ selection. Follow the repo style guide.
 
 ## Work
 
-- Acknowledge the seed's current directive before editing with the exact `lf
-  task acknowledge` command it provides. Summarize how that direction changes
-  the execution plan; provider acceptance alone is not incorporation.
+- Honor every Steer included in the seed and summarize how it changes the
+  execution plan. The boundary Basis is fixed; provider acceptance alone is
+  not application.
 - Own execution in this process and worktree. Operational Loopflow children such
   as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
   part of that execution and remain available. Do not boot a server, create a
@@ -28,11 +28,10 @@ selection. Follow the repo style guide.
 - Implement the smallest coherent slice described by the design doc.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
-- When progress requires supervisor judgment, run `lf task request-decision
-  <issue-id> "question" --option "first" --option "second" --wait`. The Task's
-  required Project Session resolves the routine choice or explicitly escalates
-  it to the Wave. Do not invent a provider-specific approval path or start
-  unrelated work while it is pending.
+- When progress requires supervisor judgment, state the exact question and
+  alternatives in the interactive step, then stop dependent work. The derived
+  Review routes the Turn to the parent; do not invent a provider-specific
+  decision command or start unrelated work while it is pending.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for
   `lf pr open` only when a human explicitly asked to see the PR for review.

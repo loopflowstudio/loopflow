@@ -521,13 +521,6 @@ mod tests {
             skill: None,
             step_index: None,
             error: None,
-            input_tokens: None,
-            output_tokens: None,
-            cache_read_tokens: None,
-            cost_usd: None,
-            duration_secs: None,
-            provider: None,
-            model: None,
         };
         store.insert_run_event(&event).expect("insert event");
 
@@ -587,6 +580,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 10,
+            control: None,
         };
         let turn = AgentTurnRow {
             id: turn_id.to_string(),
@@ -618,6 +612,8 @@ mod tests {
             context_persist_ms: 0,
             first_event_seq: Some(0),
             last_event_seq: Some(1),
+            root_output: None,
+            basis: None,
         };
         store
             .insert_trace_capture(&launch, &turn, &[], &[])

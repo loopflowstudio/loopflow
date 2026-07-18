@@ -4,33 +4,33 @@ import Foundation
 import Loopflow
 
 /// Persists the remembered surface across launches, turning the pure
-/// `HandoffSurfaceMemory` into a durable preference. Recorded only after a
+/// `LaunchTargetMemory` into a durable preference. Recorded only after a
 /// launch succeeds, so a failed attempt never rewrites the memory.
 @MainActor
 @Observable
-final class HandoffSurfacePreferences {
-    static let shared = HandoffSurfacePreferences()
+final class LaunchTargetPreferences {
+    static let shared = LaunchTargetPreferences()
 
     private let defaults: UserDefaults
     private let key: String
-    private(set) var memory: HandoffSurfaceMemory
+    private(set) var memory: LaunchTargetMemory
 
-    init(defaults: UserDefaults = .standard, key: String = "handoffSurfaceMemory") {
+    init(defaults: UserDefaults = .standard, key: String = "launchSurfaceMemory") {
         self.defaults = defaults
         self.key = key
         if let data = defaults.data(forKey: key),
-           let decoded = try? JSONDecoder().decode(HandoffSurfaceMemory.self, from: data) {
+           let decoded = try? JSONDecoder().decode(LaunchTargetMemory.self, from: data) {
             memory = decoded
         } else {
-            memory = HandoffSurfaceMemory()
+            memory = LaunchTargetMemory()
         }
     }
 
     func recordLaunch(
-        _ surface: HandoffSurface,
+        _ surface: LaunchTarget,
         provider: String,
         home: String,
-        reach: HandoffSurfaceReach,
+        reach: LaunchTargetReach,
         userInitiated: Bool,
         launchSucceeded: Bool
     ) {
@@ -48,10 +48,10 @@ final class HandoffSurfacePreferences {
     }
 }
 
-/// The outcome of launching a surface for a handoff. A launch can fully attach
+/// The outcome of launching a surface for a launch. A launch can fully attach
 /// (the exact shared command ran), partially succeed (the app opened but the
 /// command could not run — worktree-only), or fail (nothing opened, fall back).
-enum HandoffLaunchResult: Equatable, Sendable {
+enum LaunchLaunchResult: Equatable, Sendable {
     case attached
     case worktreeOnly
     case failed
@@ -61,14 +61,14 @@ enum HandoffLaunchResult: Equatable, Sendable {
 /// pure resolver decides *which* surface; this is the side effect that reaches
 /// out to `NSWorkspace` and the filesystem. It never creates or names a Session
 /// — it runs the exact shared attach command the store handed back.
-enum HandoffSurfaceLauncher {
+enum LaunchTargetLauncher {
     struct Command: Equatable {
         let cwd: String
         let argv: [String]
         let environment: [String: String]
     }
 
-    private static func bundleId(_ surface: HandoffSurface) -> String? {
+    private static func bundleId(_ surface: LaunchTarget) -> String? {
         switch surface {
         case .ghostty: nil
         case .warp: "dev.warp.Warp-Stable"
@@ -77,13 +77,13 @@ enum HandoffSurfaceLauncher {
         }
     }
 
-    static func appURL(_ surface: HandoffSurface) -> URL? {
+    static func appURL(_ surface: LaunchTarget) -> URL? {
         guard let id = bundleId(surface) else { return nil }
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)
     }
 
-    static func installedApps() -> Set<HandoffSurface> {
-        Set([HandoffSurface.warp, .vscode, .cursor].filter { appURL($0) != nil })
+    static func installedApps() -> Set<LaunchTarget> {
+        Set([LaunchTarget.warp, .vscode, .cursor].filter { appURL($0) != nil })
     }
 
     /// Whether the descriptor's execution host is another machine. Rust emits
@@ -103,7 +103,7 @@ enum HandoffSurfaceLauncher {
     /// descriptors remain byte-for-byte unchanged. Remote descriptors run the
     /// exact cwd/environment/argv on their declared host instead of probing or
     /// executing the remote path on this Mac.
-    static func command(for attach: InteractiveHandoffAttach, home: String? = nil) -> Command {
+    static func command(for attach: LaunchSurfaceRecord, home: String? = nil) -> Command {
         guard isRemoteHome(attach.host) else {
             return Command(cwd: attach.cwd, argv: attach.argv, environment: attach.environment)
         }
@@ -122,7 +122,7 @@ enum HandoffSurfaceLauncher {
         )
     }
 
-    /// Probe the machine and handoff into the pure capability the resolver reads.
+    /// Probe the machine and launch into the pure capability the resolver reads.
     /// The worktree is only probed on a local Home; a remote worktree is never
     /// locally proven. The provider and session id determine whether an IDE can
     /// attach (Claude with a known session id) or is worktree-only.
@@ -131,14 +131,14 @@ enum HandoffSurfaceLauncher {
         cwd: String,
         provider: String,
         providerSessionId: String?
-    ) -> HandoffSurfaceCapability {
+    ) -> LaunchTargetCapability {
         let installed = installedApps()
         let remote = isRemoteHome(host)
         var isDirectory: ObjCBool = false
         let proven = !remote
             && FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory)
             && isDirectory.boolValue
-        return HandoffSurfaceCapability(
+        return LaunchTargetCapability(
             installedApps: installed,
             workspaceProven: proven,
             // A command-bearing Warp launch needs only that Warp is installed; the
@@ -150,17 +150,17 @@ enum HandoffSurfaceLauncher {
         )
     }
 
-    /// Launch an external surface for a handoff. Ghostty is embedded and never
+    /// Launch an external surface for a launch. Ghostty is embedded and never
     /// routed here. Returns whether the launch attached, opened worktree-only,
     /// or failed; the caller records the preference only on `.attached` and
     /// falls back visibly on `.failed`.
     @MainActor
     static func launch(
-        _ surface: HandoffSurface,
-        attach: InteractiveHandoffAttach,
+        _ surface: LaunchTarget,
+        attach: LaunchSurfaceRecord,
         home: String,
-        reach: HandoffSurfaceReach
-    ) async -> HandoffLaunchResult {
+        reach: LaunchTargetReach
+    ) async -> LaunchLaunchResult {
         switch surface {
         case .ghostty:
             // Embedded terminal is presented by the view, not launched here.
@@ -176,10 +176,10 @@ enum HandoffSurfaceLauncher {
     }
 
     private static func launchWarp(
-        attach: InteractiveHandoffAttach,
+        attach: LaunchSurfaceRecord,
         home: String,
         attaching: Bool
-    ) -> HandoffLaunchResult {
+    ) -> LaunchLaunchResult {
         if attaching {
             // Attach only if the command-bearing config actually gets written; a
             // failed write returns .failed so the caller falls back to the embedded
@@ -198,9 +198,9 @@ enum HandoffSurfaceLauncher {
         return NSWorkspace.shared.open(url) ? .worktreeOnly : .failed
     }
 
-    /// The name of the Warp launch configuration for a handoff.
+    /// The name of the Warp launch configuration for a launch.
     static func warpLaunchConfigName(sessionId: String) -> String {
-        "loopflow-handoff-\(sessionId)"
+        "loopflow-launch-\(sessionId)"
     }
 
     /// Render a command-bearing Warp launch configuration that runs the *exact
@@ -241,7 +241,7 @@ enum HandoffSurfaceLauncher {
 
     /// Write the launch configuration, returning its `warp://launch` URL, or nil
     /// if it could not be written so the caller can fall back visibly.
-    private static func writeWarpLaunchConfig(attach: InteractiveHandoffAttach, home: String) -> URL? {
+    private static func writeWarpLaunchConfig(attach: LaunchSurfaceRecord, home: String) -> URL? {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".warp/launch_configurations", isDirectory: true)
         let name = warpLaunchConfigName(sessionId: attach.sessionId)
@@ -267,7 +267,7 @@ enum HandoffSurfaceLauncher {
     }
 
     @MainActor
-    private static func openWorkspace(_ surface: HandoffSurface, cwd: String) async -> Bool {
+    private static func openWorkspace(_ surface: LaunchTarget, cwd: String) async -> Bool {
         guard let appURL = appURL(surface) else { return false }
         let folder = URL(fileURLWithPath: cwd, isDirectory: true)
         do {
@@ -290,10 +290,10 @@ enum HandoffSurfaceLauncher {
     /// so the user sees the honest weaker action instead of a fallback.
     @MainActor
     private static func launchIDEAttach(
-        _ surface: HandoffSurface,
-        attach: InteractiveHandoffAttach,
+        _ surface: LaunchTarget,
+        attach: LaunchSurfaceRecord,
         home: String
-    ) async -> HandoffLaunchResult {
+    ) async -> LaunchLaunchResult {
         guard await openWorkspace(surface, cwd: attach.cwd) else { return .failed }
         let command = command(for: attach, home: home)
         let script = ideAttachAppleScript(

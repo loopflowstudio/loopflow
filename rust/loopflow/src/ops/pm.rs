@@ -1383,8 +1383,14 @@ async fn apply_update(
         }
     };
 
-    // Attach the PR link as a comment before closing so the task carries a
-    // durable pointer to the work without clobbering its description.
+    // Transition the state before commenting so a rejected close never leaves a
+    // "Shipped" comment on a still-open issue — the comment follows the state.
+    if mark_done {
+        ctx.client.complete_item(&id).await.map_err(pm_to_ops)?;
+    }
+
+    // Attach the PR link as a comment so the task carries a durable pointer to
+    // the work without clobbering its description.
     let linked_pr = match options
         .pr
         .as_deref()
@@ -1403,10 +1409,6 @@ async fn apply_update(
         }
         None => None,
     };
-
-    if mark_done {
-        ctx.client.complete_item(&id).await.map_err(pm_to_ops)?;
-    }
 
     Ok(PmUpdateResult {
         wave: wave.to_string(),
@@ -3883,7 +3885,12 @@ mod tests {
     async fn apply_update_completes_when_status_done() {
         let (base_url, _requests) = test_server::spawn(vec![
             projects_response(json!([])),
-            // complete_item resolves the completed workflow state, then transitions
+            // complete_item reads the issue's owning team, resolves that team's
+            // completed workflow state, then transitions.
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issue": { "team": { "id": "team-9" } } } }),
+            ),
             json_response(
                 StatusCode::OK,
                 json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
@@ -3914,7 +3921,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_update_comments_pr_link_then_closes() {
+    async fn apply_update_closes_then_comments_pr_link() {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([])),
             // update_item (issueUpdate)
@@ -3922,12 +3929,13 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
             ),
-            // comment (commentCreate) carrying the PR link
+            // complete_item: read the issue team, resolve its completed state,
+            // then transition — before any comment, so a rejected close never
+            // leaves a "Shipped" comment behind.
             json_response(
                 StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-1" } } } }),
+                json!({ "data": { "issue": { "team": { "id": "team-9" } } } }),
             ),
-            // complete_item: resolve the completed state, then transition
             json_response(
                 StatusCode::OK,
                 json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
@@ -3935,6 +3943,11 @@ mod tests {
             json_response(
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
+            ),
+            // comment (commentCreate) carrying the PR link, posted last
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-1" } } } }),
             ),
         ])
         .await;
@@ -3959,12 +3972,19 @@ mod tests {
         );
 
         let requests = requests.lock().await;
-        let comment = requests
+        let comment_at = requests
             .iter()
-            .find(|req| req.body.contains("commentCreate"))
+            .position(|req| req.body.contains("commentCreate"))
             .expect("PR link is posted as a comment");
-        assert!(comment.body.contains("Shipped:"));
-        assert!(comment.body.contains("pull/42"));
+        let state_at = requests
+            .iter()
+            .position(|req| req.body.contains("SetIssueState"))
+            .expect("issue state is transitioned to done");
+        // The comment must follow the state transition: a rejected close never
+        // leaves a "Shipped" comment on a still-open issue.
+        assert!(state_at < comment_at);
+        assert!(requests[comment_at].body.contains("Shipped:"));
+        assert!(requests[comment_at].body.contains("pull/42"));
     }
 
     fn attachment_link_response(id: &str) -> QueuedResponse {

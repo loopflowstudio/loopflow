@@ -112,7 +112,7 @@ struct WaveChatView: View {
             Button("Stop wave", role: .destructive) { stopWave() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Stops this Wave conversation. Project and Task Sessions continue independently; their observations remain durable.")
+            Text("Stops this Wave conversation. Project and Task Work continues independently; its observations remain durable.")
         }
     }
 

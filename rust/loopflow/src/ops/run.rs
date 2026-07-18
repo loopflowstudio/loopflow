@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::durable::{
-    AdvanceReceipt, BoundaryState, Containment, Launch, LaunchRoute, RunAdvance, RunLease,
+    AdvanceReceipt, BoundaryState, Containment, Launch, LaunchRoute, RunAdvance, RunLease, WorkRef,
 };
 use crate::engine::process::{current_home_execution_context, start_lf_session_with_env};
 use crate::id::WaveId;
@@ -11,8 +11,7 @@ use super::{OpsError, OpsResult};
 
 #[derive(Debug)]
 pub(crate) struct RunLaunch {
-    pub kind: &'static str,
-    pub work_id: String,
+    pub work: WorkRef,
     pub wave_id: WaveId,
     pub cwd: PathBuf,
     pub tmux_name: String,
@@ -54,8 +53,9 @@ pub(crate) async fn launch_in_run(
     };
     let argv = vec![
         execution.lf_bin.to_string_lossy().to_string(),
-        format!("__{}", request.kind),
-        request.work_id.clone(),
+        "__work".to_string(),
+        request.work.kind().to_string(),
+        request.work.id().to_string(),
     ];
     let run_lease = lease.env_value().to_string();
     let control_bin = execution.lf_bin.to_string_lossy().to_string();
@@ -93,7 +93,7 @@ pub(crate) async fn launch_in_run(
             .await;
         return Err(OpsError::Message(format!(
             "failed to launch {} body: {error}",
-            request.kind
+            request.work.kind()
         )));
     }
     Ok(launch)

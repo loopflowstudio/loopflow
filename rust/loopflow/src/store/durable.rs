@@ -66,6 +66,13 @@ impl Store {
         work: &WorkRef,
         trigger: RunTrigger,
     ) -> StoreResult<(Run, RunLease)> {
+        let _promotion_lock = crate::promotion_lock::acquire_shared()
+            .await
+            .map_err(|error| {
+                super::StoreError::InvalidData(format!(
+                    "acquire shared promotion lock before Run reservation: {error}"
+                ))
+            })?;
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_run(&work, &trigger)
@@ -494,8 +501,8 @@ mod tests {
         StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::project::{Project, ProjectId, ProjectStatus};
-    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
 
@@ -528,9 +535,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id,
-            status: ProjectStatus::Created,
-            status_reason: "created".to_string(),
-            status_at: now,
             iteration: 0,
             observation_cursor: 0,
             last_state_fingerprint: None,
@@ -585,6 +589,24 @@ mod tests {
             panic!("expected Launch receipt")
         };
         (lease, launch)
+    }
+
+    #[tokio::test]
+    async fn interrupt_ends_a_reserved_run_before_containment_exists() {
+        let (store, work) = wave_work().await;
+        let (run, _lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        let request = AuthenticatedRequest::cli();
+
+        let receipt = store
+            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .await
+            .unwrap();
+
+        assert_eq!(receipt.run_id, run.id);
+        assert_eq!(receipt.launch_id, None);
+        assert_eq!(receipt.turn_id, None);
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
     }
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-//! Machine-global fence held while `lf` promotion changes the installed binary.
+//! Machine-global fence between Run reservation and `lf` promotion.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -11,8 +11,21 @@ pub(crate) struct PromotionLock {
     _file: File,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum LockMode {
+    Shared,
+    Exclusive,
+}
+
 pub(crate) fn acquire_exclusive() -> io::Result<PromotionLock> {
-    _acquire(&lock_path())
+    _acquire(&lock_path(), LockMode::Exclusive)
+}
+
+pub(crate) async fn acquire_shared() -> io::Result<PromotionLock> {
+    let path = lock_path();
+    tokio::task::spawn_blocking(move || _acquire(&path, LockMode::Shared))
+        .await
+        .map_err(|error| io::Error::other(format!("promotion lock task failed: {error}")))?
 }
 
 fn lock_path() -> PathBuf {
@@ -21,7 +34,7 @@ fn lock_path() -> PathBuf {
         .join(".lf/promotion.lock")
 }
 
-fn _acquire(path: &Path) -> io::Result<PromotionLock> {
+fn _acquire(path: &Path, mode: LockMode) -> io::Result<PromotionLock> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -31,6 +44,9 @@ fn _acquire(path: &Path) -> io::Result<PromotionLock> {
         .read(true)
         .write(true)
         .open(path)?;
-    FileExt::lock_exclusive(&file)?;
+    match mode {
+        LockMode::Shared => FileExt::lock_shared(&file)?,
+        LockMode::Exclusive => FileExt::lock_exclusive(&file)?,
+    }
     Ok(PromotionLock { _file: file })
 }

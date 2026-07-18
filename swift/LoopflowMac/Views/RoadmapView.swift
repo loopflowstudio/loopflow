@@ -155,7 +155,7 @@ struct RoadmapView: View {
             }
             Button("Cancel", role: .cancel) { interruptSelection = nil }
         } message: {
-            Text("Queues the existing audited Task interrupt. The Task Session and worktree remain durable.")
+            Text("Queues the audited Task interrupt. Task Work and its worktree remain durable.")
         }
     }
 
@@ -694,7 +694,7 @@ private struct RoadmapTaskRow: View {
 }
 
 /// The shared attention fold plus its orthogonal raw facts: PM completion,
-/// Session status, and process liveness. `runtime == nil` means no Session — an
+/// Work status and process liveness. `runtime == nil` means Work has not started — an
 /// Available Task, distinct from a dead process.
 private struct WorkChannelChips: View {
     let task: RoadmapTask
@@ -706,10 +706,10 @@ private struct WorkChannelChips: View {
             channel("PM", task.task.completed ? "done" : "open",
                     task.task.completed ? Color.statusSuccess : palette.textSecondary)
             if let runtime = task.runtime {
-                channel("Session", runtime.status.rawValue, sessionColor(runtime.status))
+                channel("Work", runtime.status.label, workColor(runtime.status))
                 processChannel
             } else {
-                channel("Session", "none", palette.textSecondary)
+                channel("Work", "none", palette.textSecondary)
             }
         }
     }
@@ -742,13 +742,12 @@ private struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func sessionColor(_ status: TaskStatus) -> Color {
+    private func workColor(_ status: WorkStatus) -> Color {
         switch status {
-        case .running, .starting: .statusSuccess
-        case .failed: .statusError
-        case .blocked, .waiting: .statusWarning
-        case .completed, .abandoned: .statusNeutral
-        case .created: .statusInfo
+        case .running: .statusSuccess
+        case .waiting: .statusWarning
+        case .done, .abandoned: .statusNeutral
+        case .ready: .statusInfo
         }
     }
 }

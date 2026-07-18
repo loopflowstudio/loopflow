@@ -144,31 +144,25 @@ impl ChildRef {
 
 // ── Body observation ────────────────────────────────────────────────────────
 //
-// A Session is durable intent; a body is the disposable process that acts for
-// it. `status` records intent; `BodyObservation` records what the *current body*
-// is observed doing. They are different evidence and must not collapse into one
-// string: a Session can be `Running` (intent) while its body is Stalled, Stopped,
-// or Unobservable. The observation is *derived*, never stored — a projection over
-// the durable status, whether the body is alive, and how long since it last made
-// meaningful progress. No second monitor store (see the W2-135 design).
+// Work is durable; a body is the disposable process acting for its Run.
+// `BodyObservation` combines derived Work intent with fresh process evidence.
+// It is never stored as a second lifecycle.
 
-/// The observed state of a Session's current body, distinct from durable intent.
+/// The observed state of Work's current body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum BodyCategory {
-    /// A body holds the Session and made meaningful progress recently.
+    /// A body holds the Run and made meaningful progress recently.
     Working,
     /// A body is alive but has made no meaningful progress past its deadline.
     Stalled,
     /// Loopflow revoked a lost/stalled body and is starting its successor.
     Recovering,
-    /// A human decision or resume is required; Loopflow will not proceed blindly.
+    /// User input is required; Loopflow will not proceed blindly.
     NeedsInput,
     /// No live body, intent not terminal; a wake will adopt or start one.
     Stopped,
-    /// The last body failed and the flow itself failed.
-    Failed,
     /// Completed or Abandoned. Never restarts.
     Terminal,
     /// This machine cannot tell whether a body is alive. Never asserted as gone.
@@ -180,12 +174,12 @@ pub enum BodyCategory {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum BodyOwner {
-    /// The Session's own running body advances it.
-    Session,
+    /// Work's own running body advances it.
+    Work,
     /// Loopflow supervision will recover or (re)start it.
     Loopflow,
-    /// A human must decide, resume, or abandon.
-    Human,
+    /// A User must decide, resume, or abandon.
+    User,
     /// Nobody: terminal intent.
     Nobody,
     /// Unknown: the body cannot be observed from here.
@@ -212,7 +206,7 @@ pub enum BodyControl {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BodyObservation {
     pub category: BodyCategory,
-    /// Human one-liner naming the evidence for this category.
+    /// One-line evidence for this category.
     pub reason: String,
     pub owner: BodyOwner,
     /// Controls a surface may offer, ordered most to least routine.
@@ -226,19 +220,13 @@ pub struct BodyObservation {
     pub step: Option<String>,
 }
 
-/// Durable intent, coarsened to what the body projection needs. Both
-/// `TaskStatus` and `ProjectStatus` map onto this shared shape so
-/// one projection serves Wave, Project, and Tasks.
+/// Durable Work intent, coarsened to what the body projection needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyIntent {
     /// Created / Starting / Running — a body should be advancing.
     Active,
     /// Waiting on a decision or input.
     Waiting,
-    /// Blocked on a dependency.
-    Blocked,
-    /// The flow itself failed.
-    Failed,
     /// Completed or Abandoned.
     Terminal,
 }
@@ -250,13 +238,13 @@ pub struct BodyEvidence {
     pub intent: BodyIntent,
     /// Whether this machine can observe body liveness at all (tmux present).
     pub observable: bool,
-    /// Whether a body the Session claims is running was found alive.
+    /// Whether the active Run's body was found alive.
     pub process_alive: bool,
     /// Age of the last durable mutation (last event, else the last status change).
     pub progress_age: Duration,
     /// The step or command the body is on, if known.
     pub step: Option<String>,
-    /// The Session's own reason string, carried through for Working/terminal rows.
+    /// The Work reason, carried through for working and terminal rows.
     pub reason: String,
 }
 
@@ -297,31 +285,15 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
             None,
             None,
         ),
-        BodyIntent::Failed => make(
-            BodyCategory::Failed,
-            &evidence.reason,
-            BodyOwner::Human,
-            vec![BodyControl::Resume, BodyControl::Abandon],
-            None,
-            None,
-        ),
         BodyIntent::Waiting => make(
             BodyCategory::NeedsInput,
             &evidence.reason,
-            BodyOwner::Human,
+            BodyOwner::User,
             vec![
                 BodyControl::Decide,
                 BodyControl::Resume,
                 BodyControl::Abandon,
             ],
-            None,
-            None,
-        ),
-        BodyIntent::Blocked => make(
-            BodyCategory::Stopped,
-            &evidence.reason,
-            BodyOwner::Loopflow,
-            vec![BodyControl::Resume, BodyControl::Stop, BodyControl::Abandon],
             None,
             None,
         ),
@@ -366,7 +338,7 @@ pub fn observe(evidence: &BodyEvidence, stall_after: Duration) -> BodyObservatio
                 make(
                     BodyCategory::Working,
                     &evidence.reason,
-                    BodyOwner::Session,
+                    BodyOwner::Work,
                     vec![
                         BodyControl::Attach,
                         BodyControl::Steer,
@@ -406,7 +378,7 @@ mod tests {
             DEFAULT_STALL_AFTER,
         );
         assert_eq!(obs.category, BodyCategory::Working);
-        assert_eq!(obs.owner, BodyOwner::Session);
+        assert_eq!(obs.owner, BodyOwner::Work);
         assert_eq!(obs.progress_age_secs, Some(60));
         assert!(obs.controls.contains(&BodyControl::Steer));
         // Deadline is still ahead while working.
@@ -482,13 +454,13 @@ mod tests {
     }
 
     #[test]
-    fn waiting_intent_needs_human_input() {
+    fn waiting_intent_needs_user_input() {
         let obs = observe(
             &evidence(BodyIntent::Waiting, false, Duration::from_secs(5)),
             DEFAULT_STALL_AFTER,
         );
         assert_eq!(obs.category, BodyCategory::NeedsInput);
-        assert_eq!(obs.owner, BodyOwner::Human);
+        assert_eq!(obs.owner, BodyOwner::User);
         assert!(obs.controls.contains(&BodyControl::Decide));
     }
 
@@ -501,19 +473,5 @@ mod tests {
         assert_eq!(obs.category, BodyCategory::Terminal);
         assert_eq!(obs.owner, BodyOwner::Nobody);
         assert!(obs.controls.is_empty());
-    }
-
-    #[test]
-    fn a_failed_flow_asks_a_human_to_resume_or_abandon() {
-        let obs = observe(
-            &evidence(BodyIntent::Failed, false, Duration::from_secs(0)),
-            DEFAULT_STALL_AFTER,
-        );
-        assert_eq!(obs.category, BodyCategory::Failed);
-        assert_eq!(obs.owner, BodyOwner::Human);
-        assert_eq!(
-            obs.controls,
-            vec![BodyControl::Resume, BodyControl::Abandon]
-        );
     }
 }

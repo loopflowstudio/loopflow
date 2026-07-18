@@ -1017,13 +1017,30 @@ impl SqliteStore {
                 work.id()
             )));
         }
-        let launch_id: String = tx.query_row(
-            "SELECT id FROM agent_launches
-             WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')
-             ORDER BY started_at DESC LIMIT 1",
-            [run.id.as_str()],
-            |row| row.get(0),
-        )?;
+        let launch_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM agent_launches
+                 WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')
+                 ORDER BY started_at DESC LIMIT 1",
+                [run.id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(launch_id) = launch_id else {
+            let cause = serde_json::to_string(&StopCause::Interrupted)
+                .expect("interrupt cause must serialize");
+            tx.execute(
+                "UPDATE runs SET state='ended', ended_at=?2, stop_reason=?3 WHERE id=?1",
+                params![run.id.as_str(), now_unix(), cause],
+            )?;
+            let receipt = InterruptReceipt {
+                run_id: run.id,
+                launch_id: None,
+                turn_id: None,
+            };
+            tx.commit()?;
+            return Ok(receipt);
+        };
         let turn_id = tx
             .query_row(
                 "SELECT t.id FROM agent_turns t
@@ -1049,7 +1066,7 @@ impl SqliteStore {
         }
         let receipt = InterruptReceipt {
             run_id: run.id,
-            launch_id: LaunchId::parse(&launch_id).map_err(invalid_durable)?,
+            launch_id: Some(LaunchId::parse(&launch_id).map_err(invalid_durable)?),
             turn_id: turn_id
                 .map(|id| TurnId::parse(&id).map_err(invalid_durable))
                 .transpose()?,
@@ -2494,7 +2511,7 @@ fn validate_control_caller(
     }
 }
 
-fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
+pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
     let epoch = latest_epoch_in(conn, work)?;
     match epoch.state {
         EpochState::Done => return Ok(WorkStatus::Done),
@@ -2678,19 +2695,16 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
         [&project_id],
         |row| row.get(0),
     )?;
-    let (state, terminal_at) = epoch_state_for_project(session);
     tx.execute(
         "INSERT INTO epochs (
             id, number, wave_id, project_id, task_id, state, current_rev,
             created_at, terminal_at
-         ) VALUES (?1, ?2, NULL, ?3, NULL, ?4, 0, ?5, ?6)",
+         ) VALUES (?1, ?2, NULL, ?3, NULL, 'open', 0, ?4, NULL)",
         params![
             epoch_id.as_str(),
             number,
             project_id,
-            state.as_str(),
             session.updated_at.unix_timestamp(),
-            terminal_at,
         ],
     )?;
     insert_truth(
@@ -2748,19 +2762,16 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreRe
         [&task_id],
         |row| row.get(0),
     )?;
-    let (state, terminal_at) = epoch_state_for_task(session);
     tx.execute(
         "INSERT INTO epochs (
             id, number, wave_id, project_id, task_id, state, current_rev,
             created_at, terminal_at
-         ) VALUES (?1, ?2, NULL, NULL, ?3, ?4, 0, ?5, ?6)",
+         ) VALUES (?1, ?2, NULL, NULL, ?3, 'open', 0, ?4, NULL)",
         params![
             epoch_id.as_str(),
             number,
             task_id,
-            state.as_str(),
             session.updated_at.unix_timestamp(),
-            terminal_at,
         ],
     )?;
     insert_truth(
@@ -2877,30 +2888,6 @@ fn insert_truth(
         params![epoch_id.as_str(), payload.to_string(), at.unix_timestamp()],
     )?;
     Ok(())
-}
-
-fn epoch_state_for_project(session: &Project) -> (EpochState, Option<i64>) {
-    use crate::project::ProjectStatus;
-    match session.status {
-        ProjectStatus::Completed => (EpochState::Done, Some(session.updated_at.unix_timestamp())),
-        ProjectStatus::Abandoned => (
-            EpochState::Abandoned,
-            Some(session.updated_at.unix_timestamp()),
-        ),
-        _ => (EpochState::Open, None),
-    }
-}
-
-fn epoch_state_for_task(session: &Task) -> (EpochState, Option<i64>) {
-    use crate::task::TaskStatus;
-    match session.status {
-        TaskStatus::Completed => (EpochState::Done, Some(session.updated_at.unix_timestamp())),
-        TaskStatus::Abandoned => (
-            EpochState::Abandoned,
-            Some(session.updated_at.unix_timestamp()),
-        ),
-        _ => (EpochState::Open, None),
-    }
 }
 
 fn validate_basis(current: &Basis, expected: &Basis) -> StoreResult<()> {

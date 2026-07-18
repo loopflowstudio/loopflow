@@ -294,11 +294,6 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             ),
             &handoff.reason,
         ),
-        TaskEventKind::StatusChanged { to, reason, .. } => activity(
-            ChildActivityKind::StateChanged,
-            &format!("Task is {}", to.as_str()),
-            reason,
-        ),
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
@@ -340,11 +335,6 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
                 handoff.from_agent, handoff.to_agent
             ),
             &handoff.reason,
-        ),
-        ProjectEventKind::StatusChanged { to, reason, .. } => activity(
-            ChildActivityKind::StateChanged,
-            &format!("Project is {}", to.as_str()),
-            reason,
         ),
         ProjectEventKind::TaskObserved { event, .. } => task_activity_fields(event),
         ProjectEventKind::IterationCompleted { summary, .. } => activity(

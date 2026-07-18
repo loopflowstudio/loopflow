@@ -332,12 +332,13 @@ pub enum Commands {
         epoch_id: String,
         revision: u64,
     },
-    /// Internal: run the Task body holding the ambient Run lease
-    #[command(name = "__task", hide = true)]
-    TaskRunner { session_id: String },
-    /// Internal: run the Project body holding the ambient Run lease
-    #[command(name = "__project", hide = true)]
-    ProjectRunner { session_id: String },
+    /// Internal: run a Project or Task body holding the ambient Run lease
+    #[command(name = "__work", hide = true)]
+    WorkRunner {
+        #[arg(value_parser = ["project", "task"])]
+        kind: String,
+        work_id: String,
+    },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
         /// Emit as JSON

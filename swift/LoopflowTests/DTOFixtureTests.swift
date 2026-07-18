@@ -80,7 +80,7 @@ struct DTOFixtureTests {
         // The leased body observation rides the runtime snapshot on the wire. A
         // Task waiting on review reads NeedsInput, owned by a human.
         #expect(detail.projects[0].tasks[0].runtime?.observation.category == .needsInput)
-        #expect(detail.projects[0].tasks[0].runtime?.observation.owner == .human)
+        #expect(detail.projects[0].tasks[0].runtime?.observation.owner == .user)
         #expect(detail.projects[0].runtime?.observation.category == .needsInput)
         #expect(detail.projects[0].tasks[1].runtime == nil)
         #expect(detail.projects[0].tasks[1].reference.issueUrl == nil)

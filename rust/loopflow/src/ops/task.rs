@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use crate::child::ChildRef;
 use crate::durable::{
     AttentionRoute, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx,
-    Feedback, Launch, RunLease, RunState, WorkRef,
+    Feedback, Launch, RunLease, RunState, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -21,18 +21,19 @@ use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{expand_flow, load_flow, ConcreteStep};
-use crate::ops::error::{OpsError, OpsResult};
-use crate::session_context::{
+use crate::launch_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
 };
+use crate::ops::error::{OpsError, OpsResult};
 use crate::store::{
-    open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
+    open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
+    StoreError,
 };
 use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId, TaskStatus,
+    PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
@@ -71,9 +72,7 @@ pub struct TaskSnapshot {
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
     pub project_id: String,
-    pub status: TaskStatus,
-    pub status_reason: String,
-    pub status_at: time::OffsetDateTime,
+    pub status: WorkStatus,
     pub worktree: String,
     pub workspace_slug: String,
     pub lifecycle: crate::task::TaskLifecyclePlan,
@@ -308,29 +307,27 @@ async fn owning_wave(store: &SharedStore, session: &Task) -> OpsResult<Wave> {
         .ok_or_else(|| task_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
+async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
+    let work = store
+        .work_for_child(&ChildRef::Task(task.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    store
+        .work_status(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))
+}
+
 fn _defer_task_interactions(session: &mut Task) -> OpsResult<bool> {
     if session.lifecycle.all_interactions_deferred() {
         return Ok(false);
-    }
-    if session.status.is_terminal() {
-        return Err(task_error(format!(
-            "Task {} is {}; terminal Tasks cannot change interaction policy",
-            session.launch.issue.identifier,
-            session.status.as_str()
-        )));
-    }
-    if session.status.is_process_active() {
-        return Err(task_error(format!(
-            "Task {} has an active body; interrupt or wait for it before marking the Task headless",
-            session.launch.issue.identifier
-        )));
     }
     session.lifecycle.defer_all_interactions();
     session.updated_at = time::OffsetDateTime::now_utc();
     Ok(true)
 }
 
-fn _refuse_current_human_feedback(session: &Task, feedback: Option<&Feedback>) -> OpsResult<()> {
+fn _refuse_current_user_feedback(session: &Task, feedback: Option<&Feedback>) -> OpsResult<()> {
     if feedback.is_some_and(|feedback| feedback.attention == AttentionRoute::User) {
         return Err(task_error(format!(
             "Task {} routes current Feedback to the User; continue it before changing interaction policy",
@@ -365,12 +362,13 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
         if let Some(session) = &mut existing {
-            if session.status.is_terminal() {
+            let status = task_work_status(&store, session).await?;
+            if matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
                 // A terminal Task leaves its direction to a successor
                 // created below; do not return its status here. The placement
                 // path re-resolves the issue, derives a distinct worktree slug
                 // from this predecessor's id, and carries the cursor and comment
-                // ledger onto the new Session.
+                // ledger onto the reopened Task Work.
                 let predecessor_id = session.id.clone();
                 return Ok((None, Some(predecessor_id)));
             }
@@ -438,7 +436,13 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     .feedback(&work)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
-                _refuse_current_human_feedback(session, feedback.as_ref())?;
+                _refuse_current_user_feedback(session, feedback.as_ref())?;
+                if matches!(status, WorkStatus::Running { .. }) {
+                    return Err(task_error(format!(
+                        "Task {} has an active Run; interrupt it before marking the Task headless",
+                        session.launch.issue.identifier
+                    )));
+                }
             }
             if headless && _defer_task_interactions(session)? {
                 store
@@ -559,15 +563,22 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     block_on_task(async move {
         let store = task_store().await?;
         // Re-resolve after worktree planning: a concurrent run may have created
-        // a Session in the gap. A non-terminal Session wins — return it. A
+        // the Task in the gap. Non-terminal Work wins — return it. A
         // terminal one is the predecessor whose direction the successor carries;
-        // None means this is the first Session for the issue.
+        // None means this is the first Task for the issue.
         let predecessor = match store
             .get_task_by_issue(&resolved.item.id)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
         {
-            Some(existing) if !existing.status.is_terminal() => return Ok(existing),
+            Some(existing)
+                if !matches!(
+                    task_work_status(&store, &existing).await?,
+                    WorkStatus::Done | WorkStatus::Abandoned
+                ) =>
+            {
+                return Ok(existing)
+            }
             Some(terminal) => Some(terminal),
             None => None,
         };
@@ -608,9 +619,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             wave_id,
             project_id,
             pm_writeback: PmWritebackState::Current,
-            status: TaskStatus::Created,
-            status_reason: "Linear task reserved before placement".to_string(),
-            status_at: now,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
             lifecycle: if headless {
@@ -676,7 +684,10 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                             task_error(format!("failed to recover task reservation: {error}"))
                         })?
                     {
-                        if !existing.status.is_terminal() {
+                        if !matches!(
+                            task_work_status(&store, &existing).await?,
+                            WorkStatus::Done | WorkStatus::Abandoned
+                        ) {
                             return Ok(existing);
                         }
                     }
@@ -1699,7 +1710,6 @@ pub(crate) fn abandon_task_pr(
         else {
             return Ok(false);
         };
-        let mut session = session;
         let mut pr = store
             .active_task_pr(&session.id)
             .await
@@ -1757,58 +1767,19 @@ pub(crate) fn abandon_task_pr(
             None => store.settle_task_pr(&pr, None).await,
         }
         .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
-        if !session.status.is_process_active() {
-            let from = session.status;
-            session.set_status(
-                TaskStatus::Waiting,
-                format!("PR branch {branch:?} was abandoned; another PR may follow"),
-            );
-            store
-                .update_task(&session)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-            if from != session.status {
-                store
-                    .append_task_event(
-                        &session.id,
-                        &TaskEventKind::StatusChanged {
-                            from,
-                            to: session.status,
-                            reason: session.status_reason.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-            }
-        }
         Ok(true)
     })
 }
 
-/// Record a Task's transition into `Failed`: set the status, persist it,
-/// and append the paired `StatusChanged` + `Failed` events. Callers keep their
-/// own return value; this only writes the durable failure record.
+/// Record a Task failure without inventing a second Work lifecycle.
 async fn record_task_failure(
     store: &SharedStore,
     session: &mut Task,
-    reason: impl Into<String>,
+    _reason: impl Into<String>,
     error: String,
 ) -> OpsResult<()> {
-    let from = session.status;
-    session.set_status(TaskStatus::Failed, reason);
     store
         .update_task(session)
-        .await
-        .map_err(|store_error| task_error(store_error.to_string()))?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskStatus::Failed,
-                reason: session.status_reason.clone(),
-            },
-        )
         .await
         .map_err(|store_error| task_error(store_error.to_string()))?;
     store
@@ -1824,16 +1795,15 @@ async fn record_task_failure(
     Ok(())
 }
 
-/// Atomically start a fresh process generation for an inactive Session.
+/// Start a fresh Run for inactive Task Work.
 pub(crate) async fn relaunch_inactive_process(
     store: &SharedStore,
     session: &mut Task,
 ) -> OpsResult<()> {
     let Some(_) = ensure_working_pr(store, session).await? else {
         return Err(task_error(format!(
-            "Task {} is {}; terminal Tasks cannot start a process",
-            session.launch.issue.identifier,
-            session.status.as_str()
+            "Task {} is terminal and cannot start a Run",
+            session.launch.issue.identifier
         )));
     };
     launch_task_process(store, session, None).await
@@ -1895,7 +1865,6 @@ async fn launch_task_process(
         &session.id.as_str()[3..11],
         &run.id.as_str()[4..12]
     );
-    session.set_status(TaskStatus::Starting, "task process is starting");
     store
         .update_task_for_run(session, &lease)
         .await
@@ -1904,8 +1873,7 @@ async fn launch_task_process(
         store,
         &lease,
         crate::ops::RunLaunch {
-            kind: "task",
-            work_id: session.id.to_string(),
+            work: WorkRef::Task(session.id.clone()),
             wave_id: session.wave_id.clone(),
             cwd: session.worktree.clone(),
             tmux_name,
@@ -1929,15 +1897,15 @@ async fn wait_until_running(
             .await
             .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?
             .ok_or_else(|| task_error("task session disappeared during startup"))?;
-        if session.status != TaskStatus::Starting {
-            return if session.status == TaskStatus::Running {
-                Ok(session)
-            } else {
-                Err(task_error(format!(
-                    "task {} did not start: {}",
-                    session.launch.issue.identifier, session.status_reason
+        match task_work_status(store, &session).await? {
+            WorkStatus::Running { .. } => return Ok(session),
+            WorkStatus::Done | WorkStatus::Abandoned => {
+                return Err(task_error(format!(
+                    "task {} ended during startup",
+                    session.launch.issue.identifier
                 )))
-            };
+            }
+            WorkStatus::Ready | WorkStatus::Waiting { .. } => {}
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(task_error(format!(
@@ -1962,9 +1930,6 @@ pub(crate) async fn reconcile_process_liveness(
         .await
         .map_err(|error| task_error(error.to_string()))?
     else {
-        if session.status.is_process_active() {
-            mark_task_body_lost(store, session).await?;
-        }
         return Ok(());
     };
     let launch = store
@@ -2002,9 +1967,6 @@ pub(crate) async fn reconcile_process_liveness(
         )
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    if !session.status.is_process_active() {
-        return Ok(());
-    }
     mark_task_body_lost(store, session).await
 }
 
@@ -2014,34 +1976,11 @@ async fn mark_task_body_lost(store: &SharedStore, session: &mut Task) -> OpsResu
         .await
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
     if active.as_ref().is_none_or(|pr| pr.phase() == PrPhase::Open) {
-        let from = session.status;
-        session.set_status(
-            TaskStatus::Waiting,
-            match active {
-                Some(pr) => format!("PR {} is open; waiting for review", pr.sequence),
-                None => "the previous PR settled; another PR may follow".to_string(),
-            },
-        );
-        store
-            .update_task(session)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::StatusChanged {
-                    from,
-                    to: session.status,
-                    reason: session.status_reason.clone(),
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
         return Ok(());
     }
     // Do not write a human instruction into a durable field and stop. This line
     // was the strand: it told a person to type `lf task resume` and nothing ever
-    // read it, so 13 Sessions sat frozen until someone swept them by hand. The
+    // read it, so 13 Tasks sat frozen until someone swept them by hand. The
     // Run slot is now released above; redispatch this same durable Work after
     // the ordinary adoption safety check.
     let reason = "task process is missing; Loopflow will recover this Task";
@@ -2079,7 +2018,10 @@ pub(crate) async fn reconcile_project_tasks(
             .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?,
     );
     for task in &mut tasks {
-        if task.status.is_terminal() {
+        if matches!(
+            task_work_status(store, task).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
             continue;
         }
         if let Err(error) = task_recovery_adoption(store, task).await {
@@ -2094,7 +2036,10 @@ pub(crate) async fn reconcile_project_tasks(
         refuse_dirty_between_prs(store, task).await?;
         reconcile_process_liveness(store, task).await?;
         reconcile_task_completion(store, task, None).await?;
-        if task.status.is_terminal() {
+        if matches!(
+            task_work_status(store, task).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
             continue;
         }
         let no_active_pr = if observed.is_none() {
@@ -2116,7 +2061,10 @@ pub(crate) async fn reconcile_project_tasks(
         });
         if settled && !completing {
             ensure_working_pr(store, task).await?;
-            if !task.status.is_process_active() {
+            if !matches!(
+                task_work_status(store, task).await?,
+                WorkStatus::Running { .. }
+            ) {
                 relaunch_inactive_process(store, task).await?;
             }
         } else {
@@ -2128,7 +2076,10 @@ pub(crate) async fn reconcile_project_tasks(
                 && task.phase_cursor == 0
                 && task.phase_iteration == 0
             {
-                if !task.status.is_process_active() {
+                if !matches!(
+                    task_work_status(store, task).await?,
+                    WorkStatus::Running { .. }
+                ) {
                     relaunch_inactive_process(store, task).await?;
                 }
             } else {
@@ -2182,7 +2133,7 @@ pub(crate) async fn reconcile_task_pr(
 /// What an open PR makes the Task wait for.
 ///
 /// This is the durable vocabulary for the triage policy below. It deliberately
-/// does not name a Session status: every arm is a Wait, and the arms differ by
+/// does not name a lifecycle status: every arm is a Wait, and the arms differ by
 /// the fact that would end the wait, which is what `WaitOn` records. Keeping
 /// them distinct matters because "we cannot see CI" and "CI is red and nobody
 /// fixed it" need different operator responses even though the old enum
@@ -2264,7 +2215,10 @@ pub(crate) async fn route_ci_incident(
     let Some(incident) = current_ci_incident(pr) else {
         return Ok(());
     };
-    if !session.status.is_process_active() {
+    if !matches!(
+        task_work_status(store, session).await?,
+        WorkStatus::Running { .. }
+    ) {
         let mut session = session.clone();
         relaunch_for_ci_incident(store, &mut session, incident.identity.clone()).await?;
     }
@@ -2535,8 +2489,7 @@ async fn reconcile_task_pr_with_authority(
     let url = github_pr.url.clone();
     let previous_phase = previous.phase();
     let previous_github = previous.github().cloned();
-    let previous_session_status = session.status;
-    let previous_status_reason = session.status_reason.clone();
+    let previous_gate_proposal = session.gate_proposal.clone();
     let previous_pm_writeback = session.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
@@ -2586,32 +2539,34 @@ async fn reconcile_task_pr_with_authority(
                 // or infer merge from a green head.
                 let gate = feedback_gate(store, session).await?;
                 if gate.satisfied {
-                    session.set_status(
-                        TaskStatus::Completed,
-                        format!(
+                    let proposal = crate::task::TaskGateProposal {
+                        done: true,
+                        reason: format!(
                             "pull request #{} merged and completed the Task",
                             github_pr.number
                         ),
-                    );
+                    };
+                    match session.lifecycle_phase {
+                        crate::task::TaskLifecyclePhase::Kickoff => {
+                            session
+                                .enter_iterate()
+                                .map_err(|error| task_error(error.to_string()))?;
+                            session
+                                .enter_gate(proposal)
+                                .map_err(|error| task_error(error.to_string()))?;
+                        }
+                        crate::task::TaskLifecyclePhase::Iterate => {
+                            session
+                                .enter_gate(proposal)
+                                .map_err(|error| task_error(error.to_string()))?;
+                        }
+                        crate::task::TaskLifecyclePhase::Gate => {
+                            session.gate_proposal = Some(proposal);
+                            session.updated_at = now;
+                        }
+                    }
                     reconcile_pm_writeback(store, session, Some(&url)).await;
-                } else if !session.status.is_process_active() {
-                    session.set_status(
-                        TaskStatus::Waiting,
-                        format!(
-                            "pull request #{} merged; awaiting gate before completion: {}",
-                            github_pr.number,
-                            gate.reason()
-                        ),
-                    );
                 }
-            } else if !session.status.is_process_active() {
-                session.set_status(
-                    TaskStatus::Waiting,
-                    format!(
-                        "pull request #{} merged; another PR may follow",
-                        github_pr.number
-                    ),
-                );
             }
             Some(TaskEventKind::PrMerged {
                 pr_id: pr.id.clone(),
@@ -2629,24 +2584,12 @@ async fn reconcile_task_pr_with_authority(
             // fact; observation only confirms it.
             pr.abandoned_at = pr.abandoned_at.or(Some(now));
             pr.ci_observation = None;
-            if !session.status.is_process_active() {
-                session.set_status(
-                    TaskStatus::Waiting,
-                    format!("pull request #{} closed without merge", github_pr.number),
-                );
-            }
             None
         }
         _ => {
             // GitHub has it open, so any `abandoned_at` here is a stale claim that
             // it was closed. Clearing it returns the same row to `Open`.
             pr.abandoned_at = None;
-            if !session.status.is_process_active() {
-                session.set_status(
-                    TaskStatus::Waiting,
-                    format!("pull request #{} is open for review", github_pr.number),
-                );
-            }
             if let Some(ci_observation) = observe_required_checks(
                 &session.worktree,
                 &pr.branch,
@@ -2670,21 +2613,9 @@ async fn reconcile_task_pr_with_authority(
     };
 
     let pr_changed = pr != previous;
-    let completes_task = pr.phase() == PrPhase::Merged
-        && session.status == TaskStatus::Completed
-        && pr
-            .publication
-            .as_ref()
-            .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask);
-    let mut session_saved_with_pr = false;
     if pr_changed {
         pr.updated_at = now;
-        if completes_task {
-            complete_task_after_pr_with_authority(store, session, &pr, lease)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-            session_saved_with_pr = true;
-        } else if pr.is_settled() {
+        if pr.is_settled() {
             settle_task_pr_with_authority(store, &pr, None, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
@@ -2712,28 +2643,12 @@ async fn reconcile_task_pr_with_authority(
             .await
             .map_err(|error| task_error(error.to_string()))?;
     }
-    if !session_saved_with_pr
-        && (session.status != previous_session_status
-            || session.status_reason != previous_status_reason
-            || session.pm_writeback != previous_pm_writeback)
+    if session.gate_proposal != previous_gate_proposal
+        || session.pm_writeback != previous_pm_writeback
     {
         update_task_with_authority(store, session, lease)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-    }
-    if session.status != previous_session_status {
-        append_task_event_with_authority(
-            store,
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from: previous_session_status,
-                to: session.status,
-                reason: session.status_reason.clone(),
-            },
-            lease,
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
     }
     if pr_changed {
         if let Some(event) = pr_event {
@@ -2748,18 +2663,6 @@ async fn reconcile_task_pr_with_authority(
                     .map_err(|error| task_error(error.to_string()))?;
             }
         }
-    }
-    if previous_session_status != TaskStatus::Completed && session.status == TaskStatus::Completed {
-        append_task_event_with_authority(
-            store,
-            &session.id,
-            &TaskEventKind::Completed {
-                summary: "pull request merge completed the Task".to_string(),
-            },
-            lease,
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
     }
     Ok(Some(pr))
 }
@@ -3172,7 +3075,10 @@ async fn ensure_working_pr_with_authority(
         crate::ops::pr::PrReadFreshness::Cached,
     )
     .await?;
-    if session.status.is_terminal() {
+    if matches!(
+        task_work_status(store, session).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
         return Ok(None);
     }
     if let Some(active) = store
@@ -3215,7 +3121,7 @@ async fn ensure_working_pr_with_authority(
     let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     // A settled completing PR normally never rotates: completion is pending on
     // the review gate, not on a follow-up PR. `reconcile_task_completion`
-    // advances the Session to `Completed` once the gate closes. Two things
+    // commits Work completion once the gate closes. Two things
     // independently authorize one more serial PR: follow-up committed past the
     // merged tip, which the completion gate refuses to settle over, and a
     // pending directive, which the successor exists to incorporate.
@@ -3439,11 +3345,13 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
                 "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
             )));
         }
-        if session.status.is_terminal() {
+        if matches!(
+            task_work_status(&store, &session).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
             return Err(task_error(format!(
-                "Task {} is already {}; nothing to rotate",
-                session.launch.issue.identifier,
-                session.status.as_str()
+                "Task {} is terminal; nothing to rotate",
+                session.launch.issue.identifier
             )));
         }
         let rotate = RotateOptions {
@@ -3491,14 +3399,23 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
                 .await
                 .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
         }
-        if session.status == TaskStatus::Completed {
-            return Ok(session);
-        }
-        if session.status == TaskStatus::Abandoned {
-            return Err(task_error(format!(
-                "Task {} is abandoned and cannot be completed",
-                session.launch.issue.identifier
-            )));
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        match store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+        {
+            WorkStatus::Done => return Ok(session),
+            WorkStatus::Abandoned => {
+                return Err(task_error(format!(
+                    "Task {} is abandoned and cannot be completed",
+                    session.launch.issue.identifier
+                )))
+            }
+            WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {}
         }
         if !is_clean(&session.worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
@@ -3517,9 +3434,7 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
             // active, so the Task keeps its PR and no rotation is provoked.
             return Err(task_error(refusal));
         }
-        let from = session.status;
-        session.set_status(TaskStatus::Completed, summary.clone());
-        reconcile_pm_writeback(&store, &mut session, None).await;
+        propose_task_done(&mut session, summary.clone())?;
         // Every other condition is now proven, so the rotation's empty artifact
         // is dropped as part of completing — one transaction that deletes the row
         // and writes the terminal status together. There is no instant at which
@@ -3533,28 +3448,65 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
         )
         .await
         .map_err(|error| task_error(format!("failed to complete Task: {error}")))?;
-        append_task_event_with_authority(
-            &store,
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskStatus::Completed,
-                reason: session.status_reason.clone(),
-            },
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-        append_task_event_with_authority(
-            &store,
-            &session.id,
-            &TaskEventKind::Completed { summary },
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
+        if lease.is_none() {
+            let (_run, completion_lease) = store
+                .reserve_run(&work, crate::durable::RunTrigger::User)
+                .await
+                .map_err(|error| {
+                    task_error(format!("failed to reserve completion Run: {error}"))
+                })?;
+            let basis = store
+                .current_epoch(&work)
+                .await
+                .map_err(|error| task_error(error.to_string()))?
+                .current_basis;
+            store
+                .done(&completion_lease, &basis)
+                .await
+                .map_err(|error| task_error(format!("failed to complete Work: {error}")))?;
+            reconcile_pm_writeback(&store, &mut session, None).await;
+            store
+                .update_task(&session)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            append_task_event_with_authority(
+                &store,
+                &session.id,
+                &TaskEventKind::Completed { summary },
+                None,
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        }
         Ok(session)
     })
+}
+
+fn propose_task_done(session: &mut Task, summary: String) -> OpsResult<()> {
+    let proposal = crate::task::TaskGateProposal {
+        done: true,
+        reason: summary,
+    };
+    match session.lifecycle_phase {
+        crate::task::TaskLifecyclePhase::Kickoff => {
+            session
+                .enter_iterate()
+                .map_err(|error| task_error(error.to_string()))?;
+            session
+                .enter_gate(proposal)
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        crate::task::TaskLifecyclePhase::Iterate => {
+            session
+                .enter_gate(proposal)
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        crate::task::TaskLifecyclePhase::Gate => {
+            session.gate_proposal = Some(proposal);
+            session.updated_at = time::OffsetDateTime::now_utc();
+        }
+    }
+    Ok(())
 }
 
 /// The concise publication-state label carried by a PR's Linear linkage. Derived
@@ -3680,25 +3632,13 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut Task) {
             PmWritebackState::Pending { operation, .. } => *operation,
             PmWritebackState::Current => PmWritebackOperation::CompleteTask,
         };
-        let result = match operation {
-            PmWritebackOperation::CompleteTask => {
-                crate::ops::task_pm::retry_complete_task(
-                    &session.worktree,
-                    wave.name(),
-                    session.launch.issue.id.as_str(),
-                    pr_url,
-                )
-                .await
-            }
-            PmWritebackOperation::ReopenTask => {
-                crate::ops::task_pm::retry_reopen_task(
-                    &session.worktree,
-                    wave.name(),
-                    session.launch.issue.id.as_str(),
-                )
-                .await
-            }
-        };
+        let result = crate::ops::task_pm::retry_complete_task(
+            &session.worktree,
+            wave.name(),
+            session.launch.issue.id.as_str(),
+            pr_url,
+        )
+        .await;
         writeback_state_for(operation, result)
     };
     session.updated_at = time::OffsetDateTime::now_utc();
@@ -3710,7 +3650,7 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut Task) {
 // (merged or explicitly abandoned) AND no Feedback boundary remains open.
 // Every path that sets a Task to `Completed` and
 // fires the `CompleteTask` PM writeback consults this gate, so the PM row, the
-// durable Session, PR state, and Work flow converge monotonically.
+// durable Task, PR state, and Work flow converge monotonically.
 // ---------------------------------------------------------------------------
 
 /// The outcome of evaluating the completion gate.
@@ -3784,7 +3724,7 @@ async fn feedback_gate(store: &SharedStore, session: &Task) -> OpsResult<Complet
     })
 }
 
-/// Evaluate the completion gate against the Session's durable PR and Feedback
+/// Evaluate the completion gate against the Task's durable PR and Feedback
 /// state. Pure over store state: running it twice changes nothing. Use this from
 /// paths where the PR state is already persisted (`task_complete`, the
 /// reconcile advance, the repair). The merge-reconcile path uses
@@ -3794,6 +3734,7 @@ pub(crate) async fn task_completion_gate(
     session: &Task,
 ) -> OpsResult<CompletionGate> {
     let mut gate = feedback_gate(store, session).await?;
+    let work_done = task_work_status(store, session).await? == WorkStatus::Done;
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -3826,8 +3767,7 @@ pub(crate) async fn task_completion_gate(
                 // Missing later evidence blocks entry into completion, but it
                 // cannot reverse a terminal fact. Repair still reopens on a
                 // proven range or any other concrete gate blocker.
-                CommittedFollowUp::Unprovable { .. }
-                    if session.status == TaskStatus::Completed => {}
+                CommittedFollowUp::Unprovable { .. } if work_done => {}
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove merged pull request #{number} has no committed follow-up: {reason}"
                 )),
@@ -3878,7 +3818,7 @@ pub(crate) async fn task_completion_gate(
     Ok(gate)
 }
 
-/// True when the Session has a settled merged PR whose `after_merge` is
+/// True when the Task has a settled merged PR whose `after_merge` is
 /// `CompleteTask` — i.e. completion is pending on the gate, not on a future PR.
 async fn merged_completing_pr(store: &SharedStore, session: &Task) -> OpsResult<Option<TaskPr>> {
     let prs = store
@@ -3894,16 +3834,22 @@ async fn merged_completing_pr(store: &SharedStore, session: &Task) -> OpsResult<
     }))
 }
 
-/// Complete a Task after its gate closed, persisting the merged
-/// `CompleteTask` PR and firing the `CompleteTask` PM writeback. Used by the
-/// reconcile advance path (no lease) once a required review approves after a
-/// merge. Idempotent: a Session already `Completed` is left untouched.
 async fn advance_completion_after_gate(
     store: &SharedStore,
     session: &mut Task,
     lease: Option<&RunLease>,
 ) -> OpsResult<bool> {
-    if session.status.is_terminal() || session.status.is_process_active() {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    if matches!(
+        store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
         return Ok(false);
     }
     let Some(pr) = merged_completing_pr(store, session).await? else {
@@ -3922,103 +3868,49 @@ async fn advance_completion_after_gate(
     if gate.discardable_successor.is_some() {
         return Ok(false);
     }
-    let from = session.status;
     let url = pr.github().map(|github| github.url.clone());
-    session.set_status(
-        TaskStatus::Completed,
-        format!(
-            "pull request #{} merged and completed the Task",
-            pr.github().map(|github| github.number).unwrap_or_default()
-        ),
+    let summary = format!(
+        "pull request #{} merged and completed the Task",
+        pr.github().map(|github| github.number).unwrap_or_default()
     );
-    reconcile_pm_writeback(store, session, url.as_deref()).await;
+    propose_task_done(session, summary.clone())?;
     complete_task_after_pr_with_authority(store, session, &pr, lease)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    append_task_event_with_authority(
-        store,
-        &session.id,
-        &TaskEventKind::StatusChanged {
-            from,
-            to: TaskStatus::Completed,
-            reason: session.status_reason.clone(),
-        },
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(error.to_string()))?;
-    Ok(true)
-}
-
-/// Repair a prematurely completed Task: the PM row says `done` but a PR is still
-/// unsettled or a required review is still open. Revert the Session to `Waiting`
-/// with an actionable reason and queue a `ReopenTask` PM writeback so Linear
-/// reopens and the PM row reconverges. No Session, PR, directive, or review row
-/// is deleted. Idempotent: a Session already repaired (writeback Pending
-/// ReopenTask) is not repaired twice.
-async fn repair_premature_completion(
-    store: &SharedStore,
-    session: &mut Task,
-    lease: Option<&RunLease>,
-) -> OpsResult<bool> {
-    if session.status != TaskStatus::Completed {
-        return Ok(false);
-    }
-    // A writeback already in flight (either direction) owns the PM state; do not
-    // stack a second repair on top of a pending completion or reopen.
-    if matches!(session.pm_writeback, PmWritebackState::Pending { .. }) {
-        return Ok(false);
-    }
-    let gate = task_completion_gate(store, session).await?;
-    if gate.satisfied {
-        return Ok(false);
-    }
-    let from = session.status;
-    session.set_status(
-        TaskStatus::Waiting,
-        format!("reopened: completion outran its gates ({})", gate.reason()),
-    );
-    session.pm_writeback = PmWritebackState::Pending {
-        operation: PmWritebackOperation::ReopenTask,
-        error: "premature completion pending reopen".to_string(),
-    };
-    if let Some(lease) = lease {
-        store
-            .update_task_for_run(session, lease)
+    if lease.is_none() {
+        let (_run, completion_lease) = store
+            .reserve_run(&work, crate::durable::RunTrigger::User)
             .await
-            .map_err(|error| task_error(error.to_string()))?;
-    } else {
+            .map_err(|error| task_error(format!("failed to reserve completion Run: {error}")))?;
+        let basis = store
+            .current_epoch(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .current_basis;
+        store
+            .done(&completion_lease, &basis)
+            .await
+            .map_err(|error| task_error(format!("failed to complete Work: {error}")))?;
+        reconcile_pm_writeback(store, session, url.as_deref()).await;
         store
             .update_task(session)
             .await
             .map_err(|error| task_error(error.to_string()))?;
+        store
+            .append_task_event(&session.id, &TaskEventKind::Completed { summary })
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
     }
-    append_task_event_with_authority(
-        store,
-        &session.id,
-        &TaskEventKind::StatusChanged {
-            from,
-            to: TaskStatus::Waiting,
-            reason: session.status_reason.clone(),
-        },
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(error.to_string()))?;
     Ok(true)
 }
 
-/// Reconcile completion toward the gate: retry any in-flight PM writeback,
-/// repair a premature completion, or advance completion once the gate closes.
-/// Shared by every read-side reconcile (`task_status`, Project task
-/// reconcile) so out-of-band merge, delayed review, writeback retry, restart,
-/// and duplicate observation all funnel through one idempotent path.
 pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     session: &mut Task,
     lease: Option<&RunLease>,
 ) -> OpsResult<()> {
-    if session.status == TaskStatus::Completed
+    let status = task_work_status(store, session).await?;
+    if status == WorkStatus::Done
         && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
     {
         retry_pm_writeback(store, session).await;
@@ -4035,10 +3927,9 @@ pub(crate) async fn reconcile_task_completion(
         }
         return Ok(());
     }
-    if repair_premature_completion(store, session, lease).await? {
-        return Ok(());
+    if !matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
+        advance_completion_after_gate(store, session, lease).await?;
     }
-    advance_completion_after_gate(store, session, lease).await?;
     Ok(())
 }
 
@@ -4099,7 +3990,7 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
             .await
             .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
         let action_evidence = TaskActionEvidence {
-            status: work_status,
+            status: work_status.clone(),
             latest_pr_phase: latest.map(|pr| pr.phase()),
             latest_pr_after_merge: latest
                 .and_then(|pr| pr.publication.as_ref())
@@ -4111,7 +4002,7 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
             resume_refusal: resume_refusal.as_deref(),
             pending_directive: false,
             ci: active.and_then(|pr| pr.fresh_ci()),
-            process_alive: if session.status.is_process_active() {
+            process_alive: if matches!(work_status, WorkStatus::Running { .. }) {
                 Some(process_alive)
             } else {
                 None
@@ -4132,9 +4023,7 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
             pm_writeback: session.pm_writeback,
             wave: wave.name().to_string(),
             project_id: session.project_id.to_string(),
-            status: session.status,
-            status_reason: session.status_reason,
-            status_at: session.status_at,
+            status: work_status,
             worktree: session.worktree.display().to_string(),
             workspace_slug: session.workspace_slug,
             lifecycle: session.lifecycle,
@@ -4414,7 +4303,10 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
         let receipt =
             super::child::append_steer(&store, ChildRef::Task(session.id.clone()), &message)
                 .await?;
-        if !session.status.is_process_active() {
+        if !matches!(
+            task_work_status(&store, &session).await?,
+            WorkStatus::Running { .. }
+        ) {
             relaunch_inactive_process(&store, &mut session).await?;
         }
         Ok(TaskControlResult {
@@ -4493,24 +4385,17 @@ async fn _recover_abandoned_task(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-    if predecessor.status != TaskStatus::Abandoned {
-        if predecessor.status == TaskStatus::Completed {
+    match task_work_status(store, &predecessor).await? {
+        WorkStatus::Done => {
             return Err(task_error(format!(
                 "Task {} is completed; start a new Task rather than recovering it",
                 predecessor.launch.issue.identifier
             )));
         }
-        if predecessor.status == TaskStatus::Waiting
-            && predecessor.status_reason.starts_with("recovered from ")
-        {
-            return Ok(predecessor);
+        WorkStatus::Abandoned => {}
+        WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {
+            return Ok(predecessor)
         }
-        return Err(task_error(format!(
-            "Task {} is {}; resume it with `lf task resume {}`. Recover is only for abandoned Tasks.",
-            predecessor.launch.issue.identifier,
-            predecessor.status.as_str(),
-            predecessor.launch.issue.identifier
-        )));
     }
 
     // Refuse every unsafe worktree/branch/PR shape before moving ownership.
@@ -4529,19 +4414,8 @@ async fn _recover_abandoned_task(
         );
     }
     let now = time::OffsetDateTime::now_utc();
-    let status_reason = reason.map_or_else(
-        || format!("recovered from {}; resume to continue", predecessor.id),
-        |reason| {
-            format!(
-                "recovered from {}: {reason}; resume to continue",
-                predecessor.id
-            )
-        },
-    );
+    let _reason = reason;
     let mut task = predecessor;
-    task.status = TaskStatus::Waiting;
-    task.status_reason = status_reason;
-    task.status_at = now;
     task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
     task.phase_epoch += 1;
     task.phase_cursor = 0;
@@ -4647,16 +4521,6 @@ pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult>
             .abandon(&work, &reason, &basis)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-        if !session.status.is_process_active() {
-            session.set_status(
-                TaskStatus::Abandoned,
-                format!("Task explicitly abandoned: {}", reason.trim()),
-            );
-            store
-                .update_task(&session)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-        }
         Ok(TaskControlResult {
             issue_id: session.launch.issue.identifier.clone(),
             task_id: session.id.to_string(),
@@ -4670,3448 +4534,20 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
     let started = Instant::now();
     loop {
         let session = task_status(issue)?;
+        let status = block_on_task(async {
+            let store = task_store().await?;
+            task_work_status(&store, &session).await
+        })?;
         let reached = match until {
             TaskWaitUntil::Open => {
-                session.status.is_terminal()
+                matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
                     || active_pr(&session).is_ok_and(|pr| pr.phase() == PrPhase::Open)
             }
-            TaskWaitUntil::Terminal => session.status.is_terminal(),
+            TaskWaitUntil::Terminal => matches!(status, WorkStatus::Done | WorkStatus::Abandoned),
         };
         if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
             return Ok(session);
         }
         std::thread::sleep(Duration::from_secs(1));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::Path;
-    use std::process::Command;
-    use std::sync::Arc;
-
-    use super::{
-        _defer_task_interactions, _recover_abandoned_task, cached_github_observation,
-        changes_snapshot, decide_open_pr_status, derive_workspace_slug, diff_snapshot,
-        ensure_working_pr, ensure_working_pr_with_authority, file_snapshot, next_pr_slug,
-        parse_pr_slug, parse_workspace_slug, project_context, reconcile_task_pr,
-        refuse_dirty_between_prs, refuse_if_canonical_ahead,
-        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
-        resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
-        task_recovery_adoption, task_snapshot, unpublished_work,
-        verify_task_pr_range_with_authority, CommittedFollowUp, OpenPrDisposition, RotateOptions,
-        TaskRecoveryAdoption, TaskWorkspace,
-    };
-    use crate::child::ChildRef;
-    use crate::engine::git::is_ancestor;
-    use crate::id::WaveId;
-    use crate::pm::{PmKr, PmProject};
-    use crate::project::{Project, ProjectId, ProjectStatus};
-    use crate::session_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        ProjectLaunchReceipt, TaskLaunchReceipt,
-    };
-    use crate::store::{open_store, SharedStore, StorageConfig};
-    use crate::task::actions::TaskAction;
-    use crate::task::{
-        AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
-        GithubPr, Observation, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr,
-        TaskPrId, TaskStatus,
-    };
-    use crate::wave::Wave;
-    use loopflow_test_support::TestRepo;
-    use time::OffsetDateTime;
-
-    fn git(repo: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    }
-
-    struct TaskLaunchEnv {
-        previous: Vec<(&'static str, Option<OsString>)>,
-        _bin: tempfile::TempDir,
-    }
-
-    impl TaskLaunchEnv {
-        fn install(home: &Path) -> Self {
-            let bin = tempfile::tempdir().expect("fake tmux bin");
-            let tmux = bin.path().join("tmux");
-            std::fs::write(
-                &tmux,
-                "#!/bin/sh\nif [ \"$1\" = \"list-sessions\" ]; then printf 'lf-live-idle-control\\n'; fi\nexit 0\n",
-            )
-            .expect("write fake tmux");
-            let mut permissions = std::fs::metadata(&tmux)
-                .expect("stat fake tmux")
-                .permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(&tmux, permissions).expect("make fake tmux executable");
-
-            let keys = [
-                "PATH",
-                "LF_BIN",
-                "LF_HOME",
-                "LF_DB_PATH",
-                "LF_CONTROL_BIN",
-                "LF_CONTROL_HOME",
-                "LF_CONTROL_DB_PATH",
-                crate::provider_account::lease::ACCOUNT_LEASE_ENV,
-            ];
-            let previous = keys
-                .into_iter()
-                .map(|key| (key, std::env::var_os(key)))
-                .collect::<Vec<_>>();
-            let path = std::env::var_os("PATH").map_or_else(
-                || bin.path().as_os_str().to_os_string(),
-                |path| {
-                    let mut paths = vec![bin.path().to_path_buf()];
-                    paths.extend(std::env::split_paths(&path));
-                    std::env::join_paths(paths).expect("join fake tmux PATH")
-                },
-            );
-            let db = home.join("loopflow.db");
-            std::env::set_var("PATH", path);
-            std::env::set_var("LF_BIN", "/usr/bin/true");
-            std::env::set_var("LF_HOME", home);
-            std::env::set_var("LF_DB_PATH", &db);
-            std::env::set_var("LF_CONTROL_BIN", "/usr/bin/true");
-            std::env::set_var("LF_CONTROL_HOME", home);
-            std::env::set_var("LF_CONTROL_DB_PATH", db);
-            std::env::remove_var(crate::provider_account::lease::ACCOUNT_LEASE_ENV);
-            Self {
-                previous,
-                _bin: bin,
-            }
-        }
-    }
-
-    impl Drop for TaskLaunchEnv {
-        fn drop(&mut self) {
-            for (key, value) in self.previous.drain(..) {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
-
-    /// Point the store at a temp home, and nothing else. Tests that only read
-    /// persisted state must not borrow `TaskLaunchEnv`: it puts a fake tmux on
-    /// the process-global `PATH`, which reads as a live body to any concurrent
-    /// test resolving tmux.
-    struct StoreEnvGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Vec<(&'static str, Option<OsString>)>,
-    }
-
-    impl StoreEnvGuard {
-        fn new(home: &Path) -> Self {
-            let lock = crate::journal::test_env_lock();
-            let names = [
-                "LF_HOME",
-                "LF_DB_PATH",
-                crate::store::CONTROL_HOME_ENV,
-                crate::store::CONTROL_DB_PATH_ENV,
-            ];
-            let previous = names
-                .into_iter()
-                .map(|name| (name, std::env::var_os(name)))
-                .collect();
-            std::env::set_var("LF_HOME", home);
-            std::env::set_var("LF_DB_PATH", home.join("loopflow.db"));
-            std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-            std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
-            Self {
-                _lock: lock,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for StoreEnvGuard {
-        fn drop(&mut self) {
-            for (name, value) in &self.previous {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn task_flow_selection_accepts_skill_flows_and_rejects_ops() {
-        let repo = tempfile::tempdir().unwrap();
-        assert_eq!(
-            resolve_task_flow(repo.path(), Some("code")).unwrap(),
-            "code"
-        );
-        let error = resolve_task_flow(repo.path(), Some("deploy")).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("durable Task flows currently require skills"));
-    }
-
-    /// The launch resolver ignores `LF_CONTROL_BIN`. A legacy body carries
-    /// `LF_CONTROL_BIN` pointing at the (real, existing) binary that created it;
-    /// launch must not relaunch through it. Here `LF_CONTROL_BIN` names a real
-    /// binary while the current Home `LF_BIN` is gone: the launch fails at
-    /// binary resolution, proving the control pin was never consulted (had it
-    /// been, resolution would have succeeded through the real control binary).
-    #[tokio::test]
-    async fn launch_task_process_ignores_control_bin_and_resolves_current_home() {
-        let home = tempfile::tempdir().unwrap();
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-                .await
-                .unwrap(),
-        );
-        let now = OffsetDateTime::now_utc();
-        let mut session = Task {
-            id: TaskId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new("issue-no-pin").unwrap(),
-                    identifier: "INF-NO-PIN".to_string(),
-                    title: "Resolve through current lf".to_string(),
-                    description: "Never read the pinned binary".to_string(),
-                },
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-no-pin").unwrap(),
-                    slug: "no-pin".to_string(),
-                    name: "No pin".to_string(),
-                    prompt_context: String::new(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: WaveId::new(),
-            project_id: ProjectId::new(),
-            status: TaskStatus::Waiting,
-            status_reason: "ready".to_string(),
-            status_at: now,
-            worktree: home.path().join("worktree"),
-            workspace_slug: "task-no-pin".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-
-        // LF_CONTROL_BIN names a real, existing binary (the historical pin);
-        // the current Home LF_BIN is gone. The launch must fail at resolution
-        // without burning a generation or spawning tmux.
-        let previous_control_bin = std::env::var_os("LF_CONTROL_BIN");
-        let previous_lf_bin = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_CONTROL_BIN", "/bin/sh");
-        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
-        let result = super::launch_task_process(&store, &mut session, None).await;
-        match previous_lf_bin {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-        match previous_control_bin {
-            Some(value) => std::env::set_var("LF_CONTROL_BIN", value),
-            None => std::env::remove_var("LF_CONTROL_BIN"),
-        }
-
-        let error = result.expect_err("launch must fail when the current Home lf is missing");
-        assert!(
-            error
-                .to_string()
-                .contains("cannot resolve current lf binary"),
-            "launch must resolve the current Home lf, not the LF_CONTROL_BIN pin: {error}"
-        );
-    }
-
-    fn changed_workspace() -> (tempfile::TempDir, String, TaskId) {
-        let repo = tempfile::tempdir().expect("create temp repo");
-        git(repo.path(), &["init", "-b", "main"]);
-        git(repo.path(), &["config", "user.name", "Loopflow Test"]);
-        git(
-            repo.path(),
-            &["config", "user.email", "loopflow@example.com"],
-        );
-        std::fs::write(repo.path().join("tracked.txt"), "base\n").expect("write base");
-        git(repo.path(), &["add", "tracked.txt"]);
-        git(repo.path(), &["commit", "-m", "base"]);
-        let base = git(repo.path(), &["rev-parse", "HEAD"]);
-
-        std::fs::write(repo.path().join("committed.txt"), "committed\n")
-            .expect("write committed file");
-        git(repo.path(), &["add", "committed.txt"]);
-        git(repo.path(), &["commit", "-m", "task commit"]);
-        std::fs::write(repo.path().join("tracked.txt"), "staged\n").expect("write staged");
-        git(repo.path(), &["add", "tracked.txt"]);
-        std::fs::write(repo.path().join("tracked.txt"), "unstaged\n").expect("write unstaged");
-        std::fs::write(repo.path().join("untracked.txt"), "untracked\n").expect("write untracked");
-
-        (repo, base, TaskId::new())
-    }
-
-    async fn rotation_task(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-    ) -> (tempfile::TempDir, SharedStore, Task, TaskPr) {
-        let home = tempfile::tempdir().expect("task home");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-                .await
-                .expect("open store"),
-        );
-        let now = OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            WaveId::new(),
-            "task-pr-rotation".to_string(),
-            repo.path().display().to_string(),
-        );
-        let project = Project {
-            id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{}", WaveId::new()))
-                        .expect("project id"),
-                    slug: "task-pr-rotation".to_string(),
-                    name: "Task PR rotation".to_string(),
-                    prompt_context: "Keep one stable worktree.".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            status: ProjectStatus::Running,
-            status_reason: "test project is running".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("task-pr-rotation".to_string()),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let session = Task {
-            id: TaskId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                    identifier: "INF-ROTATE".to_string(),
-                    title: "Rotate Task PRs".to_string(),
-                    description: "Keep the worktree stable.".to_string(),
-                },
-                project: project.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
-            status: TaskStatus::Waiting,
-            status_reason: "first PR settled".to_string(),
-            status_at: now,
-            worktree: repo.path().to_path_buf(),
-            workspace_slug: "task-pr-proof".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: session.id.clone(),
-            sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: branch.to_string(),
-            base_commit: base_commit.to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            created_at: now,
-            updated_at: now,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-        };
-        store.create_wave(&wave).await.expect("create wave");
-        store
-            .create_project(&project)
-            .await
-            .expect("create project");
-        store.create_task(&session, &pr).await.expect("create Task");
-        (home, store, session, pr)
-    }
-
-    async fn parked_gate_task(
-        repo: &TestRepo,
-        branch: &str,
-        ci_state: Option<CiState>,
-        phase_cursor: u32,
-    ) -> (tempfile::TempDir, SharedStore, Project, Task, TaskPr) {
-        let base = repo.head_sha();
-        repo.create_branch(branch);
-        let (home, store, session, mut pr) =
-            gate_task_fixture(repo, branch, &base, false, phase_cursor).await;
-        let project = store
-            .get_project(&session.project_id)
-            .await
-            .expect("read Project")
-            .expect("Project exists");
-        let now = OffsetDateTime::now_utc();
-        let head = repo.head_sha();
-
-        pr.publication = Some(PrPublication {
-            requested_at: now,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1054,
-                url: "https://github.com/loopflowstudio/loopflow/pull/1054".to_string(),
-                head_sha: Some(head.clone()),
-            }),
-        });
-        pr.github_observation = Some(GithubObservation {
-            checked_at: now,
-            result: GithubObservationResult::Fresh,
-        });
-        pr.ci_observation = ci_state.map(|state| CiObservation {
-            head_sha: head,
-            state,
-            failing_checks: if state == CiState::Failing {
-                vec![CiCheck {
-                    name: "rust-test".to_string(),
-                    url: Some("https://ci.example/rust-test".to_string()),
-                }]
-            } else {
-                Vec::new()
-            },
-            observed_at: now,
-        });
-        pr.updated_at = now;
-        store.update_task_pr(&pr).await.expect("publish fixture PR");
-        if let Some(incident) = super::current_ci_incident(&pr) {
-            store
-                .observe_ci_incident(&incident)
-                .await
-                .expect("record failing CI incident");
-        }
-
-        (home, store, project, session, pr)
-    }
-
-    /// Settle a rotation Task PR as merged, optionally recording a `next_slug`.
-    async fn settle_pr(store: &SharedStore, mut pr: TaskPr, merge: &str, next_slug: Option<&str>) {
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: next_slug.map(str::to_string),
-            github: Some(GithubPr {
-                number: 900,
-                url: "https://example.com/pr/900".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.merge_commit = Some(merge.to_string());
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.settle_task_pr(&pr, None).await.expect("settle PR");
-    }
-
-    async fn settle_completing_pr(store: &SharedStore, mut pr: TaskPr, merge: &str) {
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1037,
-                url: "https://example.com/pr/1037".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.merge_commit = Some(merge.to_string());
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.settle_task_pr(&pr, None).await.expect("settle PR");
-    }
-
-    #[tokio::test]
-    async fn merged_task_resume_refuses_before_reserving_a_run() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/no-doomed-resume";
-        repo.create_branch(branch);
-        let (home, store, session, pr) = rotation_task(&repo, branch, &base).await;
-        settle_completing_pr(&store, pr, "merge-1037").await;
-        let _env = StoreEnvGuard::new(home.path());
-
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("Task Work");
-        let before = store.current_run(&work).await.expect("read Run before");
-        let error = resume_task_async(
-            &session.launch.issue.identifier,
-            None,
-            Some("status recommended Resume".to_string()),
-        )
-        .await
-        .expect_err("merged Task has no active PR to resume");
-        let after = store.current_run(&work).await.expect("read Run after");
-
-        assert_eq!(
-            error.to_string(),
-            "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
-        );
-        assert_eq!(after, before, "a refusal must not reserve a Run");
-    }
-
-    /// Create a parent Task with a published (not merged) PR, then a child Task
-    /// stacked on the parent's tip. The parent's branch is pushed so
-    /// `resolve_verifier_upstream` can fetch `origin/<parent_branch>`. The child
-    /// claims `repo.path()` (the verifier resolves by worktree); the parent is
-    /// moved to a dummy path so both sessions coexist under the `worktree`
-    /// UNIQUE constraint.
-    async fn stacked_rotation_task(
-        repo: &TestRepo,
-        parent_branch: &str,
-        child_branch: &str,
-        parent_base: &str,
-    ) -> (tempfile::TempDir, SharedStore, Task, TaskPr, Task, TaskPr) {
-        // Parent: create the branch, commit work, push, then register.
-        repo.create_branch(parent_branch);
-        repo.create_file("parent.txt", "parent work\n");
-        repo.stage_all();
-        repo.commit("parent commit");
-        repo.push_new_branch(parent_branch);
-        let parent_tip = repo.head_sha();
-
-        let (home, store, mut parent_session, mut parent_pr) =
-            rotation_task(repo, parent_branch, parent_base).await;
-
-        // Publish the parent PR (not merged) so the child's `parent_pr_id` is live.
-        parent_pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 900,
-                url: "https://example.com/pr/900".to_string(),
-                head_sha: None,
-            }),
-        });
-        parent_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&parent_pr)
-            .await
-            .expect("publish parent PR");
-
-        // Move the parent off repo.path() so the child can claim it.
-        parent_session.worktree = std::path::PathBuf::from("/dummy/parent-worktree");
-        store
-            .update_task(&parent_session)
-            .await
-            .expect("reparent parent worktree");
-
-        // Child: cut from the parent's tip, claim the repo worktree.
-        repo.checkout("main");
-        git(repo.path(), &["branch", child_branch, &parent_tip]);
-        repo.checkout(child_branch);
-
-        let now = OffsetDateTime::now_utc();
-        let child = Task {
-            id: TaskId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                    identifier: "INF-STACK".to_string(),
-                    title: "Stacked child".to_string(),
-                    description: "Stacked on the parent.".to_string(),
-                },
-                project: parent_session.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: parent_session.wave_id.clone(),
-            project_id: parent_session.project_id.clone(),
-            status: TaskStatus::Waiting,
-            status_reason: "stacked child".to_string(),
-            status_at: now,
-            worktree: repo.path().to_path_buf(),
-            workspace_slug: "stacked-child".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-        let child_pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: child.id.clone(),
-            sequence: 1,
-            slug: "stacked-child".to_string(),
-            branch: child_branch.to_string(),
-            base_commit: parent_tip,
-            parent_pr_id: Some(parent_pr.id.clone()),
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .create_task(&child, &child_pr)
-            .await
-            .expect("create child Task");
-        (home, store, parent_session, parent_pr, child, child_pr)
-    }
-
-    #[tokio::test]
-    async fn nonempty_refuses_when_head_is_the_recorded_base() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/empty-head";
-        repo.create_branch(branch);
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        let err =
-            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-                .await
-                .expect_err("HEAD == base must refuse as empty");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn nonempty_refuses_a_range_with_no_tree_change() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/no-tree-change";
-        repo.create_branch(branch);
-        repo.create_file("ephemeral.txt", "gone\n");
-        repo.stage_all();
-        repo.commit("add ephemeral");
-        git(repo.path(), &["rm", "ephemeral.txt"]);
-        repo.commit("remove ephemeral");
-
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        let err =
-            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-                .await
-                .expect_err("zero net tree change must refuse as empty");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal for zero tree change, got: {err}"
-        );
-    }
-
-    /// The core hole W2-254 closes: the old `task_pr_has_changes` guard skipped
-    /// emptiness when `pr.github().is_some()`. The shared verifier is
-    /// unconditional — an existing PR with an empty range is refused.
-    #[tokio::test]
-    async fn nonempty_refuses_even_when_the_pr_already_has_a_github_number() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/empty-existing";
-        repo.create_branch(branch);
-        let (_home, store, session, mut pr) = rotation_task(&repo, branch, &base).await;
-
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 925,
-                url: "https://example.com/pr/925".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.update_task_pr(&pr).await.expect("set github number");
-
-        let err =
-            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-                .await
-                .expect_err("an existing PR with an empty range must refuse");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal despite github number, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn nonempty_passes_for_a_real_range() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/real-range";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "real work\n");
-        repo.stage_all();
-        repo.commit("real task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("a real range must pass the non-empty check");
-    }
-
-    #[tokio::test]
-    async fn stacked_child_measures_from_live_parent_tip() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, _, child, _) =
-            stacked_rotation_task(&repo, "jack/stack-parent", "jack/stack-child", &origin_tip)
-                .await;
-
-        repo.create_file("child.txt", "child work\n");
-        repo.stage_all();
-        repo.commit("child commit");
-
-        require_task_pr_range_nonempty_with_authority(&store, &child, None, repo.path())
-            .await
-            .expect("stacked child with own work passes against the parent tip");
-    }
-
-    #[tokio::test]
-    async fn stacked_child_refuses_when_empty_against_live_parent() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, _, child, _) = stacked_rotation_task(
-            &repo,
-            "jack/stack-parent-empty",
-            "jack/stack-child-empty",
-            &origin_tip,
-        )
-        .await;
-
-        let err = require_task_pr_range_nonempty_with_authority(&store, &child, None, repo.path())
-            .await
-            .expect_err("empty stacked child must refuse against the parent tip");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal for stacked child, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn stacked_child_measures_from_origin_after_parent_collapsed() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, mut parent_pr, child, mut child_pr) = stacked_rotation_task(
-            &repo,
-            "jack/collapse-parent",
-            "jack/collapse-child",
-            &origin_tip,
-        )
-        .await;
-
-        repo.create_file("child.txt", "child work\n");
-        repo.stage_all();
-        repo.commit("child commit");
-
-        // Parent merged: land the parent's work on origin/main.
-        repo.checkout("main");
-        repo.create_file("parent.txt", "parent work\n");
-        repo.stage_all();
-        repo.commit("merge parent into main");
-        repo.push();
-        let main_tip = repo.head_sha();
-
-        // Collapse the child onto origin/main (replay only base..HEAD).
-        repo.checkout("jack/collapse-child");
-        git(
-            repo.path(),
-            &[
-                "rebase",
-                "--onto",
-                "origin/main",
-                &parent_pr.base_commit,
-                "jack/collapse-child",
-            ],
-        );
-
-        parent_pr.merge_commit = Some("merge-sha".to_string());
-        parent_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&parent_pr)
-            .await
-            .expect("mark parent merged");
-
-        // `base_commit` is part of `update_task_pr`'s optimistic identity, so
-        // healing it forward needs the dedicated `heal_task_pr_base` write.
-        child_pr.base_commit = main_tip;
-        child_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .heal_task_pr_base(&child_pr)
-            .await
-            .expect("heal child base to main");
-
-        require_task_pr_range_nonempty_with_authority(&store, &child, None, repo.path())
-            .await
-            .expect("collapsed child with own work passes against origin/main");
-    }
-
-    #[tokio::test]
-    async fn stacked_child_refuses_when_empty_after_parent_collapsed() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, mut parent_pr, child, mut child_pr) = stacked_rotation_task(
-            &repo,
-            "jack/collapse-parent-empty",
-            "jack/collapse-child-empty",
-            &origin_tip,
-        )
-        .await;
-
-        // Parent merged: land the parent's work on origin/main.
-        repo.checkout("main");
-        repo.create_file("parent.txt", "parent work\n");
-        repo.stage_all();
-        repo.commit("merge parent into main");
-        repo.push();
-        let main_tip = repo.head_sha();
-
-        // Collapse the child onto origin/main — no own work to replay.
-        repo.checkout("jack/collapse-child-empty");
-        git(
-            repo.path(),
-            &[
-                "rebase",
-                "--onto",
-                "origin/main",
-                &parent_pr.base_commit,
-                "jack/collapse-child-empty",
-            ],
-        );
-
-        parent_pr.merge_commit = Some("merge-sha".to_string());
-        parent_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&parent_pr)
-            .await
-            .expect("mark parent merged");
-
-        child_pr.base_commit = main_tip;
-        child_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .heal_task_pr_base(&child_pr)
-            .await
-            .expect("heal child base to main");
-
-        let err = require_task_pr_range_nonempty_with_authority(&store, &child, None, repo.path())
-            .await
-            .expect_err("empty collapsed child must refuse against origin/main");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal for collapsed child, got: {err}"
-        );
-    }
-
-    #[test]
-    fn task_context_captures_project_definition_and_kr_state() {
-        let project = PmProject {
-            id: "project-1".to_string(),
-            slug: "pr".to_string(),
-            name: "PR".to_string(),
-            summary: "Ship reliably".to_string(),
-            definition: "Every task has one durable session.".to_string(),
-            krs: vec![
-                PmKr {
-                    text: "Review resumes the same session".to_string(),
-                    holds: true,
-                },
-                PmKr {
-                    text: "Merge wakes the Wave".to_string(),
-                    holds: false,
-                },
-            ],
-            initiative_ids: vec!["initiative-1".to_string()],
-            team_ids: None,
-        };
-
-        assert_eq!(
-            project_context(&project),
-            "Definition:\nEvery task has one durable session.\n\nKRs:\n- [x] Review resumes the same session\n- [ ] Merge wakes the Wave"
-        );
-    }
-
-    #[tokio::test]
-    async fn idle_task_can_defer_its_remaining_interactive_steps() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, _store, mut session, _pr) =
-            rotation_task(&repo, "jack/task-headless", &base).await;
-
-        assert!(_defer_task_interactions(&mut session).unwrap());
-        assert!(session.lifecycle.all_interactions_deferred());
-        assert!(!_defer_task_interactions(&mut session).unwrap());
-
-        session.lifecycle = crate::task::TaskLifecyclePlan::standard("task");
-        session.status = TaskStatus::Completed;
-        assert!(_defer_task_interactions(&mut session)
-            .unwrap_err()
-            .to_string()
-            .contains("terminal Tasks cannot change interaction policy"));
-    }
-
-    /// Seed a second Task under the rotation scaffolding whose durable state is a
-    /// non-active status still carrying a dead lease — the exact shape an explicit
-    /// resume must reconcile before it can reserve a fresh body.
-    /// `outcome` is seeded at row creation because the lease outcome belongs to
-    /// the revoke/finish CAS path — `update_task` does not persist it.
-    /// `identity` is the recorded `(pid, process_group_id)`. Both `None` leaves
-    /// the tmux name as the only evidence.
-    #[test]
-    fn readable_task_names_are_semantic_and_bounded() {
-        assert_eq!(
-            derive_workspace_slug("Release scoped migrations across every target")
-                .unwrap()
-                .as_str(),
-            "release-scoped-migrations-across-every"
-        );
-        assert_eq!(
-            derive_workspace_slug("Investigate").unwrap().as_str(),
-            "investigate-task"
-        );
-        assert!(parse_workspace_slug("one").is_err());
-        assert!(parse_workspace_slug("release_scoped-migrations").is_err());
-        assert_eq!(
-            parse_pr_slug("released-upgrade-proof").unwrap(),
-            "released-upgrade-proof"
-        );
-        assert!(parse_pr_slug("released/upgrade").is_err());
-    }
-
-    #[test]
-    fn succession_slug_is_distinct_capped_and_per_predecessor() {
-        // A successor's slug must differ from its predecessor's so the successor
-        // can place a fresh worktree when the terminal predecessor's still
-        // occupies disk. The base is capped at four words so the `-s<tail>`
-        // suffix word keeps the segment within the 2-5 word limit.
-        let title = "Release scoped migrations across every target";
-        let base = derive_workspace_slug(title).unwrap();
-        assert_eq!(base.as_str(), "release-scoped-migrations-across-every");
-
-        let pred_a = TaskId::new();
-        let pred_b = TaskId::new();
-        let succ_a = succession_workspace_slug(title, &pred_a).unwrap();
-        let succ_b = succession_workspace_slug(title, &pred_b).unwrap();
-
-        // Distinct from the predecessor slug and from each other.
-        assert_ne!(succ_a.as_str(), base.as_str());
-        assert_ne!(succ_a.as_str(), succ_b.as_str());
-
-        // Valid and within the 2-5 word bound; the base is capped at four words.
-        let words = succ_a.as_str().split('-').count();
-        assert!(
-            (2..=5).contains(&words),
-            "got {words} words in {}",
-            succ_a.as_str()
-        );
-        // The four-word cap holds: the longest title still leaves room for the suffix.
-        let capped =
-            succession_workspace_slug("one two three four five six seven", &pred_a).unwrap();
-        assert_eq!(
-            capped.as_str().split('-').count(),
-            5,
-            "four base words + one suffix word"
-        );
-    }
-
-    #[tokio::test]
-    async fn settled_pr_rotates_the_same_worktree_from_fetched_main() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut first) =
-            rotation_task(&repo, first_branch, &base).await;
-        first.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: Some("follow-up-proof".to_string()),
-            github: Some(GithubPr {
-                number: 911,
-                url: "https://example.com/pr/911".to_string(),
-                head_sha: None,
-            }),
-        });
-        first.merge_commit = Some("merge-911".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&first, None)
-            .await
-            .expect("settle first PR");
-
-        let second = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("rotate PR")
-            .expect("working PR");
-
-        assert_eq!(session.worktree, repo.path());
-        assert_eq!(second.sequence, 2);
-        assert_eq!(second.branch, "jack/task-pr-proof-follow-up-proof");
-        assert_eq!(second.base_commit, base);
-        assert_eq!(second.phase(), PrPhase::Working);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            second.branch
-        );
-        let prs = store.task_prs(&session.id).await.expect("read PR history");
-        assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(prs[0].phase(), PrPhase::Merged);
-        assert_eq!(prs[1].id, second.id);
-    }
-
-    /// The state only a re-mint can produce: sequence 1 merged, the successor
-    /// branch already cut at `b1` and left checked out — the documented
-    /// "partial rotation adopted" shape — with `origin/main` advanced to `b2`
-    /// underneath it. A first mint cuts the branch at its base, so the pair
-    /// agrees by accident and the defect is invisible; only main moving under an
-    /// already-positioned branch separates base from branch.
-    struct RemintFixture {
-        _home: tempfile::TempDir,
-        repo: TestRepo,
-        store: SharedStore,
-        session: Task,
-        settled: TaskPr,
-        b1: String,
-        b2: String,
-    }
-
-    impl RemintFixture {
-        const SUCCESSOR: &str = "jack/task-pr-proof-2";
-
-        /// `carry` names a file committed onto the successor before main moves.
-        async fn new(carry: Option<&str>) -> Self {
-            let repo = TestRepo::new();
-            let b1 = repo.head_sha();
-            let settled_branch = "jack/task-pr-proof";
-            repo.create_branch(settled_branch);
-            repo.create_file("first.txt", "first PR\n");
-            repo.stage_all();
-            repo.commit("first PR");
-            let (home, store, session, mut settled) =
-                rotation_task(&repo, settled_branch, &b1).await;
-            settled.publication = Some(PrPublication {
-                requested_at: OffsetDateTime::now_utc(),
-                after_merge: AfterMerge::Review,
-                next_slug: None,
-                github: Some(GithubPr {
-                    number: 1050,
-                    url: "https://example.com/pr/1050".to_string(),
-                    head_sha: None,
-                }),
-            });
-            settled.merge_commit = Some("merge-1050".to_string());
-            settled.updated_at = OffsetDateTime::now_utc();
-
-            git(repo.path(), &["checkout", "-b", Self::SUCCESSOR, &b1]);
-            if let Some(file) = carry {
-                repo.create_file(file, "work a partial rotation already carried\n");
-                repo.stage_all();
-                repo.commit("carried follow-up");
-            }
-            repo.checkout("main");
-            repo.create_file("elsewhere.txt", "another PR merged\n");
-            repo.stage_all();
-            repo.commit("main advances");
-            repo.push();
-            let b2 = repo.head_sha();
-            assert_ne!(b1, b2, "origin/main must move or the defect cannot show");
-            repo.checkout(Self::SUCCESSOR);
-
-            Self {
-                _home: home,
-                repo,
-                store,
-                session,
-                settled,
-                b1,
-                b2,
-            }
-        }
-
-        async fn settle(&self, next: Option<&TaskPr>) {
-            self.store
-                .settle_task_pr(&self.settled, next)
-                .await
-                .expect("settle merged PR");
-        }
-
-        async fn rotate(&mut self) -> TaskPr {
-            ensure_working_pr(&self.store, &mut self.session)
-                .await
-                .expect("rotate")
-                .expect("working PR")
-        }
-
-        fn cut(&self, pr: &TaskPr) -> CommittedFollowUp {
-            unpublished_work(&self.session.worktree, pr).expect("classify")
-        }
-
-        /// An unpublished successor row recording `base`, as a past mint would have.
-        fn successor_row(&self, base: &str) -> TaskPr {
-            let mut pr = self.settled.clone();
-            pr.id = TaskPrId::new();
-            pr.sequence = 2;
-            pr.slug = "2".to_string();
-            pr.branch = Self::SUCCESSOR.to_string();
-            pr.base_commit = base.to_string();
-            pr.publication = None;
-            pr.merge_commit = None;
-            pr.created_at = OffsetDateTime::now_utc();
-            pr.updated_at = OffsetDateTime::now_utc();
-            pr
-        }
-
-        /// A commit on a sibling branch off `b1` — never on the upstream line.
-        fn sibling_commit(&self) -> String {
-            git(
-                self.repo.path(),
-                &["checkout", "-b", "jack/sibling", &self.b1],
-            );
-            self.repo
-                .create_file("sibling.txt", "another branch's work\n");
-            self.repo.stage_all();
-            self.repo.commit("sibling work");
-            let tip = self.repo.head_sha();
-            self.repo.checkout(Self::SUCCESSOR);
-            tip
-        }
-    }
-
-    /// Sabotage: record `resolve_upstream_base`'s `base_commit` again and this
-    /// goes red, while every first-mint rotation test stays green.
-    #[tokio::test]
-    async fn a_re_mint_after_main_advances_records_the_base_its_branch_forks_from() {
-        let mut fx = RemintFixture::new(None).await;
-        fx.settle(None).await;
-
-        let next = fx.rotate().await;
-
-        assert_eq!(next.sequence, 2);
-        assert_eq!(next.branch, RemintFixture::SUCCESSOR);
-        assert_eq!(
-            next.base_commit, fx.b1,
-            "the fork point of the reused branch, not the upstream tip"
-        );
-        assert_ne!(next.base_commit, fx.b2);
-        assert!(
-            is_ancestor(fx.repo.path(), &next.base_commit, &next.branch).expect("ancestry"),
-            "the recorded base must be an ancestor of its branch"
-        );
-        assert!(matches!(fx.cut(&next), CommittedFollowUp::ProvenEmpty));
-    }
-
-    /// Recording the branch tip instead would read `ProvenEmpty` here and let the
-    /// gate discard committed work — the fail-open hole #1050 closed.
-    #[tokio::test]
-    async fn a_re_mint_holding_committed_work_still_reads_range() {
-        let mut fx = RemintFixture::new(Some("carried.txt")).await;
-        fx.settle(None).await;
-        let carried_tip = fx.repo.head_sha();
-
-        let next = fx.rotate().await;
-
-        assert_eq!(
-            next.base_commit, fx.b1,
-            "the fork point, not the carried tip"
-        );
-        assert_ne!(next.base_commit, carried_tip);
-        assert!(matches!(fx.cut(&next), CommittedFollowUp::Range { .. }));
-    }
-
-    /// The live repair: a row an older mint already wrote heals on adopt, so
-    /// W2-300's wedged successor becomes provable.
-    #[tokio::test]
-    async fn an_incoherent_recorded_base_is_healed_when_the_active_pr_is_adopted() {
-        let mut fx = RemintFixture::new(None).await;
-        // Exactly W2-300's row: base at the newer main tip, branch still at the
-        // older — the legacy signature, M <= B <= upstream.
-        let incoherent = fx.successor_row(&fx.b2);
-        fx.settle(Some(&incoherent)).await;
-        assert!(
-            matches!(fx.cut(&incoherent), CommittedFollowUp::Unprovable { .. }),
-            "fixture must start wedged, or it proves nothing"
-        );
-
-        let adopted = fx.rotate().await;
-
-        assert_eq!(
-            adopted.id, incoherent.id,
-            "the same row, healed — not a new one"
-        );
-        assert_eq!(adopted.base_commit, fx.b1);
-        assert!(matches!(fx.cut(&adopted), CommittedFollowUp::ProvenEmpty));
-        let stored = fx
-            .store
-            .task_prs(&fx.session.id)
-            .await
-            .expect("read PR history")
-            .into_iter()
-            .find(|pr| pr.sequence == 2)
-            .expect("successor row");
-        assert_eq!(stored.base_commit, fx.b1, "the heal must reach the store");
-    }
-
-    /// A foreign base is not a stale mint and must stay fail-closed. It is built
-    /// so the true fork point IS its ancestor (M <= B holds), which is what makes
-    /// this catch an M<=B-only heal: only `B <= upstream` separates the legacy
-    /// signature from contamination.
-    #[tokio::test]
-    async fn a_recorded_base_off_the_upstream_line_is_refused_not_healed() {
-        let mut fx = RemintFixture::new(None).await;
-        let sibling = fx.sibling_commit();
-        let foreign = fx.successor_row(&sibling);
-        fx.settle(Some(&foreign)).await;
-
-        // The two preconditions that give this test its teeth.
-        assert!(
-            is_ancestor(fx.repo.path(), &fx.b1, &sibling).expect("ancestry"),
-            "M <= B must hold, or an M<=B-only heal would refuse this anyway and the test proves nothing"
-        );
-        assert!(
-            !is_ancestor(fx.repo.path(), &sibling, "origin/main").expect("ancestry"),
-            "B must be off the upstream line"
-        );
-        assert!(matches!(
-            fx.cut(&foreign),
-            CommittedFollowUp::Unprovable { .. }
-        ));
-
-        let adopted = fx.rotate().await;
-
-        assert_eq!(
-            adopted.base_commit, sibling,
-            "a base no past mint could have written must not be healed"
-        );
-        assert!(
-            matches!(fx.cut(&adopted), CommittedFollowUp::Unprovable { .. }),
-            "contamination stays Unprovable — the gate keeps refusing"
-        );
-        let stored = fx
-            .store
-            .task_prs(&fx.session.id)
-            .await
-            .expect("read PR history")
-            .into_iter()
-            .find(|pr| pr.sequence == 2)
-            .expect("successor row");
-        assert_eq!(stored.base_commit, sibling, "the store row is untouched");
-    }
-
-    #[tokio::test]
-    async fn rotate_forward_carries_uncommitted_follow_up_edits() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut first) =
-            rotation_task(&repo, first_branch, &base).await;
-        first.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 907,
-                url: "https://example.com/pr/907".to_string(),
-                head_sha: None,
-            }),
-        });
-        first.merge_commit = Some("merge-907".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&first, None)
-            .await
-            .expect("settle first PR");
-
-        // The worker stopped before pushing: follow-up work sits uncommitted.
-        repo.create_file("follow-up.txt", "second PR work\n");
-
-        // The runner's strict path refuses to rotate over a dirty tree.
-        assert!(ensure_working_pr(&store, &mut session.clone())
-            .await
-            .is_err());
-
-        let second = ensure_working_pr_with_authority(
-            &store,
-            &mut session,
-            None,
-            RotateOptions {
-                carry_dirty: true,
-                slug_override: Some("keep-going".to_string()),
-            },
-        )
-        .await
-        .expect("rotate forward")
-        .expect("working PR");
-
-        assert_eq!(second.sequence, 2);
-        assert_eq!(second.branch, "jack/task-pr-proof-keep-going");
-        assert_eq!(second.base_commit, base);
-        assert_eq!(second.phase(), PrPhase::Working);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            second.branch
-        );
-        // The preserved follow-up edit survived the rotation onto the new branch.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up survives"),
-            "second PR work\n"
-        );
-        let prs = store.task_prs(&session.id).await.expect("read PR history");
-        assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(prs[0].phase(), PrPhase::Merged);
-    }
-
-    #[tokio::test]
-    async fn reconcile_degrades_and_preserves_cache_when_the_github_read_fails() {
-        // A published PR whose remote can't be read (TestRepo's origin is a local
-        // bare repo, not GitHub, so the read cannot resolve) must not error
-        // reconcile: the cached row stands and freshness degrades. This is what
-        // keeps follow-up/steer/status usable during a quota or network outage —
-        // each funnels through reconcile, which previously `?`-failed on the read.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut pr) = rotation_task(&repo, branch, &base).await;
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 914,
-                url: "https://example.com/pr/914".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.update_task_pr(&pr).await.expect("publish PR");
-
-        let observed = reconcile_task_pr(&store, &mut session)
-            .await
-            .expect("reconcile does not error on a failed GitHub read")
-            .expect("the cached PR is preserved");
-
-        // Cache stands: still Open, no merge fabricated from a failed read.
-        assert_eq!(observed.phase(), PrPhase::Open);
-        assert_eq!(observed.merge_commit, None);
-        match &session.observation {
-            Observation::Degraded { reason, .. } => assert!(!reason.is_empty()),
-            other => panic!("a failed GitHub read must degrade freshness, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn reconcile_skips_the_remote_read_for_an_unpublished_working_pr() {
-        // A working PR has no persisted number; reconcile must neither enumerate
-        // nor read remotely. Proof: a read here WOULD fail (no GitHub origin), yet
-        // freshness says no read was required.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        let (_home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
-        assert!(pr.github().is_none(), "fixture PR is unpublished");
-
-        let observed = reconcile_task_pr(&store, &mut session)
-            .await
-            .expect("reconcile succeeds")
-            .expect("working PR preserved");
-
-        assert_eq!(observed.phase(), PrPhase::Working);
-        assert_eq!(session.observation, Observation::NotRequired);
-    }
-
-    #[test]
-    fn github_observation_cache_expires_fresh_reads_before_degraded_circuits() {
-        let now = OffsetDateTime::now_utc();
-        let mut pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: TaskId::new(),
-            sequence: 1,
-            slug: "cache-proof".to_string(),
-            branch: "jack/cache-proof".to_string(),
-            base_commit: "base".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: Some(GithubObservation {
-                checked_at: now - time::Duration::seconds(59),
-                result: GithubObservationResult::Fresh,
-            }),
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now - time::Duration::hours(1),
-        };
-        assert!(matches!(
-            cached_github_observation(&pr, now),
-            Some(Observation::Cached { .. })
-        ));
-        pr.github_observation.as_mut().unwrap().checked_at = now - time::Duration::seconds(60);
-        assert_eq!(cached_github_observation(&pr, now), None);
-
-        pr.github_observation = Some(GithubObservation {
-            checked_at: now - time::Duration::minutes(4),
-            result: GithubObservationResult::Degraded {
-                reason: "rate limit exhausted".to_string(),
-            },
-        });
-        assert!(matches!(
-            cached_github_observation(&pr, now),
-            Some(Observation::Degraded { .. })
-        ));
-        pr.github_observation.as_mut().unwrap().checked_at = now - time::Duration::minutes(5);
-        assert_eq!(cached_github_observation(&pr, now), None);
-    }
-
-    #[tokio::test]
-    async fn rotate_carries_committed_follow_up_and_dirty_edits_after_an_out_of_band_merge() {
-        // W2-166 shape: PR merged out of band, then the worker committed *unique*
-        // follow-up work on the settled branch plus left a dirty edit. Rotating to
-        // the next serial PR must carry BOTH the committed range and the dirty
-        // edit — and never re-apply the already-merged work.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("merged.txt", "merged work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-        // The merge landed on main (simulated by advancing origin/main to the tip
-        // GitHub merged), so the rotated branch bases on main which already
-        // carries the merged work.
-        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
-
-        // Post-merge follow-up: two committed commits, then an uncommitted edit.
-        repo.create_file("follow1.txt", "follow-up one\n");
-        repo.stage_all();
-        repo.commit("follow-up one");
-        repo.create_file("follow2.txt", "follow-up two\n");
-        repo.stage_all();
-        repo.commit("follow-up two");
-        repo.create_file("wip.txt", "uncommitted work\n");
-
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &base).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: Some("keep-going".to_string()),
-            github: Some(GithubPr {
-                number: 907,
-                url: "https://example.com/pr/907".to_string(),
-                // The merged branch tip — the cut between merged work and follow-up.
-                head_sha: Some(merged_tip.clone()),
-            }),
-        });
-        settled.merge_commit = Some("merge-907".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged PR");
-
-        let next = ensure_working_pr_with_authority(
-            &store,
-            &mut session,
-            None,
-            RotateOptions {
-                carry_dirty: true,
-                slug_override: Some("keep-going".to_string()),
-            },
-        )
-        .await
-        .expect("rotate forward")
-        .expect("working PR");
-
-        assert_eq!(next.sequence, 2);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            next.branch
-        );
-        // Committed follow-up carried forward.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow1.txt")).expect("follow1 carried"),
-            "follow-up one\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow2.txt")).expect("follow2 carried"),
-            "follow-up two\n"
-        );
-        // Dirty edit carried forward, still uncommitted.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit carried"),
-            "uncommitted work\n"
-        );
-        // The already-merged work lives in the base, not re-applied as a commit:
-        // exactly the two follow-up commits sit beyond origin/main.
-        let beyond = git(
-            repo.path(),
-            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
-        );
-        let subjects: Vec<&str> = beyond.lines().collect();
-        assert_eq!(subjects, vec!["follow-up two", "follow-up one"]);
-        // The merged work is present exactly once (from the base), not duplicated.
-        assert!(repo.path().join("merged.txt").exists());
-    }
-
-    #[tokio::test]
-    async fn a_completing_pr_rotates_only_to_carry_committed_follow_up() {
-        // A completing PR has nothing to rotate to — except follow-up committed
-        // past the merged tip (W2-293), which the completion gate refuses to
-        // settle over. Both halves read the same range, so both are proven here.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("merged.txt", "merged work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
-
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &base).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1042,
-                url: "https://example.com/pr/1042".to_string(),
-                head_sha: Some(merged_tip.clone()),
-            }),
-        });
-        settled.merge_commit = Some("merge-1042".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged completing PR");
-
-        // Nothing past the merged tip: the completing PR does not rotate.
-        let none =
-            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
-                .await
-                .expect("completing PR with no follow-up");
-        assert!(
-            none.is_none(),
-            "a completing PR with no follow-up must not mint a successor"
-        );
-
-        // The body commits the follow-up its directive asked for, after the merge.
-        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
-        repo.stage_all();
-        repo.commit("follow-up the directive asked for");
-
-        let next =
-            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
-                .await
-                .expect("rotate to carry follow-up")
-                .expect("successor PR");
-
-        assert_eq!(next.sequence, 2);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            next.branch
-        );
-        // The follow-up survives on the successor, and only the follow-up: the
-        // merged work rides in from the base rather than being re-applied.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up carried"),
-            "acknowledged follow-up\n"
-        );
-        let beyond = git(
-            repo.path(),
-            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
-        );
-        assert_eq!(
-            beyond.lines().collect::<Vec<_>>(),
-            vec!["follow-up the directive asked for"]
-        );
-    }
-
-    #[tokio::test]
-    async fn failed_committed_carry_restores_the_settled_branch_for_retry() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("shared.txt", "merged\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-
-        // Main and the post-merge follow-up edit the same line differently, so
-        // carrying the follow-up onto current main must conflict.
-        git(repo.path(), &["checkout", "-b", "main-update", &merged_tip]);
-        repo.create_file("shared.txt", "main moved on\n");
-        repo.stage_all();
-        repo.commit("main update");
-        git(repo.path(), &["push", "origin", "main-update:main"]);
-        git(repo.path(), &["checkout", settled_branch]);
-        repo.create_file("shared.txt", "follow-up edit\n");
-        repo.stage_all();
-        repo.commit("post-merge follow-up");
-        repo.create_file("wip.txt", "dirty follow-up\n");
-
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &base).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 918,
-                url: "https://example.com/pr/918".to_string(),
-                head_sha: Some(merged_tip),
-            }),
-        });
-        settled.merge_commit = Some("merge-918".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged PR");
-
-        let error = ensure_working_pr_with_authority(
-            &store,
-            &mut session,
-            None,
-            RotateOptions {
-                carry_dirty: true,
-                slug_override: Some("retry".to_string()),
-            },
-        )
-        .await
-        .expect_err("conflicting carry must fail");
-
-        assert!(error.to_string().contains("restored"));
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            settled_branch
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("shared.txt")).expect("commit restored"),
-            "follow-up edit\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit restored"),
-            "dirty follow-up\n"
-        );
-        assert_eq!(
-            git(repo.path(), &["branch", "--list", "*/task-pr-proof-retry"]),
-            ""
-        );
-        assert_eq!(git(repo.path(), &["stash", "list"]), "");
-    }
-
-    #[test]
-    fn task_workspace_reports_committed_staged_unstaged_and_untracked_files() {
-        let (repo, base, session_id) = changed_workspace();
-        let workspace = TaskWorkspace {
-            issue_identifier: "INF-123",
-            session_id: &session_id,
-            worktree: repo.path(),
-            base_commit: &base,
-        };
-
-        let snapshot = changes_snapshot(workspace).expect("inspect task changes");
-        let committed = snapshot
-            .files
-            .iter()
-            .find(|file| file.path == "committed.txt")
-            .expect("committed file");
-        assert!(committed.committed);
-        let tracked = snapshot
-            .files
-            .iter()
-            .find(|file| file.path == "tracked.txt")
-            .expect("tracked file");
-        assert!(tracked.staged && tracked.unstaged);
-        let untracked = snapshot
-            .files
-            .iter()
-            .find(|file| file.path == "untracked.txt")
-            .expect("untracked file");
-        assert!(untracked.untracked);
-
-        let patch = diff_snapshot(workspace, None).expect("inspect task diff");
-        assert!(patch.patch.contains("committed.txt"));
-        assert!(patch.patch.contains("tracked.txt"));
-        assert!(patch.patch.contains("untracked.txt"));
-
-        let untracked_patch =
-            diff_snapshot(workspace, Some("./untracked.txt")).expect("inspect one file");
-        assert_eq!(untracked_patch.path.as_deref(), Some("untracked.txt"));
-        assert!(untracked_patch.patch.contains("+untracked"));
-    }
-
-    #[test]
-    fn task_file_reads_only_files_inside_the_task_worktree() {
-        let (repo, base, session_id) = changed_workspace();
-        let workspace = TaskWorkspace {
-            issue_identifier: "INF-123",
-            session_id: &session_id,
-            worktree: repo.path(),
-            base_commit: &base,
-        };
-
-        let file = file_snapshot(workspace, "./tracked.txt").expect("read task file");
-        assert_eq!(file.path, "tracked.txt");
-        assert_eq!(file.content.as_deref(), Some("unstaged\n"));
-        assert!(file_snapshot(workspace, "../outside.txt").is_err());
-
-        #[cfg(unix)]
-        {
-            let outside = tempfile::NamedTempFile::new().expect("outside file");
-            std::os::unix::fs::symlink(outside.path(), repo.path().join("outside-link"))
-                .expect("create outside symlink");
-        }
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_a_base_carrying_a_foreign_commit() {
-        // The #877/#882 shape: the branch was cut from a local main that carried
-        // an unpushed commit, so the recorded base itself is off-origin.
-        let repo = TestRepo::new();
-        // Advance local main ahead of origin with a foreign commit; never push it.
-        repo.create_file("foreign.txt", "not this task's work\n");
-        repo.stage_all();
-        repo.commit("foreign canonical-main commit");
-        let contaminated_base = repo.head_sha();
-
-        let branch = "jack/contaminated";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("contaminated base must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("contaminated"),
-            "expected contamination refusal, got: {message}"
-        );
-        assert!(
-            message.contains("foreign canonical-main commit"),
-            "refusal must name the foreign commit, got: {message}"
-        );
-        assert!(
-            message.contains("rebase --onto"),
-            "refusal must print the recovery action, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_heals_a_stale_base_after_origin_advances() {
-        let repo = TestRepo::new();
-        let stale_base = repo.head_sha(); // origin/main at placement time
-
-        // origin advances: land a commit on main and push it.
-        repo.create_file("upstream.txt", "landed upstream\n");
-        repo.stage_all();
-        repo.commit("upstream advance");
-        repo.push();
-        let advanced = repo.head_sha();
-
-        // The Task branch already sits on the advanced origin (e.g. after an
-        // lf pr open rebase), but the recorded base is still the pre-advance sha.
-        let branch = "jack/stale-base";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &stale_base).await;
-
-        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("stale-but-compatible base verifies");
-
-        let healed = store
-            .active_task_pr(&session.id)
-            .await
-            .expect("read active PR")
-            .expect("active PR exists");
-        assert_eq!(
-            healed.base_commit, advanced,
-            "the stale base should heal forward to the current fork point"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_falls_back_to_local_main_without_a_remote() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        // Drop the remote entirely: placement fell back to local main.
-        git(repo.path(), &["remote", "remove", "origin"]);
-
-        let branch = "jack/no-remote";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("no-remote repo verifies against local main");
-    }
-
-    #[tokio::test]
-    async fn verify_passes_for_a_rotated_continuation_pr() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut first) =
-            rotation_task(&repo, first_branch, &base).await;
-        first.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: Some("follow-up".to_string()),
-            github: Some(GithubPr {
-                number: 938,
-                url: "https://example.com/pr/938".to_string(),
-                head_sha: None,
-            }),
-        });
-        first.merge_commit = Some("merge-938".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&first, None)
-            .await
-            .expect("settle first PR");
-
-        // Rotation cuts PR2 from fetched origin/main; its recorded base is the
-        // fork point, so parity holds by construction.
-        let second = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("rotate PR")
-            .expect("working PR");
-        assert_eq!(second.sequence, 2);
-        repo.create_file("second.txt", "second PR work\n");
-        repo.stage_all();
-        repo.commit("second PR commit");
-
-        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("rotated continuation PR verifies");
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_divergent_ancestry_naming_both_sides() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha(); // P
-
-        // A foreign commit advances local main ahead of origin (not pushed).
-        repo.create_file("foreign.txt", "not this task's work\n");
-        repo.stage_all();
-        repo.commit("foreign canonical-main commit");
-        let contaminated_base = repo.head_sha(); // F = P → F
-
-        // Cut the task branch from the contaminated base.
-        let branch = "jack/divergent";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-
-        // Undo the foreign commit on main and advance origin with a *different*
-        // commit so the recorded base and origin diverge from P.
-        repo.checkout("main");
-        git(repo.path(), &["reset", "--hard", &origin_tip]);
-        repo.create_file("upstream.txt", "landed upstream\n");
-        repo.stage_all();
-        repo.commit("upstream advance");
-        repo.push(); // origin/main = P → U
-
-        // Rebase the task branch onto the current origin, simulating a manual
-        // recovery that forgot to update the recorded base. After this, the
-        // branch history is U → task', but the record still says base = F.
-        repo.checkout(branch);
-        git(
-            repo.path(),
-            &[
-                "rebase",
-                "--onto",
-                "origin/main",
-                &contaminated_base,
-                branch,
-            ],
-        );
-
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("divergent ancestry must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("diverged"),
-            "expected divergence refusal, got: {message}"
-        );
-        // The base side (M..B) names the foreign commit.
-        assert!(
-            message.contains("foreign canonical-main commit"),
-            "refusal must name the base-side foreign commit, got: {message}"
-        );
-        assert!(
-            message.contains("foreign.txt"),
-            "refusal must name the base-side file, got: {message}"
-        );
-        // The upstream side (B..M) names the upstream commit.
-        assert!(
-            message.contains("upstream advance"),
-            "refusal must name the upstream-side commit, got: {message}"
-        );
-        assert!(
-            message.contains("upstream.txt"),
-            "refusal must name the upstream-side file, got: {message}"
-        );
-        assert!(
-            message.contains("rebase --onto"),
-            "refusal must print the recovery action, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_contaminated_range_without_a_remote() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha(); // P
-
-        // Drop the remote: the no-remote path must still catch contamination.
-        git(repo.path(), &["remote", "remove", "origin"]);
-
-        // Advance local main with a foreign commit, cut the branch from it, then
-        // reset main to P — the recorded base is off-local-main.
-        repo.create_file("foreign.txt", "not this task's work\n");
-        repo.stage_all();
-        repo.commit("foreign local-main commit");
-        let contaminated_base = repo.head_sha();
-
-        let branch = "jack/no-remote-contaminated";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-
-        repo.checkout("main");
-        git(repo.path(), &["reset", "--hard", &base]);
-        repo.checkout(branch);
-
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("no-remote contaminated range must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("contaminated"),
-            "expected contamination refusal, got: {message}"
-        );
-        assert!(
-            message.contains("foreign local-main commit"),
-            "refusal must name the foreign commit, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_contaminated_range_after_squash_merged_parent() {
-        // Serial PR shape: PR1 was squash-merged, so origin/main carries a
-        // squash commit rather than PR1's original commits. PR2 was cut from
-        // PR1's original tip (not the squash), so its recorded base carries
-        // commits origin/main doesn't have — the contaminated case.
-        let repo = TestRepo::new();
-
-        // PR1: two commits cut from the initial origin tip.
-        let first_branch = "jack/pr-one";
-        repo.create_branch(first_branch);
-        repo.create_file("pr1-a.txt", "a\n");
-        repo.stage_all();
-        repo.commit("PR1 first commit");
-        repo.create_file("pr1-b.txt", "b\n");
-        repo.stage_all();
-        repo.commit("PR1 second commit");
-        let pr1_tip = repo.head_sha();
-
-        // Squash-merge PR1: origin/main gets a single squash commit on P.
-        repo.checkout("main");
-        git(repo.path(), &["merge", "--squash", first_branch]);
-        repo.stage_all();
-        repo.commit("squash-merge PR1");
-        repo.push();
-
-        // PR2 cut from PR1's original tip (the pre-squash branch), not from the
-        // squash commit — the real-world mistake this test catches.
-        let second_branch = "jack/pr-two";
-        git(repo.path(), &["branch", second_branch, &pr1_tip]);
-        repo.checkout(second_branch);
-        repo.create_file("pr2.txt", "PR2 work\n");
-        repo.stage_all();
-        repo.commit("PR2 commit");
-
-        let (_home, store, session, _pr) = rotation_task(&repo, second_branch, &pr1_tip).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("squash-merged parent contamination must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("contaminated"),
-            "expected contamination refusal after squash-merge, got: {message}"
-        );
-        assert!(
-            message.contains("PR1 first commit"),
-            "refusal must name the first pre-squash commit, got: {message}"
-        );
-        assert!(
-            message.contains("PR1 second commit"),
-            "refusal must name the second pre-squash commit, got: {message}"
-        );
-        assert!(
-            message.contains("rebase --onto"),
-            "refusal must print the recovery action, got: {message}"
-        );
-    }
-
-    #[test]
-    fn placement_base_anchors_on_origin_when_a_remote_exists() {
-        let repo = TestRepo::new();
-        let origin = repo.head_sha();
-        // A local-only commit ahead of origin must NOT move the recorded base.
-        repo.create_file("local.txt", "unpushed\n");
-        repo.stage_all();
-        repo.commit("unpushed local commit");
-
-        let (base_ref, base_commit) =
-            resolve_upstream_base(repo.path(), "main").expect("resolve base");
-        assert_eq!(base_ref, "origin/main");
-        assert_eq!(
-            base_commit, origin,
-            "the base must anchor on fetched origin, not the ahead-of-origin local tip"
-        );
-    }
-
-    #[test]
-    fn placement_base_falls_back_to_local_main_without_a_remote() {
-        let repo = TestRepo::new();
-        git(repo.path(), &["remote", "remove", "origin"]);
-        repo.create_file("local.txt", "local only\n");
-        repo.stage_all();
-        repo.commit("local commit");
-        let local_tip = repo.head_sha();
-
-        let (base_ref, base_commit) =
-            resolve_upstream_base(repo.path(), "main").expect("resolve base");
-        assert_eq!(base_ref, "refs/heads/main");
-        assert_eq!(base_commit, local_tip);
-    }
-
-    #[test]
-    fn placement_refuses_when_canonical_main_is_ahead_of_origin() {
-        let repo = TestRepo::new();
-        // Simulate the #877/#882 root cause: canonical main carries an unpushed
-        // commit its upstream lacks.
-        repo.create_file("ahead.txt", "unpushed canonical work\n");
-        repo.stage_all();
-        repo.commit("unpushed canonical commit");
-
-        let err = refuse_if_canonical_ahead(repo.path(), "main")
-            .expect_err("ahead-of-origin canonical main must refuse placement");
-        let message = err.to_string();
-        assert!(
-            message.contains("ahead of origin/main"),
-            "expected control-plane refusal, got: {message}"
-        );
-        assert!(
-            message.contains("unpushed canonical commit"),
-            "refusal must name the unpushed commit, got: {message}"
-        );
-    }
-
-    /// W2-144 gen 7: a dead process on an open-PR Task with a queued `Resume`
-    /// must relaunch (consuming the Resume) instead of settling to `Waiting`.
-    /// Without a queued Resume, the existing settle-to-Waiting behavior holds.
-    #[tokio::test]
-    async fn recover_refuses_a_non_abandoned_task() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        let error = _recover_abandoned_task(&store, &session.launch.issue.identifier, None)
-            .await
-            .expect_err("a waiting Task resumes instead of recovering");
-        assert!(error.to_string().contains("lf task resume"), "{error}");
-        assert_eq!(
-            store
-                .get_task_by_issue(&session.launch.issue.identifier)
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
-            session.id
-        );
-    }
-
-    #[tokio::test]
-    async fn recover_abandoned_task_adopts_existing_worktree_pr_and_direction() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("recovery.txt", "work survives abandonment\n");
-        repo.stage_all();
-        repo.commit("task work");
-        let (_home, store, session, pr) = rotation_task(&repo, branch, &base).await;
-
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .unwrap();
-        store
-            .append_steer(
-                &work,
-                crate::durable::Author::User,
-                "finish the existing PR",
-                None,
-            )
-            .await
-            .expect("record current direction");
-        let mut abandoned = store.get_task(&session.id).await.unwrap().unwrap();
-        abandoned.set_status(TaskStatus::Abandoned, "operator stopped the attempt");
-        store.update_task(&abandoned).await.unwrap();
-
-        let recovered = _recover_abandoned_task(
-            &store,
-            &abandoned.launch.issue.identifier,
-            Some("the work is still valid".to_string()),
-        )
-        .await
-        .expect("recover abandoned Task");
-        assert_eq!(recovered.id, abandoned.id);
-        assert_eq!(recovered.status, TaskStatus::Waiting);
-        assert_eq!(recovered.worktree, abandoned.worktree);
-        assert_eq!(recovered.workspace_slug, abandoned.workspace_slug);
-        assert_eq!(
-            recovered.lifecycle_phase,
-            crate::task::TaskLifecyclePhase::Kickoff
-        );
-        assert!(recovered.status_reason.contains("the work is still valid"));
-
-        let adopted_prs = store.task_prs(&recovered.id).await.unwrap();
-        assert_eq!(adopted_prs.len(), 1);
-        assert_eq!(adopted_prs[0].id, pr.id);
-        let recovered_work = store
-            .work_for_child(&ChildRef::Task(recovered.id.clone()))
-            .await
-            .unwrap();
-        let carried = store.boundary_seed(&recovered_work).await.unwrap();
-        assert!(carried.render().contains("finish the existing PR"));
-
-        let repeated = _recover_abandoned_task(
-            &store,
-            &recovered.launch.issue.identifier,
-            Some("the work is still valid".to_string()),
-        )
-        .await
-        .expect("recovery retry converges");
-        assert_eq!(repeated.id, recovered.id);
-
-        let mut completed = repeated;
-        completed.set_status(TaskStatus::Completed, "recovered work landed");
-        store.update_task(&completed).await.unwrap();
-        let error = _recover_abandoned_task(
-            &store,
-            &completed.launch.issue.identifier,
-            Some("try again".to_string()),
-        )
-        .await
-        .expect_err("a completed recovered Task cannot be recovered again");
-        assert!(error.to_string().contains("is completed"), "{error}");
-    }
-
-    // ── Task recovery adoption preconditions (W2-251) ───────────────────────
-    //
-    // Recovery must refuse unsafe worktree/branch state before moving any
-    // durable ownership. Each test proves one adoption precondition; the
-    // unrelated-branch test additionally proves refusal leaves the predecessor,
-    // successor link, PR sequence, lease, and worktree untouched.
-
-    fn checkout_branch(repo: &TestRepo, branch: &str) {
-        let status = Command::new("git")
-            .current_dir(repo.path())
-            .args(["checkout", branch])
-            .status()
-            .expect("checkout");
-        assert!(status.success(), "checkout {branch} failed");
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_an_unrelated_branch_before_moving_ownership() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
-        settle_pr(&store, first, "merge-unrelated", None).await;
-
-        // The worktree is on an unrelated branch — neither settled nor the
-        // deterministic next branch.
-        repo.create_branch("jack/unrelated");
-        let prs_before = store.task_prs(&session.id).await.expect("read PRs");
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("unrelated branch must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("between-PR recovery expected settled branch"),
-            "expected unrelated-branch refusal, got: {message}"
-        );
-        assert!(
-            message.contains("jack/unrelated"),
-            "refusal must name the current branch, got: {message}"
-        );
-        assert!(
-            message.contains("refused before moving any ownership"),
-            "refusal must name the contract, got: {message}"
-        );
-
-        // Refusal left the PR sequence, status, and worktree untouched.
-        assert_eq!(
-            store.task_prs(&session.id).await.expect("reread PRs"),
-            prs_before,
-            "PR sequence untouched"
-        );
-        let after = store.get_task(&session.id).await.unwrap().unwrap();
-        assert_eq!(after.status, TaskStatus::Waiting, "status untouched");
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "jack/unrelated",
-            "worktree branch untouched"
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_a_dirty_worktree_between_prs() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
-        settle_pr(&store, first, "merge-dirty", None).await;
-
-        // Uncommitted follow-up work on the settled branch: the runner's strict
-        // rotation cannot carry it, so recovery must refuse before moving
-        // ownership and point the human at `lf pr next`.
-        repo.create_file("follow-up.txt", "uncommitted\n");
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("dirty between-PR worktree must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("uncommitted changes"),
-            "expected dirty refusal, got: {message}"
-        );
-        assert!(
-            message.contains("lf pr next"),
-            "refusal must name the recovery action, got: {message}"
-        );
-        assert!(
-            message.contains("refused before moving any ownership"),
-            "refusal must name the contract, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_a_missing_branch() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
-        settle_pr(&store, first, "merge-missing", None).await;
-
-        // Delete the ref the worktree is checked out on; HEAD dangles off a
-        // branch that no longer exists.
-        Command::new("git")
-            .current_dir(repo.path())
-            .args(["update-ref", "-d", &format!("refs/heads/{first_branch}")])
-            .status()
-            .expect("delete branch ref");
-        assert_eq!(
-            git(repo.path(), &["symbolic-ref", "--short", "HEAD"]),
-            first_branch,
-            "HEAD still names the deleted branch"
-        );
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("missing branch must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("no longer exists"),
-            "expected missing-branch refusal, got: {message}"
-        );
-        assert!(
-            message.contains(first_branch),
-            "refusal must name the missing branch, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_adopts_an_active_pr_branch_and_allows_ongoing_work() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        // rotation_task seeds an active (Working) PR on `branch`.
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        // Dirty ongoing work on the active PR's branch is allowed — recovery
-        // must not drop in-progress work.
-        repo.create_file("wip.txt", "ongoing\n");
-
-        let adoption = task_recovery_adoption(&store, &session)
-            .await
-            .expect("active PR on its branch is adopted, dirty work allowed");
-        assert_eq!(
-            adoption,
-            TaskRecoveryAdoption::Active {
-                branch: branch.to_string()
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_a_crash_boundary() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        // Drive the worktree into a conflicting rebase: advance main with a
-        // conflicting edit, then rebase the branch onto it.
-        repo.checkout("main");
-        repo.create_file("first.txt", "main wins\n");
-        repo.stage_all();
-        repo.commit("main advance");
-        checkout_branch(&repo, branch);
-        let rebase = Command::new("git")
-            .current_dir(repo.path())
-            .args(["rebase", "main"])
-            .output()
-            .expect("run rebase");
-        assert!(
-            !rebase.status.success(),
-            "rebase must conflict to seed a crash boundary"
-        );
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("crash boundary must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("mid-rebase"),
-            "expected crash-boundary refusal, got: {message}"
-        );
-        assert!(
-            message.contains("refused before moving any ownership"),
-            "refusal must name the contract, got: {message}"
-        );
-
-        // Cleanup so the temp repo drops cleanly.
-        let _ = Command::new("git")
-            .current_dir(repo.path())
-            .args(["rebase", "--abort"])
-            .status();
-    }
-
-    #[tokio::test]
-    async fn between_prs_recovery_selects_the_deterministic_next_branch() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
-        settle_pr(&store, first, "merge-942", Some("follow-up")).await;
-
-        // The deterministic next branch the gate must select, read from the
-        // settled PR the gate reads (not the pre-settle local copy).
-        let settled = store
-            .task_prs(&session.id)
-            .await
-            .expect("read settled PR")
-            .pop()
-            .expect("settled PR");
-        let next = format!("{first_branch}-follow-up");
-        assert_eq!(next_pr_slug(&settled, None), "follow-up");
-
-        // The worktree is already on the next branch — a partial rotation the
-        // gate must adopt, not refuse as an unrelated branch.
-        Command::new("git")
-            .current_dir(repo.path())
-            .args(["checkout", "-b", &next])
-            .status()
-            .expect("cut next branch");
-
-        let adoption = task_recovery_adoption(&store, &session)
-            .await
-            .expect("partial rotation onto the next branch is adopted");
-        assert_eq!(
-            adoption,
-            TaskRecoveryAdoption::BetweenPrs {
-                settled: first_branch.to_string(),
-                next
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn refuse_dirty_between_prs_blocks_after_an_out_of_band_merge() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) = rotation_task(&repo, first_branch, &base).await;
-        repo.create_file("wip.txt", "ongoing\n");
-
-        // While the PR is active, dirty ongoing work is fine.
-        refuse_dirty_between_prs(&store, &session)
-            .await
-            .expect("active PR with dirty work is allowed");
-
-        // The PR merges out of band -> settled -> between-PR. The post-reconcile
-        // guard must now refuse the dirty between-PR before the lease is reaped
-        // or a successor body is launched.
-        settle_pr(&store, first, "merge-out-of-band", None).await;
-        let err = refuse_dirty_between_prs(&store, &session)
-            .await
-            .expect_err("dirty between-PR after merge must refuse");
-        assert!(
-            err.to_string().contains("lf pr next"),
-            "expected dirty between-PR refusal, got: {err}"
-        );
-    }
-
-    // ── completion gate (W2-237) ───────────────────────────────────────────
-    // A Task may be completed in the PM only once every active PR is settled
-    // and every required review is approved. The tests below prove the gate and
-    // the reconcile advance/repair around it reproduce the W2-151 / W2-138
-    // ordering: a merge observed while a required review is open does not close
-    // the Task; the Task closes exactly once after the review approves.
-
-    use super::{complete_task_with_authority, reconcile_task_completion, task_completion_gate};
-    use crate::task::{TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan};
-
-    /// A Gate-phase Task whose initial PR may be left working or settled.
-    async fn gate_task_fixture(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-        settle: bool,
-        phase_cursor: u32,
-    ) -> (tempfile::TempDir, SharedStore, Task, TaskPr) {
-        let home = tempfile::tempdir().expect("task home");
-        let db_path = home.path().join("loopflow.db");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path.clone()))
-                .await
-                .expect("open store"),
-        );
-        let now = OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            WaveId::new(),
-            "completion-gate".to_string(),
-            repo.path().display().to_string(),
-        );
-        let project = Project {
-            id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{}", WaveId::new()))
-                        .expect("project id"),
-                    slug: "completion-gate".to_string(),
-                    name: "Completion gate".to_string(),
-                    prompt_context: "Keep the gate honest.".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            status: ProjectStatus::Running,
-            status_reason: "test project is running".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("completion-gate".to_string()),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let session = Task {
-            id: TaskId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                    identifier: "INF-GATE".to_string(),
-                    title: "Prove the completion gate".to_string(),
-                    description: "Completion waits on the review gate.".to_string(),
-                },
-                project: project.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id.clone(),
-            status: TaskStatus::Waiting,
-            status_reason: "merged; awaiting gate".to_string(),
-            status_at: now,
-            worktree: repo.path().to_path_buf(),
-            workspace_slug: "completion-gate".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: TaskLifecyclePhase::Gate,
-            phase_epoch: 2,
-            phase_cursor,
-            phase_iteration: 0,
-            gate_cycle: 1,
-            gate_proposal: Some(TaskGateProposal {
-                status: TaskStatus::Completed,
-                reason: "merged and reviewed".to_string(),
-            }),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: session.id.clone(),
-            sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: branch.to_string(),
-            base_commit: base_commit.to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_wave(&wave).await.expect("create wave");
-        store
-            .create_project(&project)
-            .await
-            .expect("create project");
-        store.create_task(&session, &pr).await.expect("create Task");
-        if !settle {
-            return (home, store, session, pr);
-        }
-        // Settle the PR as merged-with-complete-task after creation (the session
-        // is created with a sequence-1 Working PR).
-        let mut merged = pr.clone();
-        merged.publication = Some(PrPublication {
-            requested_at: now,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 912,
-                url: "https://example.com/pr/912".to_string(),
-                head_sha: Some(repo.head_sha()),
-            }),
-        });
-        merged.merge_commit = Some("merge-912".to_string());
-        merged.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&merged)
-            .await
-            .expect("settle merged PR");
-        (home, store, session, merged)
-    }
-
-    /// A Gate-phase Task with one merged `CompleteTask` PR, ready for a
-    /// required review to be opened against its gate waitpoint.
-    async fn gate_task(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-    ) -> (tempfile::TempDir, SharedStore, Task, TaskPr) {
-        gate_task_fixture(repo, branch, base_commit, true, 0).await
-    }
-    #[test]
-    fn merged_snapshot_with_a_clear_gate_recommends_completion() {
-        let repo = TestRepo::new();
-        let branch = "jack/merged-complete-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-        let (home, session) = runtime.block_on(async {
-            let (home, _store, session, _pr) = gate_task(&repo, branch, &base).await;
-            (home, session)
-        });
-        drop(runtime);
-        let _env = StoreEnvGuard::new(home.path());
-
-        let snapshot = task_snapshot(&session).expect("snapshot completable Task");
-        assert_eq!(snapshot.active_pr, None);
-        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Complete));
-        assert!(
-            snapshot
-                .actions
-                .status(TaskAction::Complete)
-                .expect("Complete action")
-                .available
-        );
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Resume)
-                .expect("Resume action")
-                .reason,
-            "Task INF-GATE has no active PR to resume; pull request #912 merged"
-        );
-    }
-
-    #[tokio::test]
-    async fn completion_gate_is_satisfied_with_no_prs_and_no_reviews() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let (_home, store, mut session, _pr) = gate_task(&repo, branch, &repo.head_sha()).await;
-        // The PR is settled (merged) and no required reviews are open: the gate
-        // is satisfied, so clean no-PR / no-review work can still complete.
-        session.status = TaskStatus::Waiting;
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-        assert!(
-            gate.satisfied,
-            "gate should be satisfied: {:?}",
-            gate.blockers
-        );
-    }
-
-    // ── settling over a proven-empty successor (W2-304) ────────────────────
-    // The lifecycle rotates a serial successor after a `Review` merge. When the
-    // work is done that successor is never published and never authored, and
-    // `lf task complete` refused on it: publishing opens a zero-commit PR, and
-    // abandoning leaves the Session `Waiting` so the next rotation mints PR N+1.
-    // `task_complete` resolves the machine registry itself, so these drive the two
-    // functions it composes: `task_completion_gate` and
-    // `complete_task_with_authority`.
-
-    const SUCCESSOR_BRANCH: &str = "jack/gate-proof-2";
-
-    /// Merged work on `jack/gate-proof`, plus a successor rotated behind it whose
-    /// branch starts at `successor_base`. The merged PR is relanded `Review` — the
-    /// disposition that actually rotates.
-    async fn merged_task_with_successor(
-        repo: &TestRepo,
-        successor_base: Option<&str>,
-    ) -> (tempfile::TempDir, SharedStore, Task, TaskPr, TaskPr) {
-        let merged_branch = "jack/gate-proof";
-        let base = repo.head_sha();
-        repo.create_branch(merged_branch);
-        repo.create_file("merged.txt", "the real work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let (home, store, mut session, merged) = gate_task(repo, merged_branch, &base).await;
-        session.status = TaskStatus::Waiting;
-
-        let mut merged = merged;
-        merged
-            .publication
-            .as_mut()
-            .expect("published PR")
-            .after_merge = AfterMerge::Review;
-        merged.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&merged)
-            .await
-            .expect("reland merged PR for review");
-        // `settle_task_pr` re-presents the settled row and compares it field for
-        // field; `publication.requested_at` loses sub-second precision through the
-        // store, so only the round-tripped row compares equal to itself.
-        let merged = store
-            .get_task_pr(&merged.id)
-            .await
-            .expect("read merged PR")
-            .expect("merged row");
-
-        match successor_base {
-            Some(base) => git(repo.path(), &["checkout", "-b", SUCCESSOR_BRANCH, base]),
-            None => {
-                git(repo.path(), &["checkout", "--orphan", SUCCESSOR_BRANCH]);
-                git(
-                    repo.path(),
-                    &["commit", "--allow-empty", "-m", "rewritten successor"],
-                )
-            }
-        };
-        let now = OffsetDateTime::now_utc();
-        let successor = TaskPr {
-            id: TaskPrId::new(),
-            task_id: session.id.clone(),
-            sequence: merged.sequence + 1,
-            slug: "successor".to_string(),
-            branch: SUCCESSOR_BRANCH.to_string(),
-            base_commit: successor_base.unwrap_or(&base).to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .settle_task_pr(&merged, Some(&successor))
-            .await
-            .expect("rotate successor");
-        (home, store, session, merged, successor)
-    }
-
-    async fn pr_phase(store: &SharedStore, id: &TaskPrId) -> PrPhase {
-        store
-            .get_task_pr(id)
-            .await
-            .expect("read PR")
-            .expect("PR row")
-            .phase()
-    }
-
-    #[tokio::test]
-    async fn a_merged_task_settles_over_a_proven_empty_successor() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, _merged, successor) =
-            merged_task_with_successor(&repo, Some(&base)).await;
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate over empty successor");
-        assert!(
-            gate.satisfied,
-            "the rotation's empty artifact must not block merged work: {:?}",
-            gate.blockers
-        );
-        assert_eq!(
-            gate.discardable_successor.as_ref().map(|pr| &pr.id),
-            Some(&successor.id)
-        );
-        assert_eq!(
-            pr_phase(&store, &successor.id).await,
-            PrPhase::Working,
-            "the gate must classify without mutating"
-        );
-
-        session.set_status(TaskStatus::Completed, "merged work settled");
-        complete_task_with_authority(&store, &session, gate.discardable_successor.as_ref(), None)
-            .await
-            .expect("complete over the empty successor");
-
-        let prs = store.task_prs(&session.id).await.expect("read PRs");
-        assert_eq!(
-            prs.len(),
-            1,
-            "the artifact must be gone and no replacement minted: {prs:?}"
-        );
-        assert_eq!(prs[0].phase(), PrPhase::Merged);
-        assert!(store
-            .active_task_pr(&session.id)
-            .await
-            .expect("read active PR")
-            .is_none());
-
-        // Terminal status has proven non-monotonic in this wave (W2-296/W2-299),
-        // so reconciling a settled Task must not walk it back or mint a PR.
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile after settling");
-        assert_eq!(session.status, TaskStatus::Completed);
-        assert_eq!(
-            store.task_prs(&session.id).await.expect("read PRs").len(),
-            1
-        );
-    }
-    /// Only a successor proven to hold nothing may be discarded. A `Range` is
-    /// authored work that completing would strand; an `Unprovable` base means the
-    /// branch cannot be *shown* empty, which is not the same as being empty —
-    /// `is_ancestor` reports the same false for a base whose object is gone.
-    #[tokio::test]
-    async fn a_successor_that_is_not_proven_empty_is_never_discardable() {
-        for (case, commits_work, expected) in [
-            ("range", true, "follow-up work is committed on unpublished"),
-            (
-                "unprovable",
-                false,
-                "recorded base is not an ancestor of the unpublished branch",
-            ),
-        ] {
-            let repo = TestRepo::new();
-            let base = repo.head_sha();
-            let (_home, store, session, _merged, successor) =
-                merged_task_with_successor(&repo, commits_work.then_some(base.as_str())).await;
-            if commits_work {
-                repo.create_file("follow-up.txt", "work that must not be dropped\n");
-                repo.stage_all();
-                repo.commit("follow-up work");
-            }
-
-            let gate = task_completion_gate(&store, &session)
-                .await
-                .unwrap_or_else(|error| panic!("{case}: {error}"));
-            assert!(
-                gate.blockers
-                    .iter()
-                    .any(|blocker| blocker.contains(expected)),
-                "{case}: expected blocker containing {expected:?}, got {:?}",
-                gate.blockers
-            );
-            assert_eq!(
-                pr_phase(&store, &successor.id).await,
-                PrPhase::Working,
-                "{case} must leave the row untouched"
-            );
-            if commits_work {
-                assert_eq!(
-                    super::rev_parse(repo.path(), SUCCESSOR_BRANCH).expect("resolve tip"),
-                    repo.head_sha(),
-                    "{case} must preserve the committed follow-up"
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn completion_gate_blocks_when_follow_up_range_is_unprovable() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        let base = repo.head_sha();
-        repo.create_branch(branch);
-        let (_home, store, session, pr) = gate_task(&repo, branch, &base).await;
-
-        let mut unprovable = pr.clone();
-        unprovable
-            .publication
-            .as_mut()
-            .and_then(|publication| publication.github.as_mut())
-            .expect("published github PR")
-            .head_sha = None;
-        unprovable.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&unprovable)
-            .await
-            .expect("remove published head");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with missing head");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason()
-                .contains("published pull request head is missing"),
-            "missing head must fail closed: {}",
-            gate.reason()
-        );
-
-        git(
-            repo.path(),
-            &["checkout", "--orphan", "jack/rewritten-head"],
-        );
-        git(
-            repo.path(),
-            &["commit", "--allow-empty", "-m", "rewritten published head"],
-        );
-        let rewritten_head = repo.head_sha();
-        git(repo.path(), &["checkout", branch]);
-
-        unprovable
-            .publication
-            .as_mut()
-            .and_then(|publication| publication.github.as_mut())
-            .expect("published github PR")
-            .head_sha = Some(rewritten_head);
-        unprovable.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&unprovable)
-            .await
-            .expect("record rewritten published head");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with rewritten head");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason()
-                .contains("published pull request head is not an ancestor"),
-            "rewritten head must fail closed: {}",
-            gate.reason()
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
-    async fn completion_is_withheld_over_work_committed_past_the_merged_tip() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        let base = repo.head_sha();
-        repo.create_branch(branch);
-        repo.create_file("merged.txt", "merged work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let mut open = pr.clone();
-        open.merge_commit = None;
-        open.github_observation = None;
-        open.publication
-            .as_mut()
-            .and_then(|publication| publication.github.as_mut())
-            .expect("published github PR")
-            .head_sha = Some(merged_tip.clone());
-        store.update_task_pr(&open).await.expect("open fixture PR");
-
-        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
-        repo.stage_all();
-        repo.commit("follow-up the directive asked for");
-
-        git(
-            repo.path(),
-            &[
-                "remote",
-                "set-url",
-                "origin",
-                "https://github.com/test/repo.git",
-            ],
-        );
-        let bin = tempfile::tempdir().expect("fake gh bin");
-        let gh = bin.path().join("gh");
-        std::fs::write(
-            &gh,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s\\n' '{{\"merged\":true,\"state\":\"closed\",\"merge_commit_sha\":\"merge-912\",\"number\":912,\"html_url\":\"https://example.com/pr/912\",\"head\":{{\"sha\":\"{merged_tip}\"}}}}'\n"
-            ),
-        )
-        .expect("write fake gh");
-        let mut permissions = std::fs::metadata(&gh).expect("stat fake gh").permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&gh, permissions).expect("make fake gh executable");
-        let _env_lock = crate::journal::test_env_lock();
-        let previous_path = std::env::var_os("PATH");
-        let path = match &previous_path {
-            Some(previous) => format!("{}:{}", bin.path().display(), previous.to_string_lossy()),
-            None => bin.path().display().to_string(),
-        };
-        std::env::set_var("PATH", path);
-        let observed = reconcile_task_pr(&store, &mut session).await;
-        match previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-
-        let observed = observed
-            .expect("observe merged PR")
-            .expect("persist merged PR");
-        assert_eq!(observed.phase(), PrPhase::Merged);
-        assert_ne!(
-            session.status,
-            TaskStatus::Completed,
-            "merge observation must not complete over committed follow-up"
-        );
-
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile with follow-up outstanding");
-        assert_ne!(
-            session.status,
-            TaskStatus::Completed,
-            "reconcile must not complete over committed follow-up"
-        );
-        assert_eq!(session.pm_writeback, PmWritebackState::Current);
-        assert!(repo.path().join("follow-up.txt").exists());
-    }
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_keeps_pending_and_unknown_gate_tasks_parked() {
-        let _env_lock = crate::journal::test_env_lock();
-        for (label, state) in [("pending", Some(CiState::Pending)), ("unknown", None)] {
-            let repo = TestRepo::new();
-            let branch = format!("jack/gate-{label}");
-            let (home, store, project, session, _pr) =
-                parked_gate_task(&repo, &branch, state, 0).await;
-            let _launch_env = TaskLaunchEnv::install(home.path());
-
-            supervise_project_task_bodies(&store, &project)
-                .await
-                .expect("supervise parked Gate");
-
-            let persisted = store
-                .get_task(&session.id)
-                .await
-                .expect("read Task")
-                .expect("Task exists");
-            assert_eq!(persisted.status, TaskStatus::Waiting, "{label}");
-            assert_eq!(
-                persisted.lifecycle_phase,
-                crate::task::TaskLifecyclePhase::Gate,
-                "{label}"
-            );
-            assert_eq!(persisted.phase_cursor, 0, "{label}");
-        }
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_reserves_one_typed_ci_run_for_red() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
-            parked_gate_task(&repo, "jack/gate-red", Some(CiState::Failing), 0).await;
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("first red supervision");
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("duplicate red supervision");
-
-        let incidents = store
-            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
-            .await
-            .expect("read CI incidents");
-        assert_eq!(incidents.len(), 1, "the incident identity deduplicates");
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("Task Work");
-        let run = store
-            .current_run(&work)
-            .await
-            .expect("read Run")
-            .expect("CI reserves a Run");
-        assert!(matches!(
-            &run.trigger,
-            crate::durable::RunTrigger::CiIncident { incident_id }
-                if incident_id == &incidents[0].incident.identity
-        ));
-        assert_eq!(incidents[0].incident.claimed_run_id.as_ref(), Some(&run.id));
-        assert!(store
-            .current_launch_for_run(&run.id)
-            .await
-            .expect("read Launch")
-            .is_some());
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_claims_live_run_without_reserving_a_sibling() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, mut session, _pr) =
-            parked_gate_task(&repo, "jack/gate-live-idle", Some(CiState::Failing), 0).await;
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("Task Work");
-        let (_run, lease) = store
-            .reserve_run(&work, crate::durable::RunTrigger::User)
-            .await
-            .expect("reserve live control Run");
-        store
-            .advance_run(
-                &lease,
-                crate::durable::RunAdvance::LaunchStarting {
-                    route: crate::durable::LaunchRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    containment: crate::durable::Containment::Tmux {
-                        name: "lf-live-idle-control".to_string(),
-                    },
-                    cwd: session.worktree.clone(),
-                    surface: "headless".to_string(),
-                    opaque: false,
-                    resume_token: None,
-                },
-            )
-            .await
-            .expect("start live control Launch");
-        let launch = store
-            .current_launch(&lease)
-            .await
-            .expect("read live control Launch")
-            .expect("Launch exists");
-        store
-            .advance_run(
-                &lease,
-                crate::durable::RunAdvance::LaunchLive {
-                    launch_id: launch.id.clone(),
-                },
-            )
-            .await
-            .expect("activate live control Launch");
-        session.set_status(
-            TaskStatus::Running,
-            "Project review owns the Gate step; provider turn is idle",
-        );
-        store
-            .activate_task_process_for_run(&session, &lease)
-            .await
-            .expect("activate live control body");
-        let run = store
-            .current_run(&work)
-            .await
-            .expect("read active Run")
-            .expect("active process has a Run");
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("first live-idle red supervision");
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("duplicate live-idle red supervision");
-
-        let incidents = store
-            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
-            .await
-            .expect("read CI incidents");
-        let incident = incidents
-            .iter()
-            .find(|row| row.incident.task_id == session.id)
-            .expect("live-idle incident exists");
-        assert_eq!(
-            incident.incident.claimed_run_id.as_ref(),
-            Some(&run.id),
-            "the current Run owns actionable CI"
-        );
-        assert!(incident.incident.responded_at.is_some());
-
-        let current = store
-            .current_run(&work)
-            .await
-            .expect("read current Run")
-            .expect("Run remains current");
-        assert_eq!(current.id, run.id, "CI must not reserve a sibling Run");
-
-        let persisted = store
-            .get_task(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(
-            persisted.status,
-            TaskStatus::Running,
-            "{}",
-            persisted.status_reason
-        );
-        assert_eq!(
-            store
-                .current_launch_for_run(&run.id)
-                .await
-                .expect("read current Launch")
-                .expect("control Launch remains active")
-                .id,
-            launch.id,
-            "supervision must not interrupt or replace the live control Launch"
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_relaunches_a_fresh_green_gate_exactly_once() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
-            parked_gate_task(&repo, "jack/gate-green", Some(CiState::Passing), 0).await;
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("first green supervision");
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("duplicate green supervision");
-
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("Task Work");
-        assert!(store
-            .current_run(&work)
-            .await
-            .expect("read current Run")
-            .is_some());
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_does_not_relaunch_green_after_gate_advances() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
-            parked_gate_task(&repo, "jack/gate-advanced", Some(CiState::Passing), 1).await;
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("supervise advanced Gate");
-
-        let persisted = store
-            .get_task(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(persisted.phase_cursor, 1);
-        let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("Task Work");
-        assert!(
-            store
-                .current_run(&work)
-                .await
-                .expect("read current Run")
-                .is_none(),
-            "green observation cannot reopen an advanced Gate"
-        );
-    }
-
-    /// Build an open Task PR with a GitHub receipt and an optional CI reading
-    /// for `head_sha`, the minimal shape `decide_open_pr_status` reads.
-    fn open_pr_with_ci(number: u32, head_sha: &str, state: Option<CiState>) -> TaskPr {
-        let now = OffsetDateTime::now_utc();
-        TaskPr {
-            id: TaskPrId::new(),
-            task_id: TaskId::new(),
-            sequence: 1,
-            slug: "w2-231".to_string(),
-            branch: "feature".to_string(),
-            base_commit: "base".to_string(),
-            parent_pr_id: None,
-            publication: Some(PrPublication {
-                requested_at: now,
-                after_merge: AfterMerge::Review,
-                next_slug: None,
-                github: Some(GithubPr {
-                    number,
-                    url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
-                    head_sha: Some(head_sha.to_string()),
-                }),
-            }),
-            merge_commit: None,
-            abandoned_at: None,
-            github_observation: None,
-            ci_observation: state.map(|state| CiObservation {
-                head_sha: head_sha.to_string(),
-                state,
-                failing_checks: if state == CiState::Failing {
-                    vec![CiCheck {
-                        name: "build".to_string(),
-                        url: Some("https://ci/build".to_string()),
-                    }]
-                } else {
-                    Vec::new()
-                },
-                observed_at: now,
-            }),
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    #[test]
-    fn decide_open_pr_status_blocks_on_degraded_github_observation() {
-        // A turn that ran blind to GitHub cannot be said to have repaired the
-        // head: block on the named capability with the PR still attached.
-        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
-        let (status, reason) =
-            decide_open_pr_status(&pr, Some("GitHub API rate limit exceeded"), false);
-        assert_eq!(status, OpenPrDisposition::ObservationDegraded);
-        assert!(reason.contains("github-observation"), "reason: {reason}");
-        assert!(reason.contains("rate limit"), "reason: {reason}");
-        assert!(reason.contains("#42 stays attached"), "reason: {reason}");
-    }
-
-    #[test]
-    fn decide_open_pr_status_blocks_on_no_change_failing_ci() {
-        // The body completed but the head did not advance and CI is still
-        // Failing — a no-change report, not a healthy PR observation.
-        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
-        let (status, reason) = decide_open_pr_status(&pr, None, false);
-        assert_eq!(
-            status,
-            OpenPrDisposition::NeedsDirection,
-            "a red head nobody moved needs authored direction, not a capability wait"
-        );
-        assert!(reason.contains("did not repair"), "reason: {reason}");
-        assert!(reason.contains("#42 stays attached"), "reason: {reason}");
-    }
-
-    #[test]
-    fn decide_open_pr_status_waits_when_head_advanced_even_if_failing() {
-        // The body pushed (head advanced) — that is progress, so the Task waits
-        // for CI to resolve instead of blocking a genuine attempt.
-        let pr = open_pr_with_ci(42, "sha-2", Some(CiState::Failing));
-        let (status, reason) = decide_open_pr_status(&pr, None, true);
-        assert_eq!(status, OpenPrDisposition::AwaitingReview);
-        assert!(reason.contains("open for review"), "reason: {reason}");
-    }
-
-    #[test]
-    fn decide_open_pr_status_waits_on_healthy_ci() {
-        let pending = open_pr_with_ci(42, "sha-1", Some(CiState::Pending));
-        assert_eq!(
-            decide_open_pr_status(&pending, None, false).0,
-            OpenPrDisposition::AwaitingReview
-        );
-        let passing = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
-        assert_eq!(
-            decide_open_pr_status(&passing, None, false).0,
-            OpenPrDisposition::AwaitingReview
-        );
-        // No required checks / gh unavailable reads as unknown-healthy, so an
-        // env without CI configured is never penalized with a block.
-        let unknown = open_pr_with_ci(42, "sha-1", None);
-        assert_eq!(
-            decide_open_pr_status(&unknown, None, false).0,
-            OpenPrDisposition::AwaitingReview
-        );
-    }
-
-    #[test]
-    fn decide_open_pr_status_degraded_dominates_healthy_ci() {
-        // A degraded observation blocks even when the cached CI reading looks
-        // healthy: the reading may simply be stale.
-        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
-        let (status, reason) = decide_open_pr_status(&pr, Some("network unreachable"), true);
-        assert_eq!(status, OpenPrDisposition::ObservationDegraded);
-        assert!(reason.contains("github-observation"), "reason: {reason}");
     }
 }

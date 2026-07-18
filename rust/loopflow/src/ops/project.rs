@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx, Launch, RunState,
+    AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx, Launch,
+    RunState, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -12,9 +13,9 @@ use crate::engine::process::{
     resolve_lf_binary, start_lf_session, tmux_session_exists, tmux_session_slug,
 };
 use crate::id::WaveId;
+use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
 use crate::ops::{OpsError, OpsResult};
-use crate::project::{Project, ProjectEventKind, ProjectId, ProjectStatus};
-use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+use crate::project::{Project, ProjectId};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::task::Task;
 use crate::wave::Wave;
@@ -26,9 +27,7 @@ pub struct ProjectSnapshot {
     pub project_slug: String,
     pub project_name: String,
     pub wave: String,
-    pub status: ProjectStatus,
-    pub status_reason: String,
-    pub status_at: time::OffsetDateTime,
+    pub status: WorkStatus,
     pub iteration: u32,
     pub observation_cursor: i64,
     pub pending_observations: u32,
@@ -79,6 +78,17 @@ async fn owning_wave(store: &SharedStore, session: &Project) -> OpsResult<Wave> 
         .ok_or_else(|| project_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
+async fn project_work_status(store: &Store, project: &Project) -> OpsResult<WorkStatus> {
+    let work = store
+        .work_for_child(&ChildRef::Project(project.id.clone()))
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
+    store
+        .work_status(&work)
+        .await
+        .map_err(|error| project_error(error.to_string()))
+}
+
 pub(crate) fn require_registered_wave(wave: &str) -> OpsResult<Wave> {
     let wave = wave.to_string();
     block_on_project(async move {
@@ -107,7 +117,8 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
             return Ok(None);
         };
         reconcile_project_liveness(&store, &mut existing).await?;
-        if existing.status.is_terminal() {
+        let status = project_work_status(&store, &existing).await?;
+        if matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
             return Ok(None);
         }
         if directive.is_some() {
@@ -116,9 +127,10 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
                 existing.launch.project.slug, existing.launch.project.slug,
             )));
         }
-        Ok(Some(existing))
+        Ok(Some((existing, status)))
     })? {
-        if existing.status.is_process_active() {
+        let (existing, status) = existing;
+        if matches!(status, WorkStatus::Running { .. }) {
             return Ok(existing);
         }
         return block_on_project(async move {
@@ -134,11 +146,14 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
     let mut session = reserve_project(&repo, resolved, directive)?;
-    if session.status.is_terminal() || session.status.is_process_active() {
-        return Ok(session);
-    }
     block_on_project(async move {
         let store = project_store().await?;
+        if matches!(
+            project_work_status(&store, &session).await?,
+            WorkStatus::Running { .. }
+        ) {
+            return Ok(session);
+        }
         launch_project_process(&store, &mut session).await?;
         wait_until_project_running(&store, &session.id).await
     })
@@ -166,7 +181,10 @@ pub(crate) fn reserve_project(
             .await
             .map_err(|error| project_error(format!("failed to read Project: {error}")))?;
         if let Some(existing) = &predecessor {
-            if !existing.status.is_terminal() {
+            if !matches!(
+                project_work_status(&store, existing).await?,
+                WorkStatus::Done | WorkStatus::Abandoned
+            ) {
                 return Ok(existing.clone());
             }
         }
@@ -198,9 +216,6 @@ pub(crate) fn reserve_project(
                 pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
             wave_id: wave.id().clone(),
-            status: ProjectStatus::Created,
-            status_reason: "Linear Project reserved for pursuit".to_string(),
-            status_at: now,
             iteration: 0,
             observation_cursor: 0,
             last_state_fingerprint: None,
@@ -228,7 +243,10 @@ pub(crate) fn reserve_project(
                 .await
                 .map_err(|read_error| project_error(read_error.to_string()))?
             {
-                if !existing.status.is_terminal() {
+                if !matches!(
+                    project_work_status(&store, &existing).await?,
+                    WorkStatus::Done | WorkStatus::Abandoned
+                ) {
                     return Ok(existing);
                 }
             }
@@ -243,14 +261,6 @@ pub(crate) fn ensure_project_for_task(
     resolved: crate::ops::task_pm::ResolvedProject,
 ) -> OpsResult<Project> {
     let session = reserve_project(repo, resolved, None)?;
-    if session.status.is_terminal() {
-        return Err(project_error(format!(
-            "cannot start a Task under {}: Project {} is {}; create or select an active Project",
-            session.launch.project.slug,
-            session.id,
-            session.status.as_str()
-        )));
-    }
     Ok(session)
 }
 
@@ -359,7 +369,6 @@ pub(crate) async fn launch_project_process(
         &session.id.as_str()[3..11],
         &run.id.as_str()[4..12]
     );
-    session.set_status(ProjectStatus::Starting, "project process is starting");
     store
         .update_project_for_run(session, &lease)
         .await
@@ -368,8 +377,7 @@ pub(crate) async fn launch_project_process(
         store,
         &lease,
         crate::ops::RunLaunch {
-            kind: "project",
-            work_id: session.id.to_string(),
+            work: crate::durable::WorkRef::Project(session.id.clone()),
             wave_id: session.wave_id.clone(),
             cwd: Path::new(wave.repo()).to_path_buf(),
             tmux_name,
@@ -393,15 +401,15 @@ async fn wait_until_project_running(
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project disappeared during startup"))?;
-        if session.status != ProjectStatus::Starting {
-            return if session.status == ProjectStatus::Running {
-                Ok(session)
-            } else {
-                Err(project_error(format!(
-                    "Project {} did not start: {}",
-                    session.launch.project.slug, session.status_reason
+        match project_work_status(store, &session).await? {
+            WorkStatus::Running { .. } => return Ok(session),
+            WorkStatus::Done | WorkStatus::Abandoned => {
+                return Err(project_error(format!(
+                    "Project {} ended during startup",
+                    session.launch.project.slug
                 )))
-            };
+            }
+            WorkStatus::Ready | WorkStatus::Waiting { .. } => {}
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(project_error(format!(
@@ -423,9 +431,6 @@ async fn reconcile_project_liveness(store: &SharedStore, session: &mut Project) 
         .await
         .map_err(|error| project_error(error.to_string()))?
     else {
-        if session.status.is_process_active() {
-            mark_project_body_lost(store, session).await?;
-        }
         return Ok(());
     };
     let launch = store
@@ -460,33 +465,6 @@ async fn reconcile_project_liveness(store: &SharedStore, session: &mut Project) 
             &run.id,
             launch.as_ref().map(|launch| &launch.id),
             ContainmentObservation::Absent,
-        )
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
-    if !session.status.is_process_active() {
-        return Ok(());
-    }
-    mark_project_body_lost(store, session).await
-}
-
-async fn mark_project_body_lost(store: &SharedStore, session: &mut Project) -> OpsResult<()> {
-    let from = session.status;
-    session.set_status(
-        ProjectStatus::Failed,
-        "project process is not running; resume the Project",
-    );
-    store
-        .update_project(session)
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
-    store
-        .append_project_event(
-            &session.id,
-            &ProjectEventKind::StatusChanged {
-                from,
-                to: ProjectStatus::Failed,
-                reason: session.status_reason.clone(),
-            },
         )
         .await
         .map_err(|error| project_error(error.to_string()))?;
@@ -544,15 +522,17 @@ pub fn project_snapshot(session: &Project) -> OpsResult<ProjectSnapshot> {
             .await
             .map_err(|error| project_error(error.to_string()))?
             .len() as u32;
+        let status = store
+            .work_status(&work)
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectSnapshot {
             id: session.id.to_string(),
             external_project_id: session.launch.project.id.as_str().to_string(),
             project_slug: session.launch.project.slug,
             project_name: session.launch.project.name,
             wave: wave.name().to_string(),
-            status: session.status,
-            status_reason: session.status_reason,
-            status_at: session.status_at,
+            status,
             iteration: session.iteration,
             observation_cursor: session.observation_cursor,
             pending_observations,
@@ -580,7 +560,10 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
         let receipt =
             super::child::append_steer(&store, ChildRef::Project(session.id.clone()), &message)
                 .await?;
-        if !session.status.is_process_active() {
+        if !matches!(
+            project_work_status(&store, &session).await?,
+            WorkStatus::Running { .. }
+        ) {
             launch_project_process(&store, &mut session).await?;
         }
         Ok(ProjectControlResult {
@@ -678,16 +661,6 @@ pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectContro
             .abandon(&work, &reason, &basis)
             .await
             .map_err(|error| project_error(error.to_string()))?;
-        if !session.status.is_process_active() {
-            session.set_status(
-                ProjectStatus::Abandoned,
-                format!("Project explicitly abandoned: {}", reason.trim()),
-            );
-            store
-                .update_project(&session)
-                .await
-                .map_err(|error| project_error(error.to_string()))?;
-        }
         Ok(ProjectControlResult {
             id: session.id.to_string(),
             external_project_id: session.launch.project.id.as_str().to_string(),
@@ -704,9 +677,15 @@ pub fn project_wait(
     let start = Instant::now();
     loop {
         let session = project_status(project)?;
+        let status = block_on_project(async {
+            let store = project_store().await?;
+            project_work_status(&store, &session).await
+        })?;
         let done = match until {
-            ProjectWaitUntil::Waiting => !session.status.is_process_active(),
-            ProjectWaitUntil::Terminal => session.status.is_terminal(),
+            ProjectWaitUntil::Waiting => !matches!(status, WorkStatus::Running { .. }),
+            ProjectWaitUntil::Terminal => {
+                matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
+            }
         };
         if done {
             return Ok(session);
@@ -720,11 +699,14 @@ pub fn project_wait(
 
 pub fn project_attach(project: &str) -> OpsResult<()> {
     let session = project_status(project)?;
-    if !session.status.is_process_active() {
+    let status = block_on_project(async {
+        let store = project_store().await?;
+        project_work_status(&store, &session).await
+    })?;
+    if !matches!(status, WorkStatus::Running { .. }) {
         return Err(project_error(format!(
-            "Project {} is {}; run `lf project resume {}` first",
+            "Project {} is not running; run `lf project resume {}` first",
             session.launch.project.slug,
-            session.status.as_str(),
             session.launch.project.id.as_str()
         )));
     }
@@ -772,7 +754,10 @@ pub(crate) async fn wake_project(session_id: &ProjectId) -> OpsResult<()> {
         tracing::info!(project = %session_id, "not waking Project: {bar}");
         return Ok(());
     }
-    if !session.status.is_process_active() {
+    if !matches!(
+        project_work_status(&store, &session).await?,
+        WorkStatus::Running { .. }
+    ) {
         launch_project_process(&store, &mut session).await?;
     }
     Ok(())
@@ -993,6 +978,32 @@ mod tests {
     #[tokio::test]
     async fn launch_project_process_ignores_control_bin_and_resolves_current_home() {
         let home = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+        ] {
+            assert!(Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(repo.path().join("README.md"), "test\n").unwrap();
+        assert!(Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        assert!(Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
         let store: SharedStore = Arc::new(
             open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
                 .await
@@ -1011,9 +1022,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: WaveId::new(),
-            status: ProjectStatus::Created,
-            status_reason: "ready".to_string(),
-            status_at: now,
             iteration: 1,
             observation_cursor: 0,
             last_state_fingerprint: None,
@@ -1024,6 +1032,15 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        store
+            .create_wave(&Wave::new(
+                session.wave_id.clone(),
+                "no-pin".to_string(),
+                repo.path().display().to_string(),
+            ))
+            .await
+            .unwrap();
+        store.create_project(&session).await.unwrap();
 
         let previous_control_bin = std::env::var_os("LF_CONTROL_BIN");
         let previous_lf_bin = std::env::var_os("LF_BIN");

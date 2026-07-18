@@ -1,13 +1,12 @@
-//! Linear context captured when a Project or Task starts.
+//! Linear context captured when Project or Task Work starts.
 //!
-//! These snapshots make a child resumable without another provider read. They
-//! are launch facts, not a second mutable PM model; current Project/KR/Task
-//! truth remains in the Wave's atomic PM snapshot.
+//! These immutable launch facts make Work resumable without another provider
+//! read. Current Project/KR/Task truth remains in the Wave's atomic PM snapshot.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum SessionContextError {
+pub enum LaunchContextError {
     #[error("invalid Linear id: {0}")]
     InvalidId(String),
 }
@@ -19,10 +18,10 @@ macro_rules! validated_string_id {
         pub struct $name(String);
 
         impl $name {
-            pub fn new(value: impl Into<String>) -> Result<Self, SessionContextError> {
+            pub fn new(value: impl Into<String>) -> Result<Self, LaunchContextError> {
                 let value = value.into();
                 if value.trim().is_empty() {
-                    return Err(SessionContextError::InvalidId(format!(
+                    return Err(LaunchContextError::InvalidId(format!(
                         "{} cannot be empty",
                         $label
                     )));
@@ -57,18 +56,16 @@ pub struct LinearProjectSnapshot {
     pub id: LinearProjectId,
     pub slug: String,
     pub name: String,
-    /// Definition and proof-shaped KRs captured when the child Session starts.
+    /// Definition and proof-shaped KRs captured when Project Work starts.
     pub prompt_context: String,
 }
 
-/// Immutable Linear evidence captured when a Project starts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectLaunchReceipt {
     pub project: LinearProjectSnapshot,
     pub pm_snapshot_synced_at: i64,
 }
 
-/// Immutable Linear evidence captured before a Task worktree is created.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLaunchReceipt {
     pub issue: LinearIssueSnapshot,

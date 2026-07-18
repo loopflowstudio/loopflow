@@ -1,7 +1,7 @@
 import Foundation
 
 /// The Active Sessions census: a machine-wide reading of every live body —
-/// Wave, Project Session, Task Session, direct execution, and interactive
+/// Wave, Project Work, Task Work, direct execution, and interactive
 /// launch — grouped by Wave. It is a **pure projection** over three
 /// already-merged contracts (`lf roadmap`, `lf runs`, `lf launch list`),
 /// indexed by the ids each contract declares. It performs no filesystem
@@ -235,17 +235,17 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                 guard let runtime = project.runtime,
                     !isTerminal(runtime.status)
                 else { continue }
-                let projectRowId = runtime.sessionId
+                let projectRowId = runtime.workId
                 var projectRed = false
-                var projectBlue = blockingParentIds.contains(runtime.sessionId)
+                var projectBlue = blockingParentIds.contains(runtime.workId)
                 var childRows: [ActiveSessionRow] = []
 
                 for task in project.tasks {
                     guard let taskRuntime = task.runtime,
                         !isTerminal(taskRuntime.status)
                     else { continue }
-                    let taskRowId = taskRuntime.sessionId
-                    let blockingLaunch = blockingParentIds.contains(taskRuntime.sessionId)
+                    let taskRowId = taskRuntime.workId
+                    let blockingLaunch = blockingParentIds.contains(taskRuntime.workId)
                     var tint = tint(for: task.attention.level)
                     if blockingLaunch && tint != .red { tint = .blue }
                     if tint == .red { projectRed = true }
@@ -276,7 +276,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                             launchId: nil
                         )
                     )
-                    for launch in launches where launch.parentId == taskRuntime.sessionId {
+                    for launch in launches where launch.parentId == taskRuntime.workId {
                         childRows.append(
                             launchRow(
                                 launch,
@@ -318,7 +318,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                     )
                 )
                 rows.append(contentsOf: childRows)
-                for launch in launches where launch.parentId == runtime.sessionId {
+                for launch in launches where launch.parentId == runtime.workId {
                     rows.append(
                         launchRow(
                             launch,
@@ -404,7 +404,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             step: nil,
             ageSecs: launch.ageSecs,
             reason: launch.reason,
-            nextOwner: userAttention ? .human : nil,
+            nextOwner: userAttention ? .user : nil,
             tint: userAttention ? .blue : .green,
             evidence: isStale(launch.ageSecs, staleThresholdSecs) ? .stale : .observed,
             actions: openable ? [.open] : [],
@@ -473,15 +473,8 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         return ageSecs > threshold
     }
 
-    /// A live session is one whose body could still be running. Completed and
-    /// abandoned sessions are done; a `failed` session still surfaces as a
-    /// stopped body rather than vanishing.
-    private static func isTerminal(_ status: ProjectStatus) -> Bool {
-        status == .completed || status == .abandoned
-    }
-
-    private static func isTerminal(_ status: TaskStatus) -> Bool {
-        status == .completed || status == .abandoned
+    private static func isTerminal(_ status: WorkStatus) -> Bool {
+        status == .done || status == .abandoned
     }
 
     private static func isRemote(_ home: Home) -> Bool {

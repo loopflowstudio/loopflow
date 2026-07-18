@@ -106,9 +106,9 @@ pub(crate) fn plan_apply(
 #[cfg(test)]
 mod tests {
     use super::{is_human_comment, plan_apply};
+    use crate::launch_context::{LinearIssueId, LinearIssueSnapshot, LinearProjectSnapshot};
     use crate::pm::{IssueComment, IssueObservation};
-    use crate::session_context::{LinearIssueId, LinearIssueSnapshot, LinearProjectSnapshot};
-    use crate::task::{Task, TaskId, TaskLinearObservation, TaskStatus};
+    use crate::task::{Task, TaskId, TaskLinearObservation};
 
     const VIEWER: &str = "user-loopflow";
 
@@ -137,7 +137,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::from_raw("ts_plan"),
-            launch: crate::session_context::TaskLaunchReceipt {
+            launch: crate::launch_context::TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new("issue-1").unwrap(),
                     identifier: "INF-123".to_string(),
@@ -145,7 +145,7 @@ mod tests {
                     description: "Old body".to_string(),
                 },
                 project: LinearProjectSnapshot {
-                    id: crate::session_context::LinearProjectId::new("project-1").unwrap(),
+                    id: crate::launch_context::LinearProjectId::new("project-1").unwrap(),
                     slug: "runtime".to_string(),
                     name: "Runtime".to_string(),
                     prompt_context: "Definition".to_string(),
@@ -155,9 +155,6 @@ mod tests {
             pm_writeback: crate::task::PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::project::ProjectId::new(),
-            status: TaskStatus::Running,
-            status_reason: "running".to_string(),
-            status_at: now,
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
             lifecycle: crate::task::TaskLifecyclePlan::standard("task"),

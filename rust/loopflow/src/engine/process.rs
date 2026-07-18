@@ -106,7 +106,7 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 /// perpetuate the historical binary a legacy body was created with.
 pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
-        .map_err(|error| anyhow!("cannot resolve the Session's database path: {error}"))?;
+        .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
     Ok(crate::child::ChildExecutionContext {
         lf_bin: resolve_pinned_lf_binary()?,
         db_path,
@@ -500,7 +500,12 @@ mod tests {
 
     #[test]
     fn lf_session_clears_parent_identity_and_exports_its_own() {
-        let argv = vec!["lf".to_string(), "__task".to_string()];
+        let argv = vec![
+            "lf".to_string(),
+            "__work".to_string(),
+            "task".to_string(),
+            "tsk_123".to_string(),
+        ];
         let command = lf_session_shell_command(
             &argv,
             &[("LF_RUN_CONTEXT", "agent"), ("LF_WAVE_ID", "infra")],
@@ -508,7 +513,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__task'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
         );
     }
 
@@ -526,7 +531,12 @@ mod tests {
 
     #[test]
     fn lf_session_replaces_tmux_invocation_context() {
-        let argv = vec!["lf".to_string(), "__task".to_string()];
+        let argv = vec![
+            "lf".to_string(),
+            "__work".to_string(),
+            "task".to_string(),
+            "tsk_123".to_string(),
+        ];
         let command = lf_session_shell_command(
             &argv,
             &[
@@ -539,7 +549,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__task'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
         );
     }
 

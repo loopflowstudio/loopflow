@@ -65,13 +65,6 @@ impl Child {
         }
     }
 
-    fn is_process_active(&self) -> bool {
-        match self {
-            Self::Project(session) => session.status.is_process_active(),
-            Self::Task(session) => session.status.is_process_active(),
-        }
-    }
-
     fn agent(&self) -> &str {
         match self {
             Self::Project(session) => &session.agent,
@@ -138,13 +131,16 @@ pub(crate) async fn resume_child(
             child.handoff(store, &request).await?;
         }
     }
-    if !child.is_process_active() {
-        child.launch(store).await?;
-    }
     let work = store
         .work_for_child(&child.target())
         .await
         .map_err(child_error)?;
+    if !matches!(
+        store.work_status(&work).await.map_err(child_error)?,
+        crate::durable::WorkStatus::Running { .. }
+    ) {
+        child.launch(store).await?;
+    }
     store
         .current_run(&work)
         .await
@@ -194,9 +190,9 @@ pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLeas
     // full User rights. Every Launch sets this var, so its presence without a
     // resolvable lease is a fenced or stale writer and must fail closed.
     //
-    // This deliberately does not consult the legacy Session env vars. They
-    // served as this sentinel before Run owned authority; keying on them now
-    // would make deleting them a silent privilege escalation.
+    // This deliberately does not consult the deleted Task/Project executor env
+    // vars. They served as this sentinel before Run owned authority; keying on
+    // them now would make deleting them a silent privilege escalation.
     if std::env::var_os(RUN_CONTEXT_ENV).is_some() {
         return Err(child_error(
             "in-Run agent process has no usable LF_RUN_LEASE; refusing User authority",

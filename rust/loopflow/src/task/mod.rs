@@ -15,8 +15,8 @@ use crate::durable::RunId;
 pub use crate::durable::TaskId;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
+use crate::launch_context::TaskLaunchReceipt;
 use crate::project::ProjectId;
-use crate::session_context::TaskLaunchReceipt;
 
 pub mod actions;
 pub mod runner;
@@ -25,8 +25,6 @@ pub mod runner;
 pub enum TaskDataError {
     #[error("invalid task id: {0}")]
     InvalidId(String),
-    #[error("invalid task session status: {0}")]
-    InvalidStatus(String),
     #[error("invalid task session: {0}")]
     InvalidInvariant(String),
 }
@@ -36,19 +34,6 @@ prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TaskStatus {
-    Created,
-    Starting,
-    Running,
-    Waiting,
-    Blocked,
-    Failed,
-    Completed,
-    Abandoned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum TaskLifecyclePhase {
     Kickoff,
     Iterate,
@@ -162,78 +147,18 @@ impl TaskLifecyclePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGateProposal {
-    pub status: TaskStatus,
+    pub done: bool,
     pub reason: String,
 }
 
 impl TaskGateProposal {
     fn validate(&self) -> Result<(), TaskDataError> {
-        if self.status.is_process_active() || self.status == TaskStatus::Created {
-            return Err(TaskDataError::InvalidInvariant(format!(
-                "{} is not a gate-settle outcome",
-                self.status.as_str()
-            )));
-        }
         if self.reason.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(
                 "gate proposal reason cannot be empty".to_string(),
             ));
         }
         Ok(())
-    }
-}
-
-impl TaskStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Created => "created",
-            Self::Starting => "starting",
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Blocked => "blocked",
-            Self::Failed => "failed",
-            Self::Completed => "completed",
-            Self::Abandoned => "abandoned",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Abandoned)
-    }
-
-    pub fn is_process_active(self) -> bool {
-        matches!(self, Self::Starting | Self::Running)
-    }
-
-    /// Coarsen durable intent to the shared shape the body projection reads, so
-    /// one `observe` serves Project and Tasks alike.
-    pub fn body_intent(self) -> crate::child::BodyIntent {
-        use crate::child::BodyIntent;
-        match self {
-            Self::Created | Self::Starting | Self::Running => BodyIntent::Active,
-            Self::Waiting => BodyIntent::Waiting,
-            Self::Blocked => BodyIntent::Blocked,
-            Self::Failed => BodyIntent::Failed,
-            Self::Completed | Self::Abandoned => BodyIntent::Terminal,
-        }
-    }
-}
-
-impl FromStr for TaskStatus {
-    type Err = TaskDataError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "created" => Ok(Self::Created),
-            "starting" => Ok(Self::Starting),
-            "running" => Ok(Self::Running),
-            "waiting" => Ok(Self::Waiting),
-            "blocked" => Ok(Self::Blocked),
-            "failed" => Ok(Self::Failed),
-            "completed" => Ok(Self::Completed),
-            "abandoned" => Ok(Self::Abandoned),
-            _ => Err(TaskDataError::InvalidStatus(value.to_string())),
-        }
     }
 }
 
@@ -674,10 +599,6 @@ impl TaskPr {
 #[non_exhaustive]
 pub enum PmWritebackOperation {
     CompleteTask,
-    /// Repair: the Task was prematurely completed in the PM while its gates were
-    /// still open. Reopen the PM issue so the PM row reconverges with the
-    /// Session, PR, and review state.
-    ReopenTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -722,17 +643,14 @@ pub struct Task {
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     /// Required runtime parent. Every Task reports through one durable Project
-    /// Session; its Wave retains root inspection and override authority.
+    /// Work; its Wave retains root inspection and override authority.
     pub project_id: ProjectId,
-    pub status: TaskStatus,
-    pub status_reason: String,
-    pub status_at: OffsetDateTime,
     pub worktree: PathBuf,
     pub workspace_slug: String,
     /// Three pinned phase flows and their reviewer-routing policies.
     pub lifecycle: TaskLifecyclePlan,
     /// Current phase entry. `phase_epoch` advances on every transition,
-    /// including Gate → Iterate, so stale bodies cannot rewind the Session.
+    /// including Gate → Iterate, so stale bodies cannot rewind the Task.
     pub lifecycle_phase: TaskLifecyclePhase,
     pub phase_epoch: u32,
     pub phase_cursor: u32,
@@ -749,7 +667,7 @@ pub struct Task {
     /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a process for a Session carrying this.
+    /// path may start a Launch for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -761,10 +679,8 @@ pub struct Task {
 impl Task {
     /// Why a supervisor must not start another process generation, if it must not.
     ///
-    /// Three intents are terminal for *automatic* restart, and only the first is
-    /// terminal for the Session itself:
+    /// Two intents bar an automatic restart:
     ///
-    /// - the Session is `Completed` or `Abandoned` — the work is over;
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
     /// - the active PR is `Publishing` or `Open` — publication was requested
@@ -772,12 +688,12 @@ impl Task {
     ///   and belongs to review.
     ///
     /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
-    /// and carries no live process, so it reads exactly like a Session that
+    /// and carries no live process, so it reads exactly like Work that
     /// merely stopped. A wake therefore launched generation 2, which reopened
     /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
     /// already open for review. An open PR is not an invitation to start over.
     ///
-    /// A human may still `lf task resume` a submitted Session to answer review;
+    /// A User may still `lf task resume` a submitted Task to answer review;
     /// this bars the supervisor, not the operator.
     pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
@@ -821,16 +737,9 @@ impl Task {
         None
     }
 
-    /// The two bars that hold for *every* automatic restart intent: the work is
-    /// over, or its abandonment is already decided.
+    /// The product-level bar that holds for every automatic restart intent.
+    /// Terminal execution state belongs to Work and is checked by the caller.
     pub(crate) fn terminal_or_abandon_bar(&self) -> Option<String> {
-        if self.status.is_terminal() {
-            return Some(format!(
-                "Task {} is {}; terminal Tasks do not restart",
-                self.launch.issue.identifier,
-                self.status.as_str()
-            ));
-        }
         if let Some(intent) = &self.abandon_intent {
             return Some(format!(
                 "Task {} is being abandoned: {}",
@@ -892,35 +801,12 @@ impl Task {
         if let Some(proposal) = &self.gate_proposal {
             proposal.validate()?;
         }
-        if let PmWritebackState::Pending { operation, .. } = &self.pm_writeback {
-            match operation {
-                PmWritebackOperation::CompleteTask => {
-                    if self.status != TaskStatus::Completed && self.gate_cycle == 0 {
-                        return Err(TaskDataError::InvalidInvariant(
-                            "pending PM completion requires a completed Task or an active gate cycle"
-                                .to_string(),
-                        ));
-                    }
-                }
-                PmWritebackOperation::ReopenTask => {
-                    if self.status == TaskStatus::Completed {
-                        return Err(TaskDataError::InvalidInvariant(
-                            "pending PM reopen requires the Task to no longer be completed"
-                                .to_string(),
-                        ));
-                    }
-                }
-            }
+        if matches!(self.pm_writeback, PmWritebackState::Pending { .. }) && self.gate_cycle == 0 {
+            return Err(TaskDataError::InvalidInvariant(
+                "pending PM completion requires an active gate cycle".to_string(),
+            ));
         }
         Ok(())
-    }
-
-    pub fn set_status(&mut self, status: TaskStatus, reason: impl Into<String>) {
-        let now = OffsetDateTime::now_utc();
-        self.status = status;
-        self.status_reason = reason.into();
-        self.status_at = now;
-        self.updated_at = now;
     }
 
     pub fn phase_plan(&self) -> &TaskPhasePlan {
@@ -987,11 +873,6 @@ pub enum TaskEventKind {
     Started,
     BodyHandedOff {
         handoff: crate::child::ChildBodyHandoff,
-    },
-    StatusChanged {
-        from: TaskStatus,
-        to: TaskStatus,
-        reason: String,
     },
     Progress {
         summary: String,
@@ -1116,7 +997,7 @@ pub struct LinearFollowUp {
 /// report receipts without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearObservationOutcome {
-    /// The Session had no cursor yet: this observation seeded the baseline and
+    /// The Task had no cursor yet: this observation seeded the baseline and
     /// emitted no direction (existing comments are marked seen, not replayed).
     pub baselined: bool,
     pub content_steer_applied: bool,
@@ -1128,9 +1009,9 @@ mod tests {
     use super::{
         AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
         TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
-        TaskPrId, TaskStatus,
+        TaskPrId,
     };
-    use crate::session_context::{
+    use crate::launch_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         TaskLaunchReceipt,
     };
@@ -1157,9 +1038,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::project::ProjectId::new(),
-            status: TaskStatus::Created,
-            status_reason: "created".to_string(),
-            status_at: now,
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
             lifecycle: TaskLifecyclePlan::standard("task"),
@@ -1202,14 +1080,6 @@ mod tests {
         assert_eq!(observation.inbox_id(), "task-ts_example-42");
         assert!(observation.prompt().contains("<task_observation"));
         assert!(observation.prompt().contains("\"kind\":\"failed\""));
-    }
-
-    #[test]
-    fn only_completed_and_abandoned_tasks_are_terminal() {
-        assert!(TaskStatus::Completed.is_terminal());
-        assert!(TaskStatus::Abandoned.is_terminal());
-        assert!(!TaskStatus::Waiting.is_terminal());
-        assert!(!TaskStatus::Failed.is_terminal());
     }
 
     #[test]
@@ -1578,11 +1448,6 @@ mod tests {
         let mixed = open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"])));
         assert!(session.ci_fix_restart_bar(Some(&mixed)).is_none());
 
-        // Terminal intent dominates even a legal wake.
-        let mut terminal = task();
-        terminal.status = TaskStatus::Completed;
-        assert!(terminal.ci_fix_restart_bar(Some(&legal)).is_some());
-
         // The bar does not deduplicate. A head that already woke a body still reads
         // as legal here — refusing the second launch is the ledger's job, and
         // asking the question twice is what let the two answers drift.
@@ -1590,54 +1455,19 @@ mod tests {
     }
 
     #[test]
-    fn task_rejects_impossible_process_and_writeback_state() {
+    fn task_rejects_impossible_lifecycle_and_writeback_state() {
         let mut session = task();
-        session.status = TaskStatus::Running;
-        assert!(session.validate().is_err());
-
-        session.status = TaskStatus::Waiting;
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
         assert!(session.validate().is_err());
 
-        session.status = TaskStatus::Completed;
+        session.gate_cycle = 1;
         assert!(session.validate().is_ok());
 
         session.lifecycle.iterate.flow.clear();
         assert!(session.validate().is_err());
-    }
-
-    #[test]
-    fn pending_reopen_writeback_requires_an_uncompleted_task() {
-        let mut session = task();
-        session.status = TaskStatus::Completed;
-        session.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::ReopenTask,
-            error: "premature completion".to_string(),
-        };
-        assert!(session.validate().is_err());
-
-        session.status = TaskStatus::Waiting;
-        assert!(session.validate().is_ok());
-    }
-
-    #[test]
-    fn pending_reopen_writeback_has_a_stable_json_shape() {
-        let state = PmWritebackState::Pending {
-            operation: PmWritebackOperation::ReopenTask,
-            error: "premature completion".to_string(),
-        };
-
-        assert_eq!(
-            serde_json::to_value(state).unwrap(),
-            serde_json::json!({
-                "state": "pending",
-                "operation": "reopen_task",
-                "error": "premature completion"
-            })
-        );
     }
 
     #[test]
@@ -1652,7 +1482,7 @@ mod tests {
         assert_eq!(session.phase_epoch, 2);
 
         let proposal = TaskGateProposal {
-            status: TaskStatus::Waiting,
+            done: false,
             reason: "pull request is ready for review".to_string(),
         };
         session.phase_cursor = 2;

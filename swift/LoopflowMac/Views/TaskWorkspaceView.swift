@@ -141,7 +141,7 @@ struct TaskWorkspaceView: View {
                     feedbackView
                 case .terminal:
                     TaskTerminalWorkspaceView(
-                        taskSessionId: runtime.sessionId,
+                        taskSessionId: runtime.workId,
                         issueIdentifier: task.identifier,
                         worktree: workspace.worktree,
                         store: terminalStore
@@ -151,14 +151,14 @@ struct TaskWorkspaceView: View {
                 ContentUnavailableView(
                     "Task has not started",
                     systemImage: "hammer",
-                    description: Text("Create its Task Session before opening a workspace.")
+                    description: Text("Start the Task before opening a workspace.")
                 )
             }
         }
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
-        .task(id: runtime?.sessionId) { await loadChanges() }
-        .task(id: "feedback:\(runtime?.sessionId ?? "none")") { await prepareFeedback() }
+        .task(id: runtime?.workId) { await loadChanges() }
+        .task(id: "feedback:\(runtime?.workId ?? "none")") { await prepareFeedback() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -250,9 +250,9 @@ struct TaskWorkspaceView: View {
             GhosttyTerminalView(
                 workingDirectory: workspace.worktree,
                 argv: feedbackCommand,
-                sessionId: "task-feedback-\(runtime.sessionId)"
+                sessionId: "task-feedback-\(runtime.workId)"
             )
-            .id(runtime.sessionId)
+            .id(runtime.workId)
             .background(LoopflowPalette.dark.background)
         } else if let feedbackError {
             ContentUnavailableView(

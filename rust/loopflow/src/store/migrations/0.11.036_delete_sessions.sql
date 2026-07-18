@@ -4,9 +4,6 @@ ALTER TABLE projects ADD COLUMN project_slug TEXT;
 ALTER TABLE projects ADD COLUMN project_name TEXT;
 ALTER TABLE projects ADD COLUMN project_prompt_context TEXT;
 ALTER TABLE projects ADD COLUMN pm_snapshot_synced_at INTEGER;
-ALTER TABLE projects ADD COLUMN status TEXT;
-ALTER TABLE projects ADD COLUMN status_reason TEXT;
-ALTER TABLE projects ADD COLUMN status_at INTEGER;
 ALTER TABLE projects ADD COLUMN iteration INTEGER;
 ALTER TABLE projects ADD COLUMN observation_cursor INTEGER;
 ALTER TABLE projects ADD COLUMN last_state_fingerprint TEXT;
@@ -19,12 +16,12 @@ ALTER TABLE projects ADD COLUMN updated_at INTEGER;
 
 UPDATE projects
 SET (project_slug, project_name, project_prompt_context,
-     pm_snapshot_synced_at, status, status_reason, status_at,
+     pm_snapshot_synced_at,
      iteration, observation_cursor, last_state_fingerprint,
      agent, provider, provider_session_id, abandon_requested_at,
      abandon_reason, updated_at) = (
     SELECT s.project_slug, s.project_name, s.project_prompt_context,
-           s.pm_snapshot_synced_at, s.status, s.status_reason, s.status_at,
+           s.pm_snapshot_synced_at,
            s.iteration, s.observation_cursor, s.last_state_fingerprint,
            s.agent, s.provider, s.provider_session_id,
            s.abandon_requested_at, s.abandon_reason, s.updated_at
@@ -33,15 +30,12 @@ SET (project_slug, project_name, project_prompt_context,
     ORDER BY s.created_at DESC, s.id DESC LIMIT 1
 );
 
-CREATE INDEX idx_projects_wave_status ON projects(wave_id, status, updated_at DESC);
+CREATE INDEX idx_projects_wave_updated ON projects(wave_id, updated_at DESC);
 
 ALTER TABLE tasks ADD COLUMN issue_title TEXT;
 ALTER TABLE tasks ADD COLUMN issue_description TEXT;
 ALTER TABLE tasks ADD COLUMN pm_snapshot_synced_at INTEGER;
 ALTER TABLE tasks ADD COLUMN pm_writeback_json TEXT;
-ALTER TABLE tasks ADD COLUMN status TEXT;
-ALTER TABLE tasks ADD COLUMN status_reason TEXT;
-ALTER TABLE tasks ADD COLUMN status_at INTEGER;
 ALTER TABLE tasks ADD COLUMN worktree TEXT;
 ALTER TABLE tasks ADD COLUMN workspace_slug TEXT;
 ALTER TABLE tasks ADD COLUMN agent TEXT;
@@ -65,16 +59,16 @@ ALTER TABLE tasks ADD COLUMN updated_at INTEGER;
 
 UPDATE tasks
 SET (issue_identifier, issue_title, issue_description,
-     pm_snapshot_synced_at, pm_writeback_json, status, status_reason,
-     status_at, worktree, workspace_slug, agent, provider,
+     pm_snapshot_synced_at, pm_writeback_json,
+     worktree, workspace_slug, agent, provider,
      provider_session_id, abandon_requested_at, abandon_reason,
      iterate_flow, iterate_interaction_policy, phase_cursor,
      phase_iteration, kickoff_flow, kickoff_interaction_policy,
      gate_flow, gate_interaction_policy, lifecycle_phase, phase_epoch,
      gate_cycle, gate_proposal_json, updated_at) = (
     SELECT s.issue_identifier, s.issue_title, s.issue_description,
-           s.pm_snapshot_synced_at, s.pm_writeback_json, s.status,
-           s.status_reason, s.status_at, s.worktree, s.workspace_slug,
+           s.pm_snapshot_synced_at, s.pm_writeback_json,
+           s.worktree, s.workspace_slug,
            s.agent, s.provider, s.provider_session_id,
            s.abandon_requested_at, s.abandon_reason, s.iterate_flow,
            s.iterate_interaction_policy, s.phase_cursor, s.phase_iteration,
@@ -88,7 +82,7 @@ SET (issue_identifier, issue_title, issue_description,
 
 CREATE UNIQUE INDEX idx_tasks_issue_identifier ON tasks(issue_identifier);
 CREATE UNIQUE INDEX idx_tasks_worktree ON tasks(worktree);
-CREATE INDEX idx_tasks_status ON tasks(status, updated_at DESC);
+CREATE INDEX idx_tasks_updated ON tasks(updated_at DESC);
 
 CREATE TABLE work_placements (
     wave_id TEXT REFERENCES waves(id) ON DELETE CASCADE,
@@ -107,6 +101,26 @@ CREATE TABLE work_placements (
 );
 CREATE INDEX idx_work_placements_home
     ON work_placements(home_id, placed_at);
+
+-- Run authority follows stable Work, not the Session row that first opened its
+-- Epoch. Re-key historical Runs before deleting that compatibility identity.
+UPDATE runs
+SET source_id = (
+    SELECT projects.id
+    FROM project_sessions
+    JOIN projects ON projects.external_project_id=project_sessions.project_id
+    WHERE project_sessions.id=runs.source_id
+)
+WHERE source_kind='project';
+
+UPDATE runs
+SET source_id = (
+    SELECT tasks.id
+    FROM task_sessions
+    JOIN tasks ON tasks.external_issue_id=task_sessions.issue_id
+    WHERE task_sessions.id=runs.source_id
+)
+WHERE source_kind='task';
 
 INSERT INTO work_placements (wave_id, home_id, placed_at)
 SELECT waves.id, homes.id, waves.created_at

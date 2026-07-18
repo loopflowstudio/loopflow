@@ -18,17 +18,21 @@
       }
     },
     "runtime": {
-      "session_id": "ts_live",
-      "project_session_id": "ps_1",
-      "status": "running",
+      "work_id": "ts_live",
+      "project_id": "ps_1",
+      "status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "reason": "implementing the projection",
-      "status_at": "2026-07-15T00:00:00Z",
+      "updated_at": "2026-07-15T00:00:00Z",
       "provider": "codex",
       "process_alive": true,
       "observation": {
         "category": "working",
         "reason": "implementing the projection",
-        "owner": "session",
+        "owner": "work",
         "controls": [
           "attach",
           "steer",
@@ -52,41 +56,14 @@
       "next_owner": "task",
       "actions": {
         "recommended": "no_action",
-        "actions": [
-          {
-            "action": "recover",
-            "available": false,
-            "reason": "body is alive; use attach/interrupt to interact"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "body is working; nothing to resume"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "no open PR to review"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "no merged PR to advance from"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "implementation not finished"
-          },
-          {
-            "action": "no_action",
-            "available": true,
-            "reason": "Task body is working"
-          }
-        ]
+        "reason": "Task body is working"
       },
       "pm_completed": false,
-      "session_status": "running",
+      "work_status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "process": {
         "state": "observed",
         "alive": true,
@@ -105,11 +82,11 @@
     "active_pr": null,
     "section": "now"
   },
-  "live_human_wait": {
+  "live_user_wait": {
     "task": {
-      "id": "human",
+      "id": "user",
       "identifier": "W2-A2",
-      "name": "Live human wait",
+      "name": "Live User wait",
       "description": "",
       "rank": 2,
       "completed": false,
@@ -118,17 +95,21 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "slug": "human",
-        "branch": "jack/human",
-        "worktree": "/src/loopflow.human"
+        "slug": "user",
+        "branch": "jack/user",
+        "worktree": "/src/loopflow.user"
       }
     },
     "runtime": {
-      "session_id": "ts_human",
-      "project_session_id": "ps_1",
-      "status": "running",
+      "work_id": "task-user",
+      "project_id": "ps_1",
+      "status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "reason": "waiting for a recovery decision",
-      "status_at": "2026-07-14T23:59:00Z",
+      "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
       "process_alive": true,
       "observation": {
@@ -147,7 +128,7 @@
       }
     },
     "next_move": {
-      "owner": "human",
+      "owner": "user",
       "reason": "choose the recovery boundary"
     },
     "attention": {
@@ -155,44 +136,17 @@
       "reason": "choose the recovery boundary",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 120,
-      "next_owner": "human",
+      "next_owner": "user",
       "actions": {
         "recommended": "no_action",
-        "actions": [
-          {
-            "action": "recover",
-            "available": false,
-            "reason": "body is alive; use attach/interrupt to interact"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "body is working; nothing to resume"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "no open PR to review"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "no merged PR to advance from"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "implementation not finished"
-          },
-          {
-            "action": "no_action",
-            "available": true,
-            "reason": "Task body is working"
-          }
-        ]
+        "reason": "Task body is working"
       },
       "pm_completed": false,
-      "session_status": "running",
+      "work_status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "process": {
         "state": "observed",
         "alive": true,
@@ -230,11 +184,15 @@
       }
     },
     "runtime": {
-      "session_id": "ts_dirty",
-      "project_session_id": "ps_1",
-      "status": "running",
+      "work_id": "ts_dirty",
+      "project_id": "ps_1",
+      "status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "reason": "implementing",
-      "status_at": "2026-07-14T23:50:00Z",
+      "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
       "process_alive": false,
       "observation": {
@@ -262,41 +220,14 @@
       "next_owner": "task",
       "actions": {
         "recommended": "recover",
-        "actions": [
-          {
-            "action": "recover",
-            "available": true,
-            "reason": "Task body stopped with unsettled work; recover to continue"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "no parked step to resume — recover the body first"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "no open PR to review"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "no merged PR to advance from"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "implementation not finished"
-          },
-          {
-            "action": "no_action",
-            "available": false,
-            "reason": "body is dead; recover to continue"
-          }
-        ]
+        "reason": "Task body stopped with unsettled work; recover to continue"
       },
       "pm_completed": false,
-      "session_status": "running",
+      "work_status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "process": {
         "state": "observed",
         "alive": false,
@@ -334,17 +265,17 @@
       }
     },
     "runtime": {
-      "session_id": "ts_commits",
-      "project_session_id": "ps_1",
-      "status": "waiting",
+      "work_id": "ts_commits",
+      "project_id": "ps_1",
+      "status": "ready",
       "reason": "PR open for review",
-      "status_at": "2026-07-14T22:00:00Z",
+      "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
       "process_alive": false,
       "observation": {
         "category": "needs_input",
         "reason": "PR open for review",
-        "owner": "human",
+        "owner": "user",
         "controls": [
           "decide",
           "resume",
@@ -367,41 +298,10 @@
       "next_owner": "review",
       "actions": {
         "recommended": "review",
-        "actions": [
-          {
-            "action": "recover",
-            "available": false,
-            "reason": "body is not dead; PR is open for review"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "awaiting review; resume after review to address feedback"
-          },
-          {
-            "action": "review",
-            "available": true,
-            "reason": "checks passed; awaiting review"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "PR is open, not merged"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "PR is open, not merged"
-          },
-          {
-            "action": "no_action",
-            "available": false,
-            "reason": "action available: review the PR"
-          }
-        ]
+        "reason": "checks passed; awaiting review"
       },
       "pm_completed": false,
-      "session_status": "waiting",
+      "work_status": "ready",
       "process": {
         "state": "not_expected",
         "alive": null,
@@ -466,41 +366,10 @@
       "next_owner": "project",
       "actions": {
         "recommended": null,
-        "actions": [
-          {
-            "action": "recover",
-            "available": false,
-            "reason": "no Task Session; start one with `lf task run`"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "no Task Session; start one with `lf task run`"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "no Task Session; start one with `lf task run`"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "no Task Session; start one with `lf task run`"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "no Task Session; start one with `lf task run`"
-          },
-          {
-            "action": "no_action",
-            "available": false,
-            "reason": "no Task Session; start one with `lf task run`"
-          }
-        ]
+        "reason": "Task is ready to start"
       },
       "pm_completed": false,
-      "session_status": null,
+      "work_status": null,
       "process": {
         "state": "not_applicable",
         "alive": null,
@@ -538,11 +407,11 @@
       }
     },
     "runtime": {
-      "session_id": "ts_completed",
-      "project_session_id": "ps_1",
-      "status": "completed",
+      "work_id": "ts_completed",
+      "project_id": "ps_1",
+      "status": "done",
       "reason": "merged",
-      "status_at": "2026-07-14T20:00:00Z",
+      "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
       "process_alive": false,
       "observation": {
@@ -567,41 +436,10 @@
       "next_owner": "project",
       "actions": {
         "recommended": "no_action",
-        "actions": [
-          {
-            "action": "recover",
-            "available": false,
-            "reason": "Task is terminal"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "Task is terminal"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "Task is terminal"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "Task is terminal"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "Task is terminal"
-          },
-          {
-            "action": "no_action",
-            "available": true,
-            "reason": "Task is completed"
-          }
-        ]
+        "reason": "Task is completed"
       },
       "pm_completed": true,
-      "session_status": "completed",
+      "work_status": "done",
       "process": {
         "state": "not_expected",
         "alive": null,
@@ -639,11 +477,15 @@
       }
     },
     "runtime": {
-      "session_id": "ts_stale",
-      "project_session_id": "ps_1",
-      "status": "running",
+      "work_id": "ts_stale",
+      "project_id": "ps_1",
+      "status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "reason": "implementing",
-      "status_at": "2026-07-14T18:00:00Z",
+      "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
       "process_alive": false,
       "observation": {
@@ -671,41 +513,14 @@
       "next_owner": "task",
       "actions": {
         "recommended": "recover",
-        "actions": [
-          {
-            "action": "recover",
-            "available": true,
-            "reason": "Task body stopped with unsettled work; recover to continue"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "no parked step to resume — recover the body first"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "no open PR to review"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "no merged PR to advance from"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "implementation not finished"
-          },
-          {
-            "action": "no_action",
-            "available": false,
-            "reason": "body is dead; recover to continue"
-          }
-        ]
+        "reason": "Task body stopped with unsettled work; recover to continue"
       },
       "pm_completed": false,
-      "session_status": "running",
+      "work_status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "process": {
         "state": "observed",
         "alive": false,
@@ -743,11 +558,15 @@
       }
     },
     "runtime": {
-      "session_id": "ts_unavailable",
-      "project_session_id": "ps_1",
-      "status": "running",
+      "work_id": "ts_unavailable",
+      "project_id": "ps_1",
+      "status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "reason": "implementing",
-      "status_at": "2026-07-14T23:00:00Z",
+      "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
       "process_alive": false,
       "observation": {
@@ -775,41 +594,14 @@
       "next_owner": "task",
       "actions": {
         "recommended": "recover",
-        "actions": [
-          {
-            "action": "recover",
-            "available": true,
-            "reason": "Task body stopped; recover to continue"
-          },
-          {
-            "action": "resume",
-            "available": false,
-            "reason": "no parked step to resume — recover the body first"
-          },
-          {
-            "action": "review",
-            "available": false,
-            "reason": "no open PR to review"
-          },
-          {
-            "action": "start_next_pr",
-            "available": false,
-            "reason": "no merged PR to advance from"
-          },
-          {
-            "action": "complete",
-            "available": false,
-            "reason": "implementation not finished"
-          },
-          {
-            "action": "no_action",
-            "available": false,
-            "reason": "body is dead; recover to continue"
-          }
-        ]
+        "reason": "Task body stopped; recover to continue"
       },
       "pm_completed": false,
-      "session_status": "running",
+      "work_status": {
+        "running": {
+          "run_id": "run_00000000000000000000000000000005"
+        }
+      },
       "process": {
         "state": "observed",
         "alive": false,

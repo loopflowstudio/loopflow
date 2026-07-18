@@ -137,14 +137,6 @@ pub enum EpochState {
 }
 
 impl EpochState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Done => "done",
-            Self::Abandoned => "abandoned",
-        }
-    }
-
     pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
         match value {
             "open" => Ok(Self::Open),
@@ -850,7 +842,7 @@ pub struct StopReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterruptReceipt {
     pub run_id: RunId,
-    pub launch_id: LaunchId,
+    pub launch_id: Option<LaunchId>,
     pub turn_id: Option<TurnId>,
 }
 

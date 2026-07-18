@@ -1690,12 +1690,22 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
             let sessions = runtime.block_on(store.list_tasks(None)).map_err(|error| {
                 anyhow!("cannot verify Task worktree ownership before pruning: {error}")
             })?;
-            protected.extend(
-                sessions
-                    .into_iter()
-                    .filter(|session| !session.status.is_terminal())
-                    .map(|session| session.worktree),
-            );
+            for session in sessions {
+                let work = runtime
+                    .block_on(
+                        store.work_for_child(&crate::child::ChildRef::Task(session.id.clone())),
+                    )
+                    .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
+                let status = runtime
+                    .block_on(store.work_status(&work))
+                    .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
+                if !matches!(
+                    status,
+                    crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+                ) {
+                    protected.insert(session.worktree);
+                }
+            }
         }
         Err(RegistryUnavailable::MissingFile { .. }) => {}
         Err(RegistryUnavailable::Unresolved { error }) => {

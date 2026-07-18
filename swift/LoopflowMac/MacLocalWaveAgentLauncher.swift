@@ -121,7 +121,7 @@ enum LocalWaveAgentLauncher {
         return try taskStartReceipt(stdout)
     }
 
-    /// Restart the existing Task Session without creating another worktree or
+    /// Restart existing Task Work without creating another worktree or
     /// status record.
     static func resumeTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)

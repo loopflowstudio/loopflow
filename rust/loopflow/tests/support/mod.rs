@@ -4,13 +4,13 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
-use loopflow::project::{Project, ProjectId, ProjectStatus};
-use loopflow::session_context::{
+use loopflow::launch_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
+use loopflow::project::{Project, ProjectId};
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
-use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId, TaskStatus};
+use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
@@ -269,9 +269,6 @@ fn register_task_with_process(
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        status: ProjectStatus::Running,
-        status_reason: "test project is running".to_string(),
-        status_at: now,
         iteration: 1,
         observation_cursor: 0,
         last_state_fingerprint: None,
@@ -297,17 +294,6 @@ fn register_task_with_process(
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        status: if active {
-            TaskStatus::Running
-        } else {
-            TaskStatus::Waiting
-        },
-        status_reason: if active {
-            "test Task is running".to_string()
-        } else {
-            "test Task is waiting".to_string()
-        },
-        status_at: now,
         worktree: worktree.to_path_buf(),
         workspace_slug: "task-pr-proof".to_string(),
         lifecycle: loopflow::task::TaskLifecyclePlan::standard("task"),
@@ -354,6 +340,100 @@ fn register_task_with_process(
             .create_task(&session, &pr)
             .await
             .expect("create test Task");
+        let work = store
+            .work_for_child(&loopflow::child::ChildRef::Task(session.id.clone()))
+            .await
+            .expect("resolve test Task Work");
+        let (_, lease) = store
+            .reserve_run(&work, loopflow::durable::RunTrigger::User)
+            .await
+            .expect("reserve completed test Task Run");
+        let loopflow::durable::AdvanceReceipt::Launch(launch) = store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::LaunchStarting {
+                    route: loopflow::durable::LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: loopflow::durable::Containment::ProcessGroup { id: 1 },
+                    cwd: worktree.to_path_buf(),
+                    surface: "test".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .expect("start test Task Launch")
+        else {
+            unreachable!("LaunchStarting returns Launch")
+        };
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::LaunchLive {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("activate test Task Launch");
+        let loopflow::durable::AdvanceReceipt::Turn(turn) = store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::TurnStarting {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("start test Task Turn")
+        else {
+            unreachable!("TurnStarting returns Turn")
+        };
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::TurnActive {
+                    turn_id: turn.id.clone(),
+                    provider_turn_id: None,
+                },
+            )
+            .await
+            .expect("activate test Task Turn");
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::TurnEnded {
+                    turn_id: turn.id,
+                    outcome: loopflow::durable::BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .expect("finish test Task Turn");
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::LaunchEnded {
+                    launch_id: launch.id,
+                    outcome: loopflow::durable::BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .expect("finish test Task Launch");
+        store
+            .stop_run(
+                &lease,
+                loopflow::durable::StopCause::Requested,
+                loopflow::durable::ContainmentObservation::Absent,
+            )
+            .await
+            .expect("finish test Task Run");
+        if active {
+            store
+                .reserve_run(&work, loopflow::durable::RunTrigger::User)
+                .await
+                .expect("reserve test Task Run");
+        }
     });
     RegisteredTask { store, session, pr }
 }

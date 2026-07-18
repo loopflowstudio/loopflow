@@ -72,7 +72,7 @@ public struct WaveLens: Sendable, Hashable {
         tasks: [WaveTaskWork]
     ) -> WaveLens {
         let folded = fold(tasks.map(\.attention))
-        if let runtime, runtime.processAlive, runtime.status == .running {
+        if let runtime, runtime.processAlive, runtime.status.isRunning {
             // A live body is advancing — unless a Task is calling for attention.
             if let folded, folded.color == .red || folded.color == .blue { return folded }
             return WaveLens(color: .green, reason: runtime.reason)

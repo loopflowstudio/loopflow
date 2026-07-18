@@ -26,7 +26,7 @@ use crate::provider_auth::{
 };
 use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState};
 #[cfg(test)]
-use crate::task::{Task, TaskStatus};
+use crate::task::Task;
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -481,12 +481,6 @@ impl PmClient {
     async fn complete_item(&self, item_id: &str) -> PmResult<()> {
         match self {
             Self::Linear(client) => client.complete_item(item_id).await,
-        }
-    }
-
-    async fn reopen_item(&self, item_id: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.reopen_item(item_id).await,
         }
     }
 
@@ -1293,24 +1287,6 @@ pub(crate) async fn pm_update_async(
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
     refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(result)
-}
-
-/// Reopen one PM issue: move it from its completed workflow state back to the
-/// team's default active state, then refresh the local snapshot. The Task
-/// repair path calls this when a Task was prematurely completed while its PR or
-/// required review gates were still open. Idempotent at the Linear layer: a
-/// second reopen of an already-open issue is a no-op state transition.
-pub(crate) async fn pm_reopen_task_async(
-    repo: &Path,
-    wave: &str,
-    item_id: &str,
-    progress: &impl Progress,
-) -> OpsResult<()> {
-    let ctx = resolve_context(repo, wave).await?;
-    progress.status(&format!("reopening {} task {item_id}", ctx.provider));
-    ctx.client.reopen_item(item_id).await.map_err(pm_to_ops)?;
-    refresh_pm_snapshot(repo, wave, &ctx).await?;
-    Ok(())
 }
 
 async fn apply_update(
@@ -2644,13 +2620,13 @@ fn pm_to_ops(err: PmError) -> OpsError {
 mod tests {
     use super::*;
     use crate::id::WaveId;
-    use crate::ops::NullProgress;
-    use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::project::{Project, ProjectId, ProjectStatus};
-    use crate::session_context::{
+    use crate::launch_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
+    use crate::ops::NullProgress;
+    use crate::pm::test_server::{self, json_response, QueuedResponse};
+    use crate::project::{Project, ProjectId};
     use crate::task::{
         Observation, PmWritebackState, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
         TaskPrId,
@@ -2820,9 +2796,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectStatus::Waiting,
-            status_reason: "waiting".to_string(),
-            status_at: now,
             iteration: 1,
             observation_cursor: 0,
             last_state_fingerprint: None,
@@ -2854,9 +2827,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id,
-            status: TaskStatus::Waiting,
-            status_reason: "awaiting review".to_string(),
-            status_at: now,
             worktree: PathBuf::from(format!("/repo.{identifier}")),
             workspace_slug: identifier.to_ascii_lowercase(),
             lifecycle: TaskLifecyclePlan::standard("task"),
@@ -3199,7 +3169,7 @@ mod tests {
             ),
             ReteamClass::Move
         );
-        // Open with no Session → move.
+        // Open with no active Work → move.
         assert_eq!(
             classify_reteam_item(&reteam_item("W2-4", false), "PRD", None),
             ReteamClass::Move
@@ -3531,7 +3501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reteam_already_moved_issue_only_rebinds_a_stale_session() {
+    async fn reteam_already_moved_issue_only_rebinds_a_stale_task() {
         let (_directory, store) = reteam_test_store().await;
         let session_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
         let (base_url, requests) = test_server::spawn(vec![

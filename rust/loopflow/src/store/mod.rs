@@ -1029,18 +1029,18 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{
         AttentionRoute, Author, Containment, ContainmentObservation, ControlCtx, FlowPosition,
-        RunAdvance, SendState, StopCause,
+        RunAdvance, SendState, StopCause, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::profile::EmailAddress;
-    use crate::project::{Project, ProjectId, ProjectStatus};
-    use crate::session_context::{
+    use crate::launch_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         ProjectLaunchReceipt, TaskLaunchReceipt,
     };
+    use crate::profile::EmailAddress;
+    use crate::project::{Project, ProjectId};
     use crate::task::{
         AfterMerge, CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId,
-        TaskPr, TaskPrId, TaskStatus,
+        TaskPr, TaskPrId,
     };
     use crate::trace::{AgentLaunchRow, AgentTurnRow};
     use crate::wave::Wave;
@@ -1073,11 +1073,21 @@ mod tests {
         let connection = rusqlite::Connection::open(&path).expect("open fixture database");
         connection
             .execute_batch(
-                "CREATE TABLE tasks (status TEXT NOT NULL, worktree TEXT NOT NULL);
+                "CREATE TABLE tasks (id TEXT PRIMARY KEY, worktree TEXT NOT NULL);
+                 CREATE TABLE epochs (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    number INTEGER NOT NULL,
+                    state TEXT NOT NULL
+                 );
                  INSERT INTO tasks VALUES ('running', '/repo.running');
                  INSERT INTO tasks VALUES ('waiting', '/repo.waiting');
                  INSERT INTO tasks VALUES ('completed', '/repo.completed');
-                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned');",
+                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned');
+                 INSERT INTO epochs VALUES ('e1', 'running', 1, 'open');
+                 INSERT INTO epochs VALUES ('e2', 'waiting', 1, 'open');
+                 INSERT INTO epochs VALUES ('e3', 'completed', 1, 'done');
+                 INSERT INTO epochs VALUES ('e4', 'abandoned', 1, 'abandoned');",
             )
             .expect("seed task ownership");
         drop(connection);
@@ -1216,9 +1226,6 @@ mod tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            status: TaskStatus::Created,
-            status_reason: "task session reserved".to_string(),
-            status_at: now,
             worktree: PathBuf::from("/repo.inf-123"),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
             lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
@@ -1275,9 +1282,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectStatus::Running,
-            status_reason: "project turn active".to_string(),
-            status_at: now,
             iteration: 1,
             observation_cursor: 0,
             last_state_fingerprint: None,
@@ -1364,15 +1368,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_child_reservation_refuses_remote_placement() {
+    async fn task_run_reservation_refuses_remote_placement() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
             .await
             .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
-        let mut project = make_project(&wave);
-        project.status = ProjectStatus::Created;
+        let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
@@ -1390,7 +1393,7 @@ mod tests {
         store.place_work(&work, &remote.id).await.unwrap();
 
         let error = store
-            .reserve_task_process(&task, TaskStatus::Created)
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
             .unwrap_err();
 
@@ -1460,21 +1463,19 @@ mod tests {
             .unwrap();
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
-        let mut project = make_project(&wave);
-        project.status = ProjectStatus::Created;
+        let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut task = make_task(&wave, &project);
+        let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
 
         let child_lease = store
-            .reserve_project_process(&project, ProjectStatus::Created)
+            .reserve_project_process(&project, WorkStatus::Ready)
             .await
             .unwrap()
             .unwrap();
-        project.set_status(ProjectStatus::Running, "active");
         store
             .activate_project_process(&project, &child_lease)
             .await
@@ -1489,11 +1490,10 @@ mod tests {
             .unwrap();
 
         let task_child_lease = store
-            .reserve_task_process(&task, TaskStatus::Created)
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
             .unwrap()
             .unwrap();
-        task.set_status(TaskStatus::Running, "active");
         store
             .activate_task_process(&task, &task_child_lease)
             .await
@@ -1854,15 +1854,13 @@ mod tests {
             .await
             .unwrap();
 
-        let mut running = task.clone();
-        running.set_status(TaskStatus::Waiting, "CI incident is runnable");
+        let running = task.clone();
         store.update_task(&running).await.unwrap();
         let lease = store
-            .reserve_task_process(&running, TaskStatus::Waiting)
+            .reserve_task_process(&running, WorkStatus::Ready)
             .await
             .unwrap()
             .unwrap();
-        running.set_status(TaskStatus::Running, "repairing CI");
         store.activate_task_process(&running, &lease).await.unwrap();
         let run = store.current_run(&work).await.unwrap().unwrap();
         assert!(store
@@ -1971,17 +1969,15 @@ mod tests {
         let mut task = make_task(&wave, &project);
         task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
         task.phase_cursor = 1;
-        task.set_status(TaskStatus::Waiting, "ready");
         store
             .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
         let lease = store
-            .reserve_task_process(&task, TaskStatus::Waiting)
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
             .unwrap()
             .unwrap();
-        task.set_status(TaskStatus::Running, "active");
         store.activate_task_process(&task, &lease).await.unwrap();
         let mut stale = task.clone();
 
@@ -2011,17 +2007,11 @@ mod tests {
             (crate::task::TaskLifecyclePhase::Iterate, 2, 0, 0)
         );
 
-        let mut completed = task.clone();
-        completed.set_status(TaskStatus::Completed, "implementation complete");
-        store.update_task(&completed).await.unwrap();
-        task.status = TaskStatus::Completed;
-        task.status_reason = completed.status_reason;
         task.enter_gate(crate::task::TaskGateProposal {
-            status: TaskStatus::Completed,
+            done: true,
             reason: "implementation complete".to_string(),
         })
         .unwrap();
-        task.set_status(TaskStatus::Running, "gate active");
         store.update_task_for_lease(&task, &lease).await.unwrap();
         let gating = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(
@@ -2083,8 +2073,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
 
-        let mut waiting = make_task(&wave, &project);
-        waiting.set_status(TaskStatus::Waiting, "PR is open");
+        let waiting = make_task(&wave, &project);
         store
             .create_task(&waiting, &make_task_pr(&waiting))
             .await
@@ -2119,7 +2108,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .reserve_task_process(&running, TaskStatus::Created)
+            .reserve_task_process(&running, WorkStatus::Ready)
             .await
             .unwrap()
             .expect("active Run reserves");
@@ -2496,17 +2485,12 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut session = make_task(&wave, &project);
+        let session = make_task(&wave, &project);
         let pr = make_task_pr(&session);
         store.create_task(&session, &pr).await.unwrap();
 
-        session.set_status(TaskStatus::Completed, "investigation recorded");
         store.complete_task(&session, Some(&pr)).await.unwrap();
-
-        assert_eq!(
-            store.get_task(&session.id).await.unwrap().unwrap().status,
-            TaskStatus::Completed
-        );
+        assert!(store.get_task(&session.id).await.unwrap().is_some());
         let stored = store.task_prs(&session.id).await.unwrap();
         assert!(stored.is_empty());
     }
@@ -2523,8 +2507,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let mut session = make_task(&wave, &project);
-        session.set_status(TaskStatus::Waiting, "ready");
+        let session = make_task(&wave, &project);
         store
             .create_task(&session, &make_task_pr(&session))
             .await
@@ -2536,7 +2519,7 @@ mod tests {
             tokio::spawn(async move {
                 barrier.wait().await;
                 store
-                    .reserve_task_process(&candidate, TaskStatus::Waiting)
+                    .reserve_task_process(&candidate, WorkStatus::Ready)
                     .await
                     .unwrap()
             })
@@ -2568,13 +2551,10 @@ mod tests {
         );
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
-        let mut project = make_project(&wave);
-        project.status = ProjectStatus::Created;
-        project.status_reason = "ready".to_string();
+        let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
 
-        let mut task = make_task(&wave, &project);
-        task.set_status(TaskStatus::Waiting, "ready");
+        let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task))
             .await
@@ -2588,7 +2568,7 @@ mod tests {
         let mut task_reservation = tokio::spawn(async move {
             task_started.send(()).unwrap();
             task_store
-                .reserve_task_process(&task, TaskStatus::Waiting)
+                .reserve_task_process(&task, WorkStatus::Ready)
                 .await
         });
 
@@ -2596,7 +2576,7 @@ mod tests {
         let mut project_reservation = tokio::spawn(async move {
             started_tx.send(()).unwrap();
             project_store
-                .reserve_project_process(&project, ProjectStatus::Created)
+                .reserve_project_process(&project, WorkStatus::Ready)
                 .await
         });
 
@@ -2632,67 +2612,6 @@ mod tests {
                 .unwrap();
         assert!(task_lease.is_some());
         assert!(project_lease.is_some());
-    }
-
-    #[tokio::test]
-    async fn terminal_intent_cannot_be_reverted_by_the_current_body() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let mut project = make_project(&wave);
-        project.status = ProjectStatus::Created;
-        project.status_reason = "ready".to_string();
-        store.create_project(&project).await.unwrap();
-        let project_lease = store
-            .reserve_project_process(&project, ProjectStatus::Created)
-            .await
-            .unwrap()
-            .unwrap();
-        project.set_status(ProjectStatus::Running, "active");
-        store
-            .activate_project_process(&project, &project_lease)
-            .await
-            .unwrap();
-        let mut terminal_project = project.clone();
-        terminal_project.set_status(ProjectStatus::Abandoned, "operator stopped intent");
-        store.update_project(&terminal_project).await.unwrap();
-        assert!(matches!(
-            store
-                .update_project_for_lease(&project, &project_lease)
-                .await,
-            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
-        ));
-
-        let mut task = make_task(&wave, &project);
-        task.set_status(TaskStatus::Waiting, "ready");
-        store
-            .create_task(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        let task_lease = store
-            .reserve_task_process(&task, TaskStatus::Waiting)
-            .await
-            .unwrap()
-            .unwrap();
-        task.set_status(TaskStatus::Running, "active");
-        store
-            .activate_task_process(&task, &task_lease)
-            .await
-            .unwrap();
-        let mut terminal_task = task.clone();
-        terminal_task.set_status(TaskStatus::Completed, "work delivered");
-        store.update_task(&terminal_task).await.unwrap();
-        assert!(matches!(
-            store.update_task_for_lease(&task, &task_lease).await,
-            Err(super::StoreError::LeaseRevoked { generation: 1, .. })
-        ));
-        assert_eq!(
-            store.get_task(&task.id).await.unwrap().unwrap().status,
-            TaskStatus::Completed
-        );
     }
 
     async fn run_store_basic_suite(store: &super::Store) {

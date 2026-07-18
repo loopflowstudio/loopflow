@@ -454,15 +454,19 @@ async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
 
 async fn protected_worktree_paths(state: &LfdState) -> anyhow::Result<HashSet<PathBuf>> {
     let mut protected = crate::lf::commands::top::running_workspace_paths();
-    protected.extend(
-        state
+    for task in state.store.list_tasks(None).await? {
+        let work = state
             .store
-            .list_tasks(None)
-            .await?
-            .into_iter()
-            .filter(|session| !session.status.is_terminal())
-            .map(|session| session.worktree),
-    );
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
+            .await?;
+        let status = state.store.work_status(&work).await?;
+        if !matches!(
+            status,
+            crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+        ) {
+            protected.insert(task.worktree);
+        }
+    }
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(crate::store::read_nonterminal_task_worktrees(&production)?);
@@ -561,18 +565,32 @@ async fn maintenance_sweep(state: &LfdState) {
 
     let now = OffsetDateTime::now_utc();
     if let Ok(sessions) = state.store.list_tasks(None).await {
-        let active = sessions
-            .iter()
-            .filter(|session| !session.status.is_terminal())
-            .map(|session| session.worktree.clone())
-            .collect::<HashSet<_>>();
-        let terminal = sessions
-            .into_iter()
-            .filter(|session| session.status.is_terminal())
-            .filter(|session| session.updated_at <= now - time::Duration::hours(1))
-            .map(|session| session.worktree)
-            .filter(|path| path.exists() && !active.contains(path))
-            .collect::<HashSet<_>>();
+        let mut active = HashSet::new();
+        let mut terminal = HashSet::new();
+        for session in sessions {
+            let Ok(work) = state
+                .store
+                .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
+                .await
+            else {
+                continue;
+            };
+            let Ok(status) = state.store.work_status(&work).await else {
+                continue;
+            };
+            if matches!(
+                status,
+                crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+            ) {
+                if session.updated_at <= now - time::Duration::hours(1) && session.worktree.exists()
+                {
+                    terminal.insert(session.worktree);
+                }
+            } else {
+                active.insert(session.worktree);
+            }
+        }
+        terminal.retain(|path| !active.contains(path));
         for path in terminal {
             let Ok(root) = main_repo_root(&path) else {
                 continue;

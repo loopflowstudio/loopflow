@@ -5,33 +5,32 @@ title: Architecture
 
 # Architecture
 
-> **Moment of transparency — July 17, 2026**
+> **Moment of transparency — July 18, 2026**
 >
 > Loopflow now runs durable input through Work, Epoch, Basis, Steer, Send, and
-> the existing Turn ledger. Stored Feedback/Handoff and `ChildCommand` are gone;
-> Feedback is an interactive flow interval routed by Launch attention, and direct
-> Work controls exist. Work placement now names a stable Home authority, and one
-> Home-local keeper serves all placed Waves.
+> the Turn ledger. Stored Feedback/Handoff and `ChildCommand` are gone; Feedback
+> is an interactive flow interval routed by Launch attention. Work placement
+> names a stable Home authority, and one Home-local keeper serves all placed
+> Waves.
 >
 > Child-first responsiveness has shipped. Both the Wave loop
 > (`flowloop/wave.rs`) and the Project runner drain direct User input, then the
 > oldest child Feedback awaiting them, before resuming background cadence, with
 > live-send or interrupt-and-seed fallback and no loss of the durable playhead.
 >
-> One bridge remains, and it is execution. Project and Task Session runners
-> still own process reservation, status, revocation, reaping, and recovery
-> against `ProjectSessionStatus` / `TaskSessionStatus` and a `u32` process
-> generation, then mirror those transitions into Run through
-> `reserve_run_for_child` / `activate_run_for_child`. Control *authority* no
-> longer crosses that bridge — one opaque `LF_RUN_LEASE` resolves the exact
-> active Run and missing in-Run credentials fail closed — but execution still
-> does. Run is therefore the durable authority, and not yet the only executor.
-> Removing that duplicate stack is the next and final cut.
+> The execution bridge is now deleted on the PRD-38 branch. Project and Task
+> records contain domain facts, not lifecycle state. Epoch/Run/Wait derive one
+> `WorkStatus`; Launch owns provider/process continuity; one opaque
+> `LF_RUN_LEASE` grants the exact active Run; and `run_work(WorkRef)` is the one
+> Project/Task executor entrypoint. Migration `0.11.036_delete_sessions.sql`
+> copies surviving domain facts and drops `project_sessions` and
+> `task_sessions`. Historical migrations still mention them so old databases
+> can reach the deletion.
 >
-> This page is deliberately a working architecture ledger during that cutover.
-> It keeps the current reality, target decisions, research evidence, and open
-> questions together. Sections say **Current**, **Decision**, **Target**, or
-> **Open** so aspiration cannot masquerade as shipped behavior.
+> This page remains a working architecture ledger until PRD-38 lands. “Current
+> branch” names implemented code under review; “Decision” names the normative
+> contract; “Open” names research that may change mechanics without adding a
+> second source of truth.
 
 ## Product direction
 
@@ -54,21 +53,21 @@ Three planning nouns remain distinct:
 - **Task:** concrete implementation, investigation, document, or shipped change
   inside exactly one Project.
 
-## Current implementation
+## Current branch implementation
 
-**Current.** This is the system the code still runs:
+**Current branch.** This is the system PRD-38 runs:
 
 ```text
 User -> lf start -> Home resident -> placed Wave listeners/residents
                                       |
                                       v
-                                Project Work / legacy Session runner
+                                  Project Work
                                       |
                                       v
-                                  Task Work / legacy Session runner -> worktree -> serial PRs
+                                    Task Work -> worktree -> serial PRs
 
 Steer -> Epoch Basis -> provider boundary -> agent Turn
-Run/Launch/Turn ledger <- body generation bridge -> provider process
+Run -> Launch -> provider process / optional Turn
 interactive flow + Launch attention -> Feedback projection / Swift surface
 ```
 
@@ -76,7 +75,9 @@ interactive flow + Launch attention -> Feedback projection / Swift surface
 its placed Home and asks one Home-local keeper to serve it; `lf wave <name>`
 keeps the foreground development path. Each served Wave still has its own
 listener, journal, cadence, memory, and resident body. Project and Task
-Sessions are local child processes sharing SQLite. There is no central service.
+executors are local child processes sharing SQLite. They enter through
+`lf __work <kind> <id>`, resolve the exact ambient Run lease once, and dispatch
+to typed Project or Task domain policy. There is no central service.
 
 Current decentralized truth is deliberately split by substrate:
 
@@ -89,24 +90,24 @@ Current decentralized truth is deliberately split by substrate:
 | SSH | reach to another Home without a central Loopflow coordinator |
 
 `lfd` is currently a small machine daemon for durable webhook ingress and
-liveness probes. It hosts no Sessions and is not a control API. The target Home
+liveness probes. It hosts no Work executors and is not a control API. The Home
 runtime may consolidate local keeping and Work wakeups, but it does not turn
 `lfd` or any other process into a company-wide authority.
 
-The current runtime contains several overlapping representations:
+The normalized boundary is now visible in code:
 
-- Project/Task Session identity still sits beside stable Work identity;
-- body generation mixes execution ownership with provider-process lifetime;
-- Project/Task status, lease, and health still overlap Run/Wait projection;
-- provider session ids sit on Work-shaped records;
-- Wave, Project, and Task runners repeat reservation, settlement, and recovery;
-- ambient legacy Session env reconstructs Run authority and missing credentials
-  can fall through to User authority;
-- child attention has durable routing but no parent scheduler consumer;
-- Turn records do not yet retain the root output a parent needs to understand a
-  child's question without inventing a Feedback message store.
+- Project and Task ids are stable Work identity;
+- Epoch/Run/Wait derive lifecycle and status;
+- one Run lease owns execution authority;
+- Launch owns provider route, continuation, and containment;
+- Turn owns observed boundary outcome, Basis, output, and usage;
+- Project and Task loops own only their domain policy;
+- child attention is consumed before parent background cadence;
+- Task action surfaces carry one next legal action and reason, not a mirrored
+  matrix of every blocked alternative.
 
-These are the implementation being replaced, not compatibility contracts.
+Remaining `session` names belong either to provider/tmux/UI substrate or to
+historical migrations. They are not a product executor identity.
 
 ### Foundations already changed
 
@@ -135,9 +136,9 @@ These are the implementation being replaced, not compatibility contracts.
    boundary Basis derives application.
 7. Project and Task boundaries capture immutable Basis on `agent_turns`, and
    terminal completion rejects a stale or unapplied Basis.
-8. Stable Project/Task Work rows and Epochs survive Session succession. The
-   bridge imports exact legacy generations into Runs and closes an Epoch only
-   after its executor is quiescent.
+8. Stable Project/Task Work rows contain domain state only. Epoch/Run/Wait
+   derive status, and completion closes an Epoch only after a successful
+   current boundary and quiescent containment.
 9. Stored Feedback and Handoff aggregates are deleted. Interactive flow position,
    live Launch, and `attention: User | Parent(WorkRef)` derive Feedback. A
    Basis-fenced `continue_feedback` advances the flow without a disposition.
@@ -145,16 +146,14 @@ These are the implementation being replaced, not compatibility contracts.
     claims replace its lifecycle/source/effect/claim state.
 11. Global promotion and PM reteam now fence active writers through Run and
     containment evidence rather than Session status.
-12. One opaque `LF_RUN_LEASE` now resolves exact active Run authority without a
-    caller-supplied Work, Session, generation, or Author. Observed root Turn
-    output feeds the Project runner's oldest-first child control lane.
-
-The structural gap is now shared execution, and only that. Session/body stores
-still reserve, activate, revoke, and reap through duplicated Project/Task
-paths, then mirror those transitions into Run. The ordered child control lane
-is no longer a gap: the Wave resident now runs it alongside the Project runner.
-The next cut routes Project and Task through shared Run execution and deletes
-the Session/body controller.
+12. One opaque `LF_RUN_LEASE` resolves exact active Run authority without a
+    caller-supplied Work, generation, or Author. Observed root Turn output feeds
+    the Project runner's oldest-first child control lane.
+13. Project and Task enter through one `run_work(WorkRef)` boundary. Session
+    storage, status, body generations, lifecycle mirroring, recovery, and
+    executor commands are deleted.
+14. Roadmap and Swift surfaces consume `WorkStatus` directly. The action model
+    is `recommended + reason`; the exhaustive blocked-action matrix is gone.
 
 ## Target contract
 
@@ -705,9 +704,8 @@ refused while the Work has a live Run. Run reservation resolves placement in
 the same transaction and refuses unless it names the local Home, so neither a
 caller nor a process on the wrong machine can select a different authority.
 The current mutation surface moves Wave Work only. Project and Task movement
-opens when their Session runners are replaced by the shared Run supervisor;
-until then their inherited placement is immutable rather than bridged through
-Wave routing.
+is not yet a public operation; their inherited placement is enforced by the
+same Run reservation path rather than by a second executor lifecycle.
 
 One machine-local Home resident hosts the existing per-Wave listener tasks.
 `lf start` groups Waves by Home, ensures the local keeper once, and routes
@@ -806,10 +804,10 @@ Task PR rows store evidence rather than a mutable phase label: publication
 request, nested GitHub receipt, merge, abandonment, and `after_merge`. Serial
 PRs remain inside one Task; concurrent dependency nodes are separate Tasks.
 
-**Target.** Workspace identity belongs to stable Task Work. Pursuit-specific
+**Current.** Workspace identity belongs to stable Task Work. Pursuit-specific
 authority belongs to Epoch. Historical PRs remain attributed; recovering an
 abandoned Task grants the new Epoch checked authority over the same workspace
-instead of re-keying every PR to a successor Session.
+instead of re-keying every PR to a replacement executor.
 
 ## Usage and trace
 
@@ -827,135 +825,56 @@ Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
 
 ## Migration
 
-**Target.** The cutover is one-way with no dual-write compatibility mode:
+**Current branch.** Migration `0.11.036_delete_sessions.sql` is one-way and has
+no dual-write mode. It:
 
-1. stop Wave residents and quiesce/reap every Project and Task writer; refuse
-   with an actionable list if any remains;
-2. mint stable local Project and Task ids and preserve external bindings;
-3. group Session successor chains into Epochs only at terminal restart
-   boundaries; map process generations, retries, and provider handoffs to Runs
-   and Launches inside the Epoch;
-4. convert directives to canonical truth events; convert follow-up,
-   replacement, resume, and Feedback conversation prose to ordered Steers;
-   convert narrow tool responses, CI, and lifecycle variants to typed facts;
-5. do not guess old incorporation—restart current Open Epochs with required
-   current input outstanding;
-6. move continuation data to Launch and preserve unknown historical links as
-   absent;
-7. preserve account-first routes and session pins as Launch route identity;
-   access profiles remain account-owned login venues;
-8. verify foreign keys, active-slot constraints, historical Work lookup, and
-   reconstruction on a copied dogfood database;
-9. drop live Session/body/command tables, old readers/writers, DTOs, and parsing;
-10. restart residents and let the keeper reserve current Work.
+1. copies surviving Project and Task domain facts into stable `projects` and
+   `tasks` rows;
+2. rewrites PR, CI, observation, control, and Run ownership references to
+   stable Work ids before deleting the old identity;
+3. preserves provider continuation on Launch and stable external bindings on
+   Work;
+4. drops the obsolete dependent tables, then `task_sessions` and
+   `project_sessions`;
+5. leaves no Task/Project status column on the replacement records.
 
-Shipped migration files remain history. New unpublished changes are
-dependency-ordered, file-registered drafts; the release cut alone turns them
-into Rust migrations and assigns canonical ordinals. This long-running branch
-already carried an executable six-migration tail (`one_spend_grain` through
-`drop_child_commands`) before that contract landed. Keep that tail canonical:
-Rust deliberately does not compile or apply drafts, so demoting it now would
-make fresh private and test databases omit the schema the branch executes.
-Do not add a second draft registry to bridge the mismatch. The follow-up's
-final one-way Session deletion is new schema work and must enter through the
-file-only draft contract.
+Fresh-database proof asserts that `tasks` exists, both Session tables are
+absent, and neither product table carries `status`, `status_reason`, or
+`status_at`. Historical migration files remain immutable and necessarily name
+the old tables: an older database must apply that history before it can apply
+the deletion.
 
 ## Implementation frontier
 
-**Current status.** The durable input and interaction shapes are authoritative.
-Stable Work/Epoch, ordered Basis, Steer/Send, immutable Turn Basis, typed
-ToolResponse/CI, derived Feedback, Launch attention/handback, Work status, and
-direct Work controls exist. `InteractionFeedback`, `InteractiveHandoff`, and
-`ChildCommand` have zero production references. Global promotion and PM reteam
-fence active writers through Run/containment evidence.
+**Current branch status.** The core reduction is implemented:
 
-Execution still crosses one temporary legacy bridge. Project/Task Session runners own
-process reservation, generations, status, revocation, and recovery, then mirror
-them into Run. Product control authority no longer crosses that bridge: one
-opaque `LF_RUN_LEASE` hash resolves the exact active Run and missing agent
-authority fails closed. Turn retains observed root assistant output. Project
-and Wave drain direct input then oldest child Feedback before background work
-with live-send or interrupt-and-seed fallback. Feedback route remains open across
-the conversation while nullable pending attention clears on the routed Steer;
-the next terminal child Turn re-arms it and advances the parent Basis once.
-The duplicate Session lifecycle remains.
+- Session tables, product status enums, body generations, CRUD, authority,
+  recovery, and Run mirrors are gone;
+- `run_work(WorkRef)` is the single Project/Task authority entrypoint;
+- Project and Task policy loops receive an already-resolved store and lease;
+- completion flows only through the successful-boundary Basis fence;
+- roadmap/Swift use `WorkStatus` and Work-shaped fields;
+- Task attention projects one next legal action plus its reason;
+- source is 134,190 physical Rust lines versus the pinned 144,210 baseline,
+  a reduction of 10,020. The full diff is net −14,678 lines at this checkpoint.
 
-The bridge is safe to land only when every legacy Task/Project body registers
-its actual provider process as a product Launch under the mirrored Run. Run
-control never falls back to Session lookup.
+Separate Project and Task loops remain deliberately. Their flow, KRs,
+workspace, PR, CI, and closure behavior are domain policy; combining them would
+erase the real distinction rather than reduce lifecycle machinery.
 
-One follow-up pass then finishes the authority cut rather than adding another
-bridge:
+The deterministic landing proof is complete: full Rust tests, clippy, Swift
+tests, migration upgrades, authority races, and completion fences pass. One
+configured start/Steer/interrupt/recovery/completion exercise remains useful
+dogfood when provider capacity permits; it is not evidence for a second model.
 
-1. replace Project/Task reservation, status, revocation, reaping, settlement,
-   and recovery with shared Run reserve/advance/stop;
-2. delete Session/body process authority, env vars, DTOs, and duplicate runners;
-3. author the final schema deletion under main's dependency-ordered file-only
-   draft contract, leaving no supported intermediate architecture.
+The final architecture review found no compatibility reader or lifecycle
+mirror. It did catch and remove three normalized-boundary bugs: historical Runs
+are re-keyed from deleted Session ids to stable Work ids, every Run reservation
+holds the promotion fence, and interrupt can end a reservation before a Launch
+exists without inventing containment.
 
-Size is now measured rather than asserted. `scripts/measure_source.py` counts
-physical lines under `rust/loopflow/src` and gates a required reduction against
-a pinned baseline; `ae1344a57` is 144,210 lines, reproducible by anyone.
-
-The earlier figure in this section — 121,818 physical / 119,126 normalized —
-matched no measurement of any scope in the tree (physical 144,210,
-non-blank-non-comment 123,770, excluding `#[cfg(test)]` modules 95,450, all
-Rust including tests 156,461). It described a mid-branch interim count whose
-scope was never stated, so it could not be checked and is retired rather than
-carried forward as a ceiling nobody can reproduce.
-
-The Session deletion's measured target is a net reduction of at least 10,000
-lines sourced from deletion, not compatibility shims. Behavioral proof may not
-be traded away for the count.
-
-It is done when:
-
-- killing the controller after confirmed live Send still seeds the Steer;
-- live Steer racing successful completion makes completion stale;
-- ordered Steers render once and apply together at the later Basis;
-- Unknown live Send is not repeated to that Turn and still seeds later;
-- one Feedback contains several Steers and Turns without creating Feedback rows or
-  dispositions;
-- a parent control seed includes the child's latest durable root output and
-  current evidence without creating a Message or Feedback prompt store;
-- one Feedback supports repeated parent Steer → child Turn cycles without
-  redelivering an answered turn, and each new child reply advances parent Basis;
-- Project and Wave service an awaiting child Feedback before beginning another
-  background flow step;
-- the agent already running the parent flow receives the Feedback; no reviewer
-  Run, secondary parent agent, or stored priority inbox is created;
-- a child Feedback arriving during a non-steerable parent Turn interrupts and
-  becomes the next seeded input;
-- responding to the child resumes the interrupted parent playhead without
-  replaying completed flow steps;
-- User and parent conduct the same Feedback protocol; only routing differs;
-- closing an old Feedback after Basis or flow position advances is rejected;
-- dirty canonical main cannot prevent a read-only parent control response;
-- an actionable CI incident arriving during an active Run becomes that Run's
-  next control boundary; it never reserves an overlapping repair Run;
-- a land-time-only or stale CI incident neither interrupts a Feedback nor enters
-  the control lane;
-- CI settlement cannot attribute a cached pre-repair head as the repaired head;
-  the first fresh repaired-head receipt is immutable;
-- Run authority is released only after positive containment absence; an
-  unprovable probe remains fenced;
-- one opaque Run lease identifies and authorizes the exact active Run without
-  Session id, body generation, caller-authored Work id, or Author;
-- malformed, missing, stale, and stopped in-Run credentials fail closed rather
-  than becoming User;
-- global binary promotion and external identity migration fence on active Run
-  authority and containment, never Session status or a body-generation guess;
-- a narrow typed tool response, where one exists, resolves before optional
-  provider prose;
-- stale parent lease and stale Epoch/Basis writes are rejected;
-- current Wave/Project/Task control has no production Session/body generation,
-  directive, replacement, follow-up, resume-message, `InteractionFeedback`,
-  Handoff, `ChildCommand`, or command-decision path;
-- copied dogfood migration succeeds only after every writer is quiescent;
-- format, clippy, migration/race/controller tests, and DTO round trips pass.
-
-The detailed sequence and deletion ledger live in branch-local
-`scratch/implementation-plan.md` while the cutover is active.
+Detailed deletion and proof evidence lives in
+`scratch/delete-session-and-make-run.md` while this branch is open.
 
 ## Normative race and portability tests
 
@@ -998,14 +917,11 @@ noun or source of truth:
    Unsupported unobservable writers must fail closed.
 5. Define the smallest explicit success/handback mechanism for opaque TUIs;
    process exit cannot imply success.
-6. Audit Session successor history whose terminal boundary is ambiguous. The
-   migration may preserve unknown lineage but must not invent Epochs.
+6. Exercise migration 36 against a copied long-lived dogfood database whose
+   old successor history includes ambiguous terminal boundaries. Preserve
+   unknown lineage; never invent an Epoch boundary.
 7. Decide whether historical Epoch appears in public diagnostic receipts. Work
    remains the control target either way.
-8. The architecture branch's pre-draft canonical tail is a one-time exception.
-   Main's current contract is explicit that draft files are release inputs and
-   Rust does not execute them. Do not recreate the removed `DRAFTS` registry;
-   the follow-up authors only its final schema deletion as a draft.
 
 Questions about central orchestration, generic workflow engines, recursive
 Projects, provider-wide steer capability, writable Ack, replacement messages,
@@ -1016,14 +932,14 @@ above.
 
 **Current implementation:**
 
-- `rust/loopflow/src/child_session.rs`
-- `rust/loopflow/src/child_control.rs`
-- `rust/loopflow/src/project_session/`
+- `rust/loopflow/src/work_runner.rs`
+- `rust/loopflow/src/project/runner.rs`
 - `rust/loopflow/src/task/`
 - `rust/loopflow/src/flowloop/wave.rs`
+- `rust/loopflow/src/ops/child.rs`
 - `rust/loopflow/src/store/`
 
-**Foundations and target seams:**
+**Durable and provider seams:**
 
 - `rust/loopflow/src/harness/`
 - `rust/loopflow/src/durable.rs`

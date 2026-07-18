@@ -664,7 +664,7 @@ fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> 
         println!(
             "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
-            session.status.as_str(),
+            work_status_label(&snapshot.status),
             session.id,
             session.lifecycle_phase.as_str(),
             session.lifecycle_cycle(),
@@ -676,7 +676,7 @@ fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> 
             session.worktree.display(),
             branch,
             pm_writeback,
-            session.status_reason,
+            work_status_label(&snapshot.status),
         );
         println!("  project: {}", session.project_id);
         for pr in &snapshot.prs {
@@ -700,24 +700,20 @@ fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> 
         }
         let actions = &snapshot.actions;
         if let Some(recommended) = actions.recommended {
-            let reason = actions
-                .status(recommended)
-                .map(|s| s.reason.as_str())
-                .unwrap_or("");
-            println!("  action: {}  ({})", recommended.as_str(), reason);
-            use loopflow::task::actions::TaskAction;
-            for status in &actions.actions {
-                if !status.available && status.action != TaskAction::NoAction {
-                    println!(
-                        "    blocked: {}  ({})",
-                        status.action.as_str(),
-                        status.reason,
-                    );
-                }
-            }
+            println!("  action: {}  ({})", recommended.as_str(), actions.reason);
         }
     }
     Ok(())
+}
+
+fn work_status_label(status: &loopflow::durable::WorkStatus) -> &'static str {
+    match status {
+        loopflow::durable::WorkStatus::Ready => "ready",
+        loopflow::durable::WorkStatus::Running { .. } => "running",
+        loopflow::durable::WorkStatus::Waiting { .. } => "waiting",
+        loopflow::durable::WorkStatus::Done => "done",
+        loopflow::durable::WorkStatus::Abandoned => "abandoned",
+    }
 }
 
 fn print_task_control(
@@ -762,11 +758,11 @@ fn print_project(session: &loopflow::project::Project, json: bool) -> anyhow::Re
         println!(
             "{}  {}\n  session: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             session.launch.project.slug,
-            session.status.as_str(),
+            work_status_label(&snapshot.status),
             session.id,
             body,
             session.iteration,
-            session.status_reason,
+            work_status_label(&snapshot.status),
         );
     }
     Ok(())
@@ -1310,16 +1306,13 @@ fn main() -> anyhow::Result<()> {
                 epoch_id,
                 *revision,
             ),
-            Some(Commands::TaskRunner { session_id }) => {
-                let session_id = session_id.parse()?;
-                tokio::runtime::Runtime::new()?
-                    .block_on(loopflow::task::runner::run_task(session_id))
-            }
-            Some(Commands::ProjectRunner { session_id }) => {
-                let session_id = session_id.parse()?;
-                tokio::runtime::Runtime::new()?.block_on(
-                    loopflow::project::runner::run_project(session_id),
-                )
+            Some(Commands::WorkRunner { kind, work_id }) => {
+                let work = match kind.as_str() {
+                    "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),
+                    "task" => loopflow::durable::WorkRef::Task(work_id.parse()?),
+                    _ => unreachable!("clap validates Work kind"),
+                };
+                tokio::runtime::Runtime::new()?.block_on(loopflow::work_runner::run_work(work))
             }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)

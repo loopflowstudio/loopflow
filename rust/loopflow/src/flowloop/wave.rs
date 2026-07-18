@@ -1782,10 +1782,8 @@ mod tests {
     async fn feedback_rig(tmp: &tempfile::TempDir, route: bool) -> FeedbackRig {
         use crate::child::ChildRef;
         use crate::durable::{AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance};
-        use crate::project::{Project, ProjectId, ProjectStatus};
-        use crate::session_context::{
-            LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt,
-        };
+        use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+        use crate::project::{Project, ProjectId};
 
         let store = Arc::new(
             open_store(&crate::store::StorageConfig::sqlite(
@@ -1813,9 +1811,6 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectStatus::Created,
-            status_reason: "created".to_string(),
-            status_at: now,
             iteration: 0,
             observation_cursor: 0,
             last_state_fingerprint: None,

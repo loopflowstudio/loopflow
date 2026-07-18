@@ -5,7 +5,7 @@ action_style: procedural
 Judge the exact Project after this pursuit pass.
 
 Read its authoritative Linear definition/KRs, filed Tasks, supervised Task
-Session state, merged PR evidence, decisions, and linked observations.
+Work state, merged PR evidence, decisions, and linked observations.
 
 - Check a KR only when its observable condition holds. Endurance KRs require
   their full duration; a single demo or implementation receipt is not proof.

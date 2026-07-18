@@ -138,7 +138,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
 
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
-    write_executable(&bin.path().join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.path().join("codex"), "#!/bin/sh\nexit 0\n");
     let path = std::env::var("PATH")
         .map(|path| format!("{}:{path}", bin.path().display()))
         .unwrap_or_else(|_| bin.path().display().to_string());

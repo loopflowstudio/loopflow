@@ -10,8 +10,6 @@ use crate::id::WaveId;
 use crate::project_session::ProjectSessionId;
 use crate::task::{TaskEvent, TaskEventKind, TaskSessionId};
 
-pub(crate) const PROJECT_LEASE_TOKEN_ENV: &str = "LF_PROJECT_LEASE_TOKEN";
-pub(crate) const PROJECT_GENERATION_ENV: &str = "LF_PROJECT_GENERATION";
 pub(crate) const TASK_LEASE_TOKEN_ENV: &str = "LF_TASK_LEASE_TOKEN";
 pub(crate) const TASK_GENERATION_ENV: &str = "LF_TASK_GENERATION";
 
@@ -147,10 +145,6 @@ impl std::fmt::Debug for ChildWriteLease {
 
 pub(crate) fn task_write_lease_from_env() -> Result<ChildWriteLease, ChildSessionDataError> {
     child_write_lease_from_env("Task", TASK_GENERATION_ENV, TASK_LEASE_TOKEN_ENV)
-}
-
-pub(crate) fn project_write_lease_from_env() -> Result<ChildWriteLease, ChildSessionDataError> {
-    child_write_lease_from_env("Project", PROJECT_GENERATION_ENV, PROJECT_LEASE_TOKEN_ENV)
 }
 
 fn child_write_lease_from_env(

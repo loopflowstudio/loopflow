@@ -17,7 +17,7 @@ use crate::child_session::{
     ChildLeaseToken, ChildProcessGeneration, ChildProcessReservation, ChildRef, ChildWriteLease,
     ObservationRecipient,
 };
-use crate::durable::Author;
+use crate::durable::{Author, RunLease};
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::project_session::{
@@ -38,7 +38,8 @@ use crate::task::{
 
 use super::durable::{
     activate_run_for_child, create_project_spine, create_task_spine, end_run_for_child,
-    fence_run_for_child, reserve_run_for_child, work_for_child_in,
+    end_run_for_lease, fence_run_for_child, reserve_run_for_child, validate_run_lease,
+    work_for_child_in,
 };
 use super::SqliteStore;
 
@@ -1506,6 +1507,7 @@ impl SqliteStore {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn activate_project_process(
         &self,
         session: &ProjectSession,
@@ -1547,6 +1549,40 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn activate_project_process_for_run(
+        &self,
+        session: &ProjectSession,
+        lease: &RunLease,
+    ) -> StoreResult<()> {
+        validate_project_session(session)?;
+        let process = session.latest_process.as_ref().ok_or_else(|| {
+            StoreError::InvalidData("Project activation requires process evidence".to_string())
+        })?;
+        if process.state != ChildLeaseState::Active {
+            return Err(StoreError::InvalidData(
+                "Project activation requires Active process evidence".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if update_project_session_for_run_in(&transaction, session, lease)? == 0 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot activate Project Session {}",
+                lease.run_id, session.id
+            )));
+        }
+        insert_project_event_in(
+            &transaction,
+            session,
+            &ProjectEventKind::BodyLeaseChanged {
+                process: process.clone(),
+            },
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub(crate) fn update_project_session_for_lease(
         &self,
         session: &ProjectSession,
@@ -1561,33 +1597,43 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn finish_project_process(
+    pub(crate) fn update_project_session_for_run(
         &self,
         session: &ProjectSession,
-        lease: &ChildWriteLease,
+        lease: &RunLease,
+    ) -> StoreResult<()> {
+        validate_project_session(session)?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if update_project_session_for_run_in(&conn, session, lease)? == 0 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot update Project Session {}",
+                lease.run_id, session.id
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish_project_process_for_run(
+        &self,
+        session: &ProjectSession,
+        lease: &RunLease,
     ) -> StoreResult<()> {
         validate_project_session(session)?;
         let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Project finish requires a process generation".to_string())
+            StoreError::InvalidData("Project finish requires process evidence".to_string())
         })?;
-        if process.state != ChildLeaseState::Finished
-            || process.outcome.is_none()
-            || process.generation != lease.generation
-        {
+        if process.state != ChildLeaseState::Finished || process.outcome.is_none() {
             return Err(StoreError::InvalidData(
-                "Project finish requires the matching Finished generation and outcome".to_string(),
+                "Project finish requires Finished process evidence and outcome".to_string(),
             ));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_project_session_for_lease_in(
-            &transaction,
-            session,
-            lease,
-            ChildLeaseState::Active,
-        )? == 0
-        {
-            return Err(lease_revoked("Project Session", session.id.as_str(), lease));
+        if update_project_session_for_run_in(&transaction, session, lease)? == 0 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot finish Project Session {}",
+                lease.run_id, session.id
+            )));
         }
         insert_project_event_in(
             &transaction,
@@ -1596,11 +1642,7 @@ impl SqliteStore {
                 process: process.clone(),
             },
         )?;
-        end_run_for_child(
-            &transaction,
-            &ChildRef::Project(session.id.clone()),
-            lease.generation,
-        )?;
+        end_run_for_lease(&transaction, lease)?;
         close_project_epoch_if_quiescent(&transaction, session)?;
         transaction.commit()?;
         Ok(())
@@ -1909,17 +1951,15 @@ impl SqliteStore {
         Ok(sessions)
     }
 
-    pub(crate) fn stop_project_for_lease(
+    pub(crate) fn stop_project_for_run(
         &self,
         session_id: &ProjectSessionId,
-        lease: &ChildWriteLease,
+        lease: &RunLease,
         stopped_status: ProjectSessionStatus,
         reason: &str,
     ) -> StoreResult<ProjectSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let target = ChildRef::Project(session_id.clone());
-        require_child_write_lease(&transaction, &target, lease)?;
         let mut session = transaction
             .query_row(
                 PROJECT_SESSION_SELECT,
@@ -1929,14 +1969,11 @@ impl SqliteStore {
             .optional()?
             .ok_or(StoreError::NotFound)?;
         session.set_status(stopped_status, reason);
-        if update_project_session_for_lease_in(
-            &transaction,
-            &session,
-            lease,
-            ChildLeaseState::Active,
-        )? == 0
-        {
-            return Err(lease_revoked("Project Session", session_id.as_str(), lease));
+        if update_project_session_for_run_in(&transaction, &session, lease)? == 0 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot stop Project Session {session_id}",
+                lease.run_id
+            )));
         }
         transaction.commit()?;
         Ok(session)
@@ -1959,15 +1996,15 @@ impl SqliteStore {
         Ok(event)
     }
 
-    pub(crate) fn append_project_event_for_lease(
+    pub(crate) fn append_project_event_for_run(
         &self,
         session_id: &ProjectSessionId,
-        lease: &ChildWriteLease,
+        lease: &RunLease,
         kind: &ProjectEventKind,
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_child_write_lease(&transaction, &ChildRef::Project(session_id.clone()), lease)?;
+        require_run_owns_child(&transaction, &ChildRef::Project(session_id.clone()), lease)?;
         let session = transaction.query_row(
             PROJECT_SESSION_SELECT,
             params![session_id.as_str()],
@@ -2070,27 +2107,49 @@ impl SqliteStore {
         project_session_id: &ProjectSessionId,
         observation: &ObservationOutboxRow,
     ) -> StoreResult<bool> {
-        self.consume_task_observation_for_project_with_lease(project_session_id, observation, None)
+        self.consume_task_observation_for_project_with_authority(
+            project_session_id,
+            observation,
+            None,
+            None,
+        )
     }
 
+    #[cfg(test)]
     pub(crate) fn consume_task_observation_for_project_for_lease(
         &self,
         project_session_id: &ProjectSessionId,
         observation: &ObservationOutboxRow,
         lease: &ChildWriteLease,
     ) -> StoreResult<bool> {
-        self.consume_task_observation_for_project_with_lease(
+        self.consume_task_observation_for_project_with_authority(
             project_session_id,
             observation,
+            Some(lease),
+            None,
+        )
+    }
+
+    pub(crate) fn consume_task_observation_for_project_for_run(
+        &self,
+        project_session_id: &ProjectSessionId,
+        observation: &ObservationOutboxRow,
+        lease: &RunLease,
+    ) -> StoreResult<bool> {
+        self.consume_task_observation_for_project_with_authority(
+            project_session_id,
+            observation,
+            None,
             Some(lease),
         )
     }
 
-    fn consume_task_observation_for_project_with_lease(
+    fn consume_task_observation_for_project_with_authority(
         &self,
         project_session_id: &ProjectSessionId,
         observation: &ObservationOutboxRow,
-        lease: Option<&ChildWriteLease>,
+        child_lease: Option<&ChildWriteLease>,
+        run_lease: Option<&RunLease>,
     ) -> StoreResult<bool> {
         let (
             ObservationRecipient::Project {
@@ -2110,8 +2169,15 @@ impl SqliteStore {
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(lease) = lease {
+        if let Some(lease) = child_lease {
             require_child_write_lease(
+                &transaction,
+                &ChildRef::Project(project_session_id.clone()),
+                lease,
+            )?;
+        }
+        if let Some(lease) = run_lease {
+            require_run_owns_child(
                 &transaction,
                 &ChildRef::Project(project_session_id.clone()),
                 lease,
@@ -2875,6 +2941,24 @@ pub(super) fn require_child_write_lease(
     }
 }
 
+fn require_run_owns_child(
+    conn: &Connection,
+    target: &ChildRef,
+    lease: &RunLease,
+) -> StoreResult<()> {
+    let run = validate_run_lease(conn, lease)?;
+    let work = work_for_child_in(conn, target)?;
+    if run.work != work {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Run {} does not own {} Work {}",
+            run.id,
+            target.target_kind(),
+            work.id()
+        )));
+    }
+    Ok(())
+}
+
 fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
     let publication = pr.publication.as_ref();
@@ -3371,6 +3455,7 @@ const PROJECT_SESSION_UPDATE: &str = "UPDATE project_sessions SET
     lf_bin=?23, db_path=?24, lf_home=?25,
     abandon_requested_at=?26, abandon_reason=?27
     WHERE id=?1";
+#[cfg(test)]
 const PROJECT_SESSION_LEASE_UPDATE: &str = "UPDATE project_sessions SET
     project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
     wave_id=?6, pm_snapshot_synced_at=?7, status=?8,
@@ -3387,6 +3472,20 @@ const PROJECT_SESSION_LEASE_UPDATE: &str = "UPDATE project_sessions SET
     WHERE id=?1 AND process_generation=?35 AND process_lease_token=?36
       AND process_lease_state=?37
       AND (status NOT IN ('completed', 'abandoned') OR status=?8)";
+const PROJECT_SESSION_RUN_UPDATE: &str = "UPDATE project_sessions SET
+    project_id=?2, project_slug=?3, project_name=?4, project_prompt_context=?5,
+    wave_id=?6, pm_snapshot_synced_at=?7, status=?8,
+    status_reason=?9, status_at=?10, iteration=?11,
+    observation_cursor=?12, last_state_fingerprint=?13, agent=?14, provider=?15,
+    provider_session_id=?16, process_generation=?17, process_pid=?18,
+    process_tmux_name=?19, process_started_at=?20, created_at=?21,
+    updated_at=?22,
+    lf_bin=?23, db_path=?24, lf_home=?25,
+    abandon_requested_at=?26, abandon_reason=?27,
+    process_group_id=?28, process_agent=?29, process_provider=?30,
+    process_provider_session_id=?31, process_lease_state=?32,
+    process_outcome_json=?33, process_provenance_json=?34
+    WHERE id=?1 AND (status NOT IN ('completed', 'abandoned') OR status=?8)";
 fn project_session_params(session: &ProjectSession) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(session.id.as_str().to_string()),
@@ -3507,6 +3606,7 @@ fn project_session_control_params(session: &ProjectSession) -> Vec<Box<dyn ToSql
     parameters
 }
 
+#[cfg(test)]
 fn update_project_session_for_lease_in(
     conn: &Connection,
     session: &ProjectSession,
@@ -3519,6 +3619,19 @@ fn update_project_session_for_lease_in(
     parameters.push(Box::new(expected_state.as_str().to_string()));
     Ok(conn.execute(
         PROJECT_SESSION_LEASE_UPDATE,
+        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+    )?)
+}
+
+fn update_project_session_for_run_in(
+    conn: &Connection,
+    session: &ProjectSession,
+    lease: &RunLease,
+) -> StoreResult<usize> {
+    require_run_owns_child(conn, &ChildRef::Project(session.id.clone()), lease)?;
+    let parameters = project_session_params(session);
+    Ok(conn.execute(
+        PROJECT_SESSION_RUN_UPDATE,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?)
 }

@@ -1348,13 +1348,10 @@ fn main() -> anyhow::Result<()> {
                     *generation,
                 ))
             }
-            Some(Commands::ProjectRunner {
-                session_id,
-                generation,
-            }) => {
+            Some(Commands::ProjectRunner { session_id }) => {
                 let session_id = session_id.parse()?;
                 tokio::runtime::Runtime::new()?.block_on(
-                    loopflow::project_session::runner::run_project_session(session_id, *generation),
+                    loopflow::project_session::runner::run_project_session(session_id),
                 )
             }
             Some(Commands::Tokens { json, days }) => {

@@ -370,7 +370,7 @@ pub(crate) async fn launch_project_process(
     // The reserved generation records no provenance: nothing has run yet. The
     // child stamps its own binary's provenance when it boots (mark_booted), so
     // the audit row describes what ran, never merely what launched it.
-    let generation = launch.begin_generation(tmux_name.clone());
+    launch.begin_generation(tmux_name.clone());
     let Some(lease) = store
         .reserve_project_process(&launch, from)
         .await
@@ -397,10 +397,7 @@ pub(crate) async fn launch_project_process(
         execution.lf_bin.to_string_lossy().to_string(),
         "__project".to_string(),
         session.id.to_string(),
-        "--generation".to_string(),
-        generation.to_string(),
     ];
-    let generation_text = generation.to_string();
     let run_lease = lease.run_token.env_value().to_string();
     let control_bin = execution.lf_bin.to_string_lossy().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
@@ -411,11 +408,6 @@ pub(crate) async fn launch_project_process(
             session.wave_id.as_str(),
         ),
         ("LF_PROJECT_SESSION_ID", session.id.as_str()),
-        ("LF_PROJECT_GENERATION", generation_text.as_str()),
-        (
-            crate::child_session::PROJECT_LEASE_TOKEN_ENV,
-            lease.token.as_str(),
-        ),
         (crate::durable::RUN_CONTEXT_ENV, "agent"),
         (crate::durable::RUN_LEASE_ENV, run_lease.as_str()),
         (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),

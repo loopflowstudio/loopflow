@@ -339,13 +339,9 @@ pub enum Commands {
         #[arg(long)]
         generation: u32,
     },
-    /// Internal: run one durable Project Session process generation
+    /// Internal: run the Project body holding the ambient Run lease
     #[command(name = "__project", hide = true)]
-    ProjectRunner {
-        session_id: String,
-        #[arg(long)]
-        generation: u32,
-    },
+    ProjectRunner { session_id: String },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
         /// Emit as JSON

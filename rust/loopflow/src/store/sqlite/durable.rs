@@ -1585,7 +1585,7 @@ fn resolve_wait_for_trigger(
     Ok(())
 }
 
-fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
+pub(crate) fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
     let run = run_by_id_in(conn, &lease.run_id)?;
     if run.work != lease.work || !matches!(run.state, RunState::Reserved | RunState::Active) {
         return Err(StoreError::InvalidAuthority(format!(
@@ -2914,6 +2914,27 @@ pub(crate) fn end_run_for_child(
             i64::from(generation),
             now
         ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn end_run_for_lease(conn: &Connection, lease: &RunLease) -> StoreResult<()> {
+    let run = validate_run_lease(conn, lease)?;
+    let now = now_unix();
+    conn.execute(
+        "UPDATE agent_launches SET
+            launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+            outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
+            handback_state=COALESCE(handback_state, 'unknown'),
+            attention_kind=NULL, attention_work_kind=NULL,
+            attention_work_id=NULL, attention_at=NULL
+         WHERE product_run_id=?1 AND launch_state != 'ended'",
+        params![run.id.as_str(), now],
+    )?;
+    conn.execute(
+        "UPDATE runs SET state='ended', ended_at=?2
+         WHERE id=?1 AND state != 'ended'",
+        params![run.id.as_str(), now],
     )?;
     Ok(())
 }

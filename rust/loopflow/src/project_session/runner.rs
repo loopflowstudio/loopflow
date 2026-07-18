@@ -13,11 +13,8 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, send_outstanding_steers,
     take_current_input as take_child_input, CommandStop, PendingInput,
 };
-use crate::child_session::{
-    project_write_lease_from_env, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
-    ChildRef, ChildWriteLease,
-};
-use crate::durable::{Basis, BoundarySeed};
+use crate::child_session::{ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState, ChildRef};
+use crate::durable::{Basis, BoundarySeed, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
@@ -41,14 +38,11 @@ struct PreparedProjectStep {
     basis: Basis,
 }
 
-pub async fn run_project_session(session_id: ProjectSessionId, generation: u32) -> Result<()> {
-    let lease = project_write_lease_from_env().map_err(|error| anyhow!(error))?;
-    if lease.generation != generation {
-        anyhow::bail!(
-            "Project generation {generation} does not match its ambient write lease generation {}",
-            lease.generation
-        );
-    }
+pub async fn run_project_session(session_id: ProjectSessionId) -> Result<()> {
+    let store = open_existing_store()
+        .await
+        .ok_or_else(|| anyhow!("no Loopflow registry on this machine"))?;
+    let lease = crate::ops::required_run_lease(&store).await?;
     let result = run_project_session_inner(session_id.clone(), &lease).await;
     if let Err(error) = &result {
         record_unhandled_failure(&session_id, &lease, error).await;
@@ -63,11 +57,7 @@ async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> Result<Wa
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
-async fn run_project_session_inner(
-    session_id: ProjectSessionId,
-    lease: &ChildWriteLease,
-) -> Result<()> {
-    let generation = lease.generation;
+async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLease) -> Result<()> {
     let store: SharedStore = Arc::new(
         open_existing_store()
             .await
@@ -78,14 +68,6 @@ async fn run_project_session_inner(
         .await?
         .ok_or_else(|| anyhow!("Project Session {session_id} not found"))?;
     let wave = owning_wave(&store, &session).await?;
-    if session
-        .latest_process
-        .as_ref()
-        .map(|process| process.generation)
-        != Some(generation)
-    {
-        anyhow::bail!("Project Session {session_id} generation {generation} is not current");
-    }
     if let Some(process) = &mut session.latest_process {
         process.mark_booted();
     }
@@ -94,9 +76,11 @@ async fn run_project_session_inner(
         ProjectSessionStatus::Running,
         "project pursuit turn is active",
     );
-    store.activate_project_process(&session, lease).await?;
     store
-        .append_project_event_for_lease(
+        .activate_project_process_for_run(&session, lease)
+        .await?;
+    store
+        .append_project_event_for_run(
             &session.id,
             lease,
             &ProjectEventKind::StatusChanged {
@@ -107,7 +91,7 @@ async fn run_project_session_inner(
         )
         .await?;
     store
-        .append_project_event_for_lease(&session.id, lease, &ProjectEventKind::Started)
+        .append_project_event_for_run(&session.id, lease, &ProjectEventKind::Started)
         .await?;
     let target = ChildRef::Project(session.id.clone());
     let work = store.work_for_child(&target).await?;
@@ -165,9 +149,7 @@ async fn run_project_session_inner(
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(session.provider_session_id.clone());
-    store
-        .validate_child_write_lease(&ChildRef::Project(session.id.clone()), lease)
-        .await?;
+    store.validate_run_lease(lease).await?;
     harness.start(&prepared.turn.config).await?;
     session.provider = harness_name;
     session.provider_session_id = harness.provider_session_id();
@@ -178,10 +160,7 @@ async fn run_project_session_inner(
             harness.process_group_id(),
         );
     }
-    if let Err(error) = store
-        .update_project_session_for_lease(&session, lease)
-        .await
-    {
+    if let Err(error) = store.update_project_session_for_run(&session, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
     }
@@ -376,7 +355,7 @@ async fn run_project_session_inner(
                             harness.process_group_id(),
                         );
                     }
-                    store.update_project_session_for_lease(&session, lease).await?;
+                    store.update_project_session_for_run(&session, lease).await?;
                 }
                 match event {
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
@@ -522,7 +501,7 @@ async fn run_project_session_inner(
                         let summary = bounded_summary(&last_text);
                         if flow_iteration_completed {
                             session.iteration += 1;
-                            store.append_project_event_for_lease(
+                            store.append_project_event_for_run(
                                 &session.id,
                                 lease,
                                 &ProjectEventKind::IterationCompleted {
@@ -539,7 +518,7 @@ async fn run_project_session_inner(
                         if outcome.status == ProjectSessionStatus::Running {
                             session.last_state_fingerprint = Some(outcome.fingerprint);
                             session.updated_at = time::OffsetDateTime::now_utc();
-                            store.update_project_session_for_lease(&session, lease).await?;
+                            store.update_project_session_for_run(&session, lease).await?;
                             last_text.clear();
                             let prepared = prepare_project_flow_step(
                                 &store,
@@ -566,7 +545,7 @@ async fn run_project_session_inner(
                             continue;
                         }
                         session.last_state_fingerprint = Some(outcome.fingerprint);
-                        store.update_project_session_for_lease(&session, lease).await?;
+                        store.update_project_session_for_run(&session, lease).await?;
                         if outcome.status == ProjectSessionStatus::Completed {
                             let work = store
                                 .work_for_child(&ChildRef::Project(session.id.clone()))
@@ -574,7 +553,7 @@ async fn run_project_session_inner(
                             store.validate_completion_basis(&work, &active_basis).await?;
                         }
                         let stopped = store
-                            .stop_project_for_lease(
+                            .stop_project_for_run(
                                 &session.id,
                                 lease,
                                 outcome.status,
@@ -585,7 +564,7 @@ async fn run_project_session_inner(
                         session = stopped;
                         let _ = harness.stop().await;
                         store
-                            .append_project_event_for_lease(
+                            .append_project_event_for_run(
                                 &session.id,
                                 lease,
                                 &ProjectEventKind::StatusChanged {
@@ -597,7 +576,7 @@ async fn run_project_session_inner(
                             .await?;
                         if session.status == ProjectSessionStatus::Completed {
                             store
-                                .append_project_event_for_lease(
+                                .append_project_event_for_run(
                                     &session.id,
                                     lease,
                                     &ProjectEventKind::Completed { summary },
@@ -615,7 +594,7 @@ async fn run_project_session_inner(
                             });
                         }
                         finish_capture(capture.as_ref(), "completed");
-                        store.finish_project_process(&session, lease).await?;
+                        store.finish_project_process_for_run(&session, lease).await?;
                         return Ok(());
                     }
                     ConversationEvent::Error { code, message } => {
@@ -648,7 +627,7 @@ async fn run_project_session_inner(
 async fn prepare_project_flow_step(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     wave: &Wave,
     flow: &Playhead,
     observations: &[String],
@@ -674,9 +653,7 @@ async fn prepare_project_flow_step(
         step.total,
         step.step
     );
-    store
-        .update_project_session_for_lease(session, lease)
-        .await?;
+    store.update_project_session_for_run(session, lease).await?;
     let seed = project_seed(session, wave.name(), &boundary, observations);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
@@ -701,7 +678,7 @@ fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()>
 async fn start_project_flow_turn(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -743,7 +720,7 @@ fn finish_project_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bo
 async fn handle_attachment(
     store: &SharedStore,
     session: &ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     line: String,
 ) -> Result<()> {
     let line = line.trim();
@@ -765,9 +742,7 @@ async fn handle_attachment(
             .status();
         return Ok(());
     }
-    store
-        .validate_child_write_lease(&ChildRef::Project(session.id.clone()), lease)
-        .await?;
+    store.validate_run_lease(lease).await?;
     let target = ChildRef::Project(session.id.clone());
     if line == "/interrupt" {
         let work = store.work_for_child(&target).await?;
@@ -793,7 +768,7 @@ async fn handle_attachment(
 async fn take_current_input(
     _store: &SharedStore,
     _session: &ProjectSession,
-    _lease: &ChildWriteLease,
+    _lease: &RunLease,
     pending: &mut VecDeque<PendingInput>,
 ) -> Result<Option<PendingInput>> {
     take_child_input(pending).await
@@ -892,7 +867,7 @@ fn verify_control_plane_checkout(repo: &Path) -> Result<()> {
 async fn consume_task_observations(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
 ) -> Result<Vec<String>> {
     // The successor consumes the whole project chain: observations addressed to
     // a terminal predecessor the Task was born under are routed here, not
@@ -908,23 +883,21 @@ async fn consume_task_observations(
             _ => continue,
         };
         let inserted = store
-            .consume_task_observation_for_project_for_lease(&session.id, &observation, lease)
+            .consume_task_observation_for_project_for_run(&session.id, &observation, lease)
             .await?;
         if inserted {
             prompts.push(serde_json::to_string(event)?);
         }
         session.observation_cursor = session.observation_cursor.max(observation.id);
     }
-    store
-        .update_project_session_for_lease(session, lease)
-        .await?;
+    store.update_project_session_for_run(session, lease).await?;
     Ok(prompts)
 }
 
 async fn apply_input(
     store: &SharedStore,
     _session: &ProjectSession,
-    _lease: &ChildWriteLease,
+    _lease: &RunLease,
     harness: &mut dyn Harness,
     input: PendingInput,
 ) -> Result<()> {
@@ -935,17 +908,15 @@ async fn apply_input(
 async fn set_and_record_status(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     status: ProjectSessionStatus,
     reason: impl Into<String>,
 ) -> Result<()> {
     let from = session.status;
     session.set_status(status, reason);
+    store.update_project_session_for_run(session, lease).await?;
     store
-        .update_project_session_for_lease(session, lease)
-        .await?;
-    store
-        .append_project_event_for_lease(
+        .append_project_event_for_run(
             &session.id,
             lease,
             &ProjectEventKind::StatusChanged {
@@ -968,7 +939,7 @@ fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) 
 async fn finish_failed(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     harness: &mut dyn Harness,
     error: &str,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -977,7 +948,7 @@ async fn finish_failed(
     let _ = harness.stop().await;
     set_and_record_status(store, session, lease, ProjectSessionStatus::Failed, error).await?;
     store
-        .append_project_event_for_lease(
+        .append_project_event_for_run(
             &session.id,
             lease,
             &ProjectEventKind::Failed {
@@ -992,7 +963,7 @@ async fn finish_failed(
             reason: error.to_string(),
         });
     }
-    store.finish_project_process(session, lease).await?;
+    store.finish_project_process_for_run(session, lease).await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1003,7 +974,7 @@ async fn finish_failed(
 async fn handle_body_failure(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     harness: &mut dyn Harness,
     wave: &Wave,
     reason: &str,
@@ -1024,7 +995,7 @@ async fn handle_body_failure(
             set_and_record_status(store, session, lease, ProjectSessionStatus::Failed, reason)
                 .await?;
             store
-                .append_project_event_for_lease(
+                .append_project_event_for_run(
                     &session.id,
                     lease,
                     &ProjectEventKind::Failed {
@@ -1039,7 +1010,7 @@ async fn handle_body_failure(
                     reason: reason.to_string(),
                 });
             }
-            store.finish_project_process(session, lease).await?;
+            store.finish_project_process_for_run(session, lease).await?;
 
             let request = ChildBodyHandoffRequest {
                 agent: agent.clone(),
@@ -1065,7 +1036,7 @@ async fn handle_body_failure(
 async fn finish_abandoned(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     harness: &mut dyn Harness,
     reason: String,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -1085,14 +1056,14 @@ async fn finish_abandoned(
         process.state = ChildLeaseState::Finished;
         process.outcome = Some(ChildBodyOutcome::Interrupted { reason });
     }
-    store.finish_project_process(session, lease).await?;
+    store.finish_project_process_for_run(session, lease).await?;
     Ok(())
 }
 
 async fn finish_command_stop(
     store: &SharedStore,
     session: &mut ProjectSession,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     harness: &mut dyn Harness,
     stop: CommandStop,
     capture: Option<&crate::trace::CaptureHandle>,
@@ -1115,7 +1086,7 @@ async fn finish_command_stop(
                     reason: "Project turn interrupted".to_string(),
                 });
             }
-            store.finish_project_process(session, lease).await?;
+            store.finish_project_process_for_run(session, lease).await?;
             Ok(())
         }
         CommandStop::Abandoned(reason) => {
@@ -1126,7 +1097,7 @@ async fn finish_command_stop(
 
 async fn record_unhandled_failure(
     session_id: &ProjectSessionId,
-    lease: &ChildWriteLease,
+    lease: &RunLease,
     error: &anyhow::Error,
 ) {
     let Some(store) = open_existing_store().await.map(Arc::new) else {
@@ -1135,27 +1106,27 @@ async fn record_unhandled_failure(
     let Ok(Some(mut session)) = store.get_project_session(session_id).await else {
         return;
     };
-    if session
-        .latest_process
-        .as_ref()
-        .map(|process| process.generation)
-        != Some(lease.generation)
-        || !session.status.is_process_active()
-    {
+    let Ok(work) = store
+        .work_for_child(&ChildRef::Project(session.id.clone()))
+        .await
+    else {
+        return;
+    };
+    if work != lease.work || !session.status.is_process_active() {
         return;
     }
     let message = format!("project runner failed: {error}");
     let from = session.status;
     session.set_status(ProjectSessionStatus::Failed, &message);
     if store
-        .update_project_session_for_lease(&session, lease)
+        .update_project_session_for_run(&session, lease)
         .await
         .is_err()
     {
         return;
     }
     let _ = store
-        .append_project_event_for_lease(
+        .append_project_event_for_run(
             &session.id,
             lease,
             &ProjectEventKind::StatusChanged {
@@ -1166,7 +1137,7 @@ async fn record_unhandled_failure(
         )
         .await;
     let _ = store
-        .append_project_event_for_lease(
+        .append_project_event_for_run(
             &session.id,
             lease,
             &ProjectEventKind::Failed {
@@ -1179,7 +1150,7 @@ async fn record_unhandled_failure(
         process.state = ChildLeaseState::Finished;
         process.outcome = Some(ChildBodyOutcome::Failed { reason: message });
     }
-    let _ = store.finish_project_process(&session, lease).await;
+    let _ = store.finish_project_process_for_run(&session, lease).await;
 }
 
 fn project_seed(

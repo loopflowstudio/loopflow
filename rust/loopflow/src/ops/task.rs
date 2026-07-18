@@ -4527,8 +4527,12 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
         let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
         let resume_refusal =
             no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest);
+        let work_status = store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
         let action_evidence = TaskActionEvidence {
-            status: session.status,
+            status: work_status,
             latest_pr_phase: latest.map(|pr| pr.phase()),
             latest_pr_after_merge: latest
                 .and_then(|pr| pr.publication.as_ref())

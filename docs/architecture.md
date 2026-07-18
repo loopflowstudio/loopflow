@@ -893,10 +893,19 @@ bridge:
 3. author the final schema deletion under main's dependency-ordered file-only
    draft contract, leaving no supported intermediate architecture.
 
-The committed checkpoint met the size objective at 121,818 physical / 119,126
-normalized Rust lines. Handshake, Wave-priority, and focused settlement proof
-put the working tree above that interim count. The remaining Session deletion
-must restore the target by removing duplicate truth; behavioral proof may not
+Size is now measured rather than asserted. `scripts/measure_source.py` counts
+physical lines under `rust/loopflow/src` and gates a required reduction against
+a pinned baseline; `ae1344a57` is 144,210 lines, reproducible by anyone.
+
+The earlier figure in this section — 121,818 physical / 119,126 normalized —
+matched no measurement of any scope in the tree (physical 144,210,
+non-blank-non-comment 123,770, excluding `#[cfg(test)]` modules 95,450, all
+Rust including tests 156,461). It described a mid-branch interim count whose
+scope was never stated, so it could not be checked and is retired rather than
+carried forward as a ceiling nobody can reproduce.
+
+The Session deletion's measured target is a net reduction of at least 10,000
+lines sourced from deletion, not compatibility shims. Behavioral proof may not
 be traded away for the count.
 
 It is done when:

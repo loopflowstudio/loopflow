@@ -1320,9 +1320,10 @@ async fn snapshot_task_detail(
             let user_feedback = feedback
                 .as_ref()
                 .is_some_and(|feedback| feedback.attention == AttentionRoute::User);
+            let work_status = store.work_status(&work).await?;
             (
                 Some(TaskActionEvidence {
-                    status: session.status,
+                    status: work_status,
                     latest_pr_phase: latest.map(TaskPr::phase),
                     latest_pr_after_merge: latest
                         .and_then(|pr| pr.publication.as_ref())
@@ -3118,6 +3119,19 @@ mod tests {
         }
     }
 
+    /// Project the legacy Session status onto derived Work status for fixtures
+    /// only. Production reads `store.work_status(&work)`; this dies with the
+    /// Session enum.
+    fn work_status_of(status: crate::task::TaskSessionStatus) -> crate::durable::WorkStatus {
+        use crate::durable::WorkStatus;
+        use crate::task::TaskSessionStatus as S;
+        match status {
+            S::Completed => WorkStatus::Done,
+            S::Abandoned => WorkStatus::Abandoned,
+            _ => WorkStatus::Ready,
+        }
+    }
+
     fn test_task_attention(
         pm_completed: bool,
         runtime: Option<&TaskRuntimeSnapshot>,
@@ -3156,7 +3170,7 @@ mod tests {
             reason: None,
         };
         let action_evidence = runtime.map(|r| TaskActionEvidence {
-            status: r.status,
+            status: work_status_of(r.status),
             latest_pr_phase: None,
             latest_pr_after_merge: None,
             latest_pr_next_slug: None,
@@ -3225,7 +3239,7 @@ mod tests {
         local_progress: LocalProgressEvidence,
     ) -> TaskAttentionSnapshot {
         let action_evidence = runtime.map(|r| TaskActionEvidence {
-            status: r.status,
+            status: work_status_of(r.status),
             latest_pr_phase: phase,
             latest_pr_after_merge: None,
             latest_pr_next_slug: None,

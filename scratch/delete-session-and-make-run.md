@@ -108,6 +108,31 @@ it at Run/Launch evidence **first**. It proves the spine carries the decision
 logic before a single controller loop is deleted, and it is fully testable
 without a process.
 
+### Progress ledger
+
+- [x] **Stage 0 — measurable baseline.** `scripts/measure_source.py` commits the
+      metric; `rust/loopflow/src` = 144,210 at `ae1344a57`, reproducible.
+- [x] **Launch owns provider continuity.** `observe_launch_provider` under the
+      Run lease. This was the last capability Session had that Run/Launch could
+      not express, so it gated everything else. Containment stays immutable
+      (spawn-time fencing evidence); three behavioral tests including the
+      stopped-Run refusal.
+- [x] **Stage 1 — evidence port.** `TaskActionEvidence.status` is now
+      `WorkStatus`, derived from Epoch/Run via `store.work_status(&work)` at
+      both production call sites. The pure decision function no longer reads a
+      Session enum. 26 tests pass over 17,280 exhaustive combinations.
+- [ ] **Stage 2 — shared supervisor + body loop.**
+- [ ] **Stage 3 — the cut.**
+- [ ] **Stage 4 — surfaces.**
+- [ ] **Stage 5 — draft migration + ledger.**
+
+Stage 1 was far cheaper than estimated: production code branched on
+`evidence.status` in exactly **two** places (`is_terminal()` and `== Abandoned`);
+the other 36 references were test fixtures. The status axis also shrank 8 → 5,
+which is the real simplification — `Created`/`Starting` collapse into `Ready`,
+`Blocked` into `Waiting`, and `Failed` stops being a Work state at all because
+it is Run health.
+
 ### Execution order (one PR, five stages, each compiling)
 
 1. **Evidence port.** `TaskActionEvidence` sources from Run/Launch/Turn instead

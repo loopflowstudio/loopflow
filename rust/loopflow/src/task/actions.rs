@@ -1,4 +1,4 @@
-//! Legal-action model for Task Sessions.
+//! Legal-action model for Task Work.
 //!
 //! One pure function ([`derive_task_actions`]) computes the six lifecycle
 //! actions from a total evidence bundle. Every surface (`lf task status`,
@@ -7,9 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::task::{AfterMerge, CiObservation, CiState, PrPhase, TaskSessionStatus};
+use crate::durable::WorkStatus;
+use crate::task::{AfterMerge, CiObservation, CiState, PrPhase};
 
-/// The six lifecycle actions a Task Session can take, computed from total
+/// The six lifecycle actions a Task can take, computed from total
 /// evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +56,7 @@ pub struct TaskActionStatus {
     pub reason: String,
 }
 
-/// The complete legal-action model for a Task Session. All six actions in
+/// The complete legal-action model for a Task. All six actions in
 /// canonical order, each Legal or Blocked with a reason. `recommended` is
 /// always one of the available actions, or `None` only when no session exists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,7 +101,9 @@ pub enum ReviewGateState {
 /// Built by the snapshot builders (which hold the durable `TaskPr`), not
 /// from the wire `PrSnapshot`.
 pub struct TaskActionEvidence<'a> {
-    pub status: TaskSessionStatus,
+    /// Derived from Work/Epoch/Run, not from a Session row. Only the terminal
+    /// arms change the action model; liveness rides `process_alive`.
+    pub status: WorkStatus,
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_after_merge: Option<AfterMerge>,
     pub latest_pr_next_slug: Option<&'a str>,
@@ -124,16 +127,18 @@ pub struct TaskActionEvidence<'a> {
 ///
 /// Precedence: review gate > active PR phase > body liveness > status.
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if evidence.status.is_terminal() {
-        return one_action(
-            TaskAction::NoAction,
-            if evidence.status == TaskSessionStatus::Abandoned {
-                "Task is abandoned"
-            } else {
-                "Task is completed"
-            },
-            |_| "Task is terminal".to_string(),
-        );
+    match evidence.status {
+        WorkStatus::Abandoned => {
+            return one_action(TaskAction::NoAction, "Task is abandoned", |_| {
+                "Task is terminal".to_string()
+            })
+        }
+        WorkStatus::Done => {
+            return one_action(TaskAction::NoAction, "Task is completed", |_| {
+                "Task is terminal".to_string()
+            })
+        }
+        WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {}
     }
     if evidence.abandon_intent {
         return one_action(TaskAction::NoAction, "Task is being abandoned", |_| {
@@ -567,19 +572,37 @@ mod tests {
     use super::{
         derive_task_actions, ReviewGateState, TaskAction, TaskActionEvidence, TaskActionModel,
     };
-    use crate::task::{AfterMerge, CiCheck, CiObservation, CiState, PrPhase, TaskSessionStatus};
+    use crate::durable::{EpochId, RunId, TaskId, Wait, WaitId, WaitOn, WorkRef, WorkStatus};
+    use crate::task::{AfterMerge, CiCheck, CiObservation, CiState, PrPhase};
     use time::OffsetDateTime;
 
-    const STATUSES: [TaskSessionStatus; 8] = [
-        TaskSessionStatus::Created,
-        TaskSessionStatus::Starting,
-        TaskSessionStatus::Running,
-        TaskSessionStatus::Waiting,
-        TaskSessionStatus::Blocked,
-        TaskSessionStatus::Failed,
-        TaskSessionStatus::Completed,
-        TaskSessionStatus::Abandoned,
-    ];
+    /// Work status is derived from Epoch/Run, so the axis is five states rather
+    /// than the Session enum's eight: Created/Starting collapse into Ready,
+    /// Blocked into Waiting, and Failed is Run health rather than Work state.
+    fn statuses() -> Vec<WorkStatus> {
+        vec![
+            WorkStatus::Ready,
+            WorkStatus::Running {
+                run_id: RunId::new(),
+            },
+            WorkStatus::Waiting { wait: a_wait() },
+            WorkStatus::Done,
+            WorkStatus::Abandoned,
+        ]
+    }
+
+    fn a_wait() -> Wait {
+        Wait {
+            id: WaitId::new(),
+            work: WorkRef::Task(TaskId::new()),
+            epoch_id: EpochId::new(),
+            on: WaitOn::Time {
+                not_before: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+            },
+            created_at: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+            resolved_at: None,
+        }
+    }
     const PR_PHASES: [Option<PrPhase>; 6] = [
         None,
         Some(PrPhase::Working),
@@ -616,7 +639,7 @@ mod tests {
         }
     }
 
-    fn evidence(status: TaskSessionStatus) -> TaskActionEvidence<'static> {
+    fn evidence(status: WorkStatus) -> TaskActionEvidence<'static> {
         TaskActionEvidence {
             status,
             latest_pr_phase: None,
@@ -689,7 +712,7 @@ mod tests {
             Some(CiState::Failing),
         ];
         let mut cases = 0;
-        for status in STATUSES {
+        for status in statuses() {
             for phase in PR_PHASES {
                 for predecessor in PREDECESSORS {
                     for gate in GATES {
@@ -701,7 +724,7 @@ mod tests {
                             ] {
                                 for alive in [None, Some(true), Some(false)] {
                                     let observation = reading.map(ci);
-                                    let mut ev = evidence(status);
+                                    let mut ev = evidence(status.clone());
                                     ev.latest_pr_phase = phase;
                                     ev.predecessor_phase = predecessor;
                                     ev.review_gate = gate;
@@ -723,7 +746,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(cases, 8 * 6 * 4 * 4 * 4 * 3 * 3);
+        assert_eq!(cases, 5 * 6 * 4 * 4 * 4 * 3 * 3);
     }
 
     /// The directive's named fix: a Task waiting on an open PR whose required
@@ -731,7 +754,7 @@ mod tests {
     #[test]
     fn waiting_on_a_passing_open_pr_advertises_review_not_resume() {
         let passing = ci(CiState::Passing);
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         let model = derive_task_actions(&ev);
@@ -758,7 +781,7 @@ mod tests {
         ];
         for (state, expected) in cases {
             let observation = ci(state);
-            let mut ev = evidence(TaskSessionStatus::Waiting);
+            let mut ev = evidence(WorkStatus::Ready);
             ev.latest_pr_phase = Some(PrPhase::Open);
             ev.ci = Some(&observation);
             assert_eq!(
@@ -795,7 +818,7 @@ mod tests {
     #[test]
     fn open_pr_red_only_on_scratch_clear_is_reviewable_not_resumable() {
         let observation = ci_failing(&["scratch-clear"]);
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&observation);
         let model = derive_task_actions(&ev);
@@ -815,7 +838,7 @@ mod tests {
     #[test]
     fn open_pr_with_a_real_leaf_still_resumes_even_beside_scratch_clear() {
         let observation = ci_failing(&["scratch-clear", "rust-test"]);
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&observation);
         let model = derive_task_actions(&ev);
@@ -826,7 +849,7 @@ mod tests {
 
     #[test]
     fn open_pr_without_ci_evidence_waits_instead_of_advertising_review() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         let model = derive_task_actions(&ev);
 
@@ -844,7 +867,7 @@ mod tests {
     #[test]
     fn failing_checks_are_named_in_the_resume_reason() {
         let failing = ci(CiState::Failing);
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&failing);
         let model = derive_task_actions(&ev);
@@ -858,7 +881,7 @@ mod tests {
     /// parked session with a named next step.
     #[test]
     fn dead_body_without_a_pr_recovers_rather_than_resumes() {
-        let mut ev = evidence(TaskSessionStatus::Running);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Working);
         ev.process_alive = Some(false);
         let model = derive_task_actions(&ev);
@@ -873,7 +896,7 @@ mod tests {
 
     #[test]
     fn a_live_body_is_left_alone() {
-        let mut ev = evidence(TaskSessionStatus::Running);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Working);
         ev.process_alive = Some(true);
         let model = derive_task_actions(&ev);
@@ -887,7 +910,7 @@ mod tests {
 
     #[test]
     fn merged_pr_dispositioned_complete_recommends_completing_the_task() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         let model = derive_task_actions(&ev);
@@ -902,7 +925,7 @@ mod tests {
 
     #[test]
     fn merged_review_blocker_names_the_gate_and_never_resumes() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         ev.completion_refusal = Some(
@@ -930,7 +953,7 @@ mod tests {
 
     #[test]
     fn merged_pending_directive_starts_the_serial_successor() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         ev.completion_refusal = Some(
@@ -955,7 +978,7 @@ mod tests {
 
     #[test]
     fn abandoned_latest_pr_starts_next_and_never_resumes() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Abandoned);
         ev.resume_refusal =
             Some("Task W2-283 has no active PR to resume; pull request #1039 abandoned");
@@ -972,7 +995,7 @@ mod tests {
 
     #[test]
     fn missing_pr_history_never_recommends_resume() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.resume_refusal =
             Some("Task W2-legacy has no active PR to resume; no PR history recorded");
 
@@ -987,7 +1010,7 @@ mod tests {
 
     #[test]
     fn merged_and_approved_with_a_next_slug_starts_the_next_pr() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::Review);
         ev.review_gate = Some(ReviewGateState::Approved);
@@ -1007,7 +1030,7 @@ mod tests {
 
     #[test]
     fn an_unanswered_post_merge_review_gate_outranks_completion() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::Review);
         let model = derive_task_actions(&ev);
@@ -1024,7 +1047,7 @@ mod tests {
     fn an_active_review_gate_outranks_the_pr_and_ci_evidence() {
         let passing = ci(CiState::Passing);
         for gate in [ReviewGateState::Requested, ReviewGateState::Active] {
-            let mut ev = evidence(TaskSessionStatus::Waiting);
+            let mut ev = evidence(WorkStatus::Ready);
             ev.latest_pr_phase = Some(PrPhase::Open);
             ev.ci = Some(&passing);
             ev.review_gate = Some(gate);
@@ -1040,7 +1063,7 @@ mod tests {
     #[test]
     fn a_changes_requested_gate_sends_the_task_back_to_resume() {
         let passing = ci(CiState::Passing);
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         ev.review_gate = Some(ReviewGateState::ChangesRequested);
@@ -1057,7 +1080,7 @@ mod tests {
     /// reviewable — the same fact `stacked_collapse` enforces.
     #[test]
     fn an_unmerged_stack_parent_blocks_settlement_with_the_stack_fact() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         ev.predecessor_phase = Some(PrPhase::Open);
@@ -1075,7 +1098,7 @@ mod tests {
     #[test]
     fn an_unmerged_stack_parent_still_lets_the_child_pr_be_reviewed() {
         let passing = ci(CiState::Passing);
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.ci = Some(&passing);
         ev.predecessor_phase = Some(PrPhase::Open);
@@ -1087,7 +1110,7 @@ mod tests {
 
     #[test]
     fn an_abandoned_stack_parent_asks_for_a_rebase() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.predecessor_phase = Some(PrPhase::Abandoned);
         let model = derive_task_actions(&ev);
@@ -1101,7 +1124,7 @@ mod tests {
 
     #[test]
     fn a_merged_parent_leaves_the_child_untouched() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Merged);
         ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
         ev.predecessor_phase = Some(PrPhase::Merged);
@@ -1113,7 +1136,7 @@ mod tests {
 
     #[test]
     fn a_publishing_pr_resumes_to_retry_publication() {
-        let mut ev = evidence(TaskSessionStatus::Waiting);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Publishing);
         let model = derive_task_actions(&ev);
 
@@ -1129,8 +1152,8 @@ mod tests {
     #[test]
     fn terminal_tasks_offer_no_action_regardless_of_pr_evidence() {
         let passing = ci(CiState::Passing);
-        for status in [TaskSessionStatus::Completed, TaskSessionStatus::Abandoned] {
-            let mut ev = evidence(status);
+        for status in [WorkStatus::Done, WorkStatus::Abandoned] {
+            let mut ev = evidence(status.clone());
             ev.latest_pr_phase = Some(PrPhase::Open);
             ev.ci = Some(&passing);
             ev.review_gate = Some(ReviewGateState::Requested);
@@ -1145,7 +1168,7 @@ mod tests {
 
     #[test]
     fn an_abandoning_task_offers_no_action() {
-        let mut ev = evidence(TaskSessionStatus::Running);
+        let mut ev = evidence(WorkStatus::Ready);
         ev.latest_pr_phase = Some(PrPhase::Open);
         ev.abandon_intent = true;
         let model = derive_task_actions(&ev);

@@ -152,11 +152,16 @@ it only when a human asked to see the PR.
 Every read the conducting surfaces offer is `--json`:
 
 ```bash
+lf ls --json                # every durable Wave and its Home/runtime evidence
 lf status <wave> --json     # live Project → Task hierarchy
 lf roadmap --json           # every open Task across every wave
 lf runs --task INF-123 --json
 lf trace <exec-id> --json
 ```
+
+`lf ls` is the registry plane, `lf status` is the focused operational view,
+and `lf roadmap` joins the current Linear plan to that runtime truth. Agents
+consume those projections; they do not rebuild the joins.
 
 Wave lifecycle uses the same durable `WorkStatus` as Project and Task work:
 `ready`, `running`, `waiting`, `done`, or `abandoned`. `live` stays separate —

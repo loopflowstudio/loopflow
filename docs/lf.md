@@ -401,6 +401,9 @@ woke, the miss is announced in its thread rather than passed over in silence.
 ## Reading the Local Ledger
 
 ```bash
+lf ls --json                    # every durable Wave and its Home/runtime evidence
+lf status <wave> --json         # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json               # current plan across Waves joined to runtime truth
 lf runs                         # one row per skill call: context, tokens, cost
 lf execs                        # one row per lf process
 lf trace 66863649               # select an exec or trace; render its process tree
@@ -417,6 +420,10 @@ lf top                          # persisted last-hour Turn throughput + live pro
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
+
+`lf ls` reads the Wave registry. `lf status` focuses one Wave's operational
+truth. `lf roadmap` overlays the current Linear-backed plan without creating a
+second runtime model.
 
 ```bash
 lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route

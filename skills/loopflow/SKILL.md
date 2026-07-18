@@ -78,6 +78,20 @@ lf task wait <issue-id> --until terminal
 When work feels slow or stuck, run `lf top` before guessing — it shows
 last-hour provider throughput and live processes.
 
+## Inspect
+
+When the human asks about Loopflow state, read the shared surfaces instead of
+reconstructing it from processes, worktrees, or Linear:
+
+```bash
+lf ls --json              # every durable Wave and its Home/runtime evidence
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json         # current plan across Waves joined to runtime truth
+```
+
+These are read surfaces. `lf status` is the focused operational view;
+`lf roadmap` is the planning overlay, not a second runtime model.
+
 ## Speak
 
 `lf chat` is the User surface. An external harness acting for the human may use

@@ -78,6 +78,7 @@ lf pr land -c                                         # merge the PR, complete t
 Watch the whole machine:
 
 ```bash
+lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across every wave, bucketed by need
 lf status designer     # one wave's live Project → Task hierarchy
 lf trace <exec-id>     # what one agent did — and exactly what it was told

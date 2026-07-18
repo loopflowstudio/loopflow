@@ -102,6 +102,20 @@ reported output-token throughput for the last hour and the currently running
 `lf` and provider processes; use it as machine-health evidence, not as a
 lifecycle control.
 
+## Inspect
+
+When the human asks about Loopflow state, use the shared read surfaces instead
+of reconstructing it from processes, worktrees, or Linear:
+
+```bash
+lf ls --json              # every durable Wave and its Home/runtime evidence
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json         # current plan across Waves joined to runtime truth
+```
+
+`lf status` is the focused operational view. `lf roadmap` is the planning
+overlay, not a second runtime model.
+
 ## Speak
 
 Answer a human message in your turn text. Use `lf radio pub` for proactive progress,

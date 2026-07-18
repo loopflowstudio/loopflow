@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills/loopflow/SKILL.md"
+LOOPFLOW = ROOT / "rust/loopflow/src/engine/builtins/LOOPFLOW.md"
 
 
 def test_skill_frontmatter_is_valid():
@@ -40,3 +41,17 @@ def test_external_user_and_internal_worker_authority_are_distinct():
     install = "npx skills add loopflowstudio/loopflow --skill loopflow -g -y"
     assert install in agent_api
     assert install in readme
+
+
+def test_agent_surfaces_share_the_inspection_commands():
+    surfaces = [
+        SKILL.read_text(),
+        LOOPFLOW.read_text(),
+        (ROOT / "docs/agent-api.md").read_text(),
+        (ROOT / "docs/lf.md").read_text(),
+    ]
+
+    for text in surfaces:
+        assert "lf ls --json" in text
+        assert "lf status <wave> --json" in text
+        assert "lf roadmap --json" in text

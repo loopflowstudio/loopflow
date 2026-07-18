@@ -126,6 +126,40 @@ without a process.
 - [ ] **Stage 4 — surfaces.**
 - [ ] **Stage 5 — draft migration + ledger.**
 
+Verified state at the last commit: `cargo test -p loopflow --lib` = **1,581
+passed, 0 failed**; `cargo clippy --lib --tests -D warnings` clean; source at
+144,462 (+252 from baseline, since stages 0–1 are additive — the size gate
+correctly refuses to call that progress).
+
+Commits so far: `aaec96cc4` ledger correction + design · `4b82caddc` measure
+script · `73fc72882` `observe_launch_provider` · `c86bb211b` evidence port.
+
+#### Stage 2 shape (next session starts here)
+
+Two extractions, in this order:
+
+1. **Body loop first** — it is the bigger win (1,232 + 2,991 lines) and the two
+   loops are already structurally identical. Extract
+   `run_work_body(work: WorkRef, lease: &RunLease, …)` holding the
+   `tokio::select!` with its four arms (stdin attachment; poll tick →
+   `absorb_run_control` → `send_outstanding_steers` → child-attention
+   preemption; task-supervision tick; `event_rx`). Typed `match work` at exactly
+   four domain boundaries: prepare-next-step, `TurnCompleted` settlement,
+   closure check, allowed effects. Session writes inside the loop map to:
+   `update_*_session_for_lease` → `observe_launch_provider` (already built);
+   `append_*_event_for_lease` → Run/Launch receipts;
+   `ChildTarget::Project(&id, lease)` → `&run_lease`.
+2. **Supervisor second** — unify `reserve_project_session` /
+   `launch_project_process` with `task_run`/`task_start` /
+   `launch_task_process:1779` / `recover_stranded_task_body:2246` /
+   `recover_stalled_task_body:2352` onto `reserve_run` + `RunAdvance` +
+   `stop_run`, with the containment probe moved verbatim so `Unprovable` stays
+   fenced.
+
+Do **not** start stage 3 until both extractions compile and the old runners are
+thin wrappers over them — that is what makes the deletion mechanical instead of
+a rewrite.
+
 Stage 1 was far cheaper than estimated: production code branched on
 `evidence.status` in exactly **two** places (`is_terminal()` and `== Abandoned`);
 the other 36 references were test fixtures. The status axis also shrank 8 → 5,

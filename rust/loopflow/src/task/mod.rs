@@ -12,8 +12,8 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     prefixed_uuid_id, AbandonIntent, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandState, ChildDecisionId, ChildDirective, ChildDirectiveId, ChildLeaseState,
-    ChildProcessGeneration, DirectiveKind,
+    ChildCommandSource, ChildCommandState, ChildDecisionId, ChildDirective, ChildDirectiveId,
+    ChildLeaseState, ChildProcessGeneration, DirectiveKind,
 };
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
@@ -1072,6 +1072,17 @@ pub enum TaskEventKind {
         directive_id: ChildDirectiveId,
         version: u32,
         summary: String,
+    },
+    /// An out-of-band Wave/Operator attestation that closed a merged, complete
+    /// Task's applied-but-unincorporated final directive. Distinct from
+    /// `DirectiveIncorporated`, which is the body's own acknowledgement — this
+    /// records who attested the semantic handoff from outside the Session, so
+    /// the trail never reads as a forged body acknowledgement.
+    DirectiveReconciled {
+        directive_id: ChildDirectiveId,
+        version: u32,
+        summary: String,
+        attested_by: ChildCommandSource,
     },
     DecisionRequested {
         decision_id: ChildDecisionId,

@@ -371,6 +371,16 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
                 summary,
             )
         },
+        TaskEventKind::DirectiveReconciled {
+            version, summary, ..
+        } => ActivityFields {
+            directive_version: Some(*version),
+            ..activity(
+                ChildActivityKind::Incorporated,
+                &format!("Reconciled direction v{version} by out-of-band attestation"),
+                summary,
+            )
+        },
         TaskEventKind::DecisionRequested {
             decision_id,
             prompt,

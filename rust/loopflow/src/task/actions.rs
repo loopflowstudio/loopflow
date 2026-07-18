@@ -1,6 +1,6 @@
 //! Legal-action model for Task Sessions.
 //!
-//! One pure function ([`derive_task_actions`]) computes the six lifecycle
+//! One pure function ([`derive_task_actions`]) computes the seven lifecycle
 //! actions from a total evidence bundle. Every surface (`lf task status`,
 //! `lf status`, `lf roadmap`, Mac app) consumes this one model — no
 //! client-side re-derivation.
@@ -19,17 +19,19 @@ pub enum TaskAction {
     Resume,
     Review,
     StartNextPr,
+    Reconcile,
     Complete,
     NoAction,
 }
 
 impl TaskAction {
     /// Canonical order used by [`TaskActionModel::actions`].
-    pub const ALL: [TaskAction; 6] = [
+    pub const ALL: [TaskAction; 7] = [
         TaskAction::Recover,
         TaskAction::Resume,
         TaskAction::Review,
         TaskAction::StartNextPr,
+        TaskAction::Reconcile,
         TaskAction::Complete,
         TaskAction::NoAction,
     ];
@@ -40,6 +42,7 @@ impl TaskAction {
             Self::Resume => "resume",
             Self::Review => "review",
             Self::StartNextPr => "start_next_pr",
+            Self::Reconcile => "reconcile",
             Self::Complete => "complete",
             Self::NoAction => "no_action",
         }
@@ -55,7 +58,7 @@ pub struct TaskActionStatus {
     pub reason: String,
 }
 
-/// The complete legal-action model for a Task Session. All six actions in
+/// The complete legal-action model for a Task Session. All seven actions in
 /// canonical order, each Legal or Blocked with a reason. `recommended` is
 /// always one of the available actions, or `None` only when no session exists.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +68,7 @@ pub struct TaskActionModel {
 }
 
 impl TaskActionModel {
-    /// No session exists: all six blocked, no recommendation.
+    /// No session exists: all seven blocked, no recommendation.
     pub fn no_session() -> Self {
         Self {
             recommended: None,
@@ -109,6 +112,12 @@ pub struct TaskActionEvidence<'a> {
     /// The exact refusal returned by `lf task resume`, when no active PR exists.
     pub resume_refusal: Option<&'a str>,
     pub pending_directive: bool,
+    /// True when the current (pending) directive was already delivered to a body
+    /// (`applied_at` set) but never incorporated. This is the reconcilable shape:
+    /// the work shipped, only the acknowledgement was interrupted. A pending
+    /// directive that was never applied is a post-land steer that still needs a
+    /// body, so it keeps `StartNextPr` rather than `Reconcile`.
+    pub directive_applied: bool,
     pub ci: Option<&'a CiObservation>,
     /// Some(true)=live, Some(false)=dead, None=process not expected for status.
     pub process_alive: Option<bool>,
@@ -147,10 +156,8 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
             ReviewGateState::Requested | ReviewGateState::Active
                 if evidence.latest_pr_phase != Some(PrPhase::Merged) =>
             {
-                return one_action(
-                    TaskAction::Review,
-                    "awaiting review disposition",
-                    |a| match a {
+                return one_action(TaskAction::Review, "awaiting review disposition", |a| {
+                    match a {
                         TaskAction::Review => unreachable!(),
                         TaskAction::Resume => {
                             "review in progress; resume after the review resolves".into()
@@ -162,15 +169,14 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
                             "review gate is active; advance after the review approves".into()
                         }
                         TaskAction::Recover => "body is not dead; a review gate is active".into(),
+                        TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                         TaskAction::NoAction => "action available: review the gate".into(),
-                    },
-                );
+                    }
+                });
             }
             ReviewGateState::ChangesRequested if evidence.resume_refusal.is_none() => {
-                return one_action(
-                    TaskAction::Resume,
-                    "address requested changes",
-                    |a| match a {
+                return one_action(TaskAction::Resume, "address requested changes", |a| {
+                    match a {
                         TaskAction::Resume => unreachable!(),
                         TaskAction::Review => "review returned changes; resume to fix".into(),
                         TaskAction::Complete => "review requested changes; fix them first".into(),
@@ -178,11 +184,12 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
                             "review requested changes; fix them first".into()
                         }
                         TaskAction::Recover => "body is not dead; resume to address changes".into(),
+                        TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                         TaskAction::NoAction => {
                             "action available: address requested changes".into()
                         }
-                    },
-                );
+                    }
+                });
             }
             ReviewGateState::Requested
             | ReviewGateState::Active
@@ -193,21 +200,23 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
 
     let model = match evidence.latest_pr_phase {
         Some(PrPhase::Open) => open_pr_model(evidence),
-        Some(PrPhase::Publishing) => {
-            one_action(TaskAction::Resume, "retry publication", |a| match a {
+        Some(PrPhase::Publishing) => one_action(TaskAction::Resume, "retry publication", |a| {
+            match a {
                 TaskAction::Resume => unreachable!(),
                 TaskAction::Review => "PR not yet open on GitHub".into(),
                 TaskAction::Complete => "PR is not yet published".into(),
                 TaskAction::StartNextPr => "PR is not yet published".into(),
                 TaskAction::Recover => "body is not dead; retry publication".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: retry publication".into(),
-            })
-        }
+            }
+        }),
         Some(PrPhase::Merged) => merged_pr_model(evidence),
         Some(PrPhase::Abandoned) => one_action(
             TaskAction::StartNextPr,
             "PR abandoned; start the next PR",
-            |a| match a {
+            |a| {
+                match a {
                 TaskAction::StartNextPr => unreachable!(),
                 TaskAction::Review => "PR was abandoned; no open PR to review".into(),
                 TaskAction::Complete => "PR was abandoned; nothing to complete".into(),
@@ -216,20 +225,25 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
                     .unwrap_or("PR was abandoned; no active PR to resume")
                     .into(),
                 TaskAction::Recover => "body is not dead; start the next PR".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: start the next PR".into(),
+            }
             },
         ),
         Some(PrPhase::Working) => body_model(evidence),
         None if evidence.resume_refusal.is_some() => one_action(
             TaskAction::NoAction,
             evidence.resume_refusal.expect("checked above"),
-            |a| match a {
+            |a| {
+                match a {
                 TaskAction::NoAction => unreachable!(),
                 TaskAction::Resume => evidence.resume_refusal.expect("checked above").into(),
                 TaskAction::Recover => "no Task PR exists to recover".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::Review => "no open PR to review".into(),
                 TaskAction::Complete => "no merged PR to complete from".into(),
                 TaskAction::StartNextPr => "no settled PR to advance from".into(),
+            }
             },
         ),
         None => body_model(evidence),
@@ -252,41 +266,48 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
         return open_pr_reviewable("checks passed except scratch-clear; awaiting review");
     }
     match evidence.ci.map(|ci| ci.state) {
-        Some(CiState::Pending) => one_action(
-            TaskAction::NoAction,
-            "required checks still running",
-            |a| match a {
+        Some(CiState::Pending) => {
+            one_action(TaskAction::NoAction, "required checks still running", |a| {
+                match a {
                 TaskAction::NoAction => unreachable!(),
                 TaskAction::Review => "checks still running".into(),
                 TaskAction::Resume => "awaiting CI".into(),
                 TaskAction::Complete => "PR is open, not merged".into(),
                 TaskAction::StartNextPr => "PR is open, not merged".into(),
                 TaskAction::Recover => "body is not dead; CI is running".into(),
-            },
-        ),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
+            }
+            })
+        }
         Some(CiState::Failing) => one_action(
             TaskAction::Resume,
             ci_failure_reason(evidence.ci.unwrap()),
-            |a| match a {
+            |a| {
+                match a {
                 TaskAction::Resume => unreachable!(),
                 TaskAction::Review => "required checks failed".into(),
                 TaskAction::Complete => "PR is open, not merged".into(),
                 TaskAction::StartNextPr => "PR is open, not merged".into(),
                 TaskAction::Recover => "body is not dead; fix the checks".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: fix failing required checks".into(),
+            }
             },
         ),
         Some(CiState::Passing) => open_pr_reviewable("checks passed; awaiting review"),
         None => one_action(
             TaskAction::NoAction,
             "required checks have not been observed",
-            |a| match a {
+            |a| {
+                match a {
                 TaskAction::NoAction => unreachable!(),
                 TaskAction::Review => "required checks have not been observed".into(),
                 TaskAction::Resume => "awaiting CI evidence".into(),
                 TaskAction::Complete => "PR is open, not merged".into(),
                 TaskAction::StartNextPr => "PR is open, not merged".into(),
                 TaskAction::Recover => "body is not dead; awaiting CI evidence".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
+            }
             },
         ),
     }
@@ -295,23 +316,57 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
 /// An open PR whose checks admit review: recommend Review, block the rest. Shared
 /// by a passing head and a head red only on land-time preconditions.
 fn open_pr_reviewable(reason: &str) -> TaskActionModel {
-    one_action(TaskAction::Review, reason, |a| match a {
+    one_action(TaskAction::Review, reason, |a| {
+        match a {
         TaskAction::Review => unreachable!(),
         TaskAction::Resume => "awaiting review; resume after review to address feedback".into(),
         TaskAction::Complete => "PR is open, not merged".into(),
         TaskAction::StartNextPr => "PR is open, not merged".into(),
         TaskAction::Recover => "body is not dead; PR is open for review".into(),
+        TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
         TaskAction::NoAction => "action available: review the PR".into(),
+    }
     })
 }
 
 /// Merged PR: action depends on the after-merge disposition and review gate.
 fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
     if let Some(refusal) = evidence.completion_refusal {
+        // A pending directive that was already delivered to a body but never
+        // incorporated is reconcilable: the work shipped in the merged head, only
+        // the acknowledgement turn was interrupted. It settles by an out-of-band
+        // Wave/Operator attestation, never another provider turn — so recommend
+        // Reconcile and bar the provider actions. A *not-applied* pending
+        // directive falls through to `StartNextPr`, which still needs a body.
+        //
+        // Only a merged `CompleteTask` publication is reconcilable: a merged
+        // `Review`/next-PR disposition with a pending applied directive is a serial
+        // successor, not a Task settling — it must keep `StartNextPr`.
+        if evidence.pending_directive
+            && evidence.directive_applied
+            && evidence.latest_pr_after_merge == Some(AfterMerge::CompleteTask)
+        {
+            return one_action(TaskAction::Reconcile, refusal, |a| match a {
+                TaskAction::Reconcile => unreachable!(),
+                TaskAction::Complete => refusal.into(),
+                TaskAction::StartNextPr => {
+                    "directive already delivered; reconcile it, do not start another PR".into()
+                }
+                TaskAction::Resume => {
+                    "PR is merged and the directive shipped; reconcile it, not resume".into()
+                }
+                TaskAction::Review => "merged and complete; nothing to review".into(),
+                TaskAction::Recover => "body is not dead; reconcile the applied directive".into(),
+                TaskAction::NoAction => {
+                    "action available: attest and reconcile the applied directive".into()
+                }
+            });
+        }
         if evidence.pending_directive
             || evidence.review_gate == Some(ReviewGateState::ChangesRequested)
         {
-            return one_action(TaskAction::StartNextPr, refusal, |a| match a {
+            return one_action(TaskAction::StartNextPr, refusal, |a| {
+                match a {
                 TaskAction::StartNextPr => unreachable!(),
                 TaskAction::Complete => refusal.into(),
                 TaskAction::Review => "merged follow-up belongs in the next PR".into(),
@@ -320,10 +375,13 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                     .unwrap_or("PR is merged; no active PR to resume")
                     .into(),
                 TaskAction::Recover => "body is not dead; start the next PR".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: start the next PR".into(),
+            }
             });
         }
-        return one_action(TaskAction::Review, refusal, |a| match a {
+        return one_action(TaskAction::Review, refusal, |a| {
+            match a {
             TaskAction::Review => unreachable!(),
             TaskAction::Complete => refusal.into(),
             TaskAction::Resume => evidence
@@ -332,15 +390,16 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                 .into(),
             TaskAction::StartNextPr => "completion is blocked by a required review".into(),
             TaskAction::Recover => "body is not dead; a completion gate is open".into(),
+            TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
             TaskAction::NoAction => "action available: resolve the completion gate".into(),
+        }
         });
     }
 
     match evidence.latest_pr_after_merge {
-        Some(AfterMerge::CompleteTask) => one_action(
-            TaskAction::Complete,
-            "PR merged; complete the Task",
-            |a| match a {
+        Some(AfterMerge::CompleteTask) => {
+            one_action(TaskAction::Complete, "PR merged; complete the Task", |a| {
+                match a {
                 TaskAction::Complete => unreachable!(),
                 TaskAction::StartNextPr => "PR dispositions the Task complete".into(),
                 TaskAction::Review => "PR is merged; nothing to review".into(),
@@ -349,16 +408,19 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                     .unwrap_or("PR is merged; no active PR to resume")
                     .into(),
                 TaskAction::Recover => "body is not dead; complete the Task".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: complete the Task".into(),
-            },
-        ),
+            }
+            })
+        }
         Some(AfterMerge::Review) => match evidence.review_gate {
             Some(ReviewGateState::Approved) => {
                 if evidence.latest_pr_next_slug.is_some() {
                     one_action(
                         TaskAction::StartNextPr,
                         "merged and reviewed; start the next PR",
-                        |a| match a {
+                        |a| {
+                            match a {
                             TaskAction::StartNextPr => unreachable!(),
                             TaskAction::Complete => "next PR is queued; start it instead".into(),
                             TaskAction::Review => "post-merge review is approved".into(),
@@ -367,14 +429,17 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                                 .unwrap_or("PR is merged; no active PR to resume")
                                 .into(),
                             TaskAction::Recover => "body is not dead; start the next PR".into(),
+                            TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                             TaskAction::NoAction => "action available: start the next PR".into(),
+                        }
                         },
                     )
                 } else {
                     one_action(
                         TaskAction::Complete,
                         "merged and reviewed; complete the Task",
-                        |a| match a {
+                        |a| {
+                            match a {
                             TaskAction::Complete => unreachable!(),
                             TaskAction::StartNextPr => {
                                 "no next PR queued; complete the Task".into()
@@ -385,7 +450,9 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                                 .unwrap_or("PR is merged; no active PR to resume")
                                 .into(),
                             TaskAction::Recover => "body is not dead; complete the Task".into(),
+                            TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                             TaskAction::NoAction => "action available: complete the Task".into(),
+                        }
                         },
                     )
                 }
@@ -393,7 +460,8 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
             _ => one_action(
                 TaskAction::Review,
                 "merged; answer the post-merge review",
-                |a| match a {
+                |a| {
+                    match a {
                     TaskAction::Review => unreachable!(),
                     TaskAction::Resume => evidence
                         .resume_refusal
@@ -402,35 +470,39 @@ fn merged_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
                     TaskAction::Complete => "post-merge review is not yet approved".into(),
                     TaskAction::StartNextPr => "post-merge review is not yet approved".into(),
                     TaskAction::Recover => "body is not dead; a post-merge review is active".into(),
+                    TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                     TaskAction::NoAction => "action available: answer the post-merge review".into(),
+                }
                 },
             ),
         },
-        None => one_action(
-            TaskAction::Complete,
-            "PR merged; complete the Task",
-            |a| match a {
+        None => one_action(TaskAction::Complete, "PR merged; complete the Task", |a| {
+            match a {
                 TaskAction::Complete => unreachable!(),
                 TaskAction::StartNextPr => "no next PR queued".into(),
                 TaskAction::Review => "PR is merged; nothing to review".into(),
                 TaskAction::Resume => "PR is merged; complete the Task".into(),
                 TaskAction::Recover => "body is not dead; complete the Task".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: complete the Task".into(),
-            },
-        ),
+            }
+        }),
     }
 }
 
 /// No active PR or PR in Working phase: action depends on body liveness.
 fn body_model(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.process_alive {
-        Some(true) => one_action(TaskAction::NoAction, "Task body is working", |a| match a {
+        Some(true) => one_action(TaskAction::NoAction, "Task body is working", |a| {
+            match a {
             TaskAction::NoAction => unreachable!(),
             TaskAction::Recover => "body is alive; use attach/interrupt to interact".into(),
+            TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
             TaskAction::Resume => "body is working; nothing to resume".into(),
             TaskAction::Review => "no open PR to review".into(),
             TaskAction::Complete => "implementation not finished".into(),
             TaskAction::StartNextPr => "no merged PR to advance from".into(),
+        }
         }),
         Some(false) => {
             let reason = if evidence.local_progress_unsettled == Some(true) {
@@ -438,27 +510,29 @@ fn body_model(evidence: &TaskActionEvidence) -> TaskActionModel {
             } else {
                 "Task body stopped; recover to continue"
             };
-            one_action(TaskAction::Recover, reason, |a| match a {
+            one_action(TaskAction::Recover, reason, |a| {
+                match a {
                 TaskAction::Recover => unreachable!(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::Resume => "no parked step to resume — recover the body first".into(),
                 TaskAction::Review => "no open PR to review".into(),
                 TaskAction::Complete => "implementation not finished".into(),
                 TaskAction::StartNextPr => "no merged PR to advance from".into(),
                 TaskAction::NoAction => "body is dead; recover to continue".into(),
+            }
             })
         }
-        None => one_action(
-            TaskAction::Resume,
-            "resume the parked session",
-            |a| match a {
+        None => one_action(TaskAction::Resume, "resume the parked session", |a| {
+            match a {
                 TaskAction::Resume => unreachable!(),
                 TaskAction::Recover => "body is not dead; the session is parked".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::Review => "no open PR to review".into(),
                 TaskAction::Complete => "implementation not finished".into(),
                 TaskAction::StartNextPr => "no merged PR to advance from".into(),
                 TaskAction::NoAction => "action available: resume the session".into(),
-            },
-        ),
+            }
+        }),
     }
 }
 
@@ -474,13 +548,16 @@ fn apply_predecessor_overlay(
         Some(PrPhase::Abandoned) => one_action(
             TaskAction::Resume,
             "parent PR was abandoned; re-base or abandon this stack",
-            |a| match a {
+            |a| {
+                match a {
                 TaskAction::Resume => unreachable!(),
                 TaskAction::Review => "parent PR was abandoned; re-base first".into(),
                 TaskAction::Complete => "parent PR was abandoned; re-base first".into(),
                 TaskAction::StartNextPr => "parent PR was abandoned; re-base first".into(),
                 TaskAction::Recover => "body is not dead; re-base the stack".into(),
+                TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
                 TaskAction::NoAction => "action available: re-base or abandon the stack".into(),
+            }
             },
         ),
         Some(_) => {
@@ -625,6 +702,7 @@ mod tests {
             completion_refusal: None,
             resume_refusal: None,
             pending_directive: false,
+            directive_applied: false,
             ci: None,
             process_alive: None,
             predecessor_phase: None,
@@ -951,6 +1029,70 @@ mod tests {
             model.status(TaskAction::Resume).unwrap().reason,
             ev.resume_refusal.unwrap()
         );
+    }
+
+    /// The named fix: a merged, complete Task whose final directive was *applied*
+    /// but never incorporated recommends Reconcile — never a provider turn.
+    #[test]
+    fn merged_applied_but_unincorporated_directive_reconciles_not_resumes() {
+        let mut ev = evidence(TaskSessionStatus::Waiting);
+        ev.latest_pr_phase = Some(PrPhase::Merged);
+        ev.latest_pr_after_merge = Some(AfterMerge::CompleteTask);
+        ev.completion_refusal = Some(
+            "Task W2-308 cannot complete until its gates close: directive v5 is not yet incorporated; acknowledge it or re-steer before completing",
+        );
+        ev.resume_refusal =
+            Some("Task W2-308 has no active PR to resume; pull request #1064 merged");
+        ev.pending_directive = true;
+        ev.directive_applied = true;
+
+        let model = derive_task_actions(&ev);
+
+        assert_eq!(model.recommended, Some(TaskAction::Reconcile));
+        let start_next = model.status(TaskAction::StartNextPr).unwrap();
+        assert!(!start_next.available);
+        assert_eq!(
+            start_next.reason,
+            "directive already delivered; reconcile it, do not start another PR"
+        );
+        let resume = model.status(TaskAction::Resume).unwrap();
+        assert!(!resume.available);
+        assert_eq!(
+            resume.reason,
+            "PR is merged and the directive shipped; reconcile it, not resume"
+        );
+        assert_eq!(
+            model.status(TaskAction::Complete).unwrap().reason,
+            ev.completion_refusal.unwrap()
+        );
+    }
+
+    /// Sabotage guard: a merged *non-`CompleteTask`* publication (a serial next-PR
+    /// disposition) with a pending applied directive must never become
+    /// reconcilable — it stays `StartNextPr`. Dropping the `CompleteTask` guard in
+    /// `merged_pr_model` flips this to `Reconcile` and fails here.
+    #[test]
+    fn a_merged_review_disposition_never_reconciles_even_when_applied() {
+        for disposition in [Some(AfterMerge::Review), None] {
+            let mut ev = evidence(TaskSessionStatus::Waiting);
+            ev.latest_pr_phase = Some(PrPhase::Merged);
+            ev.latest_pr_after_merge = disposition;
+            ev.completion_refusal = Some(
+                "Task W2-9 cannot complete until its gates close: directive v3 is not yet incorporated; acknowledge it or re-steer before completing",
+            );
+            ev.resume_refusal =
+                Some("Task W2-9 has no active PR to resume; pull request #9 merged");
+            ev.pending_directive = true;
+            ev.directive_applied = true;
+
+            let model = derive_task_actions(&ev);
+            assert_eq!(
+                model.recommended,
+                Some(TaskAction::StartNextPr),
+                "disposition {disposition:?} must not be reconcilable"
+            );
+            assert!(!model.status(TaskAction::Reconcile).unwrap().available);
+        }
     }
 
     #[test]

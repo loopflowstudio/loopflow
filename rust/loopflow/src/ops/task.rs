@@ -2195,6 +2195,29 @@ pub(crate) async fn reconcile_project_tasks(
         if task.status.is_terminal() {
             continue;
         }
+        // A merged, complete Task whose final directive was applied but never
+        // incorporated is reconcilable, not recoverable: its work already shipped
+        // in the merged head, so only an explicit Wave/Operator attestation can
+        // settle it. The supervisor must never synthesize that attestation — it
+        // leaves the `Reconcile` recommendation standing rather than relaunching a
+        // body, rotating a PR, or queuing a CI fix. A *durable* attestation was
+        // already consumed by `reconcile_task_completion` above (which clears the
+        // gate and completes the Task), so reaching here means none exists yet.
+        //
+        // Gate on the cheap session-local predicates first — a pending directive
+        // that a body actually ran — so the common loop never pays a `task_prs`
+        // query. Only that rare shape reads PR history, and only to confirm (via
+        // the newest PR's disposition, not `any` merged PR) that an older
+        // CompleteTask behind a later Review merge is not being suppressed.
+        if has_pending_directive(task) && current_directive_applied(store, task).await? {
+            let task_prs = store
+                .task_prs(&task.id)
+                .await
+                .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+            if latest_pr_completes_task(&task_prs) {
+                continue;
+            }
+        }
         let no_active_pr = if observed.is_none() {
             store
                 .active_task_pr(&task.id)
@@ -3604,6 +3627,54 @@ pub(crate) fn has_pending_directive(session: &TaskSession) -> bool {
     session.current_directive_version > session.incorporated_directive_version
 }
 
+/// Whether the Task's *newest* PR (by sequence) is a merged `CompleteTask` — the
+/// disposition that means the Task is settling, not rotating a serial successor.
+///
+/// The one definition of "this Task settled on a completing merge", shared by the
+/// supervisor's Reconcile suppression and the `lf task reconcile` command guard
+/// (the action model enforces the same invariant on `latest_pr_after_merge`).
+/// Keying on the newest PR — not `any` merged PR — is load-bearing: an older
+/// `CompleteTask` behind a later `Review`/next-PR merge must not authorize
+/// reconciliation.
+pub(crate) fn latest_pr_completes_task(prs: &[TaskPr]) -> bool {
+    prs.iter().max_by_key(|pr| pr.sequence).is_some_and(|pr| {
+        pr.phase() == PrPhase::Merged
+            && pr
+                .publication
+                .as_ref()
+                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+    })
+}
+
+/// The directive at `current_directive_version`, or `None` when the row is
+/// missing (a broken chain, never on a healthy Session).
+pub(crate) async fn current_directive(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<Option<ChildDirective>> {
+    let directives = store
+        .child_directives(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(format!("failed to read Task directives: {error}")))?;
+    Ok(directives
+        .into_iter()
+        .find(|directive| directive.version == session.current_directive_version))
+}
+
+/// The reconcilable shape's delivery half: the current directive was *applied* to
+/// a body (`applied_at` set) but never incorporated. Proof of delivery, not of
+/// semantic incorporation — the incorporation evidence is an explicit
+/// Wave/Operator attestation, never this predicate. `false` when the current
+/// directive is already incorporated or was never applied.
+pub(crate) async fn current_directive_applied(
+    store: &SharedStore,
+    session: &TaskSession,
+) -> OpsResult<bool> {
+    Ok(current_directive(store, session)
+        .await?
+        .is_some_and(|directive| directive.applied_at.is_some()))
+}
+
 pub(crate) fn no_active_pr_resume_refusal(
     identifier: &str,
     active: Option<&TaskPr>,
@@ -3702,13 +3773,18 @@ async fn ensure_working_pr_with_authority(
     // the review gate, not on a follow-up PR. `reconcile_task_completion`
     // advances the Session to `Completed` once the gate closes. Two things
     // independently authorize one more serial PR: follow-up committed past the
-    // merged tip, which the completion gate refuses to settle over, and a
-    // pending directive, which the successor exists to incorporate.
+    // merged tip, which the completion gate refuses to settle over, and a pending
+    // directive that still needs a body to incorporate it. An applied-but-
+    // unincorporated directive does *not* — its work already shipped in the merged
+    // head, so it settles by an out-of-band reconciliation attestation, never
+    // another provider turn.
+    let pending_needs_body =
+        has_pending_directive(session) && !current_directive_applied(store, session).await?;
     if settled
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-        && !has_pending_directive(session)
+        && !pending_needs_body
         && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
         return Ok(None);
@@ -3986,61 +4062,77 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
                 session.launch.issue.identifier
             )));
         }
-        if !is_clean(&session.worktree)
-            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
-        {
-            return Err(task_error(
-                "Task worktree has uncommitted changes; publish or explicitly abandon them first",
-            ));
-        }
-        // The completion gate: every active PR must be settled and every required
-        // review approved before the Task can be completed in the PM. Do not
-        // weaken the review gate or infer merge from a green head.
-        let gate = task_completion_gate(&store, &session).await?;
-        if let Some(refusal) = gate.refusal(&session.launch.issue.identifier) {
-            // Nothing has been written. A refusal here — an open review, a
-            // committed follow-up, anything — leaves a discardable successor
-            // active, so the Task keeps its PR and no rotation is provoked.
-            return Err(task_error(refusal));
-        }
-        let from = session.status;
-        session.set_status(TaskSessionStatus::Completed, summary.clone());
-        reconcile_pm_writeback(&store, &mut session, None).await;
-        // Every other condition is now proven, so the rotation's empty artifact
-        // is dropped as part of completing — one transaction that deletes the row
-        // and writes the terminal status together. There is no instant at which
-        // the successor is gone and the Task is not yet terminal, which is the
-        // only state `ensure_working_pr_with_authority` would rotate from.
-        complete_task_session_with_authority(
-            &store,
-            &session,
-            gate.discardable_successor.as_ref(),
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
-        append_task_event_with_authority(
-            &store,
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Completed,
-                reason: session.status_reason.clone(),
-            },
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-        append_task_event_with_authority(
-            &store,
-            &session.id,
-            &TaskEventKind::Completed { summary },
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
+        settle_completed_session(&store, &mut session, lease.as_ref(), summary).await?;
         Ok(session)
     })
+}
+
+/// Drive an inactive Session through the completion gate to `Completed`: the
+/// clean-tree check, the gate, the PM writeback, the terminal transaction, and
+/// the `StatusChanged`/`Completed` events. Shared by `lf task complete` (in-body
+/// or operator) and `lf task reconcile` (out-of-band attestation). The caller
+/// owns everything upstream — reconciling the PR, resolving the lease, and any
+/// gate-clearing side effects (e.g. incorporating a pending directive).
+async fn settle_completed_session(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: Option<&ChildWriteLease>,
+    summary: String,
+) -> OpsResult<()> {
+    if !is_clean(&session.worktree)
+        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+    {
+        return Err(task_error(
+            "Task worktree has uncommitted changes; publish or explicitly abandon them first",
+        ));
+    }
+    // The completion gate: every active PR must be settled and every required
+    // review approved before the Task can be completed in the PM. Do not
+    // weaken the review gate or infer merge from a green head.
+    let gate = task_completion_gate(store, session).await?;
+    if let Some(refusal) = gate.refusal(&session.launch.issue.identifier) {
+        // Nothing has been written. A refusal here — an open review, a
+        // committed follow-up, anything — leaves a discardable successor
+        // active, so the Task keeps its PR and no rotation is provoked.
+        return Err(task_error(refusal));
+    }
+    let from = session.status;
+    session.set_status(TaskSessionStatus::Completed, summary.clone());
+    reconcile_pm_writeback(store, session, None).await;
+    // Every other condition is now proven, so the rotation's empty artifact
+    // is dropped as part of completing — one transaction that deletes the row
+    // and writes the terminal status together. There is no instant at which
+    // the successor is gone and the Task is not yet terminal, which is the
+    // only state `ensure_working_pr_with_authority` would rotate from.
+    complete_task_session_with_authority(
+        store,
+        session,
+        gate.discardable_successor.as_ref(),
+        lease,
+    )
+    .await
+    .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
+    append_task_event_with_authority(
+        store,
+        &session.id,
+        &TaskEventKind::StatusChanged {
+            from,
+            to: TaskSessionStatus::Completed,
+            reason: session.status_reason.clone(),
+        },
+        lease,
+    )
+    .await
+    .map_err(|error| task_error(error.to_string()))?;
+    append_task_event_with_authority(
+        store,
+        &session.id,
+        &TaskEventKind::Completed { summary },
+        lease,
+    )
+    .await
+    .map_err(|error| task_error(error.to_string()))?;
+    Ok(())
 }
 
 /// The concise publication-state label carried by a PR's Linear linkage. Derived
@@ -4417,8 +4509,11 @@ pub(crate) async fn task_completion_gate(
     Ok(gate)
 }
 
-/// True when the Session has a settled merged PR whose `after_merge` is
-/// `CompleteTask` — i.e. completion is pending on the gate, not on a future PR.
+/// The newest PR (by sequence) when it is the Task's *completing* merge — i.e.
+/// completion is pending on the gate, not on a future PR. `None` when the newest
+/// PR is not a merged `CompleteTask`, so an older `CompleteTask` behind a later
+/// `Review`/next-PR merge never drives automatic completion. Shares the one
+/// disposition predicate with the reconcile command and supervisor suppression.
 async fn merged_completing_pr(
     store: &SharedStore,
     session: &TaskSession,
@@ -4427,13 +4522,10 @@ async fn merged_completing_pr(
         .task_prs(&session.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-    Ok(prs.into_iter().find(|pr| {
-        pr.phase() == PrPhase::Merged
-            && pr
-                .publication
-                .as_ref()
-                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-    }))
+    if !latest_pr_completes_task(&prs) {
+        return Ok(None);
+    }
+    Ok(prs.into_iter().max_by_key(|pr| pr.sequence))
 }
 
 /// Complete a Task Session after its gate closed, persisting the merged
@@ -4660,6 +4752,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
             pending_directive: has_pending_directive(&session),
+            directive_applied: current_directive_applied(&store, &session).await?,
             ci: active.and_then(|pr| pr.fresh_ci()),
             process_alive: if session.status.is_process_active() {
                 Some(process_alive)
@@ -5550,6 +5643,260 @@ pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult
     })
 }
 
+/// What a reconciliation settled: the now-terminal Session, who attested the
+/// directive, and the persisted recovery commands cleared in place.
+#[derive(Debug, Clone)]
+pub struct TaskReconcileResult {
+    pub session: TaskSession,
+    pub attested_by: ChildCommandSource,
+    pub cleared_commands: Vec<ChildCommandId>,
+}
+
+/// Terminalize every still-`Persisted` command for a Task that has settled
+/// terminal — they can never be delivered. Each row moves to `failed` in place;
+/// no new or superseding command is created. Returns the ids cleared.
+async fn reject_orphaned_persisted_commands(
+    store: &SharedStore,
+    session: &TaskSession,
+    reason: &str,
+) -> OpsResult<Vec<ChildCommandId>> {
+    let commands = store
+        .list_child_commands(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(format!("failed to read Task commands: {error}")))?;
+    let mut cleared = Vec::new();
+    for command in commands
+        .into_iter()
+        .filter(|command| command.state == ChildCommandState::Persisted)
+    {
+        store
+            .reject_persisted_child_command(&command.id, reason.to_string())
+            .await
+            .map_err(|error| task_error(format!("failed to clear orphaned command: {error}")))?;
+        cleared.push(command.id);
+    }
+    Ok(cleared)
+}
+
+/// Settle a merged, Linear-complete Task whose final directive was applied but
+/// never incorporated, by an explicit out-of-band Wave/Operator attestation.
+///
+/// The predicates (`applied_at`, merged `CompleteTask`, no active body) only
+/// decide whether reconciliation is *permitted*. The incorporation *evidence* is
+/// the caller's attestation: they name the exact current directive version and a
+/// non-empty semantic summary, and that summary becomes the incorporated summary.
+/// This never impersonates the Task (no `LF_TASK_SESSION_ID`, no body lease),
+/// never launches a provider or rotates a PR, and clears the orphaned persisted
+/// recovery command in place rather than queuing a duplicate.
+pub fn task_reconcile(
+    issue: &str,
+    authority: CallerAuthority,
+    version: u32,
+    summary: String,
+) -> OpsResult<TaskReconcileResult> {
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return Err(task_error("reconciliation summary cannot be empty"));
+    }
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_session_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+
+        // Authority: only an Operator or the owning Wave may attest the semantic
+        // handoff. A Project is the automatic actor — it may recommend Reconcile
+        // or consume a durable attestation, but never *create* one, or the
+        // attestation would be a machine-authored receipt of adoption that never
+        // happened.
+        if matches!(authority, CallerAuthority::Project(_)) {
+            return Err(task_error(format!(
+                "Task {} reconciliation must be attested by an operator or the owning Wave, \
+                 not a Project Session; a Project may recommend it, never create the attestation",
+                session.launch.issue.identifier
+            )));
+        }
+        let attested_by = validate_task_caller_authority(&store, &session, &authority).await?;
+
+        // Reconcile PR and body state from ground truth first so a stale local row
+        // cannot pass the merged/complete or no-active-body guards.
+        reconcile_task_pr(&store, &mut session).await?;
+        reconcile_process_liveness(&store, &mut session).await?;
+
+        // Idempotent: an already-settled Task needs no reconciliation. Still clear
+        // any orphaned persisted command so a retry converges.
+        if session.status.is_terminal() {
+            let cleared = reject_orphaned_persisted_commands(
+                &store,
+                &session,
+                &format!(
+                    "Task already {}; reconciliation is moot",
+                    session.status.as_str()
+                ),
+            )
+            .await?;
+            return Ok(TaskReconcileResult {
+                session,
+                attested_by,
+                cleared_commands: cleared,
+            });
+        }
+
+        // --- Guards. Each refusal names the exact failing condition. ---
+        if version != session.current_directive_version {
+            return Err(task_error(format!(
+                "Task {} is at directive v{}; reconcile must name the exact current directive (got v{version})",
+                session.launch.issue.identifier, session.current_directive_version
+            )));
+        }
+        // Applied delivery: a body actually ran under the current directive. This
+        // is proof of delivery, never of incorporation — the attestation carries
+        // the latter.
+        let directive = current_directive(&store, &session)
+            .await?
+            .ok_or_else(|| task_error("Task Session has no current directive"))?;
+        if directive.applied_at.is_none() {
+            return Err(task_error(format!(
+                "Task {} directive v{version} was never delivered to a body; it needs a provider turn, not reconciliation",
+                session.launch.issue.identifier
+            )));
+        }
+        // No active body: reconcile only settles a dead Session.
+        if session.status.is_process_active() {
+            return Err(task_error(format!(
+                "Task {} still has an active body ({}); reconcile only settles an inactive Session",
+                session.launch.issue.identifier,
+                session.status.as_str()
+            )));
+        }
+        if let Some(process) = session.latest_process.as_ref() {
+            if tmux_session_exists(&process.tmux_name)
+                .await
+                .map_err(|error| task_error(format!("failed to inspect Task body: {error}")))?
+            {
+                return Err(task_error(format!(
+                    "Task {} body process is still live; reconcile only settles a dead body",
+                    session.launch.issue.identifier
+                )));
+            }
+        }
+        // Shipped work: a merged `CompleteTask` PR and nothing still open. This is
+        // necessary but not sufficient — the publication is only an intent.
+        if store
+            .active_task_pr(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .is_some()
+        {
+            return Err(task_error(format!(
+                "Task {} still has an active pull request; settle it before reconciling",
+                session.launch.issue.identifier
+            )));
+        }
+        let prs = store
+            .task_prs(&session.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+        // The *newest* PR must be the completing merge. An older CompleteTask
+        // behind a later Review/next-PR merge is a serial successor, not a Task
+        // settling — it must not authorize reconciliation.
+        if !latest_pr_completes_task(&prs) {
+            return Err(task_error(format!(
+                "Task {} is not settling on a CompleteTask merge; its newest pull request is not a \
+                 merged CompleteTask. Reconcile settles only a Task whose latest merge completes it",
+                session.launch.issue.identifier
+            )));
+        }
+        // Linear-complete: the owning team's issue is *actually* in a completed
+        // state. A `CompleteTask` publication is only an intent, and its write can
+        // fail (ENG-29/ENG-75), so prove completion by observing the issue itself
+        // rather than trusting the PR. Fail closed if Linear cannot be reached.
+        //
+        // The PM/GOAL root is the Wave's canonical repo, never `session.worktree`:
+        // this command targets old, merged, dead Tasks whose worker worktree may
+        // already be pruned, and PM ownership is Wave-durable.
+        let wave = owning_wave(&store, &session).await?;
+        let linear_complete = crate::ops::task_pm::issue_is_complete(
+            Path::new(wave.repo()),
+            wave.name(),
+            session.launch.issue.id.as_str(),
+        )
+        .await
+        .map_err(|error| {
+            task_error(format!(
+                "cannot confirm Task {} is Linear-complete: {error}",
+                session.launch.issue.identifier
+            ))
+        })?;
+        if !linear_complete {
+            return Err(task_error(format!(
+                "Task {} is not Linear-complete; its owning-team issue is not in a completed state. \
+                 A merged CompleteTask publication is only an intent — reconcile requires the \
+                 completion to have actually landed",
+                session.launch.issue.identifier
+            )));
+        }
+
+        // --- Record the attestation AS the incorporation evidence. Out-of-band:
+        // no lease, no LF_TASK_SESSION_ID. The operator's summary becomes the
+        // incorporated summary; a distinct `DirectiveReconciled` event names who
+        // attested, so the trail never reads as a forged body acknowledgement. ---
+        if has_pending_directive(&session) {
+            let (incorporated_directive, incorporated) = store
+                .incorporate_child_directive(&ChildRef::Task(session.id.clone()), version, &summary)
+                .await
+                .map_err(|error| {
+                    task_error(format!(
+                        "failed to record reconciliation attestation: {error}"
+                    ))
+                })?;
+            if incorporated {
+                append_task_event_with_authority(
+                    &store,
+                    &session.id,
+                    &TaskEventKind::DirectiveReconciled {
+                        directive_id: incorporated_directive.id.clone(),
+                        version,
+                        summary: summary.clone(),
+                        attested_by: attested_by.clone(),
+                    },
+                    None,
+                )
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            }
+            // Re-read so `incorporated_directive_version` reflects the attestation
+            // before the completion gate re-evaluates it.
+            session = store
+                .get_task_session(&session.id)
+                .await
+                .map_err(|error| task_error(format!("failed to reread Task Session: {error}")))?
+                .ok_or_else(|| task_error("Task Session disappeared during reconciliation"))?;
+        }
+
+        // Complete out-of-band. The pending-directive blocker is now clear.
+        let completion_summary =
+            format!("reconciled: directive v{version} incorporated by out-of-band attestation");
+        settle_completed_session(&store, &mut session, None, completion_summary).await?;
+
+        // Clear the orphaned persisted recovery command(s) in place — no duplicate.
+        let cleared = reject_orphaned_persisted_commands(
+            &store,
+            &session,
+            &format!("Task reconciled and completed out of band; directive v{version} attested"),
+        )
+        .await?;
+
+        Ok(TaskReconcileResult {
+            session,
+            attested_by,
+            cleared_commands: cleared,
+        })
+    })
+}
+
 pub fn task_abandon(
     issue: &str,
     authority: CallerAuthority,
@@ -5627,22 +5974,24 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        _defer_task_interactions, _recover_abandoned_task, cached_github_observation,
-        changes_snapshot, count_recovery_attempts, decide_open_pr_status, derive_workspace_slug,
-        diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
-        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
-        recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
-        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
-        resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
-        task_recovery_adoption, task_snapshot, unpublished_work,
-        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions, TaskControlResult,
-        TaskRecoveryAdoption, TaskWorkspace,
+        _defer_task_interactions, _recover_abandoned_task, advance_completion_after_gate,
+        cached_github_observation, changes_snapshot, count_recovery_attempts, current_directive,
+        decide_open_pr_status, derive_workspace_slug, diff_snapshot, ensure_working_pr,
+        ensure_working_pr_with_authority, file_snapshot, latest_pr_completes_task, next_pr_slug,
+        owning_wave, parse_pr_slug, parse_workspace_slug, project_context,
+        reconcile_process_liveness, reconcile_project_tasks, reconcile_task_pr,
+        recover_stalled_task_body, recover_stranded_task_body, refuse_dirty_between_prs,
+        refuse_if_canonical_ahead, require_task_pr_range_nonempty_with_authority,
+        resolve_task_flow, resolve_upstream_base, resume_task_async, succession_workspace_slug,
+        supervise_project_task_bodies, task_reconcile, task_recovery_adoption, task_snapshot,
+        unpublished_work, verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions,
+        TaskControlResult, TaskRecoveryAdoption, TaskWorkspace,
     };
     use crate::child_session::{
         observe, BodyEvidence, BodyIntent, CallerAuthority, ChildBodyOutcome, ChildCommand,
-        ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
-        ChildProcessGeneration, ChildRef, ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
+        ChildCommandId, ChildCommandKind, ChildCommandSource, ChildCommandState, ChildDirective,
+        ChildDirectiveId, ChildLeaseState, ChildProcessGeneration, ChildRef, ChildWriteLease,
+        DirectiveKind, MAX_RECOVERY_ATTEMPTS,
     };
     use crate::engine::git::is_ancestor;
     use crate::id::WaveId;
@@ -6288,6 +6637,644 @@ mod tests {
                 .reason,
             "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
         );
+    }
+
+    /// Force [`crate::ops::task_pm::issue_is_complete`] to a fixed verdict for the
+    /// duration of a test, so reconciliation exercises without a live Linear read.
+    /// Resets on drop; the env lock its callers hold serializes the global.
+    struct LinearCompleteOverride;
+
+    impl LinearCompleteOverride {
+        fn set(complete: bool) -> Self {
+            crate::ops::task_pm::test_hooks::set_issue_complete_override(Some(complete));
+            Self
+        }
+    }
+
+    impl Drop for LinearCompleteOverride {
+        fn drop(&mut self) {
+            crate::ops::task_pm::test_hooks::set_issue_complete_override(None);
+        }
+    }
+
+    /// Build the exact impossible shape ENG-30 fixes: a merged, Linear-complete
+    /// Task (`CompleteTask` disposition) whose final directive at `version` was
+    /// delivered to a body but never incorporated, with a dead body and an
+    /// orphaned `Persisted` recovery command. Hermetic — the merged PR carries a
+    /// fresh GitHub observation and a `head_sha` equal to the branch tip, so no
+    /// `gh` runs and the completion gate proves no committed follow-up. Returns
+    /// `(home, store, session, recovery_command_id)`.
+    async fn applied_unincorporated_task(
+        repo: &TestRepo,
+        branch: &str,
+        pr_number: u32,
+        version: u32,
+        applied: bool,
+    ) -> (tempfile::TempDir, SharedStore, TaskSession, ChildCommandId) {
+        let base = repo.head_sha();
+        repo.create_branch(branch);
+        let (home, store, mut session, mut pr) = rotation_task(repo, branch, &base).await;
+        let now = OffsetDateTime::now_utc();
+
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: pr_number,
+                url: format!("https://example.com/pr/{pr_number}"),
+                head_sha: Some(base.clone()),
+            }),
+        });
+        pr.merge_commit = Some(format!("merge-{pr_number}"));
+        pr.github_observation = Some(GithubObservation {
+            checked_at: now,
+            result: GithubObservationResult::Fresh,
+        });
+        pr.updated_at = now;
+        store
+            .settle_task_pr(&pr, None)
+            .await
+            .expect("settle merged PR");
+
+        // The final directive: created via a (superseded) steer so the session's
+        // current version advances to `version`, optionally marked applied.
+        let target = ChildRef::Task(session.id.clone());
+        let steer = ChildCommand {
+            id: ChildCommandId::new(),
+            target: target.clone(),
+            source: ChildCommandSource::Human,
+            kind: ChildCommandKind::Steer {
+                text: format!("final direction v{version}"),
+            },
+            state: ChildCommandState::Accepted,
+            effect: None,
+            created_at: now,
+            claimed_by_generation: Some(1),
+            accepted_at: Some(now),
+            error: None,
+        };
+        let directive = ChildDirective {
+            id: ChildDirectiveId::new(),
+            target: target.clone(),
+            version,
+            kind: DirectiveKind::Replacement,
+            text: format!("final direction v{version}"),
+            source: ChildCommandSource::Human,
+            command_id: Some(steer.id.clone()),
+            issued_at: now,
+            applied_at: None,
+            incorporated_at: None,
+            incorporated_summary: None,
+        };
+        store
+            .create_child_command_with_directive(&steer, &directive)
+            .await
+            .expect("seed final directive");
+        if applied {
+            store
+                .mark_child_directive_applied(&target, version)
+                .await
+                .expect("mark directive applied");
+        }
+
+        // The orphaned recovery command: Persisted, never claimed, no generation.
+        let recovery = ChildCommand {
+            id: ChildCommandId::new(),
+            target: target.clone(),
+            source: ChildCommandSource::Project(session.project_session_id.clone()),
+            kind: ChildCommandKind::Resume {
+                message: Some("recover the stranded Task".to_string()),
+            },
+            state: ChildCommandState::Persisted,
+            effect: None,
+            created_at: now,
+            claimed_by_generation: None,
+            accepted_at: None,
+            error: None,
+        };
+        store
+            .create_child_command(&recovery)
+            .await
+            .expect("seed orphaned recovery command");
+
+        // Reflect the applied-but-unincorporated shape: current is `version`,
+        // incorporated one behind, a dead body, Waiting.
+        session.current_directive_version = version;
+        session.incorporated_directive_version = version - 1;
+        session.status = TaskSessionStatus::Waiting;
+        session.status_reason = "final directive applied; acknowledgement interrupted".to_string();
+        session.latest_process = None;
+        store
+            .update_task_session(&session)
+            .await
+            .expect("persist reconcilable shape");
+        let session = store
+            .get_task_session(&session.id)
+            .await
+            .unwrap()
+            .expect("reread session");
+        (home, store, session, recovery.id)
+    }
+
+    /// The W2-308 reproduction: a merged, complete Task whose applied final
+    /// directive (v5) was never acknowledged settles by an operator attestation —
+    /// no provider turn, no new PR, orphan recovery command cleared in place.
+    #[test]
+    fn reconcile_settles_a_merged_task_whose_applied_directive_was_never_acknowledged() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, store, session, recovery_id) = runtime.block_on(async {
+            let (home, store, session, recovery_id) =
+                applied_unincorporated_task(&repo, "jack/w2-308", 1064, 5, true).await;
+            let project = store
+                .get_project_session(&session.project_session_id)
+                .await
+                .unwrap()
+                .expect("project exists");
+
+            // The supervisor recognizes the shape: it must not relaunch a body,
+            // rotate a PR, or error — it leaves the Reconcile recommendation.
+            reconcile_project_tasks(&store, &project)
+                .await
+                .expect("supervisor tolerates the reconcilable shape");
+            let after = store.get_task_session(&session.id).await.unwrap().unwrap();
+            assert_eq!(
+                after.status,
+                TaskSessionStatus::Waiting,
+                "supervisor leaves it awaiting attestation, never settles it hands-off"
+            );
+            assert_eq!(
+                store.task_prs(&session.id).await.unwrap().len(),
+                1,
+                "no successor PR minted"
+            );
+            assert!(after.latest_process.is_none(), "no body relaunched");
+            (home, store, after, recovery_id)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let _linear = LinearCompleteOverride::set(true);
+
+        // Legal-action reporting points at Reconcile, never Resume/StartNextPr.
+        let snapshot = task_snapshot(&session).expect("snapshot the reconcilable Task");
+        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Reconcile));
+        assert!(
+            !snapshot
+                .actions
+                .status(TaskAction::Resume)
+                .unwrap()
+                .available
+        );
+
+        let summary =
+            "Directive v5 shipped in the merged head; the acknowledgement turn was interrupted.";
+        let result = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            5,
+            summary.to_string(),
+        )
+        .expect("operator attestation settles the Task");
+
+        assert_eq!(result.session.status, TaskSessionStatus::Completed);
+        assert_eq!(
+            result.cleared_commands,
+            vec![recovery_id.clone()],
+            "the orphaned Persisted recovery command is cleared in place"
+        );
+
+        let runtime = tokio::runtime::Runtime::new().expect("verify runtime");
+        runtime.block_on(async {
+            let settled = store.get_task_session(&session.id).await.unwrap().unwrap();
+            assert_eq!(settled.status, TaskSessionStatus::Completed);
+            assert_eq!(settled.incorporated_directive_version, 5);
+            let directive = current_directive(&store, &settled)
+                .await
+                .unwrap()
+                .expect("current directive");
+            assert!(directive.incorporated_at.is_some());
+            assert_eq!(directive.incorporated_summary.as_deref(), Some(summary));
+            let recovery = store
+                .get_child_command(&recovery_id)
+                .await
+                .unwrap()
+                .expect("recovery command still readable");
+            assert_eq!(
+                recovery.state,
+                ChildCommandState::Failed,
+                "orphan terminalized in place, not superseded by a duplicate"
+            );
+            let events = store.task_events_after(&settled.id, 0).await.unwrap();
+            assert!(
+                events.iter().any(|event| matches!(
+                    &event.kind,
+                    TaskEventKind::DirectiveReconciled { version: 5, attested_by, .. }
+                        if *attested_by == ChildCommandSource::Human
+                )),
+                "a DirectiveReconciled event names the out-of-band attester"
+            );
+            // No new command was created — only the seeded steer + recovery exist.
+            let commands = store
+                .list_child_commands(&ChildRef::Task(settled.id.clone()))
+                .await
+                .unwrap();
+            assert_eq!(commands.len(), 2, "reconciliation created no command");
+        });
+    }
+
+    /// The W2-127 reproduction: supervisor-owned work merged as PR #876 while the
+    /// provider stayed stopped; the Wave attests directive v2 out of band.
+    #[test]
+    fn reconcile_settles_w2_127_supervisor_owned_merge() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, store, session, recovery_id) = runtime.block_on(async {
+            applied_unincorporated_task(&repo, "jack/w2-127", 876, 2, true).await
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let _linear = LinearCompleteOverride::set(true);
+
+        let summary = "Provider stayed stopped; no branch-built lf touched the live registry; \
+             supervisor-owned implementation merged as PR #876.";
+        let result = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            2,
+            summary.to_string(),
+        )
+        .expect("attestation settles W2-127");
+
+        assert_eq!(result.session.status, TaskSessionStatus::Completed);
+        assert_eq!(result.cleared_commands, vec![recovery_id]);
+
+        let runtime = tokio::runtime::Runtime::new().expect("verify runtime");
+        runtime.block_on(async {
+            let settled = store.get_task_session(&session.id).await.unwrap().unwrap();
+            assert_eq!(settled.incorporated_directive_version, 2);
+            let directive = current_directive(&store, &settled).await.unwrap().unwrap();
+            assert_eq!(directive.incorporated_summary.as_deref(), Some(summary));
+        });
+    }
+
+    /// Reconcile refuses everything outside its exact shape: an empty summary, a
+    /// stale directive version, a Project caller, and a not-yet-applied directive.
+    #[test]
+    fn reconcile_refuses_outside_its_exact_shape() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, _store, session, project_id) = runtime.block_on(async {
+            let (home, store, session, _rec) =
+                applied_unincorporated_task(&repo, "jack/guard-applied", 900, 5, true).await;
+            let project_id = session.project_session_id.clone();
+            (home, store, session, project_id)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let issue = session.launch.issue.identifier.clone();
+
+        let empty = task_reconcile(&issue, CallerAuthority::Operator, 5, "   ".to_string())
+            .expect_err("empty summary refused");
+        assert!(
+            empty.to_string().contains("summary cannot be empty"),
+            "{empty}"
+        );
+
+        let stale = task_reconcile(&issue, CallerAuthority::Operator, 4, "attest".to_string())
+            .expect_err("stale version refused");
+        assert!(
+            stale.to_string().contains("exact current directive"),
+            "{stale}"
+        );
+
+        let project = task_reconcile(
+            &issue,
+            CallerAuthority::Project(project_id),
+            5,
+            "attest".to_string(),
+        )
+        .expect_err("a Project may not create the attestation");
+        assert!(
+            project
+                .to_string()
+                .contains("must be attested by an operator or the owning Wave"),
+            "{project}"
+        );
+    }
+
+    /// A pending directive that was never *applied* is a post-land steer that
+    /// still needs a body: reconcile refuses it, and legal-action reporting keeps
+    /// recommending StartNextPr rather than Reconcile.
+    #[test]
+    fn reconcile_refuses_a_directive_that_was_never_delivered() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, _store, session) = runtime.block_on(async {
+            let (home, store, session, _rec) =
+                applied_unincorporated_task(&repo, "jack/never-applied", 901, 3, false).await;
+            (home, store, session)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+
+        let snapshot = task_snapshot(&session).expect("snapshot");
+        assert_eq!(
+            snapshot.actions.recommended,
+            Some(TaskAction::StartNextPr),
+            "a not-applied pending directive still needs a body"
+        );
+
+        let refusal = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            3,
+            "attest".to_string(),
+        )
+        .expect_err("a never-delivered directive cannot be reconciled");
+        assert!(
+            refusal.to_string().contains("never delivered to a body"),
+            "{refusal}"
+        );
+    }
+
+    /// Reconcile refuses when the owning-team Linear issue is not actually in a
+    /// completed state — a merged CompleteTask publication is only an intent, and
+    /// its write can fail (ENG-29/ENG-75). Sabotage guard for the Linear proof:
+    /// dropping the `issue_is_complete` check lets this attest a still-open issue.
+    #[test]
+    fn reconcile_refuses_when_the_linear_issue_is_not_complete() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, _store, session) = runtime.block_on(async {
+            let (home, store, session, _rec) =
+                applied_unincorporated_task(&repo, "jack/open-issue", 903, 5, true).await;
+            (home, store, session)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let _linear = LinearCompleteOverride::set(false);
+
+        let refusal = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            5,
+            "attest".to_string(),
+        )
+        .expect_err("a not-Linear-complete issue cannot be reconciled");
+        assert!(
+            refusal.to_string().contains("not Linear-complete"),
+            "{refusal}"
+        );
+    }
+
+    /// Reconcile resolves the PM/GOAL root from the owning Wave's canonical repo,
+    /// not the (possibly pruned) worker worktree. Sabotage guard for v6/v7:
+    /// reading `session.worktree` here would break reconciliation of a dead Task.
+    #[test]
+    fn reconcile_reads_the_linear_proof_from_the_wave_repo_not_the_worktree() {
+        let repo = TestRepo::new();
+        let dead_worktree = tempfile::tempdir().expect("dead worktree parent");
+        let missing = dead_worktree.path().join("pruned-worker-tree");
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, store, session, wave_repo) = runtime.block_on(async {
+            let (home, store, mut session, _rec) =
+                applied_unincorporated_task(&repo, "jack/dead-tree", 905, 5, true).await;
+            let wave_repo = owning_wave(&store, &session)
+                .await
+                .unwrap()
+                .repo()
+                .to_string();
+            // Point the Session at a worktree that does not exist — the shape this
+            // command targets. PM ownership stays Wave-durable at `wave_repo`.
+            session.worktree = missing.clone();
+            store.update_task_session(&session).await.unwrap();
+            let session = store.get_task_session(&session.id).await.unwrap().unwrap();
+            (home, store, session, wave_repo)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let _linear = LinearCompleteOverride::set(true);
+        crate::ops::task_pm::test_hooks::record_root(Path::new("unset"));
+
+        // The clean-tree gate (deliberately preserved) fails on the missing
+        // worktree — but only *after* the Linear proof was reached against the
+        // Wave repo, which is the point under test.
+        let err = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            5,
+            "attest".to_string(),
+        )
+        .expect_err("clean-tree gate still fires on the missing worktree");
+        assert!(
+            err.to_string().contains("worktree"),
+            "the preserved clean-tree gate should fail on the missing worktree: {err}"
+        );
+        let root = crate::ops::task_pm::test_hooks::last_root().expect("Linear proof was reached");
+        assert_eq!(root, wave_repo, "PM root must be the Wave repo");
+        assert_ne!(
+            root,
+            missing.display().to_string(),
+            "PM root must not be the dead worker worktree"
+        );
+        drop(store);
+    }
+
+    /// Append a serial successor to `first` and merge it with a `Review`
+    /// disposition — a later, non-completing merge stacked on an older
+    /// `CompleteTask`. Leaves the Task with no active PR.
+    async fn append_merged_review_pr(store: &SharedStore, first: &TaskPr, number: u32) {
+        let now = OffsetDateTime::now_utc();
+        let mut next = TaskPr {
+            id: TaskPrId::new(),
+            task_session_id: first.task_session_id.clone(),
+            sequence: first.sequence + 1,
+            slug: format!("{}-next", first.slug),
+            branch: format!("{}-next", first.branch),
+            base_commit: first.base_commit.clone(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            created_at: now,
+            updated_at: now,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+        };
+        store
+            .settle_task_pr(first, Some(&next))
+            .await
+            .expect("insert successor working PR");
+        next.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number,
+                url: format!("https://example.com/pr/{number}"),
+                head_sha: None,
+            }),
+        });
+        next.merge_commit = Some(format!("merge-{number}"));
+        next.updated_at = now;
+        store
+            .settle_task_pr(&next, None)
+            .await
+            .expect("settle successor as Review-merged");
+    }
+
+    /// Multi-PR sabotage: an older merged `CompleteTask` behind a later merged
+    /// `Review` must never authorize reconciliation — through the direct command,
+    /// the supervisor suppression, or automatic completion. Reverting any consumer
+    /// to `task_prs(..).any(CompleteTask)` flips one of these assertions.
+    #[test]
+    fn an_older_completetask_behind_a_later_review_never_reconciles() {
+        let repo = TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+        let (home, store, session) = runtime.block_on(async {
+            let (home, store, session, _rec) =
+                applied_unincorporated_task(&repo, "jack/sabotage", 1064, 5, true).await;
+            let first = store
+                .task_prs(&session.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("first PR");
+            append_merged_review_pr(&store, &first, 1099).await;
+            let project = store
+                .get_project_session(&session.project_session_id)
+                .await
+                .unwrap()
+                .unwrap();
+            let session = store.get_task_session(&session.id).await.unwrap().unwrap();
+
+            // The shared predicate: the newest PR (Review) is not a completing merge.
+            let prs = store.task_prs(&session.id).await.unwrap();
+            assert_eq!(prs.len(), 2);
+            assert!(
+                !latest_pr_completes_task(&prs),
+                "a later Review merge is not reconcilable, even behind an older CompleteTask"
+            );
+
+            // Supervisor suppression is gated solely by `latest_pr_completes_task`
+            // on this same PR set (asserted false above), so it cannot fire; a
+            // supervisor pass must never auto-complete the Task from the older
+            // CompleteTask either.
+            let _ = reconcile_project_tasks(&store, &project).await;
+            let after = store.get_task_session(&session.id).await.unwrap().unwrap();
+            assert_ne!(
+                after.status,
+                TaskSessionStatus::Completed,
+                "must not auto-complete from an older CompleteTask behind a later Review"
+            );
+            (home, store, session)
+        });
+        drop(runtime);
+        let _env = StoreEnvGuard::new(home.path());
+        let _linear = LinearCompleteOverride::set(true);
+
+        // Direct command: refuses because the newest PR is not a merged CompleteTask.
+        let err = task_reconcile(
+            &session.launch.issue.identifier,
+            CallerAuthority::Operator,
+            5,
+            "attest".to_string(),
+        )
+        .expect_err("later-Review case is refused");
+        assert!(
+            err.to_string()
+                .contains("not settling on a CompleteTask merge"),
+            "{err}"
+        );
+        drop(store);
+    }
+
+    /// Automatic completion (`advance_completion_after_gate`) must select the
+    /// newest PR's disposition: with the gate otherwise clear, an older
+    /// `CompleteTask` behind a later `Review` merge must not complete the Task.
+    /// Reverting `merged_completing_pr` to `find(any CompleteTask)` fails here.
+    #[tokio::test]
+    async fn advance_completion_never_completes_from_an_older_disposition() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        repo.create_branch("jack/adv-older");
+        let (_home, store, mut session, pr) = rotation_task(&repo, "jack/adv-older", &base).await;
+        settle_completing_pr(&store, pr, "merge-adv").await;
+        let first = store
+            .task_prs(&session.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("first PR");
+        append_merged_review_pr(&store, &first, 2).await;
+        session = store.get_task_session(&session.id).await.unwrap().unwrap();
+
+        let advanced = advance_completion_after_gate(&store, &mut session, None)
+            .await
+            .expect("advance completion");
+        assert!(
+            !advanced,
+            "the newest merge is Review, not CompleteTask — must not complete"
+        );
+        assert_ne!(session.status, TaskSessionStatus::Completed);
+    }
+
+    /// The shared disposition predicate keys on the newest PR by sequence.
+    #[test]
+    fn latest_pr_completes_task_keys_on_the_newest_pr() {
+        fn merged(sequence: u32, after_merge: AfterMerge) -> TaskPr {
+            let now = OffsetDateTime::UNIX_EPOCH;
+            TaskPr {
+                id: TaskPrId::new(),
+                task_session_id: TaskSessionId::new(),
+                sequence,
+                slug: format!("s{sequence}"),
+                branch: format!("b{sequence}"),
+                base_commit: "base".to_string(),
+                parent_pr_id: None,
+                publication: Some(PrPublication {
+                    requested_at: now,
+                    after_merge,
+                    next_slug: None,
+                    github: Some(GithubPr {
+                        number: sequence,
+                        url: "u".to_string(),
+                        head_sha: None,
+                    }),
+                }),
+                merge_commit: Some("m".to_string()),
+                abandoned_at: None,
+                created_at: now,
+                updated_at: now,
+                ci_observation: None,
+                github_observation: None,
+                linear_attachment_id: None,
+                linear_comment_id: None,
+                linear_link_error: None,
+            }
+        }
+        // Newest is CompleteTask → reconcilable.
+        assert!(latest_pr_completes_task(&[
+            merged(1, AfterMerge::Review),
+            merged(2, AfterMerge::CompleteTask),
+        ]));
+        // Older CompleteTask behind a newer Review → not reconcilable.
+        assert!(!latest_pr_completes_task(&[
+            merged(1, AfterMerge::CompleteTask),
+            merged(2, AfterMerge::Review),
+        ]));
+        // Order-independent: sequence, not vector order, decides.
+        assert!(!latest_pr_completes_task(&[
+            merged(2, AfterMerge::Review),
+            merged(1, AfterMerge::CompleteTask),
+        ]));
+        assert!(!latest_pr_completes_task(&[]));
     }
 
     /// Create a parent Task with a published (not merged) PR, then a child Task

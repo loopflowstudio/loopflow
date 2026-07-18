@@ -1138,6 +1138,19 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Settle a merged, complete Task whose applied final directive was never
+    /// acknowledged, by an out-of-band Wave/Operator attestation. Records the
+    /// summary as the incorporation evidence, completes the Task, and clears its
+    /// orphaned recovery command — no provider turn, no new PR.
+    Reconcile {
+        issue: String,
+        #[arg(long)]
+        directive: u32,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Resolve a durable Task decision request
     Decide {
         issue: String,

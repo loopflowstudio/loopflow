@@ -3460,9 +3460,8 @@ mod observe_launch_provider_tests {
     }
 
     fn start_launch(store: &SqliteStore, work: &WorkRef) -> (crate::durable::RunLease, PathBuf) {
-        let home = store.home("local").unwrap();
         let (_, lease) = store
-            .reserve_run(work, &home.id, &RunTrigger::User)
+            .reserve_run(work, &RunTrigger::User)
             .expect("reserve a Run");
         let cwd = PathBuf::from("/repo");
         store

@@ -77,15 +77,12 @@ async fn spawn_failover(
     store: &SharedStore,
     session: &TaskSession,
     lease: &RunLease,
-    wave: &Wave,
 ) -> Result<()> {
     let tmux_name = session
         .latest_process
         .as_ref()
         .map(|process| process.tmux_name.clone())
         .ok_or_else(|| anyhow!("Task failover has no reserved Launch containment"))?;
-    let wave_home =
-        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
     crate::ops::launch_in_run(
         store,
         lease,
@@ -97,7 +94,6 @@ async fn spawn_failover(
             tmux_name,
             agent: session.agent.clone(),
             resume_token: session.provider_session_id.clone(),
-            wave_home,
         },
     )
     .await
@@ -1762,7 +1758,7 @@ async fn fail_and_maybe_relaunch(
     else {
         return Ok(());
     };
-    spawn_failover(store, session, &rotated, wave).await
+    spawn_failover(store, session, &rotated).await
 }
 
 async fn finish_abandoned(
@@ -2119,6 +2115,24 @@ mod tests {
         inputs: usize,
     }
 
+    fn install_work_placements(path: &std::path::Path) {
+        let connection = rusqlite::Connection::open(path).unwrap();
+        let installed: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='work_placements')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !installed {
+            connection
+                .execute_batch(include_str!(
+                    "../store/migrations/drafts/work_placements__be058cd06c7176605dec099930569221.sql"
+                ))
+                .unwrap();
+        }
+    }
+
     #[async_trait]
     impl Harness for RunnerUsageHarness {
         async fn start(&mut self, _config: &AgentConfig) -> Result<()> {
@@ -2353,11 +2367,7 @@ mod tests {
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
             .unwrap();
-        let home = store.home("test-home").await.unwrap();
-        let (_run, lease) = store
-            .reserve_run(&work, &home.id, RunTrigger::User)
-            .await
-            .unwrap();
+        let (_run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
         let receipt = store
             .advance_run(
                 &lease,
@@ -2385,7 +2395,12 @@ mod tests {
     async fn conformance_session(provider: &str) -> (SharedStore, TaskSession, RunLease) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.keep().join("registry.db");
-        let store = Arc::new(open_store(&StorageConfig::sqlite(path)).await.unwrap());
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(path.clone()))
+                .await
+                .unwrap(),
+        );
+        install_work_placements(&path);
         let (mut session, lease) = seed_conformance_session(
             store.clone(),
             provider,
@@ -2408,11 +2423,13 @@ mod tests {
     async fn task_runner_records_reported_turn_usage() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let repo = TestRepo::new();
+        let store_path = ledger.home().join("loopflow.db");
         let store = Arc::new(
-            open_store(&StorageConfig::sqlite(ledger.home().join("loopflow.db")))
+            open_store(&StorageConfig::sqlite(store_path.clone()))
                 .await
                 .unwrap(),
         );
+        install_work_placements(&store_path);
         let (session, lease) = seed_conformance_session(
             store.clone(),
             "codex",
@@ -2925,10 +2942,11 @@ mod tests {
 
         let store_path = repo.path().join("registry.db");
         let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(store_path))
+            open_store(&StorageConfig::sqlite(store_path.clone()))
                 .await
                 .unwrap(),
         );
+        install_work_placements(&store_path);
         let wave = Wave::new(
             WaveId::new(),
             wave_name.to_string(),
@@ -3029,11 +3047,7 @@ mod tests {
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
             .unwrap();
-        let home = store.home("test-home").await.unwrap();
-        let (_run, lease) = store
-            .reserve_run(&work, &home.id, RunTrigger::User)
-            .await
-            .unwrap();
+        let (_run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
         let receipt = store
             .advance_run(
                 &lease,

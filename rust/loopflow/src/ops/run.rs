@@ -18,7 +18,6 @@ pub(crate) struct RunLaunch {
     pub tmux_name: String,
     pub agent: String,
     pub resume_token: Option<String>,
-    pub wave_home: String,
 }
 
 pub(crate) async fn launch_in_run(
@@ -78,10 +77,6 @@ pub(crate) async fn launch_in_run(
         (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
         (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
         (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
-        (
-            crate::engine::wave_home::WAVE_HOME_ENV,
-            request.wave_home.as_str(),
-        ),
     ];
     if let Err(error) =
         start_lf_session_with_env(&tmux_name, &request.cwd, &argv, &environment).await

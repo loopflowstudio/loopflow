@@ -68,8 +68,6 @@ async fn spawn_failover(
         .as_ref()
         .map(|process| process.tmux_name.clone())
         .ok_or_else(|| anyhow!("Project failover has no reserved Launch containment"))?;
-    let wave_home =
-        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
     crate::ops::launch_in_run(
         store,
         lease,
@@ -81,7 +79,6 @@ async fn spawn_failover(
             tmux_name,
             agent: session.agent.clone(),
             resume_token: session.provider_session_id.clone(),
-            wave_home,
         },
     )
     .await

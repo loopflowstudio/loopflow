@@ -471,9 +471,25 @@ mod tests {
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
-        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
+        let database = directory.join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let installed: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='work_placements')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !installed {
+            connection
+                .execute_batch(include_str!(
+                    "migrations/drafts/work_placements__be058cd06c7176605dec099930569221.sql"
+                ))
+                .unwrap();
+        }
         let wave = Wave::new(
             WaveId::new(),
             "runtime".to_string(),
@@ -559,8 +575,8 @@ mod tests {
 
     #[tokio::test]
     async fn one_run_can_own_sequential_launches_but_never_overlapping_launches() {
-        let (store, work, home) = wave_work().await;
-        let (lease, first) = start_launch(&store, &work, &home, false).await;
+        let (store, work) = wave_work().await;
+        let (lease, first) = start_launch(&store, &work, false).await;
         let next = RunAdvance::LaunchStarting {
             route: LaunchRoute {
                 provider: "claude".to_string(),

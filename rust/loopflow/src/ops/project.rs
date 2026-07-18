@@ -156,7 +156,7 @@ pub(crate) fn reserve_project_session(
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let config = load_config_or_default(Some(repo));
-    let agent = config.agent.as_deref().unwrap_or("codex");
+    let agent = config.agent();
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {
@@ -354,17 +354,13 @@ pub(crate) async fn launch_project_process(
     {
         return Ok(());
     }
-    let home = store
-        .home("local")
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
     let basis = store
         .current_epoch(&work)
         .await
         .map_err(|error| project_error(error.to_string()))?
         .current_basis;
     let (_, lease) = store
-        .reserve_run(&work, &home.id, crate::durable::RunTrigger::Input { basis })
+        .reserve_run(&work, crate::durable::RunTrigger::Input { basis })
         .await
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
     session.begin_generation(tmux_name.clone());
@@ -372,10 +368,6 @@ pub(crate) async fn launch_project_process(
         .update_project_session_for_run(session, &lease)
         .await
         .map_err(|error| project_error(error.to_string()))?;
-    // Inherit the Wave's execution home so this child's routed commands target
-    // the same host — read from the owning Wave's identity, not the branch.
-    let wave_home =
-        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
     crate::ops::launch_in_run(
         store,
         &lease,
@@ -387,7 +379,6 @@ pub(crate) async fn launch_project_process(
             tmux_name,
             agent: session.agent.clone(),
             resume_token: session.provider_session_id.clone(),
-            wave_home,
         },
     )
     .await

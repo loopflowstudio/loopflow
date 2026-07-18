@@ -3387,9 +3387,8 @@ mod tests {
             .work_for_child(&crate::child_session::ChildRef::Task(session.id.clone()))
             .await
             .expect("resolve Task Work");
-        let home = store.home("test-home").await.expect("resolve Home");
         store
-            .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+            .reserve_run(&work, crate::durable::RunTrigger::User)
             .await
             .expect("reserve active Run");
         let (base_url, requests) = test_server::spawn(vec![

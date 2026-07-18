@@ -298,9 +298,8 @@ impl Store {
         let work = self
             .work_for_child(&crate::child_session::ChildRef::Task(session.id.clone()))
             .await?;
-        let home = self.home("legacy-test").await?;
         let (_run, lease) = match self
-            .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+            .reserve_run(&work, crate::durable::RunTrigger::User)
             .await
         {
             Ok(reserved) => reserved,
@@ -886,9 +885,8 @@ impl Store {
         let work = self
             .work_for_child(&crate::child_session::ChildRef::Project(session.id.clone()))
             .await?;
-        let home = self.home("legacy-test").await?;
         let (_run, lease) = match self
-            .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+            .reserve_run(&work, crate::durable::RunTrigger::User)
             .await
         {
             Ok(reserved) => reserved,

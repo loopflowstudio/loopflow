@@ -565,7 +565,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     let project_session_id = task_project_session_id(&project_session)?;
     let wave_id = project_session.wave_id.clone();
     let config = load_config_or_default(Some(&main_repo));
-    let agent = config.agent.as_deref().unwrap_or("claude:opus");
+    let agent = config.agent();
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {
@@ -1286,6 +1286,82 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     })
 }
 
+/// Publication proof: require ancestry parity without changing the recorded
+/// fork. Only an explicit integration boundary may advance Task stack/base
+/// metadata.
+pub(crate) fn verify_task_pr_range_without_healing(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            StaleBaseAction::Refuse,
+            None,
+        )
+        .await
+    })
+}
+
+/// Prove the post-rebase Task range against the operation's immutable target
+/// without advancing durable metadata before a requested push is verified.
+pub(crate) fn validate_task_pr_range_for_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+) -> OpsResult<()> {
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Accept)
+}
+
+/// Record the immutable base only after every requested Git postcondition,
+/// including remote-head equality, has passed.
+pub(crate) fn record_task_pr_range_after_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+) -> OpsResult<()> {
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Heal)
+}
+
+fn verify_task_pr_range_for_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+    stale_base: StaleBaseAction,
+) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    let target_ref = target_ref.to_string();
+    let target_sha = target_sha.to_string();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            stale_base,
+            Some((target_ref, target_sha)),
+        )
+        .await
+    })
+}
+
 /// Prove the active Task PR's range is **authoritative and non-empty** before
 /// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
 /// proof (healing a stale base), then refuses when the tree at HEAD matches the
@@ -1306,6 +1382,30 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
             return Ok(());
         };
         require_task_pr_range_nonempty_with_authority(&store, &session, lease.as_ref(), &repo).await
+    })
+}
+
+/// Publication's post-commit proof: require a non-empty authoritative range
+/// while leaving integration metadata untouched.
+pub(crate) fn require_task_pr_range_nonempty_without_healing(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        require_task_pr_range_nonempty_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            StaleBaseAction::Refuse,
+        )
+        .await
     })
 }
 
@@ -1358,6 +1458,32 @@ async fn verify_task_pr_range_with_authority(
     lease: Option<&RunLease>,
     repo: &Path,
 ) -> OpsResult<()> {
+    verify_task_pr_range_with_authority_mode(
+        store,
+        session,
+        lease,
+        repo,
+        StaleBaseAction::Heal,
+        None,
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleBaseAction {
+    Accept,
+    Refuse,
+    Heal,
+}
+
+async fn verify_task_pr_range_with_authority_mode(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&RunLease>,
+    repo: &Path,
+    stale_base: StaleBaseAction,
+    upstream_override: Option<(String, String)>,
+) -> OpsResult<()> {
     let mut pr = store
         .active_task_pr(&session.id)
         .await
@@ -1377,8 +1503,13 @@ async fn verify_task_pr_range_with_authority(
         )));
     }
 
-    let default_branch = get_default_branch(repo)?;
-    let (base_ref, upstream) = resolve_verifier_upstream(store, &pr, repo, &default_branch).await?;
+    let (base_ref, upstream) = match upstream_override {
+        Some(target) => target,
+        None => {
+            let default_branch = get_default_branch(repo)?;
+            resolve_verifier_upstream(store, &pr, repo, &default_branch).await?
+        }
+    };
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
     let base = pr.base_commit.clone();
@@ -1418,6 +1549,17 @@ async fn verify_task_pr_range_with_authority(
         // B < M: the upstream advanced past a stale or squash-merged base.
         // Heal the recorded base to the true fork point so lf task changes and
         // the durable evidence report the minimal M..HEAD range.
+        match stale_base {
+            StaleBaseAction::Accept => return Ok(()),
+            StaleBaseAction::Refuse => {
+                return Err(task_error(format!(
+                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
+                    short(&base),
+                    short(&merge_base),
+                )));
+            }
+            StaleBaseAction::Heal => {}
+        }
         pr.base_commit = merge_base.clone();
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease {
@@ -1463,7 +1605,24 @@ async fn require_task_pr_range_nonempty_with_authority(
     lease: Option<&RunLease>,
     repo: &Path,
 ) -> OpsResult<()> {
-    verify_task_pr_range_with_authority(store, session, lease, repo).await?;
+    require_task_pr_range_nonempty_with_authority_mode(
+        store,
+        session,
+        lease,
+        repo,
+        StaleBaseAction::Heal,
+    )
+    .await
+}
+
+async fn require_task_pr_range_nonempty_with_authority_mode(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&RunLease>,
+    repo: &Path,
+    stale_base: StaleBaseAction,
+) -> OpsResult<()> {
+    verify_task_pr_range_with_authority_mode(store, session, lease, repo, stale_base, None).await?;
     let pr = store
         .active_task_pr(&session.id)
         .await
@@ -1815,10 +1974,6 @@ async fn launch_task_process(
     {
         return Ok(());
     }
-    let home = store
-        .home("local")
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
     let trigger = match trigger {
         Some(trigger) => trigger,
         None => crate::durable::RunTrigger::Input {
@@ -1830,7 +1985,7 @@ async fn launch_task_process(
         },
     };
     let (_, lease) = store
-        .reserve_run(&work, &home.id, trigger)
+        .reserve_run(&work, trigger)
         .await
         .map_err(|error| task_error(format!("failed to reserve Task Run: {error}")))?;
     session.begin_generation(tmux_name.clone());
@@ -1838,14 +1993,6 @@ async fn launch_task_process(
         .update_task_session_for_run(session, &lease)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-
-    // Inherit the Wave's execution home so this Task's routed shipping commands
-    // (`lf commit`, `lf pr open`) target the same host as its Wave.
-    let wave_home = match owning_wave(store, session).await {
-        Ok(wave) => crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name())
-            .to_string(),
-        Err(_) => crate::engine::wave_config::default_local_home(&session.worktree).to_string(),
-    };
     crate::ops::launch_in_run(
         store,
         &lease,
@@ -1857,7 +2004,6 @@ async fn launch_task_process(
             tmux_name,
             agent: session.agent.clone(),
             resume_token: session.provider_session_id.clone(),
-            wave_home,
         },
     )
     .await
@@ -6348,6 +6494,17 @@ mod tests {
         // Unprovable and decides the probe before the group is ever asked.
         let _tmux = crate::engine::process::FakeTmux::no_session();
 
+        // Before the release the CAS cannot pass: `revoked` satisfies neither
+        // `IS NULL` nor `= 'finished'`. This is the permanent refusal.
+        let mut blocked = session.clone();
+        let generation = blocked.begin_generation("lf-task-eng4-blocked".to_string());
+        assert_eq!(generation, 2);
+        assert!(store
+            .reserve_task_process(&blocked, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve against a revoked lease")
+            .is_none());
+
         let finished =
             crate::ops::child::release_dead_revoked_child_body(&store, &target, &revoked)
                 .await
@@ -6376,6 +6533,15 @@ mod tests {
         ));
         // Status is untouched: releasing a lease is not a decision about work.
         assert_eq!(persisted.status, TaskSessionStatus::Waiting);
+
+        // ...and only now can a successor reserve.
+        let mut launch = persisted.clone();
+        launch.begin_generation("lf-task-eng4-successor".to_string());
+        assert!(store
+            .reserve_task_process(&launch, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve after the release")
+            .is_some());
     }
 
     /// The CAS pins the generation as well as the state, so a release can only
@@ -6607,6 +6773,63 @@ mod tests {
             Some(crate::child_session::ChildLeaseState::Finished)
         );
         assert_eq!(persisted.status, TaskSessionStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn progress_wins_the_race_against_stall_recovery() {
+        let repo = TestRepo::new();
+        let base = repo.head_sha();
+        let (_home, store, mut session, _pr) =
+            rotation_task(&repo, "jack/progress-race", &base).await;
+        session.begin_generation(format!("progress-race-{}", session.id));
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .unwrap()
+            .expect("reserve body");
+        session
+            .latest_process
+            .as_mut()
+            .expect("reserved process")
+            .state = ChildLeaseState::Active;
+        session.set_status(TaskSessionStatus::Running, "provider is alive");
+        store.activate_task_process(&session, &lease).await.unwrap();
+        session = store.get_task_session(&session.id).await.unwrap().unwrap();
+        let observed_event_id = store
+            .latest_task_event(&session.id)
+            .await
+            .unwrap()
+            .map(|event| event.id);
+
+        store
+            .append_task_event(
+                &session.id,
+                &TaskEventKind::Progress {
+                    summary: "body advanced before revocation".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let revoked = store
+            .revoke_task_process_if_unchanged(
+                &session.id,
+                1,
+                session.status_at,
+                observed_event_id,
+                &ChildBodyOutcome::Superseded {
+                    reason: "stale observation".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(revoked.is_none());
+        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
+        assert_eq!(
+            persisted.latest_process.map(|process| process.state),
+            Some(ChildLeaseState::Active),
+        );
+        assert_eq!(persisted.status, TaskSessionStatus::Running);
     }
 
     #[test]
@@ -8946,17 +9169,34 @@ mod tests {
     async fn project_supervision_claims_live_run_without_reserving_a_sibling() {
         let _env_lock = crate::journal::test_env_lock();
         let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
+        let (home, store, project, mut session, _pr) =
             parked_gate_task(&repo, "jack/gate-live-idle", Some(CiState::Failing), 0).await;
+        let generation = session.begin_generation("lf-live-idle-control".to_string());
+        let lease = store
+            .reserve_task_process(&session, TaskSessionStatus::Waiting)
+            .await
+            .expect("reserve live control body")
+            .expect("waiting Task reserves one generation");
+        if let Some(process) = session.latest_process.as_mut() {
+            process.state = crate::child_session::ChildLeaseState::Active;
+        }
+        session.set_status(
+            TaskSessionStatus::Running,
+            "Project review owns the Gate step; provider turn is idle",
+        );
+        store
+            .activate_task_process(&session, &lease)
+            .await
+            .expect("activate live control body");
         let work = store
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
             .expect("Task Work");
-        let durable_home = store.home("test-home").await.expect("resolve Home");
-        let (run, _lease) = store
-            .reserve_run(&work, &durable_home.id, crate::durable::RunTrigger::User)
+        let run = store
+            .current_run(&work)
             .await
-            .expect("reserve active Run");
+            .expect("read active Run")
+            .expect("active process has a Run");
         let _launch_env = TaskLaunchEnv::install(home.path());
 
         supervise_project_task_bodies(&store, &project)
@@ -8987,6 +9227,27 @@ mod tests {
             .expect("read current Run")
             .expect("Run remains current");
         assert_eq!(current.id, run.id, "CI must not reserve a sibling Run");
+
+        let persisted = store
+            .get_task_session(&session.id)
+            .await
+            .expect("read Task")
+            .expect("Task exists");
+        assert_eq!(
+            persisted.status,
+            TaskSessionStatus::Running,
+            "{}",
+            persisted.status_reason
+        );
+        assert_eq!(
+            persisted
+                .latest_process
+                .as_ref()
+                .expect("control generation remains active")
+                .generation,
+            generation,
+            "supervision must not interrupt or replace the live control body"
+        );
     }
 
     #[tokio::test]

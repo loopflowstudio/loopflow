@@ -2,47 +2,45 @@
 
 ## Problem
 
-A Task can merge, disposition itself `CompleteTask`, and go Linear-complete, yet
-its Session never reaches a terminal status — because the body was interrupted
-**after** the final directive was applied and **before** its acknowledgement was
-recorded. The Session is left `Waiting` with `current_directive_version >
+A Task can merge a `CompleteTask` PR and go Linear-complete, yet its Session
+never reaches a terminal status — because the body was interrupted **after** the
+final directive was applied and **before** its acknowledgement was recorded. The
+Session is left non-terminal with `current_directive_version >
 incorporated_directive_version`, and every supported actor is barred from closing
 the loop:
 
-- **Completion refuses.** `task_completion_gate` pushes a blocker while
-  `has_pending_directive(session)` is true: *"directive v5 is not yet
-  incorporated; acknowledge it or re-steer before completing."*
-  (`ops/task.rs:4330`).
+- **Completion refuses.** `task_completion_gate` blocks while
+  `has_pending_directive(session)` holds: *"directive vN is not yet incorporated;
+  acknowledge it or re-steer before completing."*
 - **Acknowledgement refuses.** `task_acknowledge` requires `LF_TASK_SESSION_ID`
-  to equal the owning Session id **and** a live body write lease
-  (`ops/task.rs:5460`). A terminal-ish Session has no body, so nothing can run
-  inside it.
+  to equal the owning Session id **and** a live body write lease. A terminal-ish
+  Session has no body, so nothing can run inside it.
 - **A body cannot be started.** For a merged `CompleteTask` PR the supervisor's
-  recovery has no correct branch: `relaunch_inactive_process` fails *"Task W2-308
-  is waiting; terminal Task Sessions cannot start a process"* (`ops/task.rs:1834`),
-  and the pending-directive rotation path (`ensure_working_pr_with_authority`,
-  `ops/task.rs:3699`) would mint another serial PR and launch another provider —
-  both forbidden by the human directive.
+  recovery has no correct branch — `relaunch_inactive_process` fails *"terminal
+  Task Sessions cannot start a process"*, and rotating a serial successor to carry
+  the directive would mint another PR and launch another provider, both forbidden.
 
-The orphaned terminal recovery command `cc_a172ed28…` stays `Persisted` with no
-generation, indefinitely. This is the exact "no-stranded-Task" failure the
-Developer Efficiency KR forbids: a durable command orphaned against a dead
-generation with every supported owner barred from acting.
+The orphaned recovery command stays `Persisted` with no generation, indefinitely.
+This is the exact "no-stranded-Task" failure the Developer Efficiency KR forbids:
+a durable command orphaned against a dead generation with every supported owner
+barred from acting.
 
-W2-308 (PR #1064, directive v5) is the live reproduction; W2-127 (PR #876,
-directive v2) is a second deterministic one whose historical Technical
-Architecture Project Session is intentionally abandoned.
+**Live reproduction: ENG-29** (PR #1083, directive v12 fully implemented and
+verified, acknowledge barred outside the body, resume barred after merge). The
+regression seeds two deterministic reproductions: **W2-308** (directive v5) and
+**W2-127** (directive v2, whose historical Project Session is intentionally
+abandoned — proving a Wave/Operator can reconcile without resurrecting it).
 
 ## The demo
 
 ```
-$ lf task reconcile W2-308 --directive 5 \
-    --summary "Directive v5 shipped in the merged head; ack turn was interrupted."
-W2-308 reconciled: directive v5 incorporated by operator attestation,
-Task completed, recovery command cc_a172ed28 cleared.
+$ lf task reconcile ENG-29 --directive 12 \
+    --summary "Directive v12 shipped and verified in PR #1083; the ack turn was interrupted."
+ENG-29 reconciled: directive v12 incorporated by out-of-band attestation,
+Task completed, 1 orphaned command cleared.
 
-$ lf task status W2-308
-W2-308  completed   directive v5 incorporated   no pending commands
+$ lf task status ENG-29
+ENG-29  completed   directive v12 incorporated   no pending commands
 ```
 
 A Wave or a human — never the body, never a hands-off supervisor — attests the
@@ -51,168 +49,111 @@ no new PR, no provider turn, no duplicate command.
 
 ## Approach
 
-Add a supported **out-of-band reconciliation** verb, `lf task reconcile <issue>
+A supported **out-of-band reconciliation** verb, `lf task reconcile <issue>
 --directive <version> --summary <text>`, plus a `Reconcile` legal action and a
 supervisor branch that recognizes the shape without acting on it hands-off.
 
-The load-bearing distinction, set by the revised direction:
+Two load-bearing distinctions:
 
-> `applied_at` proves **delivery**; a merged `CompleteTask` PR proves **shipped
-> work**. Neither proves **semantic incorporation**. Reconciliation must not
-> synthesize an incorporation receipt from those predicates.
+> **Delivery is not incorporation.** `applied_at` proves a body *ran* under the
+> directive; it never proves the direction was *adopted*. The incorporation
+> evidence is an explicit Wave/Operator **attestation** — the caller names the
+> exact current directive version and a non-empty semantic summary, and that
+> summary becomes the incorporation record. Predicates only decide whether
+> reconciliation is *permitted*.
 
-So the predicates are **guards**, not evidence. The *evidence* of incorporation
-is the explicit Wave/Operator attestation: the caller names the exact current
-directive version and writes a non-empty semantic summary, and **that summary
-becomes the incorporation record**. This mirrors the wave-memory learning that a
-generation or PR head never proves the current directive was adopted — a separate
-incorporation receipt is required.
+> **A `CompleteTask` publication is intent, not proof of Linear completion.** The
+> publication write can fail (ENG-29/ENG-75), so reconciliation force-refreshes
+> the owning team's *actual* Linear issue and requires `completed == true`. The
+> PM/GOAL root is the Wave's canonical repo (`wave.repo()`), never
+> `session.worktree` — this command targets dead Tasks whose worker worktree may
+> already be pruned, and PM ownership is Wave-durable.
 
 ### `task_reconcile(issue, authority, version, summary)`
 
-1. **Authority.** Resolve `CallerAuthority` at the CLI surface (as the other
-   control ops now do since #1079). Accept only `Operator` or the owning `Wave`.
-   Reject `Project` — the automatic actor must never *create* the attestation.
-   Validate via `validate_caller_authority` (`ops/util.rs:144`); the resulting
-   `ChildCommandSource` is the audited attester.
-2. **Guards (all must hold, else refuse with a specific message).**
-   - `version == session.current_directive_version` (name the *exact* current
-     directive; a stale version is refused, like `task_acknowledge`).
-   - `summary` non-empty after trim.
-   - The current directive is **delivered**: its `ChildDirective.applied_at`
-     is `Some` (a body ran under it) and `incorporated_at` is `None`.
-   - The latest PR is **merged** with `after_merge == CompleteTask`.
-   - **Linear complete** — the merge dispositioned the Task complete (the
-     `CompleteTask` publication is the durable proof; reconcile also reconciles PR
-     state first so a stale row can't pass).
-   - **No active body**: `!status.is_process_active()` and no live tmux for the
-     latest process.
-3. **Record the attestation as incorporation.** Call the existing out-of-band
-   `store.incorporate_child_directive(target, version, summary)`
-   (`store/child_sessions.rs:1334`) — no lease, no `LF_TASK_SESSION_ID`. This sets
-   `incorporated_at` + `incorporated_summary = <attestation>`. Append a new
-   `TaskEventKind::DirectiveReconciled { directive_id, version, summary,
-   attested_by }` so the audit trail shows an out-of-band Wave/Operator
-   attestation, distinct from the body-authored `DirectiveIncorporated`. This is
-   how we settle **without impersonating the Task**: the incorporation is real and
-   attributed, not a forged body acknowledgement.
-4. **Complete.** With `has_pending_directive` now false the completion gate
-   clears; complete the Session out-of-band (lease `None`, the path
-   `task_complete` already takes when not inside a body).
-5. **Clear the orphan.** `reject_persisted_child_command(cmd_id, reason)`
-   (`store/…:1915`) terminalizes the `Persisted` recovery command to `failed`
-   with *"reconciled out of band; directive vN attested by <authority>"*. It
-   touches **only** the existing row (`WHERE state = 'persisted'`); it never
-   creates or supersedes-with a duplicate.
+1. **Authority.** Only `Operator` or the owning `Wave` may attest. A `Project` is
+   the automatic actor — it may recommend `Reconcile` or consume a durable
+   attestation, but never *create* one.
+2. **Guards** (each refusal names the exact failing fact): `version` equals the
+   current directive; non-empty summary; the current directive is applied
+   (`applied_at` set) but unincorporated; no active body (status + live tmux); no
+   active PR; the **newest PR by sequence** is a merged `CompleteTask`; and the
+   **Linear issue is actually complete** (live force-refresh from `wave.repo()`).
+3. **Record the attestation as incorporation.** Out-of-band
+   `store.incorporate_child_directive` (no lease, no `LF_TASK_SESSION_ID`); the
+   summary becomes the incorporated summary. A distinct `DirectiveReconciled`
+   event names the attester, so the trail never reads as a forged body ack.
+4. **Complete** through the shared `settle_completed_session` — the clean-tree
+   check, completion gate, PM writeback, and terminal transaction are all
+   preserved unchanged.
+5. **Clear the orphan** `Persisted` recovery command in place
+   (`reject_persisted_child_command`); no new or superseding command.
 
-### `Reconcile` legal action
+### The newest-PR-by-sequence invariant, in *every* consumer
 
-Add `TaskAction::Reconcile` to the model (`task/actions.rs`) and a
-`directive_applied: bool` field to `TaskActionEvidence`. In `merged_pr_model`,
-when the completion refusal is the pending-directive one **and** the directive is
-already applied (`directive_applied`), recommend `Reconcile` and block `Resume`
-and `StartNextPr`, naming the attestation requirement in their reasons. This is
-the named fix for *"legal-action reporting stops recommending resume when the
-current human directive forbids a provider turn."*
+`latest_pr_completes_task(&[TaskPr])` is the one definition of "this Task settled
+on a completing merge": the PR with the highest `sequence` must be a merged
+`CompleteTask`. An older `CompleteTask` behind a later `Review`/next-PR merge is a
+serial successor, not a Task settling, and must never authorize reconciliation.
+This one predicate governs:
 
-A pending directive that is **not** applied (`applied_at.is_none()` — a genuine
-post-land steer that still needs work) keeps today's `StartNextPr`
-recommendation. Only the applied-but-unincorporated shape reconciles.
+- the **action model** recommendation (`latest_pr_after_merge == CompleteTask`);
+- the **command guard** in `task_reconcile`;
+- the **supervisor suppression** in `reconcile_project_tasks`;
+- **automatic completion** — `merged_completing_pr` selects the newest PR and
+  returns it only when the predicate holds (so `advance_completion_after_gate`
+  cannot complete from an older disposition).
 
-### Supervisor: recommend or consume, never create
+The duplicate `task_prs(..).any(merged CompleteTask)` logic is deleted from all
+of them.
 
-`reconcile_project_tasks` (`ops/task.rs:2163`) gets one guarded branch for the
-applied-but-unincorporated + merged-`CompleteTask` shape:
+### Supervisor: recommend or consume, never create; cheap checks first
 
-- **Do not** relaunch a body, rotate a serial PR, or queue a CI-fix for it (these
-  are the paths that error today).
-- **Consume** an already-durable attestation: if the directive was already
-  incorporated out-of-band, the pending-directive blocker is gone, so the
-  existing `reconcile_task_completion` → `advance_completion_after_gate` completes
-  the Task hands-off (and clears any lingering orphan). This is the *consume*
-  half.
-- Otherwise **leave the recommendation**: surface `Reconcile` (via the action
-  model) and stop. The supervisor never fabricates the semantic summary.
-
-Also gate the pending-directive rotation in `ensure_working_pr_with_authority`
-(`ops/task.rs:3699`) on `applied_at.is_none()`: an applied-but-unincorporated
-directive must not mint a successor PR. A not-yet-applied post-land directive
-still rotates as before.
-
-## De-risking
-
-| Question | Finding | Impact on design |
-|----------|---------|-----------------|
-| Does an out-of-band, lease-free incorporation path already exist? | Yes — `store.incorporate_child_directive` (non-lease) sits beside `incorporate_child_directive_for_lease`; `mark_child_directive_applied` too. | Reconcile reuses it; no new store primitive for incorporation. |
-| Can a `Persisted` command be terminalized with no lease/generation? | Yes — `reject_persisted_child_command` updates `WHERE state='persisted'` → `failed`, no lease. Its `changed==0` is a genuine "no longer persisted", so it never races a body that took ownership. | Reconcile clears `cc_a172ed28…` directly; no duplicate command. |
-| Does `applied_at` prove the directive was *incorporated*? | **No.** It is set when a turn *starts* under the version (`task/runner.rs:1448`). It proves the body ran under vN, not that its meaning was integrated. A merged head is delivery, not adoption. | Predicates are guards only. The Wave/Operator `--summary` is the incorporation evidence; no predicate synthesizes it. |
-| Can completion run out-of-band once the directive is incorporated? | Yes — `task_complete` resolves `lease = ambient_task_write_lease(session)`, which is `None` outside a body, and completes without one. | Reconcile calls the same settle path; no reshaping for tests. |
-| Does W2-127's abandoned Project block reconciliation? | Yes for a `Project` caller — `validate_caller_authority` refuses a Project that is not the Task's live route, and W2-127 has no live route. | Reconcile is authorized by `Wave`/`Operator`, so a retired Project is never resurrected. |
-| Could reconcile silently erase a genuinely un-applied post-land directive? | Only if the guards let an `applied_at.is_none()` directive through. | Guard requires `applied_at.is_some()`; the not-applied case keeps `StartNextPr`/rotation and a real body. |
-| Residual: applied directive whose turn produced no merged output? | Narrow — requires a directive applied on a turn that shipped nothing while an *earlier* turn's head merged. The merged-`CompleteTask` + applied + explicit-summary combination still forces a human/Wave to look and attest. | Accepted: the human attestation is the backstop, not the predicate. Noted, not engineered around. |
-
-## Alternatives considered
-
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Auto-incorporate from `applied_at` + merged PR (my first draft) | Zero human touch; supervisor settles hands-off | **Rejected by direction:** conflates delivery with semantic incorporation; lets a lost ack turn silently become "adopted." |
-| Let the supervisor synthesize a placeholder summary and incorporate | Also hands-off | Same conflation; an unaudited machine-authored summary is exactly the forged receipt the direction forbids. |
-| Relax `task_acknowledge` to run out-of-band | Reuses one verb | Acknowledgement is the *body's* receipt; loosening its `LF_TASK_SESSION_ID`/lease guard would let any process forge a body acknowledgement. Reconcile is a distinct, attributed authority. |
-| Weaken the completion gate to ignore pending directives on merged Tasks | One-line change | Silently erases direction accepted after `lf pr land` armed auto-merge — the precise regression the gate exists to prevent. |
+`reconcile_project_tasks` gates on the cheap session-local predicates —
+`has_pending_directive(task)` then `current_directive_applied` — **before**
+loading PR history, so the common non-terminal loop pays no extra `task_prs`
+query. Only that rare shape reads PRs and consults `latest_pr_completes_task`. A
+durable attestation is consumed by `reconcile_task_completion` (the gate clears
+and the Task completes); otherwise the supervisor leaves the `Reconcile`
+recommendation standing and never fabricates the summary.
 
 ## Key decisions
 
 - **Attestation, not inference.** The incorporation evidence is a human/Wave
-  summary naming the exact current version. Predicates (`applied_at`, merged
-  `CompleteTask`, Linear complete, no active body) only decide whether
-  reconciliation is *permitted*, never whether it *happened*.
-- **Authority is `Wave`/`Operator` only.** A `Project` may recommend `Reconcile`
-  or consume an already-durable attestation; it may never create one. This keeps
-  semantic handoff a judgment, not an automatic side effect.
-- **Distinct audit event.** `DirectiveReconciled { …, attested_by }` records who
-  attested out-of-band, so the trail never reads as a body acknowledgement.
-- **One existing row cleared, none created.** The orphan `Persisted` command is
-  terminalized in place; reconciliation adds no command.
-- **Rotation guard tightened.** The pending-directive successor rotation fires
-  only for a *not-yet-applied* directive; an applied one awaits attestation.
-
-## Scope
-
-- **In scope:** `lf task reconcile` op + CLI; `TaskAction::Reconcile` +
-  `directive_applied` evidence; `DirectiveReconciled` event; supervisor
-  recommend/consume branch; rotation guard on `applied_at`; W2-308 and W2-127
-  behavioral regressions; guard/refusal regressions.
-- **Out of scope:** any change to `task_acknowledge`'s in-body authority; a
-  generic multi-product deploy platform; modifying or abandoning W2-127
-  operationally from this body; resurrecting the Technical Architecture Project.
+  summary naming the exact current version; predicates only gate permission.
+- **Authority is `Wave`/`Operator` only.** A retired Project is never resurrected.
+- **Linear completion is proven live from the Wave repo**, not inferred from the
+  PR publication and not read through a possibly-pruned worker worktree.
+- **Newest-PR-by-sequence is one shared predicate**, used by four consumers with
+  no duplicated disposition logic.
+- **One existing row cleared, none created.**
+- **Gate proofs preserved.** Reconciliation does not weaken the clean-tree or
+  completion gate and invents no missing-worktree completion policy.
 
 ## Done when
 
-- `lf task reconcile W2-308 --directive 5 --summary "…"` records the attestation
-  as incorporation, completes the Task, and clears `cc_a172ed28…` — creating no
-  PR and no duplicate/superseding command.
-- `lf task reconcile` refuses when: the directive version is not the current one;
-  the summary is empty; the current directive is not applied; the latest PR is
-  not a merged `CompleteTask`; a body is live; or the caller is a `Project`.
-- Legal-action reporting for the applied-but-unincorporated merged shape
-  recommends `Reconcile` and blocks `Resume`/`StartNextPr`.
-- The supervisor no longer errors on the shape: it recommends `Reconcile` and,
-  once an attestation is durable, completes hands-off — but never fabricates the
-  attestation.
-- A regression exercises the full path for **both** W2-308 (v5) and W2-127 (v2):
-  final directive applied → PR merged (`CompleteTask`) → Linear complete → body
-  interrupted before ack → Project recovery attempted (recommends `Reconcile`, no
-  relaunch) → Wave/Operator attests → Session settles terminal, orphan cleared.
-  W2-127's attestation summary is that the provider stayed stopped, no
-  branch-built `lf` touched the live registry, and supervisor-owned
-  implementation merged as PR #876.
-- `cargo fmt`, `cargo clippy -- -D warnings`, and the targeted tests pass. Any
-  local reconciliation probe runs against an isolated `LF_DB_PATH`, never the
-  live registry.
+- `lf task reconcile <issue> --directive N --summary "…"` records the attestation,
+  completes the Task, and clears the orphaned command — no PR, no provider turn,
+  no duplicate command.
+- Reconcile refuses when: the version is not current; the summary is empty; the
+  directive was never applied; a body is live; the caller is a `Project`; the
+  newest PR is not a merged `CompleteTask` (older-CompleteTask-behind-later-Review
+  included); or the Linear issue is not actually complete.
+- Legal-action reporting recommends `Reconcile` only for a merged `CompleteTask`
+  latest with an applied, unincorporated directive; a merged `Review`/next-PR
+  latest stays `StartNextPr`.
+- The supervisor never errors on the shape, never fabricates an attestation, and
+  pays no PR-history query outside the rare reconcilable case.
+- Regressions cover: the W2-308 and W2-127 happy paths; the guard refusals; the
+  Linear-incomplete refusal; the PM root resolving to `wave.repo()` not a dead
+  worktree; the multi-PR sabotage (direct command + supervisor +
+  `advance_completion_after_gate`); and the `latest_pr_completes_task` predicate.
+- `cargo fmt`, `cargo clippy -- -D warnings`, and the targeted tests pass. Local
+  reconciliation probes use an isolated `LF_DB_PATH`.
 
 ## Measure
 
-Not a quantitative change. The observable outcome is the Developer Efficiency KR:
-zero Sessions stranded in a non-terminal state on a dead generation, and zero
-durable commands left orphaned against one. W2-308 reaching `completed` with
-`cc_a172ed28…` no longer `Persisted` is the concrete before/after.
+The Developer Efficiency KR: zero Sessions stranded in a non-terminal state on a
+dead generation, and zero durable commands orphaned against one. A merged,
+Linear-complete Task reaching `completed` with its recovery command cleared is
+the concrete before/after.

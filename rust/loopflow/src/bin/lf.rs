@@ -1256,6 +1256,33 @@ fn run_task_command(
             }
             Ok(())
         }
+        TaskCommand::Reconcile {
+            issue,
+            directive,
+            summary,
+            json,
+        } => {
+            let result = loopflow::ops::task::task_reconcile(
+                issue,
+                authority.clone(),
+                *directive,
+                summary.clone(),
+            )?;
+            if *json {
+                print_task_session(&result.session, true)
+            } else {
+                let tail = match result.cleared_commands.len() {
+                    0 => String::new(),
+                    1 => ", 1 orphaned command cleared".to_string(),
+                    n => format!(", {n} orphaned commands cleared"),
+                };
+                println!(
+                    "{issue} reconciled: directive v{directive} incorporated by out-of-band \
+                     attestation, Task completed{tail}"
+                );
+                Ok(())
+            }
+        }
         TaskCommand::Decide {
             issue,
             decision_id,

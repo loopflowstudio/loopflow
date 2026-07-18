@@ -1,5 +1,20 @@
 # Open implementation notes
 
+## Landing split decision 2026-07-18
+
+Land the normalized control spine before deleting the Session controller.
+This supersedes the earlier instruction that both cuts must share PR #1073.
+
+The split is valid only after the remaining legacy Task/Project executor
+registers its actual provider process as a product Launch under the mirrored
+Run. The current red integration test proves that invariant is missing. Fix the
+Launch registration; do not restore a Session fallback in Run interrupt.
+
+After PR #1073 lands, create and launch one follow-up Task for the Task+Project
+Run-controller rewrite and complete Session deletion. The line-count target,
+zero legacy controller references, keeper cutover, and final schema drop belong
+to that Task.
+
 ## Gate audit 2026-07-17
 
 `uv run python scripts/test.py --all` now passes Python, website, Swift, E2E,

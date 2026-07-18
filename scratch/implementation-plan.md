@@ -27,6 +27,22 @@ The end-to-end demonstration is one Task exercised four ways:
 
 Every path produces the same Work status, Basis fencing, recovery decision, and completion result.
 
+## Landing split selected 2026-07-18
+
+Ship the durable control spine in PR #1073, then delete the Session controller
+in one follow-up Task.
+
+The first landing is complete only when every legacy Task/Project body is also
+a real product Launch under its mirrored Run. Run interrupt and steering must
+find that Launch directly; no Session lookup fallback is allowed. Session stays
+the sole temporary Task/Project executor and write fence, so this landing does
+not introduce a second partial execution controller.
+
+The follow-up owns the connected runner rewrite, keeper recovery, schema drop,
+zero Session-controller references, and the 121,819-line ceiling. Historical
+sections below describe how the target was derived; when they say the Session
+cut must share one branch, read that as one follow-up branch, not PR #1073.
+
 ## Scope boundary
 
 This push owns the central execution model, its persistence, the local agent API, provider adapters, recovery, monitoring projections, Swift attention/open behavior, and usage authority.
@@ -40,7 +56,11 @@ It does not redesign:
 - provider-native subagent UX or a portable child-session graph;
 - the website and user docs, except where their implementation must stop naming removed APIs.
 
-Do not add compatibility shims. Migrate stored data once, cut every caller to the new model, and delete the old readers and writers in the same branch. The implementation checkpoints below are review boundaries, not independently supported dual architectures.
+Do not add compatibility shims. PR #1073 may retain the existing Session
+executor only as a bounded internal adapter whose real process is registered as
+a Run Launch. The follow-up migrates execution once and deletes all old readers
+and writers in the same branch. Neither landing supports two execution
+controllers.
 
 ## Current implementation review
 

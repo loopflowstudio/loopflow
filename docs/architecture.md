@@ -830,7 +830,7 @@ direct Work controls exist. `InteractionReview`, `InteractiveHandoff`, and
 `ChildCommand` have zero production references. Global promotion and PM reteam
 fence active writers through Run/containment evidence.
 
-Execution still crosses one legacy bridge. Project/Task Session runners own
+Execution still crosses one temporary legacy bridge. Project/Task Session runners own
 process reservation, generations, status, revocation, and recovery, then mirror
 them into Run. Product control authority no longer crosses that bridge: one
 opaque `LF_RUN_LEASE` hash resolves the exact active Run and missing agent
@@ -841,7 +841,11 @@ the conversation while nullable pending attention clears on the routed Steer;
 the next terminal child Turn re-arms it and advances the parent Basis once.
 The duplicate Session lifecycle remains.
 
-The remaining pass finishes the authority cut rather than adding another
+The bridge is safe to land only when every legacy Task/Project body registers
+its actual provider process as a product Launch under the mirrored Run. Run
+control never falls back to Session lookup.
+
+One follow-up pass then finishes the authority cut rather than adding another
 bridge:
 
 1. replace Project/Task reservation, status, revocation, reaping, settlement,

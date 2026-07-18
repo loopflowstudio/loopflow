@@ -11,6 +11,15 @@
   interrupts once, seeds the durable child projection, and leaves the
   background playhead on its next unfinished step. Wave scheduling still needs
   the same lane before the cut is complete.
+- Review found that route and pending attention cannot be one flag. Parent
+  Steer must clear only the answered turn while leaving Review open; the
+  child's next terminal Turn must re-arm pending attention exactly once. That
+  re-arm must also allocate a parent evidence revision so stale completion and
+  old boundaries lose.
+- Review also fixed live delivery advancing the background playhead: a Turn
+  repurposed for child control now closes the active flow body as Interrupted
+  even when the provider reports success. Deterministic live/seed-only harness
+  tests still need to prove this end to end.
 - The trace-only `LF_RUN_ID` environment variable is renamed `LF_TRACE_ID`, so
   the public Run vocabulary no longer collides with diagnostic lineage.
 - `root_output` was folded into unpublished migration 0.11.031 rather than

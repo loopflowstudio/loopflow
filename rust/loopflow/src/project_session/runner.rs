@@ -220,6 +220,7 @@ async fn run_project_session_inner(
 
     let mut flow_turn_active = false;
     let mut control_turn_active = initial_input.is_some() || initial_child.is_some();
+    let mut background_preempted = false;
     let mut provider_turn_active;
     let mut pending_child = None;
     let mut delivered_child = initial_child
@@ -309,12 +310,19 @@ async fn run_project_session_inner(
                     if let Some(child) = store.child_attention(&work).await?.into_iter().next() {
                         let key = (child.review.launch_id.clone(), child.review.basis.revision);
                         if delivered_child.as_ref() != Some(&key) {
-                            if !matches!(
-                                harness.send_current(&child.render()).await,
-                                SendCurrentOutcome::Sent { .. }
-                            ) {
-                                harness.interrupt().await?;
-                                pending_child = Some(child);
+                            match harness.send_current(&child.render()).await {
+                                SendCurrentOutcome::Sent { .. } => {
+                                    // This provider Turn began as background work, but its
+                                    // result now belongs to the child interaction. Close the
+                                    // active flow body as interrupted when the Turn ends so a
+                                    // successful live delivery cannot advance the playhead.
+                                    control_turn_active = true;
+                                    background_preempted = true;
+                                }
+                                _ => {
+                                    harness.interrupt().await?;
+                                    pending_child = Some(child);
+                                }
                             }
                             delivered_child = Some(key);
                         }
@@ -408,7 +416,13 @@ async fn run_project_session_inner(
                             }
                         }
                         let flow_iteration_completed = if flow_turn_active {
-                            finish_project_flow_turn(&mut flow, status)?
+                            let flow_status = if background_preempted {
+                                Lifecycle::Interrupted
+                            } else {
+                                status
+                            };
+                            background_preempted = false;
+                            finish_project_flow_turn(&mut flow, flow_status)?
                         } else {
                             false
                         };

@@ -548,7 +548,7 @@ Review is derived from facts the system already needs:
 ```text
 current flow step is interactive
 + active Launch
-+ attention owed by User or immediate parent Work
++ Review route to User or immediate parent Work
 + latest observed root Turn output when the provider exposes Turns
 = open Review
 ```
@@ -558,6 +558,14 @@ or copied evidence aggregate. Stable Work identifies the conversation target;
 `LaunchId` opens the current provider/TUI surface; Basis fences a stale close.
 At most one Review may be current for one Work because one flow has one current
 step.
+
+Review route and pending attention are different facts on that Launch. The
+route exists for the whole interactive interval. `attention_at` exists only
+while the routed peer owes the next response. A parent Steer clears pending
+attention after its durable commit but leaves the Review open. The child's next
+terminal Turn re-arms attention. `close_review` alone clears the route and
+advances flow. This is turn-taking state, not a Message, disposition, or Review
+aggregate.
 
 ```text
 steer(work, text, if_basis)   # one message inside the Review
@@ -582,7 +590,7 @@ background pursuit:
 3. other child evidence that can unblock progress;
 4. the parent's own pursue, mutate, selection, and cadence work.
 
-The control lane is an ordered projection over durable inputs and child
+The control lane is an ordered projection over durable inputs and pending child
 attention, not another stored inbox or priority table. The same parent agent
 that is running clarify, pursue, mutate, cadence, or another flow services it.
 There is no reviewer Launch and no second parent agent.
@@ -592,6 +600,12 @@ plus current Work, flow, workspace, PR/CI, and other relevant domain facts.
 This is what lets the same protocol carry critique, questions, or brainstorming
 without restoring a Review prompt row. Attention without understandable child
 content is not considered serviced.
+
+When a child terminal Turn re-arms parent attention, the same transaction
+allocates one idempotent `evidence` revision on the parent's current Epoch using
+that child Turn as source. The next parent boundary therefore starts from a
+Basis that includes the child reply, and an older completion proposal loses.
+The source remains the child Turn/Launch; there is no copied inbox row.
 
 The active Run listens for control input concurrently with provider events. At
 every parent Turn boundary it drains control before starting more background
@@ -611,9 +625,10 @@ control item cannot rewrite, advance, or validate the background playhead.
 
 Transport delivery to the parent does not discharge attention. The item stays
 first until the parent actually sends an ordinary Steer to the child or closes
-the Review. A child reply creates another control-lane item. After all child
-attention drains, the same parent agent resumes its own flow from durable
-position and Basis.
+the Review. Steer clears only the pending turn; the Review remains open. A
+later terminal child Turn re-arms pending attention and creates the next
+control-lane item. After all child attention drains, the same parent agent
+resumes its own flow from durable position and Basis.
 
 Serving child attention must not require a clean writable canonical checkout.
 Wave and Project control Launches get read-only repository context; writable
@@ -827,15 +842,19 @@ yet drain the same projection, and the duplicate Session lifecycle remains.
 The remaining pass finishes the authority cut rather than adding another
 bridge:
 
-1. give the Wave resident the same ordered control projection the Project
+1. separate the durable Review route from the currently pending attention;
+   parent Steer clears only pending, and the child's next terminal Turn re-arms
+   it with one parent evidence revision;
+2. give the Wave resident the same ordered control projection the Project
    runner now executes;
-2. prove live and seed-only child control against deterministic parent harnesses;
-3. replace Project/Task reservation, status, revocation, reaping, settlement,
+3. prove live and seed-only child control against deterministic parent harnesses,
+   including that a live-repurposed Turn cannot advance background playhead;
+4. replace Project/Task reservation, status, revocation, reaping, settlement,
    and recovery with shared Run reserve/advance/stop;
-4. delete Session/body process authority, env vars, DTOs, and duplicate runners;
-5. restore focused CI preemption and fresh-settlement tests removed with the
+5. delete Session/body process authority, env vars, DTOs, and duplicate runners;
+6. restore focused CI preemption and fresh-settlement tests removed with the
    command-ledger suite;
-6. consolidate unpublished schema work under main's dependency-ordered draft
+7. consolidate unpublished schema work under main's dependency-ordered draft
    migration contract, leaving no supported intermediate architecture.
 
 The size objective is already met, which removes any incentive to delete proof.
@@ -854,6 +873,8 @@ It is done when:
   dispositions;
 - a parent control seed includes the child's latest durable root output and
   current evidence without creating a Message or Review prompt store;
+- one Review supports repeated parent Steer → child Turn cycles without
+  redelivering an answered turn, and each new child reply advances parent Basis;
 - Project and Wave service an awaiting child Review before beginning another
   background flow step;
 - the agent already running the parent flow receives the Review; no reviewer

@@ -631,10 +631,11 @@ lf -m codex pr publish        # one-off agent override for copy generation
 
 When `-m` is omitted, copy generation uses `agent:` from `.lf/config.yaml` or
 `~/.lf/config.yaml`. Use the `pr` ops skill to generate `--title`/`--body`
-with agent judgment. Before publishing, Loopflow syncs the default branch in
-the main repo so the PR is based on current upstream state even from a
-sibling worktree. Push or GitHub failure returns an error and presents
-nothing.
+with agent judgment. Publication commits and pushes the current branch as-is;
+it never fetches to integrate, rebases, rewrites Task stack metadata, or
+launches conflict recovery. A PR may remain behind its base until `lf rebase`,
+`lf gate`, `lf pr submit`, or `lf pr land` owns integration. Push or GitHub
+failure returns an error and presents nothing.
 
 ### lf pr open
 
@@ -652,6 +653,10 @@ lf pr land                    # land one PR; the Task stays open
 lf pr land -c                 # land, then complete the owning Task
 lf pr land --next parser-proof  # name the next serial Task PR
 ```
+
+Submit and land clear `scratch/`, preserve a recovery ref, collapse the
+authored range to one tree-identical commit, replay that commit onto the pinned
+target, verify it, and push once. Ordinary `lf rebase` keeps commit history.
 
 ### lf pr abandon
 
@@ -682,9 +687,14 @@ lf rebase origin/main          # explicit target
 ```
 
 Classifies the branch before mutating git: disposable branches can reset to
-their base, authored work uses a normal rebase path. If `scratch/` needs to
-survive a reset, Loopflow stashes it under `.lf/scratch-stash/` and restores
-it afterward.
+their base, authored work uses a normal rebase path. Clean updates stay
+mechanical. A conflict keeps the first sequencer in place for one authorized
+recovery agent; Loopflow verifies the pinned target, branch, dirty state, and
+remote head before reporting success. If `scratch/` needs to survive a reset,
+Loopflow stashes it under `.lf/tmp/scratch-stash/` and restores it afterward.
+Loopflow records reviewed conflict resolutions with command-scoped rerere and
+keeps auto-staging disabled. Repeating the same conflict reuses that resolution
+mechanically and stages only its unmerged paths.
 
 Keep conflict resolution local when the branch is too large or sensitive to
 hand to another agent:
@@ -696,7 +706,16 @@ lf rebase --continue   # stages only the current conflict paths; repeat
 lf rebase --abort      # restore the pre-rebase branch
 ```
 
-Manual recovery stays local and never pushes.
+Manual recovery stays local and never pushes. `--continue` and `--abort`
+atomically adopt a stale Loopflow operation after its owner dies. A rebase
+started with raw Git has no owner record, so name that destructive intent:
+
+```bash
+lf rebase --continue --adopt
+lf rebase --abort --adopt
+```
+
+Plain `lf rebase` never adopts or aborts an existing Git operation.
 
 ## lf wt
 

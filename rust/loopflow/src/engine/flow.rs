@@ -25,8 +25,6 @@ pub struct Skill {
     pub feedback: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fast_path: Option<String>,
 }
 
 impl Skill {
@@ -40,7 +38,6 @@ impl Skill {
             interactive: None,
             feedback: false,
             content: None,
-            fast_path: None,
         }
     }
 }
@@ -391,7 +388,6 @@ struct SkillFrontmatter {
     directions: Vec<String>,
     action_style: Option<String>,
     interactive: Option<bool>,
-    fast_path: Option<String>,
 }
 
 fn parse_skill_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), LoadError> {
@@ -415,7 +411,6 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
         interactive: frontmatter.interactive,
         feedback: false,
         content: Some(body),
-        fast_path: frontmatter.fast_path,
     })
 }
 
@@ -441,17 +436,12 @@ fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
     let default_agent = parse_optional_string(map, "default_agent");
     let action_style = parse_optional_string(map, "action_style");
     let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
-    // Accept both kebab-case "fast-path" and snake_case "fast_path" in YAML.
-    let fast_path =
-        parse_optional_string(map, "fast-path").or_else(|| parse_optional_string(map, "fast_path"));
-
     SkillFrontmatter {
         agent,
         default_agent,
         directions: parse_directions_field(map),
         action_style,
         interactive,
-        fast_path,
     }
 }
 
@@ -853,7 +843,6 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
                 interactive,
                 feedback,
                 content: None,
-                fast_path: None,
             })
         }
         _ => Err(LoadError::InvalidFlow(
@@ -1574,7 +1563,6 @@ Be careful.
                 interactive: None,
                 feedback: true,
                 content: None,
-                fast_path: None,
             })],
         };
 
@@ -1597,7 +1585,6 @@ Be careful.
                 interactive: None,
                 feedback: true,
                 content: None,
-                fast_path: None,
             })],
         };
 

@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
 use loopflow::engine::worktrees::create_named_worktree;
@@ -45,6 +46,11 @@ fi
 
 if [ "$1 $2" = "pr list" ]; then
   echo '[]'
+  exit 0
+fi
+
+if [ "$1 $2" = "pr create" ]; then
+  echo 'https://example.com/pr/1'
   exit 0
 fi
 
@@ -285,6 +291,224 @@ fn land_clears_scratch_and_preserves_gitkeep() {
 }
 
 #[test]
+fn land_collapses_checkpoint_history_and_pushes_the_final_tree_once() {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("first.txt", "first");
+    repo.stage_all();
+    repo.commit("checkpoint: first slice");
+    repo.create_file("second.txt", "second");
+    repo.stage_all();
+    repo.commit("feature behavior");
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(&scratch).expect("create scratch");
+    fs::write(scratch.join("working.md"), "discard me").expect("write scratch");
+    repo.stage_all();
+    repo.commit("checkpoint: notes");
+    push_branch(&repo, "feature");
+
+    let push_log = repo.path().join("push.log");
+    let hook = repo.bare_path().join("hooks/update");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n",
+            push_log.display()
+        ),
+    )
+    .expect("write update hook");
+    let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
+
+    let gh_log = repo.bare_path().join("gh.log");
+    let script = gh_land_script(gh_log.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
+    land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: true,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("collapsed change".to_string()),
+            pr_body: Some("proof".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("land collapsed history");
+
+    let output = |args: &[&str]| {
+        let result = Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .expect("run git proof");
+        assert!(result.status.success(), "git {:?} failed", args);
+        String::from_utf8_lossy(&result.stdout).trim().to_string()
+    };
+    assert_eq!(output(&["rev-list", "--count", "origin/main..HEAD"]), "1");
+    assert_eq!(
+        output(&["rev-parse", "HEAD"]),
+        Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["rev-parse", "refs/heads/feature"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .expect("read remote head")
+    );
+    assert!(repo.path().join("first.txt").exists());
+    assert!(repo.path().join("second.txt").exists());
+    assert!(!repo.path().join("scratch/working.md").exists());
+    assert_eq!(
+        fs::read_to_string(&push_log)
+            .expect("one final push receipt")
+            .lines()
+            .collect::<Vec<_>>(),
+        vec!["refs/heads/feature"],
+        "submit/land must push only the verified final head"
+    );
+    assert!(
+        !output(&[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/loopflow/recovery/"
+        ])
+        .is_empty(),
+        "the pre-collapse head must remain recoverable"
+    );
+}
+
+#[test]
+fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
+    let repo = TestRepo::new();
+    repo.create_file("scratch/.gitkeep", "");
+    repo.stage_all();
+    repo.commit("track scratch");
+    repo.push();
+    repo.create_branch("feature");
+    repo.create_file("scratch/notes.md", "notes only");
+    repo.stage_all();
+    repo.commit("checkpoint: notes");
+    push_branch(&repo, "feature");
+    let remote_head = repo.head_sha();
+    let gh_log = repo.bare_path().join("gh.log");
+    let script = gh_land_script(gh_log.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str())]);
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: true,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("notes only".to_string()),
+            pr_body: Some("proof".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("no authored changes remain")),
+        "scratch-only finalization must refuse actionably: {result:?}"
+    );
+    assert_eq!(
+        Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["rev-parse", "refs/heads/feature"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .expect("read untouched remote"),
+        remote_head,
+        "empty finalization must not push"
+    );
+    assert!(
+        !fs::read_to_string(gh_log)
+            .unwrap_or_default()
+            .contains("pr create"),
+        "empty finalization must not create a PR"
+    );
+}
+
+#[test]
+fn land_does_not_push_when_target_already_contains_the_authored_patch() {
+    let repo = TestRepo::new();
+    repo.create_file("scratch/.gitkeep", "");
+    repo.create_file("shared.txt", "base\n");
+    repo.stage_all();
+    repo.commit("shared base");
+    repo.push();
+    repo.create_branch("feature");
+    repo.create_file("shared.txt", "same final content\n");
+    repo.stage_all();
+    repo.commit("feature patch");
+    push_branch(&repo, "feature");
+    let remote_feature = repo.head_sha();
+
+    repo.checkout("main");
+    repo.create_file("shared.txt", "same final content\n");
+    repo.stage_all();
+    repo.commit("upstream equivalent patch");
+    repo.push();
+    repo.checkout("feature");
+
+    let gh_log = repo.bare_path().join("gh.log");
+    let script = gh_land_script(gh_log.to_string_lossy().as_ref());
+    let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: true,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("already upstream".to_string()),
+            pr_body: Some("proof".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("expected" ) && message.contains("empty")),
+        "an empty final replay must fail before push: {result:?}"
+    );
+    assert_eq!(
+        Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.bare_path())
+            .args(["rev-parse", "refs/heads/feature"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .expect("read remote feature"),
+        remote_feature,
+        "the remote branch must keep its last authored head"
+    );
+    let gh_calls = fs::read_to_string(gh_log).unwrap_or_default();
+    assert!(
+        !gh_calls.contains("pr create")
+            && !gh_calls.contains("pr edit")
+            && !gh_calls.contains("pr ready")
+            && !gh_calls.contains("pr merge"),
+        "GitHub must not be mutated for an empty replay: {gh_calls}"
+    );
+}
+
+#[test]
 fn land_missing_pr_error_includes_branch_name() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_home(
@@ -340,7 +564,7 @@ fn land_uses_cached_pr_copy_when_available() {
     fs::write(scratch.join("pr-body.md"), "cached body").expect("write body");
     fs::write(scratch.join(".pr-copy-ref"), repo.head_sha()).expect("write ref");
 
-    let log_path = repo.path().join("gh.log");
+    let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
@@ -380,7 +604,7 @@ fn submit_and_land_make_no_presentation_attempt() {
     submit_repo.stage_all();
     submit_repo.commit("feature work");
     push_branch(&submit_repo, "feature");
-    let submit_log = submit_repo.path().join("gh.log");
+    let submit_log = submit_repo.bare_path().join("gh.log");
     let submit_script = gh_land_script(submit_log.to_string_lossy().as_ref());
     {
         let _env = EnvGuard::new(&[
@@ -419,7 +643,7 @@ fn submit_and_land_make_no_presentation_attempt() {
     land_repo.stage_all();
     land_repo.commit("feature work");
     push_branch(&land_repo, "feature");
-    let land_log = land_repo.path().join("gh.log");
+    let land_log = land_repo.bare_path().join("gh.log");
     let land_script = gh_land_script(land_log.to_string_lossy().as_ref());
     {
         let _env = EnvGuard::new(&[
@@ -461,7 +685,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     repo.commit("feature work");
     push_branch(&repo, "feature");
 
-    let log_path = repo.path().join("gh.log");
+    let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
@@ -562,7 +786,7 @@ fn latest_land_disposition_wins_before_merge() {
 #[test]
 fn submit_does_not_rotate_worktree() {
     let repo = TestRepo::new();
-    let log_path = repo.path().join("gh.log");
+    let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
@@ -666,7 +890,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
 #[test]
 fn lf_ops_land_leaves_worktree_in_place() {
     let repo = TestRepo::new();
-    let log_path = repo.path().join("gh.log");
+    let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 

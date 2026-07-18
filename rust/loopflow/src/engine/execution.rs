@@ -284,7 +284,6 @@ impl<E: SkillExecutor> FlowEngine<E> {
                     interactive: Some(false),
                     feedback: false,
                     content: Some(prompt.clone()),
-                    fast_path: None,
                 },
                 flow_parents: branch.flow_parents.clone(),
             },

@@ -333,7 +333,6 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
         action_style: None,
         interactive: Some(true),
         feedback: false,
-        fast_path: None,
     })
 }
 

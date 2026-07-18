@@ -39,6 +39,12 @@ enum Finalize {
     AssignForReview,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Integration {
+    Required,
+    Completed,
+}
+
 /// Run every land skill: commit, rebase onto main, clear scratch, mark the PR
 /// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
 /// the PR for a human to merge. Neither rotates the worktree — the wave home is
@@ -48,6 +54,7 @@ fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
     finalize: Finalize,
+    integration: Integration,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
     if options.complete && options.next_slug.is_some() {
@@ -63,33 +70,61 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
+    if !options.local && !crate::ops::pr::gh_available() {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    // Prove the Task PR range is uncontaminated before the first GitHub side
-    // effect (prepare_land pushes and can open a draft PR). No-op for non-Task
-    // worktrees.
+    // Prove the Task PR range before preparing the exact local tree. Submit and
+    // land make no remote mutation until the owned integration pushes once.
     crate::ops::task::verify_task_pr_range(&repo_root)?;
-    prepare_land(&repo_root, options, progress)?;
-    let main_branch = rebase_land(&repo_root, &main_repo, progress)?;
-    // Rebase may advance the fork point. Re-run the authoritative proof to heal
-    // the recorded base and refuse an empty range before any `gh pr` side effect.
+    match integration {
+        Integration::Required => prepare_land(&repo_root, options, progress)?,
+        Integration::Completed if !is_clean(&repo_root)? => {
+            return Err(OpsError::Message(
+                "recovered integration left uncommitted changes; refusing to mutate the verified head before PR finalization"
+                    .to_string(),
+            ));
+        }
+        Integration::Completed => {}
+    }
+    // Refuse an already-empty Task before scratch cleanup can manufacture a
+    // bookkeeping-only `.gitkeep` commit or any GitHub command observes it.
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let pr_exists = if options.local {
         false
     } else {
         crate::ops::pr::pr_exists_for_current_branch(&repo_root)?
     };
-    if pr_exists {
-        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch)?;
-    }
     if !options.local && !pr_exists && !options.create_pr {
         return Err(OpsError::Message(format!(
             "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
         )));
     }
+    let copy_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+    let copy_state = read_worktree_state(&repo_root)?;
     let (pr_title, pr_body) = resolve_pr_copy(&repo_root, options, progress)?;
-    clear_scratch(&repo_root, progress)?;
-
+    let current_head = crate::engine::git::rev_parse(&repo_root, "HEAD")?;
+    if current_head != copy_head || read_worktree_state(&repo_root)? != copy_state {
+        return Err(OpsError::Message(
+            "PR copy generation changed the worktree; refusing to integrate or finalize unreviewed provider mutations"
+                .to_string(),
+        ));
+    }
+    if matches!(integration, Integration::Required) {
+        clear_scratch(&repo_root, progress)?;
+    }
+    crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+    let main_branch = match integration {
+        Integration::Required => rebase_land(&repo_root, &main_repo, progress)?,
+        Integration::Completed => accept_completed_integration(&repo_root, &main_repo)?,
+    };
+    // Rebase may advance the fork point. Re-run the authoritative proof to heal
+    // the recorded base and refuse an empty range before any `gh pr` side effect.
+    crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
+    if pr_exists {
+        crate::ops::pr::retarget_open_pr(&repo_root, &main_branch)?;
+    }
     if options.local {
         finalize_local(&repo_root, &main_branch, &feature_branch, progress)?;
         return Ok(None);
@@ -104,17 +139,19 @@ fn prepare_pr(
         },
         options.next_slug.as_deref(),
     )?;
-    ensure_pr(
+    let created_pr = ensure_pr(
         &repo_root,
         pr_exists,
         &feature_branch,
         options.create_pr,
+        &main_branch,
         pr_title.as_deref(),
         pr_body.as_deref(),
-        options.agent.as_deref(),
-        progress,
     )?;
-    let pr = crate::ops::pr::current_pr(&repo_root)?;
+    let pr = match created_pr {
+        Some(pr) => Some(pr),
+        None => crate::ops::pr::current_pr(&repo_root)?,
+    };
     crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref())?;
     finalize_remote(
         &repo_root,
@@ -134,7 +171,28 @@ pub fn land(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(repo, options, Finalize::AutoMerge, progress)
+    prepare_pr(
+        repo,
+        options,
+        Finalize::AutoMerge,
+        Integration::Required,
+        progress,
+    )
+}
+
+/// Continue land after owned recovery already verified and pushed integration.
+pub(crate) fn finish_land_after_rebase(
+    repo: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<Option<PrInfo>> {
+    prepare_pr(
+        repo,
+        options,
+        Finalize::AutoMerge,
+        Integration::Completed,
+        progress,
+    )
 }
 
 /// Prepare a PR to land without arming auto-merge: commit, rebase onto main,
@@ -146,7 +204,27 @@ pub fn submit(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> OpsResult<Option<PrInfo>> {
-    prepare_pr(repo, options, Finalize::AssignForReview, progress)
+    prepare_pr(
+        repo,
+        options,
+        Finalize::AssignForReview,
+        Integration::Required,
+        progress,
+    )
+}
+
+pub(crate) fn finish_submit_after_rebase(
+    repo: &Path,
+    options: &LandOptions,
+    progress: &impl Progress,
+) -> OpsResult<Option<PrInfo>> {
+    prepare_pr(
+        repo,
+        options,
+        Finalize::AssignForReview,
+        Integration::Completed,
+        progress,
+    )
 }
 
 fn resolve_pr_copy(
@@ -251,8 +329,8 @@ fn prepare_land(
             .unwrap_or_else(|| "lf land: stage uncommitted changes".to_string());
         let commit_options = CommitOptions {
             add: true,
-            push: true,
-            create_draft_pr: true,
+            push: false,
+            create_draft_pr: false,
             message: Some(message),
             agent: options.agent.clone(),
             ..CommitOptions::for_task("land")
@@ -269,7 +347,7 @@ fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> 
     // A stacked child collapses onto trunk deterministically: replay only
     // `base..HEAD`, dropping the (squash-)merged parent commits.
     let stacked = crate::ops::task::stacked_collapse(repo_root)?;
-    crate::ops::rebase::rebase_with_recovery(
+    let verification = crate::ops::rebase::rebase_final_with_recovery(
         repo_root,
         &crate::ops::rebase::RebaseOptions {
             onto: onto.clone(),
@@ -279,7 +357,20 @@ fn rebase_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> 
         progress,
     )?;
     if let Some(stacked) = stacked {
-        let new_base = crate::engine::git::rev_parse(repo_root, &onto)?;
+        // Record the immutable target proven by the integration owner. Another
+        // worktree may fetch and move origin/main after our pinned fetch.
+        crate::ops::task::record_stack_rebase(&stacked, &verification.target_sha, true)?;
+    }
+    Ok(main_branch)
+}
+
+fn accept_completed_integration(repo_root: &Path, main_repo: &Path) -> OpsResult<String> {
+    let main_branch = get_default_branch(main_repo)?;
+    if let Some(stacked) = crate::ops::task::stacked_collapse(repo_root)? {
+        // Final integration is exactly one collapsed authored commit. Its
+        // parent is the immutable target the owner already verified; reading a
+        // moving origin/main here could record a newer, unreachable base.
+        let new_base = crate::engine::git::rev_parse(repo_root, "HEAD^")?;
         crate::ops::task::record_stack_rebase(&stacked, &new_base, true)?;
     }
     Ok(main_branch)
@@ -303,11 +394,10 @@ fn ensure_pr(
     pr_exists: bool,
     feature_branch: &str,
     create_pr: bool,
+    base_branch: &str,
     pr_title: Option<&str>,
     pr_body: Option<&str>,
-    agent_override: Option<&str>,
-    progress: &impl Progress,
-) -> OpsResult<()> {
+) -> OpsResult<Option<PrInfo>> {
     if !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
@@ -320,15 +410,13 @@ fn ensure_pr(
                 )
             })?;
             let body = pr_body.unwrap_or("");
-            let _ = crate::ops::pr::create_or_update_pr(
+            return crate::ops::pr::create_pr_from_pushed_branch(
                 repo_root,
-                &crate::ops::pr::PrOptions {
-                    title: Some(title.to_string()),
-                    body: Some(body.to_string()),
-                    agent: agent_override.map(str::to_string),
-                },
-                progress,
-            )?;
+                title,
+                body,
+                base_branch,
+            )
+            .map(Some);
         } else {
             return Err(OpsError::Message(format!(
                 "no open PR found for branch '{feature_branch}'; run lf pr open or use --create-pr"
@@ -336,7 +424,7 @@ fn ensure_pr(
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 fn finalize_remote(
@@ -458,7 +546,6 @@ fn clear_scratch(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
     crate::engine::git::stage_all(repo)?;
     if has_staged_changes(repo)? {
         crate::engine::git::commit(repo, "lf land: clear scratch/")?;
-        crate::ops::commit::push_with_upstream_if_needed(repo)?;
     }
 
     Ok(())
@@ -472,6 +559,20 @@ fn has_staged_changes(repo: &Path) -> OpsResult<bool> {
         .current_dir(repo)
         .status()?;
     Ok(!status.success())
+}
+
+fn read_worktree_state(repo: &Path) -> OpsResult<String> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain=v1"])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: "git status --porcelain=v1".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {

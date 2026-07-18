@@ -20,29 +20,20 @@ re-derive what these already record.
 
 ## Goal
 
-Recover from rebase conflicts and push a clean branch.
+Resolve the existing Loopflow-owned rebase. The waiting parent verifies and
+pushes after this agent exits.
 
 ## Workflow
 
-### 1. Understand the branch's intent
+### 1. Understand the conflict
 ```bash
-git log main..HEAD --oneline
-git diff main...HEAD --stat
+git status --short
 ```
-Note which files this branch modified and what it's trying to accomplish.
+Read `<lf:rebase-conflict>` for the pinned target and affected paths. The
+sequencer already exists. Do not fetch, start another rebase, delegate to a
+subagent, or run raw `git rebase` lifecycle commands.
 
-If `<lf:rebase-conflict>` is present, read it to understand what conflicted.
-
-### 2. Rebase
-
-Use the target from the conflict context if present. Default to `origin/main`:
-
-```bash
-git fetch origin main
-git rebase origin/main
-```
-
-### 3. Handle conflicts
+### 2. Resolve and continue
 
 If conflicts occur:
 
@@ -50,40 +41,35 @@ If conflicts occur:
 # See which files have conflicts
 git status
 
-# After resolving each file
-git add <file>
-git rebase --continue
+# After resolving the current conflict
+lf rebase --continue
 ```
 
 **Conflict resolution strategy:**
 
-- **Files central to the branch's intent:** Preserve the branch's changes. These are the files listed in `git diff main...HEAD --stat`.
+- **Files central to the branch's intent:** Preserve the branch's changes named by the conflict context and surrounding code.
 - **Files outside the branch's scope:** Accept main's version. The branch probably touched these incidentally.
 - **Both versions are valid:** Combine manually if both changes make sense.
 - **Ambiguous or high-risk conflicts:** Do not guess. In interactive runs, ask the user. In headless runs, write the ambiguity and options to `scratch/questions.md` and stop.
 
-Repeat until `git rebase --continue` completes without conflicts.
+`lf rebase --continue` stages the resolved conflict paths and checks that this
+agent owns the operation. Repeat until it reports completion. Loopflow records
+the reviewed resolution for later identical conflicts; rerere auto-staging stays
+disabled, so unrelated paths are never staged with it.
 
-### 4. Verify the resolution and push
+### 3. Verify the resolution
 
-If the rebase was conflict-free, do not run tests. The branch-authored patch
-did not change; the next gate or CI run owns integration proof against the new
-base.
+Run the smallest behavioral test that exercises the reconciled behavior, once,
+after the rebase completes. Do not expand into the whole project suite or
+unrelated lint/build checks here. Gate and CI own that broader proof.
 
-If you resolved conflicts, run the smallest behavioral test that exercises the
-reconciled behavior, once, after the rebase completes. Do not expand into the
-whole project suite or unrelated lint/build checks here. Gate and CI own that
-broader proof.
-
-```bash
-git push --force-with-lease
-```
+Do not push. Exit after the focused proof; the waiting `lf rebase` process owns
+Git postconditions and the single push.
 
 ## Abort
 
 ```bash
-# Abort and return to pre-rebase state
-git rebase --abort
+lf rebase --abort
 ```
 
 Then:

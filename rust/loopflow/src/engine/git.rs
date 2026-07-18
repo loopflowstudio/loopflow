@@ -902,25 +902,29 @@ pub fn rebase(
     onto: &str,
     base_commit: Option<&str>,
 ) -> Result<RebaseResult, GitError> {
-    rebase_command(worktree, onto, base_commit, true)
-}
-
-/// Start a rebase and leave conflicts in place for the current process.
-pub fn rebase_for_resolution(
-    worktree: &Path,
-    onto: &str,
-    base_commit: Option<&str>,
-) -> Result<RebaseResult, GitError> {
-    rebase_command(worktree, onto, base_commit, false)
+    rebase_command(worktree, onto, base_commit)
 }
 
 fn rebase_command(
     worktree: &Path,
     onto: &str,
     base_commit: Option<&str>,
-    abort_on_conflict: bool,
 ) -> Result<RebaseResult, GitError> {
-    let mut args = vec!["rebase"];
+    if let Some(state) = intervention_state(worktree)? {
+        return Err(GitError::CommandFailed {
+            command: "git rebase".to_string(),
+            stderr: format!(
+                "refusing to start a rebase while a {state} operation is already in progress"
+            ),
+        });
+    }
+    let mut args = vec![
+        "-c",
+        "rerere.enabled=true",
+        "-c",
+        "rerere.autoupdate=false",
+        "rebase",
+    ];
     if let Some(base) = base_commit {
         args.extend(["--onto", onto, base]);
     } else {
@@ -939,9 +943,6 @@ fn rebase_command(
     }
 
     let conflicts = list_conflicts(worktree)?;
-    if abort_on_conflict {
-        let _ = run_git(worktree, &["rebase", "--abort"])?;
-    }
     Ok(RebaseResult {
         success: false,
         conflicts: if conflicts.is_empty() {
@@ -973,7 +974,16 @@ pub fn continue_rebase(worktree: &Path) -> Result<RebaseResult, GitError> {
 
     let output = run_git(
         worktree,
-        &["-c", "core.editor=true", "rebase", "--continue"],
+        &[
+            "-c",
+            "rerere.enabled=true",
+            "-c",
+            "rerere.autoupdate=false",
+            "-c",
+            "core.editor=true",
+            "rebase",
+            "--continue",
+        ],
     )?;
     if output.status.success() {
         let new_head = git_stdout(worktree, &["rev-parse", "HEAD"])?
@@ -994,6 +1004,36 @@ pub fn continue_rebase(worktree: &Path) -> Result<RebaseResult, GitError> {
     })
 }
 
+/// Conflict paths whose current resolution was not supplied by rerere.
+///
+/// Loopflow keeps rerere auto-staging disabled. An empty result while Git still
+/// reports unmerged paths means every conflict path was populated from a
+/// previously reviewed resolution and may be staged explicitly for continue.
+pub fn rerere_remaining(worktree: &Path) -> Result<Vec<PathBuf>, GitError> {
+    let output = run_git(
+        worktree,
+        &[
+            "-c",
+            "rerere.enabled=true",
+            "-c",
+            "rerere.autoupdate=false",
+            "rerere",
+            "remaining",
+        ],
+    )?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: "git rerere remaining".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(PathBuf::from)
+        .collect())
+}
+
 /// Abort an in-progress rebase and restore its pre-rebase state.
 pub fn abort_rebase(worktree: &Path) -> Result<(), GitError> {
     git_stdout(worktree, &["rebase", "--abort"])?;
@@ -1005,7 +1045,7 @@ pub fn abort_rebase(worktree: &Path) -> Result<(), GitError> {
 /// worktree's own git dir (`git rev-parse --absolute-git-dir`) so linked
 /// worktrees inspect their private state, not the shared main repo.
 pub fn intervention_state(worktree: &Path) -> Result<Option<&'static str>, GitError> {
-    let git_dir = git_dir(worktree)?;
+    let git_dir = absolute_git_dir(worktree)?;
     let present = |name: &str| std::fs::metadata(git_dir.join(name)).is_ok();
     if present("rebase-merge") || present("rebase-apply") {
         return Ok(Some("rebase"));
@@ -1025,7 +1065,7 @@ pub fn intervention_state(worktree: &Path) -> Result<Option<&'static str>, GitEr
     Ok(None)
 }
 
-fn git_dir(worktree: &Path) -> Result<PathBuf, GitError> {
+pub fn absolute_git_dir(worktree: &Path) -> Result<PathBuf, GitError> {
     let raw = git_stdout(worktree, &["rev-parse", "--absolute-git-dir"])?;
     Ok(PathBuf::from(raw.trim()))
 }
@@ -1250,8 +1290,7 @@ mod tests {
         git_stdout(repo.path(), &["commit", "-m", "main change"]).expect("commit main");
         git_stdout(repo.path(), &["checkout", "feature"]).expect("checkout feature");
 
-        let conflicted =
-            rebase_for_resolution(repo.path(), "main", None).expect("start manual rebase");
+        let conflicted = rebase(repo.path(), "main", None).expect("start manual rebase");
         assert!(!conflicted.success);
         assert_eq!(conflicted.conflicts, Some(vec![PathBuf::from("README.md")]));
         assert_eq!(list_conflicts(repo.path()).unwrap().len(), 1);

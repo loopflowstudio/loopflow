@@ -156,10 +156,13 @@ software: Loopflow-launched workers use radio; an external harness acting for
 a person is a `User` and uses the same chat/start/status surfaces as the Mac
 app.
 
-The skill is a manual compression of the injected canonical `LOOPFLOW.md`, but
+The skill is a manual compression of the injected canonical `LOOPFLOW.md`.
 PR #1069 landed `python/tests/test_loopflow_skill_alignment.py` to pin their
-shared doctrine anchors and public frontmatter. Agent-api extends that existing
-guard when it changes caller authority; it does not add another sync system.
+shared doctrine anchors and public frontmatter, but #1091 then deleted the
+doctrine-anchor half as a low-value test; only frontmatter and
+self-containment guards survive on main. Agent-api extends that surviving
+file when it changes caller authority; it does not add another sync system or
+restore the anchor list.
 
 Focused PR #1069 packaging verification passed: 8 tests cover README/docs-index
 alignment, raw Markdown delivery, content negotiation, agent-readable 404s,
@@ -360,8 +363,10 @@ The project needs no new durable entity and no new generic runtime DTO.
   `docs/` canonical and generates `website/docs/`. Agent-api must use that sync
   path, not edit both copies or add another corpus.
 - **Injected contract versus installed skill**: both must carry shared safety
-  rules. PR #1069's doctrine-anchor test is the ownership seam; agent-api must
-  update it alongside intentional semantic changes.
+  rules, but #1091 removed the doctrine-anchor test that pinned them together.
+  Nothing now catches `LOOPFLOW.md`/`SKILL.md` wording drift automatically, so
+  agent-api must re-check that pairing by hand when it changes caller
+  authority.
 
 PR #1069 is merged on main and is now the docs/skill packaging substrate.
 Product still has open PR #1071. Architecture remains the hard stack parent,

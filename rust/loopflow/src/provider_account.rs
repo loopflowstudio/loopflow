@@ -2,6 +2,7 @@
 //! leases for Claude and Codex.
 
 pub mod lease;
+pub mod recovery;
 
 use std::fs;
 use std::path::{Path, PathBuf};

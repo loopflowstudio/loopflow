@@ -1047,8 +1047,9 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 #[cfg(test)]
 mod promote_tests {
     use super::{
-        activate_cli_then_advance, activate_install_then_advance, commit_cli_symlink,
-        preserve_prior_binary, publish_cli, rollback_from_store, stage_binary, AppPromotion,
+        activate_cli_then_advance, activate_install_then_advance, commit_app_bundle,
+        commit_cli_symlink, copy_tree, preserve_prior_binary, publish_cli, retained_binary_path,
+        rollback_from_store, stage_binary, validate_rollback_verdict, AppPromotion,
         CandidateIdentity, CliPromotion, Verdict,
     };
     use anyhow::anyhow;
@@ -1354,5 +1355,199 @@ mod promote_tests {
         );
         assert_eq!(fs::read(&cli_target).unwrap(), b"current-compatible");
         assert!(!cli_target.is_symlink());
+    }
+
+    #[test]
+    fn validate_rollback_verdict_accepts_only_an_exact_promote() {
+        validate_rollback_verdict(&Verdict::Promote).expect("an exact-compatible prior rolls back");
+
+        let ahead = validate_rollback_verdict(&Verdict::PromoteAndMigrate).unwrap_err();
+        assert!(
+            ahead.to_string().contains("ahead of the current store"),
+            "{ahead}"
+        );
+
+        let reject = validate_rollback_verdict(&Verdict::Reject {
+            reasons: vec!["database migration 0.11.027 is unknown to lf".to_string()],
+        })
+        .unwrap_err();
+        assert!(
+            reject.to_string().contains("not rollback-compatible"),
+            "{reject}"
+        );
+        assert!(reject.to_string().contains("0.11.027"), "{reject}");
+    }
+
+    #[test]
+    fn retained_binary_path_rejects_out_of_store_and_mismatched_content_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("bin");
+        let candidate = dir.path().join("lf");
+        fs::write(&candidate, b"retained-bytes").unwrap();
+        let staged = stage_binary(&candidate, &bin_dir).unwrap();
+
+        // A correctly content-addressed member of the store resolves. Compare
+        // against the canonicalized staged path so a symlinked TMPDIR
+        // (/var -> /private/var on macOS) doesn't masquerade as a mismatch.
+        assert_eq!(
+            retained_binary_path(&staged, &bin_dir).unwrap(),
+            fs::canonicalize(&staged).unwrap()
+        );
+
+        // A binary outside the immutable store is refused.
+        let outside = retained_binary_path(&candidate, &bin_dir).unwrap_err();
+        assert!(
+            outside
+                .to_string()
+                .contains("outside the immutable binary store"),
+            "{outside}"
+        );
+
+        // A file inside the store whose name is not its digest is refused.
+        let renamed = bin_dir.join("lf-deadbeef");
+        fs::copy(&staged, &renamed).unwrap();
+        let mismatch = retained_binary_path(&renamed, &bin_dir).unwrap_err();
+        assert!(
+            mismatch.to_string().contains("content address"),
+            "{mismatch}"
+        );
+    }
+
+    #[test]
+    fn copy_tree_preserves_symlinks_and_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("Loopflow.app");
+        fs::create_dir_all(source.join("Contents/MacOS")).unwrap();
+        let helper = source.join("Contents/MacOS/lf");
+        fs::write(&helper, b"bundled-lf").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o555)).unwrap();
+        std::os::unix::fs::symlink("MacOS/lf", source.join("Contents/current")).unwrap();
+
+        let dest = dir.path().join("staged.app");
+        copy_tree(&source, &dest).unwrap();
+
+        assert_eq!(
+            fs::read(dest.join("Contents/MacOS/lf")).unwrap(),
+            b"bundled-lf"
+        );
+        assert_eq!(
+            fs::metadata(dest.join("Contents/MacOS/lf"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o555
+        );
+        let link = dest.join("Contents/current");
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            std::path::Path::new("MacOS/lf")
+        );
+    }
+
+    #[test]
+    fn commit_app_bundle_restores_the_old_app_when_the_staged_rename_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("Applications/Loopflow.app");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("marker"), b"old-app").unwrap();
+
+        // A staged path that does not exist forces the staged -> target rename to
+        // fail *after* the old app has already moved to its sidecar — exactly the
+        // window between old-app->sidecar and staged->target. The old app must be
+        // restored in place, not stranded in the sidecar.
+        let missing_staged = dir.path().join("Applications/.never-staged");
+        let identity = CandidateIdentity::current();
+        let verdict = Verdict::Promote;
+        let plan = AppPromotion {
+            source: dir.path(), // unused on the commit path
+            target: &target,
+            legacy_target: None,
+            expected_candidate: &identity,
+            expected_verdict: &verdict,
+        };
+        let error = commit_app_bundle(&missing_staged, &plan).unwrap_err();
+        assert!(error.to_string().contains("commit staged app"), "{error}");
+
+        assert!(
+            target.exists(),
+            "old app must be restored to the target on a failed commit"
+        );
+        assert_eq!(fs::read(target.join("marker")).unwrap(), b"old-app");
+        let sidecars: Vec<_> = fs::read_dir(dir.path().join("Applications"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("superseded"))
+            .collect();
+        assert!(
+            sidecars.is_empty(),
+            "superseded sidecar leaked: {sidecars:?}"
+        );
+    }
+
+    #[test]
+    fn a_frontier_failure_leaves_the_cli_new_and_the_app_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli_target = dir.path().join("lf");
+        let candidate = dir.path().join("cand");
+        fs::write(&cli_target, b"old-compatible").unwrap();
+        fs::write(&candidate, b"candidate-knows-pending-frontier").unwrap();
+        let bin_dir = dir.path().join("bin");
+
+        let source = dir.path().join("built.app");
+        let identity = CandidateIdentity::current();
+        let verdict = Verdict::PromoteAndMigrate;
+        write_app(&source, &identity, &verdict);
+        let app_target = dir.path().join("Applications/Loopflow.app");
+        fs::create_dir_all(&app_target).unwrap();
+        fs::write(app_target.join("old-app"), b"old-app").unwrap();
+        let app = AppPromotion {
+            source: &source,
+            target: &app_target,
+            legacy_target: None,
+            expected_candidate: &identity,
+            expected_verdict: &verdict,
+        };
+
+        let error = activate_install_then_advance(
+            &verdict,
+            &CliPromotion {
+                candidate_binary: &candidate,
+                cli_target: &cli_target,
+                bin_dir: &bin_dir,
+            },
+            Some(&app),
+            || Err(anyhow!("migration fsync failed")),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("migration fsync failed"),
+            "{error}"
+        );
+
+        // The CLI is already the compatible candidate; the app never committed, so
+        // its old bytes remain and no staged bundle leaks.
+        let active = fs::read_link(&cli_target).unwrap();
+        assert_eq!(
+            fs::read(active).unwrap(),
+            b"candidate-knows-pending-frontier"
+        );
+        assert!(app_target.join("old-app").exists());
+        assert!(
+            !app_target.join("new-app").exists(),
+            "app not committed on failure"
+        );
+        let leftovers: Vec<_> = fs::read_dir(dir.path().join("Applications"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with('.'))
+            .collect();
+        assert!(leftovers.is_empty(), "staged app leaked: {leftovers:?}");
     }
 }

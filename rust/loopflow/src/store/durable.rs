@@ -591,8 +591,8 @@ mod tests {
 
     #[tokio::test]
     async fn exit_guard_continues_only_the_exact_user_feedback() {
-        let (store, work, home) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, &home, false).await;
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, false).await;
         let basis = store.current_epoch(&work).await.unwrap().current_basis;
         store
             .set_flow_position(
@@ -653,7 +653,7 @@ mod tests {
 
     #[tokio::test]
     async fn active_parent_run_can_escalate_only_its_current_child_feedback() {
-        let (store, parent, home) = wave_work().await;
+        let (store, parent) = wave_work().await;
         let project = project_session(match &parent {
             WorkRef::Wave(id) => id.clone(),
             _ => unreachable!(),
@@ -663,8 +663,8 @@ mod tests {
             .work_for_child(&crate::child_session::ChildRef::Project(project.id))
             .await
             .unwrap();
-        let (parent_lease, _) = start_launch(&store, &parent, &home, false).await;
-        let (child_lease, child_launch) = start_launch(&store, &child, &home, false).await;
+        let (parent_lease, _) = start_launch(&store, &parent, false).await;
+        let (child_lease, child_launch) = start_launch(&store, &child, false).await;
         let basis = store.current_epoch(&child).await.unwrap().current_basis;
         store
             .set_flow_position(

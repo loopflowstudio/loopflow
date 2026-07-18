@@ -12,8 +12,8 @@ title: Architecture
 > Feedback is an interactive flow interval routed by Launch attention, and direct
 > Work controls exist. Work placement now names a stable Home authority, and one
 > Home-local keeper serves all placed Waves. Project/Task Session runners and
-> body leases still own
-> process execution and reconstruct Run authority from legacy generations.
+> body leases still own process execution and reconstruct Run authority from
+> legacy generations.
 > Child attention is queryable but parent loops do not yet prioritize it. Run is
 > therefore the durable authority, but not yet the only executor.
 >

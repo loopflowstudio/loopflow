@@ -8,7 +8,8 @@
   implementation lands, or land them together in that release PR.
 
   Verified in a disposable release-shaped copy: canonicalization produced only
-  `0.12.001_work_placements`; migration validation passed; all six durable
-  Store behavior tests passed, including wrong-Home reservation refusal,
-  local-identity protection, and live-Run move fencing. The remaining issue is
-  publication order, not schema or runtime correctness.
+  `0.12.001_work_placements`; migration validation passed; all eight durable
+  Store behavior tests and the durable Wave identity test passed, including
+  wrong-Home reservation refusal, local-identity protection, and live-Run move
+  fencing. The remaining issue is publication order, not schema or runtime
+  correctness.

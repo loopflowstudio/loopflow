@@ -128,7 +128,7 @@ enum LaunchTargetLauncher {
         return Command(
             cwd: "/",
             argv: [
-                lfPath, "work", "feedback", attach.work.kind, attach.work.id,
+                lfPath, "work", "feedback", attach.work.kind.rawValue, attach.work.id,
                 "--continue-on-exit",
             ],
             environment: [:]

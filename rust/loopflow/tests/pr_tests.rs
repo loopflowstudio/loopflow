@@ -21,11 +21,11 @@ fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
-fn claude_script() -> &'static str {
+fn agent_script() -> &'static str {
     "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
-fn mutating_claude_script() -> &'static str {
+fn mutating_agent_script() -> &'static str {
     "#!/bin/sh\nprintf 'provider mutation\\n' > provider.txt\ngit add provider.txt\ngit commit -m 'provider mutation' >/dev/null\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
@@ -99,7 +99,7 @@ fn pr_create_calls_gh() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -134,7 +134,7 @@ fn publish_makes_no_presentation_attempt() {
             ("gh", gh_script.as_str()),
             ("open", open_script.as_str()),
             ("xdg-open", open_script.as_str()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -166,7 +166,7 @@ fn publication_refuses_if_copy_generation_changes_the_pushed_head() {
     let gh_script = write_gh_script("[]", None);
     let _env = EnvGuard::new(&[
         ("gh", gh_script.as_str()),
-        ("claude", mutating_claude_script()),
+        ("codex", mutating_agent_script()),
     ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -434,7 +434,7 @@ fn pr_update_refreshes_body() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -464,7 +464,7 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -510,7 +510,7 @@ fn pr_auto_generates_title_when_missing() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );

@@ -39,8 +39,19 @@ struct WaveLensTests {
     func levelsMapOneToOne() {
         #expect(WaveLensColor(.green) == .green)
         #expect(WaveLensColor(.red) == .red)
+        #expect(WaveLensColor(.blue) == .blue)
         #expect(WaveLensColor(.black) == .black)
         #expect(WaveLensColor(.unknown) == .unknown)
+    }
+
+    @Test("a User Review is blue and wins over a live Project body")
+    func projectBlueWinsOverLiveBody() throws {
+        let lens = WaveLens.forProject(
+            runtime: try makeRuntime(status: "running", alive: true, reason: "implementing"),
+            tasks: [try makeTask(level: "blue", reason: "Waiting for your Review")]
+        )
+        #expect(lens.color == .blue)
+        #expect(lens.reason == "Waiting for your Review")
     }
 
     @Test("unknown is a lit lens, distinct from the off black")

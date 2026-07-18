@@ -543,6 +543,7 @@ Test skill body.
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
+                    review: false,
                     content: Some("Skill body".to_string()),
                     fast_path: None,
                 }),

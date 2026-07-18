@@ -927,6 +927,7 @@ private extension TaskAttentionLevel {
         switch self {
         case .green: .statusSuccess
         case .red: .statusError
+        case .blue: Color(hex: 0x3578C8)
         case .black: .statusNeutral
         case .unknown: .statusWarning
         }

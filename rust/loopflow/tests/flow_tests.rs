@@ -88,7 +88,7 @@ fn flow_parsing_parity() {
 - implement
 - step:
     name: review
-    interactive: true
+    review: true
     direction: [ux, security]
 "#,
     );
@@ -105,6 +105,7 @@ fn flow_parsing_parity() {
             directions: vec![],
             action_style: None,
             interactive: None,
+            review: false,
             content: None,
             fast_path: None,
         })
@@ -117,7 +118,8 @@ fn flow_parsing_parity() {
             default_agent: None,
             directions: vec!["ux".to_string(), "security".to_string()],
             action_style: None,
-            interactive: Some(true),
+            interactive: None,
+            review: true,
             content: None,
             fast_path: None,
         })

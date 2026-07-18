@@ -1062,7 +1062,7 @@ async fn prepare_task_flow_step(
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(session.agent.clone());
     let skill = crate::engine::load_skill(&step.step, Path::new(&session.worktree))?;
-    let attention = if skill.interactive.unwrap_or(false) {
+    let attention = if step.review {
         let route = match session.phase_plan().interaction_policy {
             InteractionPolicy::Require => AttentionRoute::User,
             InteractionPolicy::Defer => AttentionRoute::Parent(
@@ -1125,10 +1125,10 @@ fn interactive_step_protocol(
         AttentionRoute::Parent(_) => "the immediate parent Run",
     };
     format!(
-        "Conduct the interactive `{skill}` step in this existing Task Launch. Attention is routed \
+        "Conduct the `{skill}` Review step in this existing Task Launch. Attention is routed \
 to {route}. Conversation arrives as ordinary Steers addressed to Work `{}`. Ask bounded \
 questions, respond in this same Launch, and wait when another answer is required. A current \
-Basis close advances the flow; there is no approval or changes-requested disposition. Extra \
+Basis Continue advances the flow; there is no approval or changes-requested disposition. Extra \
 findings are ordinary Steers.\n\n{instructions}",
         work.id()
     )

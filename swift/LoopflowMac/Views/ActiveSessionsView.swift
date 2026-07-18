@@ -303,6 +303,7 @@ private enum TintStyle {
         switch tint {
         case .green: .statusSuccess
         case .red: .statusError
+        case .blue: Color(hex: 0x3578C8)
         case .black: palette.text
         case .neutral: .statusNeutral
         }
@@ -384,7 +385,7 @@ private struct LaunchAttachSheet: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Text("Interactive launch")
+            Text(launch.attention?.kind == "user" ? "Review" : "Interactive launch")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             if let fallbackNotice {
@@ -429,12 +430,14 @@ private struct LaunchAttachSheet: View {
     @ViewBuilder
     private var content: some View {
         if let attach, surface == .ghostty {
-            let command = LaunchTargetLauncher.command(for: attach, home: launch.home)
+            let command = launch.attention?.kind == "user"
+                ? LaunchTargetLauncher.reviewCommand(for: attach, home: launch.home)
+                : LaunchTargetLauncher.command(for: attach, home: launch.home)
             GhosttyTerminalView(
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "launch-\(attach.sessionId)"
+                sessionId: "review-\(attach.sessionId)"
             )
             .id(attach.sessionId)
         } else if let surface, let externalNote {
@@ -464,6 +467,11 @@ private struct LaunchAttachSheet: View {
         do {
             let descriptor = try await query.attachLaunch(launchId: launch.id)
             attach = descriptor
+            if descriptor.attention?.kind == "user" {
+                surface = .ghostty
+                externalNote = nil
+                return
+            }
             // Consume the descriptor's Home, not a local-only assumption: a remote
             // worktree makes local editors and plain windows unavailable. The
             // provider and session id determine whether an IDE can attach (Claude

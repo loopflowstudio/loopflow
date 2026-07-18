@@ -1,4 +1,6 @@
-- design
+- step:
+    name: design
+    review: true
 - implement
 - reduce
 - polish

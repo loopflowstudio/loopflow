@@ -256,6 +256,10 @@ lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-125 --headless                       # route Reviews to the Project
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
+lf queue                                             # User-attention Reviews, oldest first
+lf work review task task_...                        # explicit: /continue advances
+lf work review task task_... --continue-on-success  # EOF advances
+lf work review task task_... --continue-on-exit     # every client exit advances
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -278,10 +282,11 @@ Its provider process and transcript are replaceable execution state: plain
 Work, durable Steers, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
-Every Task runs `kickoff → iterate N → gate`. Standard Tasks conduct interactive
-kickoff and gate steps with the human in the existing provider transcript, while
-the owning Project conducts interactive iteration steps. `--headless` assigns
-all three phases to the Project without skipping their skills.
+Every Task runs `kickoff → iterate N → gate`. A flow step declares `review: true`;
+the active Launch routes that Review to the User or the immediate parent Run.
+Standard Tasks route kickoff and gate to the human, while the owning Project
+conducts interactive iteration steps. `--headless` routes all three to the
+Project without skipping their skills.
 
 A Review is the current interactive flow step plus its live Launch and route;
 there is no Review id or disposition. `lf task steer` and `lf project steer`
@@ -290,34 +295,49 @@ advances the interactive step under its current Basis fence. Interrupt and
 replacement direction stay separate: interrupt the active boundary, then
 Steer normally.
 
+`lf work review` renders complete root Turn output and sends typed input as
+Basis-fenced Steers. `/continue` advances the current flow interval. Bare mode
+leaves the Review open on EOF; `--continue-on-success` advances on clean EOF;
+`--continue-on-exit` also advances after signals or a client crash, but only if
+the same Launch and Basis still own User attention.
+
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
 parent merges. The two Tasks keep separate identities, worktrees, and workers.
-`lf task attach` attaches to the active tmux process. Prefer `steer` for durable
-direction; raw terminal input is provider transport, not the control ledger.
+tmux remains containment and read-only inspection; Review input never writes
+terminal bytes into the provider process.
 
-## Handing Interactive Work to a Human
+## Reviewing Work
 
-List the Launches the Run controller already owns, inspect one generic attach
-descriptor, and reopen it:
+Open what currently needs you, then continue the Work. The same Launches the Run
+controller owns remain inspectable through the generic attach descriptor:
 
 ```bash
+lf queue
+lf work review task task_0123456789abcdef0123456789abcdef
+lf work continue task task_0123456789abcdef0123456789abcdef
+
 lf launch list --active --json
 lf launch status launch_... --json
 lf launch present launch_...                 # exec the tmux/provider attach route
 lf launch handback launch_... --outcome succeeded
 ```
 
-`attach` prints the same descriptor as `status` without changing Launch state;
-`present` replaces `lf` with that route. Closing the app or terminal does not
-end the Launch. For an opaque TUI, record the observed boundary result with
+Review is derived from the Work's current conversational flow step, live
+Launch, Basis, and User attention. It has no separate queue row, transcript,
+disposition, or terminal outcome. Typed lines become ordinary Steers; Continue
+only advances the flow interval.
+
+Closing the app or terminal does not end the Launch. For an opaque TUI, record
+the observed boundary result with
 `handback --outcome succeeded|failed|interrupted|unknown`; process exit alone
 does not claim success.
 
-The descriptor carries stable Work and Wave identity, Home route, provider,
-cwd, attention route, explicit handback evidence, and optional attach argv.
-tmux or the provider owns terminal bytes. Loopflow does not create a separate
-Handoff or Review record around the Launch.
+`lf launch present <launch-id>` remains the generic presentation adapter for an
+opaque TUI Launch. It executes that Launch's attach route but does not create a
+Review or become its identity. The descriptor carries stable Work and Wave
+identity, Home route, provider, cwd, attention route, explicit handback
+evidence, and optional attach argv. tmux or the provider owns terminal bytes.
 
 ## Speaking to Waves
 

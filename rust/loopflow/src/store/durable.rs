@@ -4,7 +4,7 @@ use crate::durable::{
     ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId,
     InterruptReceipt, LaunchId, LaunchSurface, Review, Run, RunAdvance, RunControl, RunLease,
     RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    ToolResponseReceipt, ToolResponseWrite, UserReview, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -155,6 +155,57 @@ impl Store {
     pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildReview>> {
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| store.child_attention(&parent)).await
+    }
+
+    pub async fn user_attention(&self) -> StoreResult<Vec<UserReview>> {
+        run_sqlite(&self.sqlite, move |store| store.user_attention()).await
+    }
+
+    pub async fn escalate_review(
+        &self,
+        lease: &RunLease,
+        child: &WorkRef,
+        if_basis: &Basis,
+    ) -> StoreResult<Review> {
+        let lease = lease.clone();
+        let child = child.clone();
+        let if_basis = if_basis.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.escalate_review(&lease, &child, &if_basis)
+        })
+        .await
+    }
+
+    pub(crate) async fn continue_review_if_current(
+        &self,
+        work: &WorkRef,
+        launch_id: &LaunchId,
+        if_basis: &Basis,
+    ) -> StoreResult<WorkStatus> {
+        let work = work.clone();
+        let launch_id = launch_id.clone();
+        let if_basis = if_basis.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.continue_review_if_current(&work, &launch_id, &if_basis)
+        })
+        .await
+    }
+
+    pub(crate) async fn steer_review_if_current(
+        &self,
+        work: &WorkRef,
+        launch_id: &LaunchId,
+        text: &str,
+        if_basis: &Basis,
+    ) -> StoreResult<SteerReceipt> {
+        let work = work.clone();
+        let launch_id = launch_id.clone();
+        let text = text.to_string();
+        let if_basis = if_basis.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.steer_review_if_current(&work, &launch_id, &text, &if_basis)
+        })
+        .await
     }
 
     pub async fn close_review(
@@ -364,10 +415,12 @@ mod tests {
 
     use crate::durable::{
         AttentionRoute, AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation,
-        ControlCtx, FlowPosition, LaunchRoute, RunAdvance, RunState, RunTrigger, StopCause,
-        WorkRef, WorkStatus,
+        ControlCtx, FlowPosition, LaunchId, LaunchRoute, RunAdvance, RunState, RunTrigger,
+        StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
+    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
 
@@ -384,6 +437,36 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let home = store.home("test-home").await.unwrap();
         (store, WorkRef::Wave(wave.id().clone()), home)
+    }
+
+    fn project_session(wave_id: WaveId) -> ProjectSession {
+        let now = OffsetDateTime::now_utc();
+        ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-review").unwrap(),
+                    slug: "review-runtime".to_string(),
+                    name: "Review Runtime".to_string(),
+                    prompt_context: "Definition".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id,
+            status: ProjectSessionStatus::Created,
+            status_reason: "created".to_string(),
+            status_at: now,
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        }
     }
 
     async fn start_launch(
@@ -462,6 +545,10 @@ mod tests {
         assert_eq!(review.work, work);
         assert_eq!(review.launch_id, launch.id);
         assert_eq!(review.position.step, "design");
+        let queued = store.user_attention().await.unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].review, review);
+        assert_eq!(queued[0].surface.launch.id, launch.id);
 
         let request = AuthenticatedRequest::cli();
         let steer = store
@@ -487,12 +574,127 @@ mod tests {
         ));
         assert!(matches!(
             store
+                .continue_review_if_current(&work, &launch.id, &initial)
+                .await,
+            Err(StoreError::StaleBasis { .. })
+        ));
+        assert!(matches!(
+            store
                 .close_review(&ControlCtx::User(&request), &work, &steer.steer.basis,)
                 .await
                 .unwrap(),
             WorkStatus::Running { .. }
         ));
         assert!(store.review(&work).await.unwrap().is_none());
+        assert!(store.user_attention().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn exit_guard_steers_and_continues_only_the_exact_user_review() {
+        let (store, work, home) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, &home, false).await;
+        let basis = store.current_epoch(&work).await.unwrap().current_basis;
+        store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: basis.epoch_id.clone(),
+                    flow: "wave-pursue".to_string(),
+                    step: "review".to_string(),
+                    step_index: 0,
+                    iteration: 0,
+                    interactive: true,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .route_review(&lease, &launch.id, AttentionRoute::User)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .steer_review_if_current(&work, &LaunchId::new(), "wrong launch", &basis)
+                .await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        let steer = store
+            .steer_review_if_current(&work, &launch.id, "inspect the boundary", &basis)
+            .await
+            .unwrap();
+        assert!(matches!(
+            store
+                .continue_review_if_current(&work, &launch.id, &basis)
+                .await,
+            Err(StoreError::StaleBasis { .. })
+        ));
+        let status = store
+            .continue_review_if_current(&work, &launch.id, &steer.steer.basis)
+            .await
+            .unwrap();
+        assert!(matches!(status, WorkStatus::Running { .. }));
+        assert!(store.review(&work).await.unwrap().is_none());
+        assert!(matches!(
+            store
+                .steer_review_if_current(&work, &launch.id, "too late", &steer.steer.basis,)
+                .await,
+            Err(StoreError::NotFound)
+        ));
+    }
+
+    #[tokio::test]
+    async fn active_parent_run_can_escalate_only_its_current_child_review() {
+        let (store, parent, home) = wave_work().await;
+        let project = project_session(match &parent {
+            WorkRef::Wave(id) => id.clone(),
+            _ => unreachable!(),
+        });
+        store.create_project_session(&project).await.unwrap();
+        let child = store
+            .work_for_child(&crate::child_session::ChildRef::Project(project.id))
+            .await
+            .unwrap();
+        let (parent_lease, _) = start_launch(&store, &parent, &home, false).await;
+        let (child_lease, child_launch) = start_launch(&store, &child, &home, false).await;
+        let basis = store.current_epoch(&child).await.unwrap().current_basis;
+        store
+            .set_flow_position(
+                &child_lease,
+                FlowPosition {
+                    work: child.clone(),
+                    epoch_id: basis.epoch_id.clone(),
+                    flow: "project".to_string(),
+                    step: "review".to_string(),
+                    step_index: 0,
+                    iteration: 0,
+                    interactive: true,
+                    updated_at: OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .route_review(
+                &child_lease,
+                &child_launch.id,
+                AttentionRoute::Parent(parent.clone()),
+            )
+            .await
+            .unwrap();
+
+        let escalated = store
+            .escalate_review(&parent_lease, &child, &basis)
+            .await
+            .unwrap();
+        assert_eq!(escalated.attention, AttentionRoute::User);
+        assert_eq!(store.user_attention().await.unwrap().len(), 1);
+        assert!(matches!(
+            store.escalate_review(&parent_lease, &child, &basis).await,
+            Err(StoreError::InvalidAuthority(_))
+        ));
     }
 
     #[tokio::test]

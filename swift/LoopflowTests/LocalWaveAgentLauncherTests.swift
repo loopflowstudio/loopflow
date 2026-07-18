@@ -84,8 +84,8 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
-        #expect(LocalWaveAgentLauncher.taskAttachCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "attach", "W2-131",
+        #expect(LocalWaveAgentLauncher.taskReviewCommand(lfPath: lf, taskId: "task_131") == [
+            lf, "work", "review", "task", "task_131", "--continue-on-exit",
         ])
     }
 

@@ -719,6 +719,17 @@ pub struct ChildReview {
     pub evidence: serde_json::Value,
 }
 
+/// User-facing Review reconstructed from current durable Work facts.
+///
+/// This is a query result, not a second lifecycle model or a queue row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserReview {
+    pub review: Review,
+    pub surface: LaunchSurface,
+    pub latest_output: Option<String>,
+    pub evidence: serde_json::Value,
+}
+
 impl ChildReview {
     pub fn render(&self) -> String {
         let kind = self.review.work.kind();
@@ -728,7 +739,7 @@ impl ChildReview {
             "<lf:child-review work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
              Service this child before background parent work. Use \
              `lf work steer {kind} {id} \"<response>\"` to continue or \
-             `lf work close {kind} {id}` to finish. Delivery alone does not clear attention.\n\n\
+             `lf work continue {kind} {id}` to continue the flow. Delivery alone does not clear attention.\n\n\
              Durable child output and current evidence:\n{facts}\n</lf:child-review>",
             self.review.basis.epoch_id, self.review.basis.revision,
         )

@@ -302,7 +302,7 @@ runs mechanical `lf` commands.
 
 ### Session Launch
 
-Pick where interactive Launches open.
+Pick where directly invoked interactive skills open.
 
 ```yaml
 session:

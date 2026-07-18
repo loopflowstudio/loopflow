@@ -301,6 +301,21 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WorkCommand,
     },
+    /// List current User-attention Reviews, oldest first
+    Queue {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Internal: continue a Review if its owning client exits unexpectedly
+    #[command(name = "__review-exit-guard", hide = true)]
+    ReviewExitGuard {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        launch_id: String,
+        epoch_id: String,
+        revision: u64,
+    },
     /// Internal: run one durable Task Session process generation
     #[command(name = "__task", hide = true)]
     TaskRunner {
@@ -707,8 +722,28 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Advance the current interactive flow step without recording a disposition
-    Close {
+    /// Talk with the current User-attention Review
+    Review {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        /// Continue after a clean end-of-input
+        #[arg(long, conflicts_with = "continue_on_exit")]
+        continue_on_success: bool,
+        /// Continue whenever the Review client exits, including signals or crashes
+        #[arg(long, conflicts_with = "continue_on_success")]
+        continue_on_exit: bool,
+    },
+    /// Continue the current Review without recording a disposition
+    Continue {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Escalate an immediate child Review from this parent Run to the User
+    Escalate {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
@@ -1025,8 +1060,6 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Attach read-write to the Task Session control terminal
-    Attach { issue: String },
     /// Explicitly end a Task Session without merging
     Abandon {
         issue: String,
@@ -2517,14 +2550,45 @@ mod tests {
             }) if kind == "task" && id == "task_1" && message == "inspect the failure"
         ));
 
-        let close = Cli::try_parse_from(["lf", "work", "close", "project", "project_1"])
-            .expect("parse Work close");
+        let continue_cli = Cli::try_parse_from(["lf", "work", "continue", "project", "project_1"])
+            .expect("parse Work continue");
         assert!(matches!(
-            close.command,
+            continue_cli.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Close { kind, id, json: false }
+                cmd: WorkCommand::Continue { kind, id, json: false }
             }) if kind == "project" && id == "project_1"
         ));
+
+        let review = Cli::try_parse_from([
+            "lf",
+            "work",
+            "review",
+            "task",
+            "task_1",
+            "--continue-on-exit",
+        ])
+        .expect("parse Review client exit policy");
+        assert!(matches!(
+            review.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Review {
+                    kind,
+                    id,
+                    continue_on_success: false,
+                    continue_on_exit: true,
+                }
+            }) if kind == "task" && id == "task_1"
+        ));
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "review",
+            "task",
+            "task_1",
+            "--continue-on-success",
+            "--continue-on-exit",
+        ])
+        .is_err());
     }
 
     #[test]

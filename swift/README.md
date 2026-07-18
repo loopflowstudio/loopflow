@@ -57,8 +57,8 @@ and observation spans.
 - **Task Sessions** own implementation worktrees and PR delivery. Every Task
   reports through its Project Session; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
-- **Task workspace presentation** reads `lf task changes/diff/file --json`,
-  attaches through `lf task attach`, and keys terminal tabs by Task Session id.
+- **Task workspace presentation** reads `lf task changes/diff/file --json` and
+  opens blue Reviews through `lf work review task <id> --continue-on-exit`.
   Lifecycle mutations remain `lf task run/resume/interrupt`.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app

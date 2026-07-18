@@ -390,16 +390,11 @@ mod tests {
     #[test]
     fn build_is_one_bounded_pass_without_delivery() {
         let flow = get_builtin_flow("build").expect("build flow");
-        for step in [
-            "kickoff",
-            "review-design",
-            "implement",
-            "compress",
-            "lint",
-            "gate",
-        ] {
+        for step in ["kickoff", "implement", "compress", "lint", "gate"] {
             assert!(flow.contains(&format!("- {step}")));
         }
+        assert!(flow.contains("name: review-design"));
+        assert!(flow.contains("review: true"));
         assert!(!flow.contains("loop:"));
         assert!(!flow.contains("deploy"));
         assert!(!flow.contains("pr land"));

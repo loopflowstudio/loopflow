@@ -31,7 +31,7 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Frontmatter sets machine behavior; the body stays prose:
+Frontmatter can make a directly invoked skill interactive; the body stays prose:
 
 ```markdown
 ---
@@ -55,6 +55,18 @@ flow — with commits between them:
 - lint
 - gate
 ```
+
+Declare conversation on the flow step that owns it:
+
+```yaml
+- kickoff
+- step:
+    name: review-design
+    review: true
+- implement
+```
+
+The skill itself does not make every flow that references it stop for Review.
 
 Mechanical git/PR operations ride along as `op:` steps:
 

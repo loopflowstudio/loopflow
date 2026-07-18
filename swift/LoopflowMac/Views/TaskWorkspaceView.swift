@@ -73,7 +73,7 @@ final class TaskTerminalStore: ObservableObject {
 
 enum TaskWorkspaceSection: String, Codable, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
-    case agent = "Agent"
+    case agent = "Review"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -103,8 +103,8 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
-    @State private var attachCommand: [String]?
-    @State private var agentError: String?
+    @State private var reviewCommand: [String]?
+    @State private var reviewError: String?
 
     init(
         task: TaskPlanningSnapshot,
@@ -158,7 +158,7 @@ struct TaskWorkspaceView: View {
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
         .task(id: runtime?.sessionId) { await loadChanges() }
-        .task(id: "agent:\(runtime?.sessionId ?? "none")") { await prepareAgentAttach() }
+        .task(id: "review:\(runtime?.sessionId ?? "none")") { await prepareReview() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -240,34 +240,34 @@ struct TaskWorkspaceView: View {
 
     @ViewBuilder
     private var agentView: some View {
-        if !canAttachToAgent {
+        if !canReview {
             ContentUnavailableView(
-                "Task agent is not running",
-                systemImage: "bolt.slash",
-                description: Text("Resume the Task Session from the roadmap before attaching.")
+                "No Review needs you",
+                systemImage: "checkmark.circle",
+                description: Text("This Task is not waiting for User attention.")
             )
-        } else if let attachCommand, let workspace, let runtime {
+        } else if let reviewCommand, let workspace, let runtime {
             GhosttyTerminalView(
                 workingDirectory: workspace.worktree,
-                argv: attachCommand,
-                sessionId: "task-agent-\(runtime.sessionId)"
+                argv: reviewCommand,
+                sessionId: "task-review-\(runtime.sessionId)"
             )
             .id(runtime.sessionId)
             .background(LoopflowPalette.dark.background)
-        } else if let agentError {
+        } else if let reviewError {
             ContentUnavailableView(
-                "Task agent unavailable",
+                "Review unavailable",
                 systemImage: "exclamationmark.triangle",
-                description: Text(agentError)
+                description: Text(reviewError)
             )
         } else {
-            ProgressView("Preparing Task agent…")
+            ProgressView("Preparing Review…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private var canAttachToAgent: Bool {
-        runtime?.observation.controls.contains(.attach) ?? false
+    private var canReview: Bool {
+        attention.level == .blue
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {
@@ -381,24 +381,24 @@ struct TaskWorkspaceView: View {
     }
 
     @MainActor
-    private func prepareAgentAttach() async {
-        guard canAttachToAgent else {
-            attachCommand = nil
-            agentError = nil
+    private func prepareReview() async {
+        guard canReview else {
+            reviewCommand = nil
+            reviewError = nil
             return
         }
         let repoPath = repoPath
-        let issue = task.identifier
+        let taskId = task.id
         do {
-            attachCommand = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.resolvedTaskAttachCommand(
+            reviewCommand = try await Task.detached(priority: .userInitiated) {
+                try LocalWaveAgentLauncher.resolvedTaskReviewCommand(
                     repoPath: repoPath,
-                    issue: issue
+                    taskId: taskId
                 )
             }.value
-            agentError = nil
+            reviewError = nil
         } catch {
-            agentError = error.localizedDescription
+            reviewError = error.localizedDescription
         }
     }
 

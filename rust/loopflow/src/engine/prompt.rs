@@ -2378,6 +2378,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             ..Default::default()
@@ -2401,6 +2402,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             ..Default::default()
@@ -2501,6 +2503,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             diff: Some("diff content".to_string()),
@@ -3094,6 +3097,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             ..Default::default()
@@ -3130,6 +3134,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             ..Default::default()
@@ -3175,6 +3180,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             ..Default::default()
@@ -3214,6 +3220,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             message: Some("login page crashes".to_string()),
@@ -3235,6 +3242,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
+                review: false,
                 fast_path: None,
             }),
             ..Default::default()

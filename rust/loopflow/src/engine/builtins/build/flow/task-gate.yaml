@@ -1,4 +1,8 @@
 # Prove the result and judge whether this Task may settle.
-- demo
-- code-review
+- step:
+    name: demo
+    review: true
+- step:
+    name: code-review
+    review: true
 - gate

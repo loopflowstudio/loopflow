@@ -23,22 +23,28 @@ pub enum StepKind {
 pub struct StepPlan {
     pub name: String,
     pub kind: StepKind,
+    pub review: bool,
 }
 
 impl StepPlan {
     fn from_concrete(step: &ConcreteStep) -> Self {
-        let (name, kind) = match step {
-            ConcreteStep::Skill(skill) => (skill.skill.name.clone(), StepKind::Skill),
-            ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op),
+        let (name, kind, review) = match step {
+            ConcreteStep::Skill(skill) => (
+                skill.skill.name.clone(),
+                StepKind::Skill,
+                skill.skill.review,
+            ),
+            ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op, false),
             ConcreteStep::Xor(branch) => (
                 branch
                     .router
                     .clone()
                     .unwrap_or_else(|| "xor-route".to_string()),
                 StepKind::Xor,
+                false,
             ),
         };
-        Self { name, kind }
+        Self { name, kind, review }
     }
 }
 
@@ -96,6 +102,7 @@ pub struct StepRef {
     pub flow: String,
     pub step: String,
     pub kind: StepKind,
+    pub review: bool,
     pub index: u32,
     pub total: u32,
     pub iteration: u32,
@@ -452,6 +459,7 @@ fn step_ref(invocation: &InvocationState) -> Option<StepRef> {
         flow: invocation.flow.clone(),
         step: step.name.clone(),
         kind: step.kind,
+        review: step.review,
         index: invocation.cursor,
         total: invocation.steps.len() as u32,
         iteration: invocation.iteration,
@@ -471,6 +479,7 @@ mod tests {
                 .map(|name| StepPlan {
                     name: (*name).to_string(),
                     kind: StepKind::Skill,
+                    review: false,
                 })
                 .collect(),
         }

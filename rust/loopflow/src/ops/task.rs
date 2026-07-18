@@ -5029,30 +5029,6 @@ pub fn task_wait(
     }
 }
 
-pub fn task_attach(issue: &str) -> OpsResult<()> {
-    let session = task_status(issue)?;
-    if !session.status.is_process_active() {
-        return Err(task_error(format!(
-            "task {} is {}; resume it before attaching",
-            session.launch.issue.identifier,
-            session.status.as_str()
-        )));
-    }
-    let tmux_name = session
-        .latest_process
-        .as_ref()
-        .map(|process| process.tmux_name.as_str())
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| task_error("task has no attachable process; resume it first"))?;
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", tmux_name])
-        .status()
-        .map_err(|error| task_error(format!("failed to attach to task: {error}")))?;
-    if !status.success() {
-        return Err(task_error(format!("tmux attach failed for {tmux_name}")));
-    }
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;

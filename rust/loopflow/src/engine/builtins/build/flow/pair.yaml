@@ -1,2 +1,4 @@
-- design
+- step:
+    name: design
+    review: true
 - code

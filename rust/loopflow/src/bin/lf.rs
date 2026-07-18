@@ -1055,9 +1055,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let session = loopflow::ops::task::task_recover(issue, reason.clone())?;
             print_task_session(&session, *json)
         }
-        TaskCommand::Attach { issue } => {
-            loopflow::ops::task::task_attach(issue).map_err(Into::into)
-        }
         TaskCommand::Abandon {
             issue,
             reason,
@@ -1303,6 +1300,22 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Work { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
             }
+            Some(Commands::Queue { json }) => {
+                loopflow::lf::commands::work::run_queue(*json)
+            }
+            Some(Commands::ReviewExitGuard {
+                kind,
+                id,
+                launch_id,
+                epoch_id,
+                revision,
+            }) => loopflow::lf::commands::work::run_exit_guard(
+                kind,
+                id,
+                launch_id,
+                epoch_id,
+                *revision,
+            ),
             Some(Commands::TaskRunner {
                 session_id,
                 generation,

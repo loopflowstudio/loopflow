@@ -592,7 +592,8 @@ private struct WaveWorkInspector: View {
                     runtime: task.runtime,
                     attention: task.attention,
                     repoPath: repoPath,
-                    terminalStore: terminalStore
+                    terminalStore: terminalStore,
+                    initialSection: task.attention.level == .blue ? .agent : .changes
                 )
             }
         }

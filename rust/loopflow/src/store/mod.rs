@@ -1712,7 +1712,7 @@ mod tests {
         let control_seed = attention[0].render();
         assert!(control_seed.contains("The retry still reuses the failed head."));
         assert!(control_seed.contains("lf work steer task"));
-        assert!(control_seed.contains("lf work close task"));
+        assert!(control_seed.contains("lf work continue task"));
 
         let receipt = store
             .steer(

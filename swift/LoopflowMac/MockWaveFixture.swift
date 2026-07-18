@@ -5,7 +5,7 @@ import Loopflow
 /// Fixture data for the `mock-waves` UI-test mode (`AppTestMode.mockWaves`).
 ///
 /// It bypasses the `lf` registry entirely so the populated Wave surface renders
-/// deterministically offline — the stable list's green/red/black lenses and the
+/// deterministically offline — the stable list's green/red/blue/black lenses and the
 /// selected Wave's full detail hierarchy (objective, Projects, KRs, Task rows
 /// with verbatim attention lenses). That makes the "selected" screenshot state
 /// real and, crucially, lets the AttributeGraph cycle capture drive the

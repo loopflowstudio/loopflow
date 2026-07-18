@@ -79,6 +79,7 @@ pub enum ChildSessionDataError {
 pub(crate) struct ChildLeaseToken(String);
 
 impl ChildLeaseToken {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self(format!("cl_{}", uuid::Uuid::new_v4().simple()))
     }
@@ -105,12 +106,14 @@ pub(crate) struct ChildWriteLease {
 /// The body receives the two independent capabilities through separate env
 /// values: the compatibility lease may update the old Session row, while the
 /// Run lease is the only authority accepted by product control mutations.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChildProcessReservation {
     pub(crate) write_lease: ChildWriteLease,
     pub(crate) run_token: crate::durable::RunLeaseToken,
 }
 
+#[cfg(test)]
 impl std::ops::Deref for ChildProcessReservation {
     type Target = ChildWriteLease;
 

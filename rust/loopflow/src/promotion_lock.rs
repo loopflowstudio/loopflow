@@ -17,6 +17,7 @@ pub(crate) struct PromotionLock {
 
 #[derive(Debug, Clone, Copy)]
 enum LockMode {
+    #[cfg(test)]
     Shared,
     Exclusive,
 }
@@ -25,6 +26,7 @@ pub(crate) fn acquire_exclusive() -> io::Result<PromotionLock> {
     _acquire(&lock_path(), LockMode::Exclusive)
 }
 
+#[cfg(test)]
 pub(crate) async fn acquire_shared() -> io::Result<PromotionLock> {
     let path = lock_path();
     tokio::task::spawn_blocking(move || _acquire(&path, LockMode::Shared))
@@ -49,6 +51,7 @@ fn _acquire(path: &Path, mode: LockMode) -> io::Result<PromotionLock> {
         .write(true)
         .open(path)?;
     match mode {
+        #[cfg(test)]
         LockMode::Shared => FileExt::lock_shared(&file)?,
         LockMode::Exclusive => FileExt::lock_exclusive(&file)?,
     }

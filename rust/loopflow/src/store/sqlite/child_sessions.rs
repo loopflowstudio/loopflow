@@ -14,9 +14,10 @@ use time::OffsetDateTime;
 
 use crate::child_session::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
-    ChildLeaseToken, ChildProcessGeneration, ChildProcessReservation, ChildRef, ChildWriteLease,
-    ObservationRecipient,
+    ChildProcessGeneration, ChildRef, ChildWriteLease, ObservationRecipient,
 };
+#[cfg(test)]
+use crate::child_session::{ChildLeaseToken, ChildProcessReservation};
 use crate::durable::{Author, RunLease};
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
@@ -37,10 +38,10 @@ use crate::task::{
 };
 
 #[cfg(test)]
-use super::durable::activate_run_for_child;
+use super::durable::{activate_run_for_child, reserve_run_for_child};
 use super::durable::{
     create_project_spine, create_task_spine, end_run_for_child, end_run_for_lease,
-    fence_run_for_child, reserve_run_for_child, validate_run_lease, work_for_child_in,
+    fence_run_for_child, validate_run_lease, work_for_child_in,
 };
 use super::SqliteStore;
 
@@ -786,6 +787,7 @@ impl SqliteStore {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn reserve_task_process(
         &self,
         session: &TaskSession,
@@ -1909,6 +1911,7 @@ impl SqliteStore {
         Ok(process)
     }
 
+    #[cfg(test)]
     pub(crate) fn reserve_project_process(
         &self,
         session: &ProjectSession,

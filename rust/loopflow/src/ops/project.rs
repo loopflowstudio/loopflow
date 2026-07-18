@@ -7,8 +7,7 @@ use crate::durable::{AuthenticatedRequest, Author, ControlCtx};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
-    resolve_lf_binary, start_lf_session, start_lf_session_with_env, tmux_session_exists,
-    tmux_session_slug,
+    resolve_lf_binary, start_lf_session, tmux_session_exists, tmux_session_slug,
 };
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
@@ -157,7 +156,7 @@ pub(crate) fn reserve_project_session(
     directive: Option<String>,
 ) -> OpsResult<ProjectSession> {
     let config = load_config_or_default(Some(repo));
-    let agent = config.agent();
+    let agent = config.agent.as_deref().unwrap_or("codex");
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {
@@ -330,122 +329,70 @@ pub(crate) async fn launch_project_process(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
-    // Resolve the current Home lf before reserving anything, ignoring any
-    // LF_CONTROL_* pin a legacy body carries: we always launch through the
-    // current binary, store, and home. A missing or incompatible lf fails
-    // without burning a generation reservation.
-    let execution = crate::engine::process::current_home_execution_context()
-        .map_err(|error| project_error(format!("cannot resolve current lf binary: {error}")))?;
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, session).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
+    let next_generation = session
+        .latest_process
+        .as_ref()
+        .map_or(1, |process| process.generation + 1);
     let tmux_name = format!(
-        "lf-project-{}-{}",
+        "lf-project-{}-{}-{next_generation}",
         tmux_session_slug(&session.launch.project.slug),
         &session.id.as_str()[3..11]
     );
-    // A lease stuck at `revoked` bars every future generation — the reserve CAS
-    // accepts only NULL or `finished` — and nothing else revisits it. Release it
-    // when the body is provably gone; a present or unprovable body keeps its
-    // lease. Same boundary as the Task twin.
-    if let Some(revoked) = session
-        .latest_process
-        .as_ref()
-        .filter(|process| process.state == crate::child_session::ChildLeaseState::Revoked)
-        .cloned()
-    {
-        if let Some(finished) = super::child::release_dead_revoked_child_body(
-            store,
-            &ChildRef::Project(session.id.clone()),
-            &revoked,
-        )
-        .await?
-        {
-            session.latest_process = Some(finished);
-        }
-    }
-    let from = session.status;
-    let mut launch = session.clone();
-    // The reserved generation records no provenance: nothing has run yet. The
-    // child stamps its own binary's provenance when it boots (mark_booted), so
-    // the audit row describes what ran, never merely what launched it.
-    launch.begin_generation(tmux_name.clone());
-    let Some(lease) = store
-        .reserve_project_process(&launch, from)
+    let work = store
+        .work_for_child(&ChildRef::Project(session.id.clone()))
         .await
-        .map_err(|error| project_error(format!("failed to reserve project process: {error}")))?
-    else {
-        let current = store
-            .get_project_session(&session.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error("Project Session disappeared during launch"))?;
-        if current.status.is_process_active() {
-            *session = current;
-            return Ok(());
-        }
-        return Err(project_error(format!(
-            "Project Session {} changed while its process was reserved; retry",
-            session.id
-        )));
-    };
-    *session = launch;
-
-    // argv[0] and the store come from the Session, never from this process.
-    let argv = vec![
-        execution.lf_bin.to_string_lossy().to_string(),
-        "__project".to_string(),
-        session.id.to_string(),
-    ];
-    let run_lease = lease.run_token.env_value().to_string();
-    let control_bin = execution.lf_bin.to_string_lossy().to_string();
-    let db_path = execution.db_path.to_string_lossy().to_string();
-    let lf_home = execution.lf_home.to_string_lossy().to_string();
-    let environment = [
-        (
-            crate::engine::wave_context::WAVE_ID_ENV,
-            session.wave_id.as_str(),
-        ),
-        ("LF_PROJECT_SESSION_ID", session.id.as_str()),
-        (crate::durable::RUN_CONTEXT_ENV, "agent"),
-        (crate::durable::RUN_LEASE_ENV, run_lease.as_str()),
-        (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
-        (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
-        (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
-    ];
-    if let Err(error) =
-        start_lf_session_with_env(&tmux_name, Path::new(wave.repo()), &argv, &environment).await
+        .map_err(|error| project_error(error.to_string()))?;
+    if store
+        .current_run(&work)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+        .is_some()
     {
-        let reason = format!("project process launch failed: {error}");
-        session.latest_process = Some(
-            super::child::revoke_and_reap_child_body(
-                store,
-                &ChildRef::Project(session.id.clone()),
-                crate::child_session::ChildBodyOutcome::Lost {
-                    reason: reason.clone(),
-                },
-            )
-            .await?,
-        );
-        session.set_status(ProjectSessionStatus::Failed, reason.clone());
-        store
-            .update_project_session(session)
-            .await
-            .map_err(|store_error| project_error(store_error.to_string()))?;
-        store
-            .append_project_event(
-                &session.id,
-                &ProjectEventKind::Failed {
-                    error: reason.clone(),
-                    resumable: true,
-                },
-            )
-            .await
-            .map_err(|store_error| project_error(store_error.to_string()))?;
-        return Err(project_error(reason));
+        return Ok(());
     }
-    Ok(())
+    let home = store
+        .home("local")
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
+    let basis = store
+        .current_epoch(&work)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+        .current_basis;
+    let (_, lease) = store
+        .reserve_run(&work, &home.id, crate::durable::RunTrigger::Input { basis })
+        .await
+        .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
+    session.begin_generation(tmux_name.clone());
+    store
+        .update_project_session_for_run(session, &lease)
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
+    // Inherit the Wave's execution home so this child's routed commands target
+    // the same host — read from the owning Wave's identity, not the branch.
+    let wave_home =
+        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
+    crate::ops::launch_in_run(
+        store,
+        &lease,
+        crate::ops::RunLaunch {
+            kind: "project",
+            legacy_id: session.id.to_string(),
+            wave_id: session.wave_id.clone(),
+            cwd: Path::new(wave.repo()).to_path_buf(),
+            tmux_name,
+            agent: session.agent.clone(),
+            resume_token: session.provider_session_id.clone(),
+            wave_home,
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| project_error(error.to_string()))
 }
 
 async fn wait_until_project_running(

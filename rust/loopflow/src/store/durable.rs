@@ -90,6 +90,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
     }
 
+    pub(crate) async fn rotate_run_lease(&self, lease: &RunLease) -> StoreResult<RunLease> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| store.rotate_run_lease(&lease)).await
+    }
+
     pub async fn advance_run(
         &self,
         lease: &RunLease,
@@ -162,6 +167,18 @@ impl Store {
     pub async fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
         let launch_id = launch_id.clone();
         run_sqlite(&self.sqlite, move |store| store.launch_surface(&launch_id)).await
+    }
+
+    pub(crate) async fn current_launch(
+        &self,
+        lease: &RunLease,
+    ) -> StoreResult<Option<crate::durable::Launch>> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.validate_run_lease(&lease)?;
+            store.control_launch_for_run(&lease.run_id)
+        })
+        .await
     }
 
     pub async fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
@@ -538,6 +555,47 @@ mod tests {
             panic!("expected Launch receipt")
         };
         (lease, launch)
+    }
+
+    #[tokio::test]
+    async fn one_run_can_own_sequential_launches_but_never_overlapping_launches() {
+        let (store, work, home) = wave_work().await;
+        let (lease, first) = start_launch(&store, &work, &home, false).await;
+        let next = RunAdvance::LaunchStarting {
+            route: LaunchRoute {
+                provider: "claude".to_string(),
+                model: None,
+                account_id: None,
+            },
+            containment: Containment::Tmux {
+                name: "lf-runtime-2".to_string(),
+            },
+            cwd: PathBuf::from("/tmp/runtime"),
+            surface: "headless".to_string(),
+            opaque: false,
+            resume_token: None,
+        };
+
+        assert!(store.advance_run(&lease, next.clone()).await.is_err());
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchEnded {
+                    launch_id: first.id,
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .unwrap();
+        let rotated = store.rotate_run_lease(&lease).await.unwrap();
+        assert!(store.validate_run_lease(&lease).await.is_err());
+        let crate::durable::AdvanceReceipt::Launch(second) =
+            store.advance_run(&rotated, next).await.unwrap()
+        else {
+            panic!("expected second Launch")
+        };
+        assert_eq!(second.run_id, rotated.run_id);
+        assert_eq!(second.route.provider, "claude");
     }
 
     #[tokio::test]

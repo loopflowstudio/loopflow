@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, send_outstanding_steers,
     take_current_input as take_child_input, CommandStop, PendingInput,
 };
-use crate::child_session::{ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState, ChildRef};
+use crate::child_session::{ChildBodyHandoff, ChildBodyOutcome, ChildLeaseState, ChildRef};
 use crate::durable::{Basis, BoundarySeed, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
@@ -55,6 +55,38 @@ async fn owning_wave(store: &SharedStore, session: &ProjectSession) -> Result<Wa
         .get_wave(&session.wave_id)
         .await?
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
+}
+
+async fn spawn_failover(
+    store: &SharedStore,
+    session: &ProjectSession,
+    lease: &RunLease,
+    wave: &Wave,
+) -> Result<()> {
+    let tmux_name = session
+        .latest_process
+        .as_ref()
+        .map(|process| process.tmux_name.clone())
+        .ok_or_else(|| anyhow!("Project failover has no reserved Launch containment"))?;
+    let wave_home =
+        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
+    crate::ops::launch_in_run(
+        store,
+        lease,
+        crate::ops::RunLaunch {
+            kind: "project",
+            legacy_id: session.id.to_string(),
+            wave_id: session.wave_id.clone(),
+            cwd: Path::new(wave.repo()).to_path_buf(),
+            tmux_name,
+            agent: session.agent.clone(),
+            resume_token: session.provider_session_id.clone(),
+            wave_home,
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| anyhow!(error.to_string()))
 }
 
 async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLease) -> Result<()> {
@@ -103,19 +135,28 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
         .current_run(&work)
         .await?
         .ok_or_else(|| anyhow!("Project Work {} has no active Run", work.id()))?;
-    let process = session
-        .latest_process
-        .as_ref()
-        .ok_or_else(|| anyhow!("Project Session {} has no process containment", session.id))?;
+    let launch = store
+        .current_launch(lease)
+        .await?
+        .ok_or_else(|| anyhow!("Project Run {} has no current Launch", lease.run_id))?;
+    let crate::durable::AdvanceReceipt::Launch(launch) = store
+        .advance_run(
+            lease,
+            crate::durable::RunAdvance::LaunchLive {
+                launch_id: launch.id,
+            },
+        )
+        .await?
+    else {
+        unreachable!("LaunchLive returns a Launch receipt")
+    };
     let run_control = crate::trace::ControlLaunch {
         run_id: run.id,
         home_id: run.home_id,
-        account_id: None,
-        containment: crate::durable::Containment::Tmux {
-            name: process.tmux_name.clone(),
-        },
-        resume_token: session.provider_session_id.clone(),
-        opaque_basis: None,
+        account_id: launch.route.account_id.clone(),
+        containment: launch.containment.clone(),
+        resume_token: launch.resume_token.clone(),
+        opaque_basis: launch.opaque_basis.clone(),
     };
     let mut pending = VecDeque::new();
     let initial_input = take_current_input(&store, &session, lease, &mut pending).await?;
@@ -153,6 +194,9 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
     harness.start(&prepared.turn.config).await?;
     session.provider = harness_name;
     session.provider_session_id = harness.provider_session_id();
+    store
+        .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
+        .await?;
     if let Some(process) = &mut session.latest_process {
         process.observe_provider(
             &session.provider,
@@ -390,7 +434,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                                 "provider turn failed",
                             );
                             finish_capture(capture.as_ref(), "failed");
-                            return handle_body_failure(
+                            return fail_and_maybe_relaunch(
                                 &store,
                                 &mut session,
                                 lease,
@@ -600,7 +644,7 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                     ConversationEvent::Error { code, message } => {
                         let reason = format!("{code}: {message}");
                         finish_capture(capture.as_ref(), "failed");
-                        return handle_body_failure(
+                        return fail_and_maybe_relaunch(
                             &store,
                             &mut session,
                             lease,
@@ -979,7 +1023,7 @@ async fn handle_body_failure(
     wave: &Wave,
     reason: &str,
     turn_had_durable_side_effect: bool,
-) -> Result<()> {
+) -> Result<Option<RunLease>> {
     let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
     let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
     let decision = classify_disconnect_recovery(
@@ -1010,27 +1054,94 @@ async fn handle_body_failure(
                     reason: reason.to_string(),
                 });
             }
-            store.finish_project_process_for_run(session, lease).await?;
-
-            let request = ChildBodyHandoffRequest {
-                agent: agent.clone(),
-                provider: provider.clone(),
+            store.update_project_session_for_run(session, lease).await?;
+            let launch = store.current_launch(lease).await?.ok_or_else(|| {
+                anyhow!("Project Run {} has no Launch to hand back", lease.run_id)
+            })?;
+            store
+                .advance_run(
+                    lease,
+                    crate::durable::RunAdvance::LaunchEnded {
+                        launch_id: launch.id,
+                        outcome: crate::durable::BoundaryState::Failed,
+                    },
+                )
+                .await?;
+            let handoff = ChildBodyHandoff {
+                from_agent: session.agent.clone(),
+                to_agent: agent.clone(),
+                from_provider: session.provider.clone(),
+                to_provider: provider.clone(),
                 reason: format!(
                     "disconnect-class failure; handing off from {} to {agent}",
                     session.agent
                 ),
             };
-            *session = store.handoff_project_body(&session.id, &request).await?;
-            Ok(())
+            if session.provider != provider {
+                session.provider_session_id = None;
+            }
+            session.agent = agent;
+            session.provider = provider;
+            store.update_project_session_for_run(session, lease).await?;
+            store
+                .append_project_event_for_run(
+                    &session.id,
+                    lease,
+                    &ProjectEventKind::BodyHandedOff { handoff },
+                )
+                .await?;
+            let rotated = store.rotate_run_lease(lease).await?;
+            let next_generation = session
+                .latest_process
+                .as_ref()
+                .map_or(1, |process| process.generation + 1);
+            let tmux_name = format!(
+                "lf-project-{}-{next_generation}",
+                &session.id.as_str()[3..11]
+            );
+            session.begin_generation(tmux_name);
+            store
+                .update_project_session_for_run(session, &rotated)
+                .await?;
+            Ok(Some(rotated))
         }
         RecoveryDecision::Stop => {
             let non_convergence = format!(
                 "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
             );
-            finish_failed(store, session, lease, harness, &non_convergence, None).await
+            finish_failed(store, session, lease, harness, &non_convergence, None)
+                .await
+                .map(|_| None)
         }
-        _ => finish_failed(store, session, lease, harness, reason, None).await,
+        _ => finish_failed(store, session, lease, harness, reason, None)
+            .await
+            .map(|_| None),
     }
+}
+
+async fn fail_and_maybe_relaunch(
+    store: &SharedStore,
+    session: &mut ProjectSession,
+    lease: &RunLease,
+    harness: &mut dyn Harness,
+    wave: &Wave,
+    reason: &str,
+    turn_had_durable_side_effect: bool,
+) -> Result<()> {
+    let Some(rotated) = handle_body_failure(
+        store,
+        session,
+        lease,
+        harness,
+        wave,
+        reason,
+        turn_had_durable_side_effect,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    spawn_failover(store, session, &rotated, wave).await
 }
 
 async fn finish_abandoned(

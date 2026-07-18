@@ -1,11 +1,10 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
-#[cfg(test)]
-use crate::child_session::ChildWriteLease;
 use crate::child_session::{
-    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ChildProcessReservation,
-    ObservationRecipient,
+    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ObservationRecipient,
 };
+#[cfg(test)]
+use crate::child_session::{ChildProcessReservation, ChildWriteLease};
 use crate::durable::{Author, RunLease};
 use crate::id::WaveId;
 use crate::project_session::{
@@ -21,6 +20,7 @@ use time::OffsetDateTime;
 
 use super::{run_sqlite, Store, StoreResult};
 
+#[cfg(test)]
 async fn _acquire_promotion_reservation_lock() -> StoreResult<crate::promotion_lock::PromotionLock>
 {
     crate::promotion_lock::acquire_shared()
@@ -291,6 +291,7 @@ impl Store {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn reserve_task_process(
         &self,
         session: &TaskSession,
@@ -300,19 +301,6 @@ impl Store {
         let session = session.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_task_process(&session, expected_status, None)
-        })
-        .await
-    }
-
-    pub(crate) async fn reserve_task_process_for_trigger(
-        &self,
-        session: &TaskSession,
-        expected_status: TaskSessionStatus,
-        trigger: crate::durable::RunTrigger,
-    ) -> StoreResult<Option<ChildProcessReservation>> {
-        let session = session.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reserve_task_process(&session, expected_status, Some(&trigger))
         })
         .await
     }
@@ -932,6 +920,7 @@ impl Store {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn reserve_project_process(
         &self,
         session: &ProjectSession,

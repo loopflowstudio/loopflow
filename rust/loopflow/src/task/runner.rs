@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, input_is_current,
     send_outstanding_steers, CommandStop, PendingInput,
 };
-use crate::child_session::{ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState, ChildRef};
+use crate::child_session::{ChildBodyHandoff, ChildBodyOutcome, ChildLeaseState, ChildRef};
 use crate::durable::{AttentionRoute, Basis, BoundarySeed, FlowPosition, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::InteractionPolicy;
@@ -73,6 +73,38 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> Result<Wave>
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
 }
 
+async fn spawn_failover(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: &RunLease,
+    wave: &Wave,
+) -> Result<()> {
+    let tmux_name = session
+        .latest_process
+        .as_ref()
+        .map(|process| process.tmux_name.clone())
+        .ok_or_else(|| anyhow!("Task failover has no reserved Launch containment"))?;
+    let wave_home =
+        crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name()).to_string();
+    crate::ops::launch_in_run(
+        store,
+        lease,
+        crate::ops::RunLaunch {
+            kind: "task",
+            legacy_id: session.id.to_string(),
+            wave_id: session.wave_id.clone(),
+            cwd: session.worktree.clone(),
+            tmux_name,
+            agent: session.agent.clone(),
+            resume_token: session.provider_session_id.clone(),
+            wave_home,
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| anyhow!(error.to_string()))
+}
+
 async fn run_task_session_with(
     store: SharedStore,
     session_id: TaskSessionId,
@@ -113,19 +145,28 @@ async fn run_task_session_with(
         .current_run(&work)
         .await?
         .ok_or_else(|| anyhow!("Task Work {} has no active Run", work.id()))?;
-    let process = session
-        .latest_process
-        .as_ref()
-        .ok_or_else(|| anyhow!("Task Session {} has no process containment", session.id))?;
+    let launch = store
+        .current_launch(lease)
+        .await?
+        .ok_or_else(|| anyhow!("Task Run {} has no current Launch", lease.run_id))?;
+    let crate::durable::AdvanceReceipt::Launch(launch) = store
+        .advance_run(
+            lease,
+            crate::durable::RunAdvance::LaunchLive {
+                launch_id: launch.id,
+            },
+        )
+        .await?
+    else {
+        unreachable!("LaunchLive returns a Launch receipt")
+    };
     let run_control = crate::trace::ControlLaunch {
         run_id: run.id,
         home_id: run.home_id,
-        account_id: None,
-        containment: crate::durable::Containment::Tmux {
-            name: process.tmux_name.clone(),
-        },
-        resume_token: session.provider_session_id.clone(),
-        opaque_basis: None,
+        account_id: launch.route.account_id.clone(),
+        containment: launch.containment.clone(),
+        resume_token: launch.resume_token.clone(),
+        opaque_basis: launch.opaque_basis.clone(),
     };
     // Typed current-head evidence selects ci-fix before ordinary lifecycle work.
     // The exact Run claim is the crash/recovery fence; no command row mediates it.
@@ -152,6 +193,9 @@ async fn run_task_session_with(
     harness.start(&prepared.turn.config).await?;
     session.provider = harness_name;
     session.provider_session_id = harness.provider_session_id();
+    store
+        .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
+        .await?;
     if let Some(process) = &mut session.latest_process {
         process.observe_provider(
             &session.provider,
@@ -408,7 +452,7 @@ async fn run_task_session_with(
                                 &mut event_rx,
                                 "provider turn failed",
                             );
-                            return handle_body_failure(
+                            return fail_and_maybe_relaunch(
                                 &store,
                                 &mut session,
                                 lease,
@@ -947,7 +991,7 @@ async fn run_task_session_with(
                     }
                     ConversationEvent::Error { code, message } => {
                         let reason = format!("{code}: {message}");
-                        return handle_body_failure(
+                        return fail_and_maybe_relaunch(
                             &store,
                             &mut session,
                             lease,
@@ -1586,7 +1630,7 @@ async fn handle_body_failure(
     reason: &str,
     turn_had_durable_side_effect: bool,
     capture: Option<&crate::trace::CaptureHandle>,
-) -> Result<()> {
+) -> Result<Option<RunLease>> {
     finish_capture(capture, "failed");
     let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
     let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
@@ -1617,28 +1661,64 @@ async fn handle_body_failure(
                     reason: reason.to_string(),
                 });
             }
-            store.finish_task_process_for_run(session, lease).await?;
-
-            let request = ChildBodyHandoffRequest {
-                agent: agent.clone(),
-                provider: provider.clone(),
+            store.update_task_session_for_run(session, lease).await?;
+            let launch = store
+                .current_launch(lease)
+                .await?
+                .ok_or_else(|| anyhow!("Task Run {} has no Launch to hand back", lease.run_id))?;
+            store
+                .advance_run(
+                    lease,
+                    crate::durable::RunAdvance::LaunchEnded {
+                        launch_id: launch.id,
+                        outcome: crate::durable::BoundaryState::Failed,
+                    },
+                )
+                .await?;
+            let handoff = ChildBodyHandoff {
+                from_agent: session.agent.clone(),
+                to_agent: agent.clone(),
+                from_provider: session.provider.clone(),
+                to_provider: provider.clone(),
                 reason: format!(
                     "disconnect-class failure; handing off from {} to {agent}",
                     session.agent
                 ),
             };
-            *session = store.handoff_task_body(&session.id, &request).await?;
-            Ok(())
+            if session.provider != provider {
+                session.provider_session_id = None;
+            }
+            session.agent = agent;
+            session.provider = provider;
+            store.update_task_session_for_run(session, lease).await?;
+            store
+                .append_task_event_for_run(
+                    &session.id,
+                    lease,
+                    &TaskEventKind::BodyHandedOff { handoff },
+                )
+                .await?;
+            let rotated = store.rotate_run_lease(lease).await?;
+            let next_generation = session
+                .latest_process
+                .as_ref()
+                .map_or(1, |process| process.generation + 1);
+            let tmux_name = format!("lf-task-{}-{next_generation}", &session.id.as_str()[3..11]);
+            session.begin_generation(tmux_name);
+            store.update_task_session_for_run(session, &rotated).await?;
+            Ok(Some(rotated))
         }
         RecoveryDecision::Stop => {
             let non_convergence = format!(
                 "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
             );
-            finish_failed(store, session, lease, harness, &non_convergence, None).await
+            finish_failed(store, session, lease, harness, &non_convergence, None)
+                .await
+                .map(|_| None)
         }
-        RecoveryDecision::AllowRetry => {
-            finish_failed(store, session, lease, harness, reason, None).await
-        }
+        RecoveryDecision::AllowRetry => finish_failed(store, session, lease, harness, reason, None)
+            .await
+            .map(|_| None),
         RecoveryDecision::Normal => {
             // Not a disconnect-class failure — a provider outage during a
             // PR/ci-fix iteration is an infrastructure blocker: keep the PR
@@ -1647,11 +1727,42 @@ async fn handle_body_failure(
             // generic failed path.
             if store.active_task_pr(&session.id).await?.is_some() {
                 return finish_infra_blocked(store, session, lease, harness, "provider", reason)
-                    .await;
+                    .await
+                    .map(|_| None);
             }
-            finish_failed(store, session, lease, harness, reason, None).await
+            finish_failed(store, session, lease, harness, reason, None)
+                .await
+                .map(|_| None)
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fail_and_maybe_relaunch(
+    store: &SharedStore,
+    session: &mut TaskSession,
+    lease: &RunLease,
+    harness: &mut dyn Harness,
+    wave: &Wave,
+    reason: &str,
+    turn_had_durable_side_effect: bool,
+    capture: Option<&crate::trace::CaptureHandle>,
+) -> Result<()> {
+    let Some(rotated) = handle_body_failure(
+        store,
+        session,
+        lease,
+        harness,
+        wave,
+        reason,
+        turn_had_durable_side_effect,
+        capture,
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    spawn_failover(store, session, &rotated, wave).await
 }
 
 async fn finish_abandoned(
@@ -2937,17 +3048,14 @@ mod tests {
             "provider session cleared on cross-provider handoff"
         );
 
-        // The failed opencode generation is retained as evidence.
+        // The replacement is reserved in the same Run. The failed provider is
+        // retained by the ended Launch, not copied into the next controller.
         let process = session.latest_process.as_ref().expect("process retained");
         assert_eq!(
             process.state,
-            crate::child_session::ChildLeaseState::Finished
+            crate::child_session::ChildLeaseState::Reserved
         );
-        assert!(matches!(
-            &process.outcome,
-            Some(crate::child_session::ChildBodyOutcome::Failed { reason })
-                if reason.contains("opencode_disconnected")
-        ));
+        assert_eq!(process.outcome, None);
 
         // The BodyHandedOff event is in the ledger.
         let events = store.task_events_after(&session.id, 0).await.unwrap();

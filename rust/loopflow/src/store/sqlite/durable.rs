@@ -213,6 +213,42 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn rotate_run_lease(&self, lease: &RunLease) -> StoreResult<RunLease> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        let live: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM agent_launches
+                WHERE product_run_id=?1 AND launch_state != 'ended'
+            )",
+            [run.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if live {
+            return Err(StoreError::InvalidData(format!(
+                "Run {} cannot rotate authority while a Launch is live",
+                run.id
+            )));
+        }
+        let token = RunLeaseToken::new();
+        if tx.execute(
+            "UPDATE runs SET lease_hash=?2
+             WHERE id=?1 AND lease_hash=?3 AND state IN ('reserved', 'active')",
+            params![run.id.as_str(), token.hash(), lease.token_hash()],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} lost authority while rotating its Launch",
+                run.id
+            )));
+        }
+        let basis = current_epoch_in(&tx, &run.work)?.current_basis;
+        let rotated = RunLease::new(run.id, run.work, basis, token);
+        tx.commit()?;
+        Ok(rotated)
+    }
+
     pub fn advance_run(
         &self,
         lease: &RunLease,
@@ -245,6 +281,20 @@ impl SqliteStore {
                     return Err(StoreError::InvalidData(
                         "Launch provider and surface cannot be empty".to_string(),
                     ));
+                }
+                let live: bool = tx.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM agent_launches
+                        WHERE product_run_id=?1 AND launch_state != 'ended'
+                    )",
+                    [run.id.as_str()],
+                    |row| row.get(0),
+                )?;
+                if live {
+                    return Err(StoreError::InvalidData(format!(
+                        "Run {} already owns a live Launch",
+                        run.id
+                    )));
                 }
                 let basis = current_epoch_in(&tx, &run.work)?.current_basis;
                 let launch = Launch {
@@ -2733,6 +2783,7 @@ fn import_run_for_child(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn reserve_run_for_child(
     tx: &Transaction<'_>,
     target: &ChildRef,

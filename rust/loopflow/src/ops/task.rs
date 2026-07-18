@@ -18,8 +18,7 @@ use crate::engine::git::{
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{
-    start_lf_session_with_env, tmux_installed, tmux_live_sessions, tmux_session_exists,
-    tmux_session_slug,
+    tmux_installed, tmux_live_sessions, tmux_session_exists, tmux_session_slug,
 };
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
@@ -566,7 +565,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     let project_session_id = task_project_session_id(&project_session)?;
     let wave_id = project_session.wave_id.clone();
     let config = load_config_or_default(Some(&main_repo));
-    let agent = config.agent();
+    let agent = config.agent.as_deref().unwrap_or("claude:opus");
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {
@@ -1287,82 +1286,6 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     })
 }
 
-/// Publication proof: require ancestry parity without changing the recorded
-/// fork. Only an explicit integration boundary may advance Task stack/base
-/// metadata.
-pub(crate) fn verify_task_pr_range_without_healing(repo: &Path) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    block_on_task(async move {
-        let TaskAuthority::Authority {
-            store,
-            session,
-            lease,
-        } = resolve_task_authority(&repo).await?
-        else {
-            return Ok(());
-        };
-        verify_task_pr_range_with_authority_mode(
-            &store,
-            &session,
-            lease.as_ref(),
-            &repo,
-            StaleBaseAction::Refuse,
-            None,
-        )
-        .await
-    })
-}
-
-/// Prove the post-rebase Task range against the operation's immutable target
-/// without advancing durable metadata before a requested push is verified.
-pub(crate) fn validate_task_pr_range_for_integration(
-    repo: &Path,
-    target_ref: &str,
-    target_sha: &str,
-) -> OpsResult<()> {
-    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Accept)
-}
-
-/// Record the immutable base only after every requested Git postcondition,
-/// including remote-head equality, has passed.
-pub(crate) fn record_task_pr_range_after_integration(
-    repo: &Path,
-    target_ref: &str,
-    target_sha: &str,
-) -> OpsResult<()> {
-    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Heal)
-}
-
-fn verify_task_pr_range_for_integration(
-    repo: &Path,
-    target_ref: &str,
-    target_sha: &str,
-    stale_base: StaleBaseAction,
-) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    let target_ref = target_ref.to_string();
-    let target_sha = target_sha.to_string();
-    block_on_task(async move {
-        let TaskAuthority::Authority {
-            store,
-            session,
-            lease,
-        } = resolve_task_authority(&repo).await?
-        else {
-            return Ok(());
-        };
-        verify_task_pr_range_with_authority_mode(
-            &store,
-            &session,
-            lease.as_ref(),
-            &repo,
-            stale_base,
-            Some((target_ref, target_sha)),
-        )
-        .await
-    })
-}
-
 /// Prove the active Task PR's range is **authoritative and non-empty** before
 /// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
 /// proof (healing a stale base), then refuses when the tree at HEAD matches the
@@ -1383,30 +1306,6 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
             return Ok(());
         };
         require_task_pr_range_nonempty_with_authority(&store, &session, lease.as_ref(), &repo).await
-    })
-}
-
-/// Publication's post-commit proof: require a non-empty authoritative range
-/// while leaving integration metadata untouched.
-pub(crate) fn require_task_pr_range_nonempty_without_healing(repo: &Path) -> OpsResult<()> {
-    let repo = repo.to_path_buf();
-    block_on_task(async move {
-        let TaskAuthority::Authority {
-            store,
-            session,
-            lease,
-        } = resolve_task_authority(&repo).await?
-        else {
-            return Ok(());
-        };
-        require_task_pr_range_nonempty_with_authority_mode(
-            &store,
-            &session,
-            lease.as_ref(),
-            &repo,
-            StaleBaseAction::Refuse,
-        )
-        .await
     })
 }
 
@@ -1459,32 +1358,6 @@ async fn verify_task_pr_range_with_authority(
     lease: Option<&RunLease>,
     repo: &Path,
 ) -> OpsResult<()> {
-    verify_task_pr_range_with_authority_mode(
-        store,
-        session,
-        lease,
-        repo,
-        StaleBaseAction::Heal,
-        None,
-    )
-    .await
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StaleBaseAction {
-    Accept,
-    Refuse,
-    Heal,
-}
-
-async fn verify_task_pr_range_with_authority_mode(
-    store: &SharedStore,
-    session: &TaskSession,
-    lease: Option<&ChildWriteLease>,
-    repo: &Path,
-    stale_base: StaleBaseAction,
-    upstream_override: Option<(String, String)>,
-) -> OpsResult<()> {
     let mut pr = store
         .active_task_pr(&session.id)
         .await
@@ -1504,13 +1377,8 @@ async fn verify_task_pr_range_with_authority_mode(
         )));
     }
 
-    let (base_ref, upstream) = match upstream_override {
-        Some(target) => target,
-        None => {
-            let default_branch = get_default_branch(repo)?;
-            resolve_verifier_upstream(store, &pr, repo, &default_branch).await?
-        }
-    };
+    let default_branch = get_default_branch(repo)?;
+    let (base_ref, upstream) = resolve_verifier_upstream(store, &pr, repo, &default_branch).await?;
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
     let base = pr.base_commit.clone();
@@ -1550,17 +1418,6 @@ async fn verify_task_pr_range_with_authority_mode(
         // B < M: the upstream advanced past a stale or squash-merged base.
         // Heal the recorded base to the true fork point so lf task changes and
         // the durable evidence report the minimal M..HEAD range.
-        match stale_base {
-            StaleBaseAction::Accept => return Ok(()),
-            StaleBaseAction::Refuse => {
-                return Err(task_error(format!(
-                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
-                    short(&base),
-                    short(&merge_base),
-                )));
-            }
-            StaleBaseAction::Heal => {}
-        }
         pr.base_commit = merge_base.clone();
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease {
@@ -1606,24 +1463,7 @@ async fn require_task_pr_range_nonempty_with_authority(
     lease: Option<&RunLease>,
     repo: &Path,
 ) -> OpsResult<()> {
-    require_task_pr_range_nonempty_with_authority_mode(
-        store,
-        session,
-        lease,
-        repo,
-        StaleBaseAction::Heal,
-    )
-    .await
-}
-
-async fn require_task_pr_range_nonempty_with_authority_mode(
-    store: &SharedStore,
-    session: &TaskSession,
-    lease: Option<&ChildWriteLease>,
-    repo: &Path,
-    stale_base: StaleBaseAction,
-) -> OpsResult<()> {
-    verify_task_pr_range_with_authority_mode(store, session, lease, repo, stale_base, None).await?;
+    verify_task_pr_range_with_authority(store, session, lease, repo).await?;
     let pr = store
         .active_task_pr(&session.id)
         .await
@@ -1954,130 +1794,75 @@ async fn launch_task_process(
     session: &mut TaskSession,
     trigger: Option<crate::durable::RunTrigger>,
 ) -> OpsResult<()> {
-    // Resolve the current Home lf before reserving anything, ignoring any
-    // LF_CONTROL_* pin a legacy body carries: we always launch through the
-    // current binary, store, and home. A missing or incompatible lf fails
-    // without burning a generation reservation.
-    let execution = crate::engine::process::current_home_execution_context()
-        .map_err(|error| task_error(format!("cannot resolve current lf binary: {error}")))?;
+    let next_generation = session
+        .latest_process
+        .as_ref()
+        .map_or(1, |process| process.generation + 1);
     let tmux_name = format!(
-        "lf-task-{}-{}",
+        "lf-task-{}-{}-{next_generation}",
         tmux_session_slug(&session.launch.issue.identifier),
         &session.id.as_str()[3..11]
     );
-    // A lease stuck at `revoked` bars every future generation — the reserve CAS
-    // accepts only NULL or `finished` — and nothing else in the system ever
-    // revisits it. Release it here when the body is provably gone, so a resume
-    // is not permanently refused by a corpse. A body still present, or one we
-    // cannot prove gone, keeps its lease and fails the reservation below with
-    // the real cause.
-    release_dead_revoked_task_lease(store, session).await?;
-    let from = session.status;
-    let mut launch = session.clone();
-    // The reserved generation records no provenance: nothing has run yet. The
-    // child stamps its own binary's provenance when it boots (mark_booted), so
-    // the audit row describes what ran, never merely what launched it.
-    launch.begin_generation(tmux_name.clone());
-    let reservation = match trigger {
-        Some(trigger) => {
-            store
-                .reserve_task_process_for_trigger(&launch, from, trigger)
-                .await
-        }
-        None => store.reserve_task_process(&launch, from).await,
-    };
-    let Some(lease) = reservation
-        .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?
-    else {
-        let current = store
-            .get_task_session(&session.id)
-            .await
-            .map_err(|error| task_error(format!("failed to reread task process: {error}")))?
-            .ok_or_else(|| task_error("Task Session disappeared during process reservation"))?;
-        if current.status.is_process_active() {
-            *session = current;
-            return Ok(());
-        }
-        if current.status.is_terminal() {
-            return Err(task_error(format!(
-                "task {} became {}; terminal Task Sessions cannot start a process",
-                current.launch.issue.identifier,
-                current.status.as_str()
-            )));
-        }
-        // The reserve CAS pins the lease state as well as the status. Without
-        // this arm a lease miss is reported as "changed from waiting to
-        // waiting; retry the command" — which names the wrong thing and tells a
-        // machine to retry a command that cannot ever pass.
-        if let Some(process) = current.latest_process.as_ref() {
-            if process.state != ChildLeaseState::Finished {
-                return Err(task_error(format!(
-                    "task {} holds a `{}` lease on body generation {}; a new generation \
-                     cannot be reserved until that lease is released",
-                    current.launch.issue.identifier,
-                    process.state.as_str(),
-                    process.generation
-                )));
-            }
-        }
-        return Err(task_error(format!(
-            "task {} changed from {} to {} during process reservation; retry the command",
-            current.launch.issue.identifier,
-            from.as_str(),
-            current.status.as_str()
-        )));
-    };
-    *session = launch;
-
-    // argv[0] and the store come from the Session, never from this process:
-    // whoever queued the command does not get to choose the child's binary or
-    // its database.
-    let argv = vec![
-        execution.lf_bin.to_string_lossy().to_string(),
-        "__task".to_string(),
-        session.id.to_string(),
-    ];
-    let run_lease = lease.run_token.env_value().to_string();
-    let control_bin = execution.lf_bin.to_string_lossy().to_string();
-    let db_path = execution.db_path.to_string_lossy().to_string();
-    let lf_home = execution.lf_home.to_string_lossy().to_string();
-    let environment = [
-        (
-            crate::engine::wave_context::WAVE_ID_ENV,
-            session.wave_id.as_str(),
-        ),
-        ("LF_TASK_SESSION_ID", session.id.as_str()),
-        (crate::durable::RUN_CONTEXT_ENV, "agent"),
-        (crate::durable::RUN_LEASE_ENV, run_lease.as_str()),
-        (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
-        (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
-        (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
-    ];
-    if let Err(error) =
-        start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    if store
+        .current_run(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .is_some()
     {
-        session.latest_process = Some(
-            super::child::revoke_and_reap_child_body(
-                store,
-                &ChildRef::Task(session.id.clone()),
-                crate::child_session::ChildBodyOutcome::Lost {
-                    reason: format!("task process launch failed: {error}"),
-                },
-            )
-            .await?,
-        );
-        record_task_failure(
-            store,
-            session,
-            format!("task process launch failed: {error}"),
-            error.to_string(),
-        )
-        .await?;
-        return Err(task_error(format!(
-            "failed to launch task process: {error}"
-        )));
+        return Ok(());
     }
-    Ok(())
+    let home = store
+        .home("local")
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    let trigger = match trigger {
+        Some(trigger) => trigger,
+        None => crate::durable::RunTrigger::Input {
+            basis: store
+                .current_epoch(&work)
+                .await
+                .map_err(|error| task_error(error.to_string()))?
+                .current_basis,
+        },
+    };
+    let (_, lease) = store
+        .reserve_run(&work, &home.id, trigger)
+        .await
+        .map_err(|error| task_error(format!("failed to reserve Task Run: {error}")))?;
+    session.begin_generation(tmux_name.clone());
+    store
+        .update_task_session_for_run(session, &lease)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+
+    // Inherit the Wave's execution home so this Task's routed shipping commands
+    // (`lf commit`, `lf pr open`) target the same host as its Wave.
+    let wave_home = match owning_wave(store, session).await {
+        Ok(wave) => crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name())
+            .to_string(),
+        Err(_) => crate::engine::wave_config::default_local_home(&session.worktree).to_string(),
+    };
+    crate::ops::launch_in_run(
+        store,
+        &lease,
+        crate::ops::RunLaunch {
+            kind: "task",
+            legacy_id: session.id.to_string(),
+            wave_id: session.wave_id.clone(),
+            cwd: session.worktree.clone(),
+            tmux_name,
+            agent: session.agent.clone(),
+            resume_token: session.provider_session_id.clone(),
+            wave_home,
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| task_error(error.to_string()))
 }
 
 async fn wait_until_running(

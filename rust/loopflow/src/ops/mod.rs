@@ -15,6 +15,7 @@ mod progress;
 pub mod project;
 mod rebase;
 mod release;
+mod run;
 pub mod task;
 pub(crate) mod task_pm;
 pub(crate) mod telemetry;
@@ -45,5 +46,6 @@ pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
     release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,
 };
+pub(crate) use run::{launch_in_run, RunLaunch};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};
 pub use util::normalize_wave_name;

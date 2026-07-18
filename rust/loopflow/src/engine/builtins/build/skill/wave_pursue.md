@@ -9,7 +9,7 @@ flow.
 
 Resolve the exact wave from the prompt or its `wave/<wave>/GOAL.md`; never infer
 an approximate name. Read GOAL/MEMORY, the PM snapshot's Project definitions,
-KRs, and tasks, recent chat, and Task Session state. If that reader fails,
+KRs, and tasks, recent chat, and Task state. If that reader fails,
 report the failure once and select from memory; repairing PM or auth is not
 this wave's new objective. Trust worker summaries; do not reread worker
 transcripts. Each project belongs to exactly one wave and owns KRs, not memory
@@ -46,7 +46,7 @@ its available status/next owner.
 
 - Select from filed tasks and open KRs; filing work does not require launching it.
 - Treat Projects as the Wave's bet portfolio. When one Project has an unresolved
-  mechanism choice, direct its Project Session to run an approach portfolio;
+  mechanism choice, direct its Project to run an approach portfolio;
   do not create duplicate Projects or several Tasks with the same favored
   brief. Allocate attention from concrete Task evidence and exact gaps, not
   activity or symmetrical fan-out. Let the Project preserve early independence
@@ -55,7 +55,7 @@ its available status/next owner.
 - Keep coordination and small read-only decisions in the Wave. Every concrete
   file-writing change begins as a Linear task under exactly one Project.
 - Start the task with `lf task run <issue-id> --directive "<delegation brief>"`.
-  This ensures the owning Project Session before creating the Task Session.
+  This ensures the owning Project before creating the Task.
   The Task owns one stable worktree and provider transcript. Its ordered
   PRs own serial branches to main; the Project receives routine
   observations and decisions.
@@ -64,7 +64,7 @@ its available status/next owner.
   separate worktree and worker; same-Task PRs remain serial.
 - Supervise active work with `lf task status`, `lf task steer`, `lf task
   interrupt`, `lf task wait`, and `lf task resume` when root inspection or
-  override is needed. This never replaces the Task's Project Session.
+  override is needed. This never replaces the Task's Project.
   Independent tasks may run in parallel; never create a second session for one
   issue.
 - Service a pending child Feedback before background portfolio work. Reply with
@@ -76,7 +76,7 @@ its available status/next owner.
   create or resume the Project's durable pursuit session. It sleeps while
   supervised Tasks run and wakes from their typed observations. Projects never
   own worktrees or Waves.
-- Trust linked Task events and summaries. Drill into the Task Session only when
+- Trust linked Task events and summaries. Drill into the Task only when
   the report is insufficient; do not copy raw child tool chatter into the Wave.
 - Answer human steering before returning to the goal.
 

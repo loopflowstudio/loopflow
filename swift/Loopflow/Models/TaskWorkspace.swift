@@ -1,6 +1,6 @@
 import Foundation
 
-/// One path changed from a Task Session's immutable base commit.
+/// One path changed from a Task's immutable base commit.
 public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     public var id: String { path }
 

@@ -396,6 +396,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "drop_child_commands",
         sql: include_str!("migrations/0.11.035_drop_child_commands.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 36,
+        },
+        name: "delete_sessions",
+        sql: include_str!("migrations/0.11.036_delete_sessions.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1373,7 +1382,6 @@ mod tests {
         validate_foreign_keys, validate_set, validate_sqlite, Migration, MigrationId,
         DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
-    use crate::task::TaskEventKind;
 
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
@@ -1563,8 +1571,19 @@ mod tests {
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
-            .any(|object| object.object_type == "table" && object.name == "task_sessions"));
-        for table in ["project_sessions", "task_sessions"] {
+            .any(|object| object.object_type == "table" && object.name == "tasks"));
+        let schema = product_schema(&conn).unwrap();
+        assert!(!schema.iter().any(|object| {
+            object.object_type == "table"
+                && matches!(object.name.as_str(), "task_sessions" | "project_sessions")
+        }));
+        assert!(!columns(&conn, "tasks")
+            .iter()
+            .any(|column| { matches!(column.as_str(), "status" | "status_reason" | "status_at") }));
+        assert!(!columns(&conn, "projects")
+            .iter()
+            .any(|column| { matches!(column.as_str(), "status" | "status_reason" | "status_at") }));
+        for table in ["projects", "tasks"] {
             let names = columns(&conn, table);
             assert!(!names.iter().any(|name| name == "current_directive_version"));
             assert!(!names
@@ -2132,7 +2151,7 @@ mod tests {
     }
 
     #[test]
-    fn project_successor_migration_preserves_history_and_child_references() {
+    fn project_successor_migration_allows_one_current_successor() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_set(&conn, &MIGRATIONS[..2]).unwrap();
@@ -2150,34 +2169,23 @@ mod tests {
                  'Developer Efficiency', 'Definition', 'w1', 1,
                  'abandoned', 'legacy Session ended', 2, 1, 0,
                  'codex', 'codex', 1, 2, 1, 1
-             );
-             INSERT INTO project_events (session_id, kind_json, created_at)
-                 VALUES ('ps_old', '{\"kind\":\"completed\",\"summary\":\"history\"}', 2);",
+             );",
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
-
-        assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM project_events WHERE session_id = 'ps_old'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            1
-        );
+        apply_set(&conn, &MIGRATIONS[..4]).unwrap();
         conn.execute_batch(
             "INSERT INTO project_sessions (
                  id, project_id, project_slug, project_name,
                  project_prompt_context, wave_id, pm_snapshot_synced_at,
                  status, status_reason, status_at, iteration,
-                 observation_cursor, agent, provider, created_at, updated_at
+                 observation_cursor, agent, provider, created_at, updated_at,
+                 current_directive_version, incorporated_directive_version
              ) VALUES (
                  'ps_new', 'project-1', 'developer-efficiency',
                  'Developer Efficiency', 'Definition', 'w1', 3,
                  'created', 'successor', 3, 0, 0,
-                 'codex', 'codex', 3, 3
+                 'codex', 'codex', 3, 3, 1, 1
              );",
         )
         .unwrap();
@@ -2187,12 +2195,13 @@ mod tests {
                      id, project_id, project_slug, project_name,
                      project_prompt_context, wave_id, pm_snapshot_synced_at,
                      status, status_reason, status_at, iteration,
-                     observation_cursor, agent, provider, created_at, updated_at
+                     observation_cursor, agent, provider, created_at, updated_at,
+                     current_directive_version, incorporated_directive_version
                  ) VALUES (
                      'ps_parallel', 'project-1', 'developer-efficiency',
                      'Developer Efficiency', 'Definition', 'w1', 3,
                      'created', 'parallel', 3, 0, 0,
-                     'codex', 'codex', 3, 3
+                     'codex', 'codex', 3, 3, 1, 1
                  );"
             )
             .is_err());
@@ -2245,7 +2254,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_task_rows_become_sequence_one_prs_without_losing_events() {
+    fn existing_task_rows_collapse_into_stable_work_and_prs() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_set(&conn, &MIGRATIONS[..2]).unwrap();
@@ -2304,33 +2313,39 @@ mod tests {
 
         apply_sqlite(&conn).unwrap();
 
-        let session: (String, String) = conn
+        let task: (String, String, String) = conn
             .query_row(
-                "SELECT status, workspace_slug FROM task_sessions WHERE id='ts_legacy'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(session, ("completed".to_string(), "inf-123".to_string()));
-        let project_lease: (String, String, Option<String>) = conn
-            .query_row(
-                "SELECT process_lease_token, process_lease_state, process_outcome_json
-                 FROM project_sessions WHERE id='ps_legacy'",
+                "SELECT id, issue_identifier, workspace_slug
+                 FROM tasks WHERE external_issue_id='issue-1'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert!(project_lease.0.starts_with("cl_"));
-        assert_eq!(project_lease.1, "legacy");
-        assert_eq!(project_lease.2, None);
+        assert_eq!(task.1, "INF-123");
+        assert_eq!(task.2, "inf-123");
+        let task_state: String = conn
+            .query_row(
+                "SELECT state FROM epochs WHERE task_id=?1",
+                [&task.0],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(task_state, "done");
+        let project_id: String = conn
+            .query_row(
+                "SELECT id FROM projects WHERE external_project_id='project-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         let project_launch: (String, String, String, String) = conn
             .query_row(
                 "SELECT agent_launches.launch_state, agent_launches.containment_kind,
                         agent_launches.containment_id, agent_launches.provider
                  FROM agent_launches
                  JOIN runs ON runs.id = agent_launches.product_run_id
-                 WHERE runs.source_kind = 'project' AND runs.source_id = 'ps_legacy'",
-                [],
+                 WHERE runs.source_kind = 'project' AND runs.source_id = ?1",
+                [&project_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
@@ -2343,23 +2358,12 @@ mod tests {
                 "codex".to_string(),
             )
         );
-        let task_lease: (String, String, String) = conn
-            .query_row(
-                "SELECT process_lease_token, process_lease_state, process_outcome_json
-                 FROM task_sessions WHERE id='ts_legacy'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert!(task_lease.0.starts_with("cl_"));
-        assert_eq!(task_lease.1, "finished");
-        assert_eq!(task_lease.2, "{\"kind\":\"completed\"}");
         let pr: (i64, String, i64, String, i64, String, String, Option<i64>) = conn
             .query_row(
                 "SELECT sequence, branch, publication_requested_at, after_merge,
                         github_number, github_url, merge_commit, abandoned_at
-                 FROM task_prs WHERE task_session_id='ts_legacy'",
-                [],
+                 FROM task_prs WHERE task_id=?1",
+                [&task.0],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -2389,32 +2393,12 @@ mod tests {
         );
         let events: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM task_events WHERE session_id='ts_legacy'",
-                [],
+                "SELECT COUNT(*) FROM task_events WHERE task_id=?1",
+                [&task.0],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(events, 3);
-        let event_shape: (String, String, String, String) = conn
-            .query_row(
-                "SELECT
-                    kind_json,
-                    json_extract(kind_json, '$.pr_id'),
-                    (SELECT json_extract(kind_json, '$.from') FROM task_events
-                     WHERE json_extract(kind_json, '$.kind')='status_changed'),
-                    (SELECT json_extract(kind_json, '$.to') FROM task_events
-                     WHERE json_extract(kind_json, '$.kind')='status_changed')
-                 FROM task_events
-                 WHERE json_extract(kind_json, '$.kind')='pr_opened'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        let event: TaskEventKind = serde_json::from_str(&event_shape.0).unwrap();
-        assert!(matches!(event, TaskEventKind::PrOpened { sequence: 1, .. }));
-        assert!(event_shape.1.starts_with("pr_"));
-        assert_eq!(event_shape.2, "waiting");
-        assert_eq!(event_shape.3, "completed");
+        assert_eq!(events, 0);
     }
 
     #[test]
@@ -2499,7 +2483,7 @@ mod tests {
     fn a_stale_edit_of_a_shipped_migration_tells_the_user_to_recreate() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
-        conn.execute_batch("ALTER TABLE task_sessions DROP COLUMN project_prompt_context")
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN issue_description")
             .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();

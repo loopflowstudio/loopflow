@@ -1,8 +1,4 @@
-//! Machine-global fence between body reservation and `lf` promotion.
-//!
-//! Task and Project reservations hold the shared side only across their lease
-//! CAS. Promotion holds the exclusive side from its under-lock recount through
-//! CLI activation and any migration, so a body cannot reserve into that gap.
+//! Machine-global fence between Run reservation and `lf` promotion.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;

@@ -2,11 +2,12 @@ mod support;
 
 use std::process::Command;
 
+use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_complete, task_status};
 use loopflow::ops::{
     create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication, TaskSessionStatus};
+use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
@@ -290,7 +291,8 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
         .expect("mark PR as published");
 
     let session = task_status("INF-123").expect("reconcile Task PR");
-    assert_ne!(session.status, loopflow::task::TaskSessionStatus::Completed);
+    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    assert!(!matches!(snapshot.status, WorkStatus::Done));
     assert!(
         matches!(
             session.observation,
@@ -307,14 +309,16 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let publication = prs[0].publication.as_ref().expect("adopted publication");
     assert_eq!(publication.after_merge, AfterMerge::Review);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
-    let stored_session = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read reconciled Task")
-        .expect("reconciled Task");
-    assert_eq!(
-        stored_session.status_reason,
-        "pull request #912 merged; another PR may follow"
-    );
+    let work = runtime
+        .block_on(
+            task.store
+                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+        )
+        .expect("resolve reconciled Task Work");
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
 }
 
 #[test]
@@ -351,12 +355,8 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         ),
         "completion should use the bounded REST observation: {session:?}"
     );
-    assert_eq!(session.status, TaskSessionStatus::Completed);
-    let stored_session = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read completed Task")
-        .expect("completed Task");
-    assert_eq!(stored_session.status, TaskSessionStatus::Completed);
+    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    assert!(matches!(snapshot.status, WorkStatus::Done));
     let prs = runtime
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read completing PR");
@@ -390,11 +390,16 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
 
     // The Session and PR are unchanged: no premature completion, no deleted PR.
     let runtime = tokio::runtime::Runtime::new().expect("read runtime");
-    let stored = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read session")
-        .expect("session present");
-    assert_ne!(stored.status, TaskSessionStatus::Completed);
+    let work = runtime
+        .block_on(
+            task.store
+                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+        )
+        .expect("resolve Task Work");
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
     let prs = runtime
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read PRs");

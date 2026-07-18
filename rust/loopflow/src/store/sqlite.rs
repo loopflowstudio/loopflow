@@ -21,7 +21,7 @@ use crate::trace::{
 };
 use crate::wave::Wave;
 
-mod child_sessions;
+mod children;
 mod ci_incidents;
 mod durable;
 mod provider_deliveries;
@@ -38,8 +38,12 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     )?;
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     let mut statement = conn.prepare(
-        "SELECT worktree FROM task_sessions \
-         WHERE status NOT IN ('completed', 'abandoned')",
+        "SELECT t.worktree FROM tasks t
+         JOIN epochs e ON e.id=(
+             SELECT latest.id FROM epochs latest
+             WHERE latest.task_id=t.id ORDER BY latest.number DESC LIMIT 1
+         )
+         WHERE e.state='open'",
     )?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))

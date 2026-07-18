@@ -12,8 +12,7 @@ use time::OffsetDateTime;
 use crate::pm::{IssueComment, IssueObservation};
 use crate::store::{Store, StoreResult};
 use crate::task::{
-    LinearFollowUp, LinearObservationApply, LinearObservationOutcome, TaskLinearObservation,
-    TaskSession,
+    LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
 };
 
 /// A comment carries human direction when it has an author that is not
@@ -45,7 +44,7 @@ pub(crate) fn linear_follow_up_text(body: &str) -> String {
 /// Read one Linear observation into durable, exactly-once Task direction.
 pub async fn reconcile_linear_observation(
     store: &Store,
-    session: &TaskSession,
+    session: &Task,
     observation: IssueObservation,
     viewer_id: &str,
     observed_at: OffsetDateTime,
@@ -66,7 +65,7 @@ pub async fn reconcile_linear_observation(
 /// content changed; every user comment rides as a candidate Steer, and the
 /// store drops the ones already seen.
 pub(crate) fn plan_apply(
-    session: &TaskSession,
+    session: &Task,
     observation: IssueObservation,
     viewer_id: &str,
     observed_at: OffsetDateTime,
@@ -94,7 +93,7 @@ pub(crate) fn plan_apply(
         })
         .collect();
     LinearObservationApply {
-        session_id: session.id.clone(),
+        task_id: session.id.clone(),
         revision: observation.revision,
         title: observation.title,
         description: observation.description,
@@ -107,9 +106,9 @@ pub(crate) fn plan_apply(
 #[cfg(test)]
 mod tests {
     use super::{is_human_comment, plan_apply};
+    use crate::launch_context::{LinearIssueId, LinearIssueSnapshot, LinearProjectSnapshot};
     use crate::pm::{IssueComment, IssueObservation};
-    use crate::session_context::{LinearIssueId, LinearIssueSnapshot, LinearProjectSnapshot};
-    use crate::task::{TaskLinearObservation, TaskSession, TaskSessionId, TaskSessionStatus};
+    use crate::task::{Task, TaskId, TaskLinearObservation};
 
     const VIEWER: &str = "user-loopflow";
 
@@ -134,11 +133,11 @@ mod tests {
         }
     }
 
-    fn session() -> TaskSession {
+    fn session() -> Task {
         let now = time::OffsetDateTime::now_utc();
-        TaskSession {
-            id: TaskSessionId::from_raw("ts_plan"),
-            launch: crate::session_context::TaskLaunchReceipt {
+        Task {
+            id: TaskId::from_raw("ts_plan"),
+            launch: crate::launch_context::TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new("issue-1").unwrap(),
                     identifier: "INF-123".to_string(),
@@ -146,7 +145,7 @@ mod tests {
                     description: "Old body".to_string(),
                 },
                 project: LinearProjectSnapshot {
-                    id: crate::session_context::LinearProjectId::new("project-1").unwrap(),
+                    id: crate::launch_context::LinearProjectId::new("project-1").unwrap(),
                     slug: "runtime".to_string(),
                     name: "Runtime".to_string(),
                     prompt_context: "Definition".to_string(),
@@ -155,10 +154,7 @@ mod tests {
             },
             pm_writeback: crate::task::PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
-            project_session_id: crate::project_session::ProjectSessionId::new(),
-            status: TaskSessionStatus::Running,
-            status_reason: "running".to_string(),
-            status_at: now,
+            project_id: crate::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
             lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
@@ -171,7 +167,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -182,7 +177,7 @@ mod tests {
     fn cursor(title: &str, description: &str) -> TaskLinearObservation {
         let now = time::OffsetDateTime::now_utc();
         TaskLinearObservation {
-            session_id: TaskSessionId::from_raw("ts_plan"),
+            task_id: TaskId::from_raw("task_plan"),
             last_revision: "2026-07-15T00:00:00.000Z".to_string(),
             last_title: title.to_string(),
             last_description: description.to_string(),

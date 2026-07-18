@@ -247,12 +247,6 @@ fn resident_spawner(
             .env("PATH", crate::flowloop::wave::path_for_children())
             .env_remove(crate::durable::RUN_CONTEXT_ENV)
             .env_remove(crate::durable::RUN_LEASE_ENV)
-            .env_remove("LF_PROJECT_SESSION_ID")
-            .env_remove("LF_PROJECT_GENERATION")
-            .env_remove("LF_PROJECT_LEASE_TOKEN")
-            .env_remove("LF_TASK_SESSION_ID")
-            .env_remove("LF_TASK_GENERATION")
-            .env_remove("LF_TASK_LEASE_TOKEN")
             .stdin(std::process::Stdio::null());
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
@@ -508,7 +502,7 @@ mod tests {
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
 
-    /// Serving a mind and running a Task Session are different entrypoints, and the
+    /// Serving a mind and running a Task are different entrypoints, and the
     /// listener spawns its resident body by name. Nothing here reads the
     /// environment: an `lf` process inheriting `WAVE_SERVER_ENDPOINT` and
     /// `RESIDENT_TOKEN` — a tmux child, a promoted Wave — becomes whichever

@@ -3,7 +3,7 @@
 use time::OffsetDateTime;
 
 use crate::durable::RunId;
-use crate::task::{CiIncident, TaskPrId, TaskSessionStatus};
+use crate::task::{CiIncident, TaskPrId};
 
 use super::{run_sqlite, Store, StoreResult};
 
@@ -13,8 +13,7 @@ pub(crate) struct CiIncidentReportRow {
     pub wave: String,
     pub task: String,
     pub task_started_at: OffsetDateTime,
-    pub task_status: TaskSessionStatus,
-    pub task_status_reason: String,
+    pub task_status: String,
     pub human_assisted: bool,
 }
 

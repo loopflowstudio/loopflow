@@ -302,7 +302,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: ProjectCommand,
     },
-    /// Linear-backed Task Session lifecycle
+    /// Linear-backed Task lifecycle
     Task {
         #[command(subcommand)]
         cmd: TaskCommand,
@@ -332,19 +332,12 @@ pub enum Commands {
         epoch_id: String,
         revision: u64,
     },
-    /// Internal: run one durable Task Session process generation
-    #[command(name = "__task", hide = true)]
-    TaskRunner {
-        session_id: String,
-        #[arg(long)]
-        generation: u32,
-    },
-    /// Internal: run one durable Project Session process generation
-    #[command(name = "__project", hide = true)]
-    ProjectRunner {
-        session_id: String,
-        #[arg(long)]
-        generation: u32,
+    /// Internal: run a Project or Task body holding the ambient Run lease
+    #[command(name = "__work", hide = true)]
+    WorkRunner {
+        #[arg(value_parser = ["project", "task"])]
+        kind: String,
+        work_id: String,
     },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
@@ -894,7 +887,7 @@ pub enum ReceiptCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
-    /// Create a Linear Project first, then start its durable Project Session
+    /// Create a Linear Project first, then start its durable Project
     Start {
         title: String,
         #[arg(short = 'w', long = "wave")]
@@ -913,9 +906,9 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Show durable Project Session state and reconcile process liveness
+    /// Show durable Project state and reconcile process liveness
     Status {
-        /// Linear Project UUID, unique slug, or historical Project Session id
+        /// Linear Project UUID, unique slug, or historical Project id
         project_id: String,
         #[arg(long)]
         json: bool,
@@ -943,7 +936,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Resume the same Project Session, optionally handing its next body to another agent
+    /// Resume the same Project, optionally handing its next body to another agent
     Resume {
         project_id: String,
         #[arg(long)]
@@ -953,7 +946,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Attach to the writable Project Session control terminal
+    /// Attach to the writable Project control terminal
     Attach { project_id: String },
     /// End Project pursuit without deleting its durable history
     Abandon {
@@ -975,7 +968,7 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Ensure its Project Session, then start or return the existing Linear task
+    /// Ensure its Project, then start or return the existing Linear task
     Run {
         issue: String,
         #[arg(long)]
@@ -994,7 +987,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Linear task, ensure its Project Session, then start its Task Session
+    /// Create a Linear task, ensure its Project, then start its Task
     Start {
         title: String,
         #[arg(short = 'p', long = "project")]
@@ -1072,7 +1065,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Resume the same Task Session, optionally handing its next body to another agent
+    /// Resume the same Task, optionally handing its next body to another agent
     Resume {
         issue: String,
         #[arg(long)]
@@ -1090,7 +1083,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Explicitly end a Task Session without merging
+    /// Explicitly end a Task without merging
     Abandon {
         issue: String,
         #[arg(long)]
@@ -1343,7 +1336,7 @@ pub enum PmCommand {
         #[command(subcommand)]
         cmd: PmProjectCommand,
     },
-    /// Linear webhook receiver: stream human edits into Task Sessions
+    /// Linear webhook receiver: stream human edits into Tasks
     Webhook {
         #[command(subcommand)]
         cmd: PmWebhookCommand,

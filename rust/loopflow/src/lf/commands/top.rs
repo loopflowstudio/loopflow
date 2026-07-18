@@ -59,7 +59,7 @@ pub fn run() -> Result<()> {
 /// Best-effort snapshot of directories currently owned by a live process.
 ///
 /// Worktree cleanup uses this as a second ownership signal alongside durable
-/// Task Sessions. An empty set is returned when `lsof` is unavailable so the
+/// Tasks. An empty set is returned when `lsof` is unavailable so the
 /// daemon can still rely on its registry on minimal hosts.
 pub fn running_workspace_paths() -> HashSet<PathBuf> {
     let output = Command::new("lsof").args(["-d", "cwd", "-Fn"]).output();
@@ -392,7 +392,7 @@ mod tests {
                 pid: 42,
                 elapsed: "01:12".to_string(),
                 kind: ProcessKind::Lf,
-                command: "lf __task ts_123 --generation 1".to_string(),
+                command: "lf __work task tsk_123".to_string(),
                 workspace: None,
             }],
         );
@@ -403,13 +403,13 @@ mod tests {
             .contains("total 120 tokens · avg 0.03 tok/s · peak 2.0 tok/s · current 2.0 tok/s"));
         assert!(rendered.contains("RUNNING LF + PROVIDER PROCESSES (1)"));
         assert!(rendered.contains("42  01:12"));
-        assert!(rendered.contains("lf __task ts_123 --generation 1"));
+        assert!(rendered.contains("lf __work task tsk_123"));
     }
 
     #[test]
     fn process_snapshot_keeps_lf_and_provider_commands() {
         let processes = parse_processes(
-            "  10  01:00 /usr/local/bin/lf wave infrastructure\n  11  00:01 /usr/bin/ps -axo pid=,etime=,command=\n  12  00:02 lf top\n  13  00:03 /bin/zsh -lc lf task run INF-1\n  14  02:00 lf __task ts_123\n  15  03:00 /opt/codex app-server\n",
+            "  10  01:00 /usr/local/bin/lf wave infrastructure\n  11  00:01 /usr/bin/ps -axo pid=,etime=,command=\n  12  00:02 lf top\n  13  00:03 /bin/zsh -lc lf task run INF-1\n  14  02:00 lf __work task tsk_123\n  15  03:00 /opt/codex app-server\n",
             12,
         );
 
@@ -427,7 +427,7 @@ mod tests {
                     pid: 14,
                     elapsed: "02:00".to_string(),
                     kind: ProcessKind::Lf,
-                    command: "lf __task ts_123".to_string(),
+                    command: "lf __work task tsk_123".to_string(),
                     workspace: None,
                 },
                 RunningProcess {

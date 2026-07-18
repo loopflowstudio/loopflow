@@ -88,7 +88,7 @@ fn assert_no_gh_pr_mutation(log_path: &std::path::Path) {
     }
 }
 
-/// RAII guard for an ambient env var so a test never leaks `LF_TASK_SESSION_ID`
+/// RAII guard for an ambient env var so a test never leaks Run context
 /// into a concurrently-running test, even on panic.
 struct AmbientVarGuard {
     name: &'static str,
@@ -140,12 +140,12 @@ fn submit_refuses_when_registry_missing_before_any_push() {
     repo.commit("task commit");
     // Deliberately NOT pushed: the refusal must precede the first push.
 
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let _task = register_task(home.path(), repo.path(), branch, &base);
 
-    // The registry vanishes. An ambient Task id still names this as a Task entry
+    // The registry vanishes. Ambient Run context still marks this as an agent entry
     // point, so the missing registry is missing authority — not "no tasks here."
     std::fs::remove_file(home.path().join("loopflow.db")).expect("remove registry");
-    let _ambient = AmbientVarGuard::set("LF_TASK_SESSION_ID", task.session.id.as_str());
+    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_CONTEXT_ENV, "agent");
 
     let err = submit(
         repo.path(),
@@ -364,7 +364,7 @@ fn publish_refuses_when_registry_schema_incompatible_before_any_push() {
     assert_no_gh_pr_mutation(&log_path);
 }
 
-/// Valid authority: a healthy registry with a Task Session that owns this
+/// Valid authority: a healthy registry with a Task that owns this
 /// worktree publishes, pushes, and durably records the PR — the publication
 /// request and GitHub attachment prove the Task path ran, not a generic PR.
 #[test]
@@ -439,7 +439,7 @@ fn ordinary_pr_publishes_when_worktree_is_not_a_task_worktree() {
         home.path(),
     );
 
-    // A healthy registry exists, but its one Task Session claims a different
+    // A healthy registry exists, but its one Task claims a different
     // worktree — this checkout is provably not a Task worktree.
     let elsewhere = tempfile::TempDir::new().expect("unrelated worktree");
     let _unrelated = register_task(home.path(), elsewhere.path(), "jack/elsewhere", &base);

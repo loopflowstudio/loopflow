@@ -231,7 +231,7 @@ fn orchestration_discipline(wave: &str) -> String {
          - Create or select a Linear Project and Linear task before delegating \
          file-writing work. Start it with `lf task run <issue-id>`. Never \
          delegate anonymous work or the whole wave objective.\n\
-         - Supervise durable Task Sessions with `lf task status`, `follow-up`, \
+         - Supervise durable Tasks with `lf task status`, `follow-up`, \
          `steer`, `interrupt`, `wait`, and `resume`. Each task owns one stable \
          worktree; ordered PRs own its serial branches to main. \
          Keep the Wave home free of shipping edits.\n\
@@ -1780,12 +1780,10 @@ mod tests {
     }
 
     async fn feedback_rig(tmp: &tempfile::TempDir, route: bool) -> FeedbackRig {
-        use crate::child_session::ChildRef;
+        use crate::child::ChildRef;
         use crate::durable::{AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance};
-        use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-        use crate::session_context::{
-            LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt,
-        };
+        use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+        use crate::project::{Project, ProjectId};
 
         let store = Arc::new(
             open_store(&crate::store::StorageConfig::sqlite(
@@ -1801,8 +1799,8 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let now = time::OffsetDateTime::now_utc();
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
+        let project = Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: LinearProjectSnapshot {
                     id: LinearProjectId::new("project-uuid").unwrap(),
@@ -1813,21 +1811,17 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),
-            status: ProjectSessionStatus::Created,
-            status_reason: "created".to_string(),
-            status_at: now,
             iteration: 0,
             observation_cursor: 0,
             last_state_fingerprint: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
         };
-        store.create_project_session(&project).await.unwrap();
+        store.create_project(&project).await.unwrap();
         let child_work = store
             .work_for_child(&ChildRef::Project(project.id))
             .await

@@ -1,14 +1,12 @@
 //! SQLite persistence for historical CI recovery incidents.
 
-use std::str::FromStr;
-
 use rusqlite::{params, types::Type};
 use time::OffsetDateTime;
 
 use crate::durable::RunId;
 use crate::store::ci_incidents::CiIncidentReportRow;
 use crate::store::{StoreError, StoreResult};
-use crate::task::{CiIncident, TaskPrId, TaskSessionId, TaskSessionStatus};
+use crate::task::{CiIncident, TaskId, TaskPrId};
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp_nanos() as i64
@@ -29,19 +27,15 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
     let failure_set = serde_json::from_str(&failure_set_json).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(6, Type::Text, Box::new(error))
     })?;
-    let task_status_value: String = row.get(20)?;
-    let task_status = TaskSessionStatus::from_str(&task_status_value).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(20, Type::Text, Box::new(error))
-    })?;
     Ok(CiIncidentReportRow {
         incident: CiIncident {
             identity: row.get(0)?,
-            task_session_id: TaskSessionId::from_raw(row.get::<_, String>(1)?),
+            task_id: TaskId::from_raw(row.get::<_, String>(1)?),
             pr_id: TaskPrId::from_raw(row.get::<_, String>(2)?),
             repo: row.get(3)?,
             pr_number: row.get::<_, i64>(4)? as u32,
             failed_head_sha: row.get(5)?,
-            repaired_head_sha: row.get::<_, Option<String>>(24)?,
+            repaired_head_sha: row.get::<_, Option<String>>(23)?,
             failure_set,
             provider_completed_at: optional_datetime(7, row.get(7)?)?,
             poll_observed_at: optional_datetime(8, row.get(8)?)?,
@@ -63,10 +57,9 @@ fn map_incident_report_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CiIncide
         },
         wave: row.get(18)?,
         task: row.get(19)?,
-        task_status,
-        task_status_reason: row.get(21)?,
-        task_started_at: datetime(22, row.get(22)?)?,
-        human_assisted: row.get::<_, i64>(23)? != 0,
+        task_status: row.get(20)?,
+        task_started_at: datetime(21, row.get(21)?)?,
+        human_assisted: row.get::<_, i64>(22)? != 0,
     })
 }
 
@@ -76,7 +69,7 @@ impl super::SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO ci_incidents (
-                identity, task_session_id, pr_id, repo, pr_number,
+                identity, task_id, pr_id, repo, pr_number,
                 failed_head_sha, failure_set_json, provider_completed_at,
                 poll_observed_at, webhook_received_at, claimed_run_id,
                 responded_at, green_at, merged_at, blocked_at, blocked_reason,
@@ -105,7 +98,7 @@ impl super::SqliteStore {
                 updated_at=MAX(ci_incidents.updated_at, excluded.updated_at)",
             params![
                 incident.identity,
-                incident.task_session_id.as_str(),
+                incident.task_id.as_str(),
                 incident.pr_id.as_str(),
                 incident.repo,
                 i64::from(incident.pr_number),
@@ -233,18 +226,24 @@ impl super::SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT
-                ci.identity, ci.task_session_id, ci.pr_id, ci.repo, ci.pr_number,
+                ci.identity, ci.task_id, ci.pr_id, ci.repo, ci.pr_number,
                 ci.failed_head_sha, ci.failure_set_json, ci.provider_completed_at,
                 ci.poll_observed_at, ci.webhook_received_at, ci.claimed_run_id,
                 ci.responded_at, ci.green_at, ci.merged_at, ci.blocked_at,
                 ci.blocked_reason, ci.created_at, ci.updated_at,
-                w.name, ts.issue_identifier, ts.status, ts.status_reason,
+                w.name, ts.issue_identifier,
+                CASE
+                    WHEN e.state='done' THEN 'done'
+                    WHEN e.state='abandoned' THEN 'abandoned'
+                    WHEN EXISTS (SELECT 1 FROM runs r WHERE r.epoch_id=e.id AND r.state != 'ended') THEN 'running'
+                    WHEN EXISTS (SELECT 1 FROM waits wait WHERE wait.epoch_id=e.id AND wait.resolved_at IS NULL) THEN 'waiting'
+                    ELSE 'ready'
+                END,
                 ts.created_at,
                 EXISTS (
                     SELECT 1 FROM steers s
                     JOIN epochs e ON e.id=s.epoch_id
-                    JOIN task_sessions steered ON steered.epoch_id=e.id
-                    WHERE steered.id=ci.task_session_id
+                    WHERE e.task_id=ci.task_id
                       AND s.author_kind='user'
                       AND s.issued_at * 1000000000 >= CASE
                           WHEN ci.poll_observed_at IS NULL THEN ci.webhook_received_at
@@ -255,8 +254,13 @@ impl super::SqliteStore {
                 ),
                 ci.repaired_head_sha
              FROM ci_incidents ci
-             JOIN task_sessions ts ON ts.id=ci.task_session_id
-             JOIN waves w ON w.id=ts.wave_id
+             JOIN tasks ts ON ts.id=ci.task_id
+             JOIN epochs e ON e.id=(
+                 SELECT latest.id FROM epochs latest
+                 WHERE latest.task_id=ts.id ORDER BY latest.number DESC LIMIT 1
+             )
+             JOIN projects p ON p.id=ts.project_id
+             JOIN waves w ON w.id=p.wave_id
              WHERE COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                             ci.webhook_received_at, ci.created_at) >= ?1
                AND (?2 IS NULL OR w.name=?2)

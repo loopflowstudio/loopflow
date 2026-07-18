@@ -2,7 +2,11 @@
   "wave": {
     "id": "wave-1",
     "name": "infrastructure",
-    "status": {"running":{"run_id":"run_00000000000000000000000000000001"}},
+    "status": {
+      "running": {
+        "run_id": "run_00000000000000000000000000000001"
+      }
+    },
     "goal": "Make releases boring.",
     "repo": "/src/loopflow",
     "active_tasks": 1,
@@ -35,10 +39,10 @@
         ]
       },
       "runtime": {
-        "session_id": "ps_11111111111111111111111111111111",
-        "status": "waiting",
+        "work_id": "ps_11111111111111111111111111111111",
+        "status": "ready",
         "reason": "supervised Tasks are active",
-        "status_at": "2026-07-13T18:00:00Z",
+        "updated_at": "2026-07-13T18:00:00Z",
         "iteration": 2,
         "pending_observations": 0,
         "provider": "codex",
@@ -46,7 +50,7 @@
         "observation": {
           "category": "needs_input",
           "reason": "supervised Tasks are active",
-          "owner": "human",
+          "owner": "user",
           "controls": [
             "decide",
             "resume",
@@ -89,17 +93,17 @@
             }
           },
           "runtime": {
-            "session_id": "ts_22222222222222222222222222222222",
-            "project_session_id": "ps_11111111111111111111111111111111",
-            "status": "waiting",
+            "work_id": "ts_22222222222222222222222222222222",
+            "project_id": "ps_11111111111111111111111111111111",
+            "status": "ready",
             "reason": "waiting for review",
-            "status_at": "2026-07-13T19:00:00Z",
+            "updated_at": "2026-07-13T19:00:00Z",
             "provider": "codex",
             "process_alive": false,
             "observation": {
               "category": "needs_input",
               "reason": "waiting for review",
-              "owner": "human",
+              "owner": "user",
               "controls": [
                 "decide",
                 "resume",
@@ -130,41 +134,10 @@
             "next_owner": "review",
             "actions": {
               "recommended": "review",
-              "actions": [
-                {
-                  "action": "recover",
-                  "available": false,
-                  "reason": "body is not dead; PR is open for review"
-                },
-                {
-                  "action": "resume",
-                  "available": false,
-                  "reason": "awaiting review; resume after review to address feedback"
-                },
-                {
-                  "action": "review",
-                  "available": true,
-                  "reason": "checks passed; awaiting review"
-                },
-                {
-                  "action": "start_next_pr",
-                  "available": false,
-                  "reason": "PR is open, not merged"
-                },
-                {
-                  "action": "complete",
-                  "available": false,
-                  "reason": "PR is open, not merged"
-                },
-                {
-                  "action": "no_action",
-                  "available": false,
-                  "reason": "action available: review the PR"
-                }
-              ]
+              "reason": "checks passed; awaiting review"
             },
             "pm_completed": false,
-            "session_status": "waiting",
+            "work_status": "ready",
             "process": {
               "state": "not_expected",
               "alive": null,
@@ -232,41 +205,10 @@
             "next_owner": "project",
             "actions": {
               "recommended": null,
-              "actions": [
-                {
-                  "action": "recover",
-                  "available": false,
-                  "reason": "no Task Session; start one with `lf task run`"
-                },
-                {
-                  "action": "resume",
-                  "available": false,
-                  "reason": "no Task Session; start one with `lf task run`"
-                },
-                {
-                  "action": "review",
-                  "available": false,
-                  "reason": "no Task Session; start one with `lf task run`"
-                },
-                {
-                  "action": "start_next_pr",
-                  "available": false,
-                  "reason": "no Task Session; start one with `lf task run`"
-                },
-                {
-                  "action": "complete",
-                  "available": false,
-                  "reason": "no Task Session; start one with `lf task run`"
-                },
-                {
-                  "action": "no_action",
-                  "available": false,
-                  "reason": "no Task Session; start one with `lf task run`"
-                }
-              ]
+              "reason": "Task is ready to start"
             },
             "pm_completed": false,
-            "session_status": null,
+            "work_status": null,
             "process": {
               "state": "not_applicable",
               "alive": null,

@@ -14,8 +14,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::child_session::{ChildBodyOutcome, ChildProcessGeneration};
-use crate::project_session::{ProjectEventKind, ProjectObservation};
+use crate::project::{ProjectEventKind, ProjectObservation};
 use crate::task::{TaskEventKind, TaskObservation};
 use crate::wave::playhead::{now_rfc3339, BodyProvenance};
 
@@ -61,7 +60,7 @@ impl ChildControlActivity {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Task,
             subject_id: observation.issue_identifier.clone(),
-            session_id: observation.session_id.to_string(),
+            session_id: observation.task_id.to_string(),
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
@@ -74,7 +73,7 @@ impl ChildControlActivity {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Project,
             subject_id: observation.project.clone(),
-            session_id: observation.session_id.to_string(),
+            session_id: observation.project_id.to_string(),
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
@@ -295,19 +294,6 @@ fn task_activity_fields(event: &TaskEventKind) -> ActivityFields {
             ),
             &handoff.reason,
         ),
-        TaskEventKind::BodyLeaseChanged { process } => body_lease_activity("Task", process),
-        TaskEventKind::BodyRecoveryAttempted {
-            attempt, reason, ..
-        } => activity(
-            ChildActivityKind::StateChanged,
-            &format!("Task body recovered automatically (attempt {attempt})"),
-            reason,
-        ),
-        TaskEventKind::StatusChanged { to, reason, .. } => activity(
-            ChildActivityKind::StateChanged,
-            &format!("Task is {}", to.as_str()),
-            reason,
-        ),
         TaskEventKind::Progress { summary } => {
             activity(ChildActivityKind::StateChanged, "Task progress", summary)
         }
@@ -350,12 +336,6 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             ),
             &handoff.reason,
         ),
-        ProjectEventKind::BodyLeaseChanged { process } => body_lease_activity("Project", process),
-        ProjectEventKind::StatusChanged { to, reason, .. } => activity(
-            ChildActivityKind::StateChanged,
-            &format!("Project is {}", to.as_str()),
-            reason,
-        ),
         ProjectEventKind::TaskObserved { event, .. } => task_activity_fields(event),
         ProjectEventKind::IterationCompleted { summary, .. } => activity(
             ChildActivityKind::StateChanged,
@@ -369,27 +349,6 @@ fn project_activity_fields(event: &ProjectEventKind) -> ActivityFields {
             activity(ChildActivityKind::Failed, "Project failed", error)
         }
     }
-}
-
-fn body_lease_activity(subject: &str, process: &ChildProcessGeneration) -> ActivityFields {
-    let summary = match process.outcome.as_ref() {
-        Some(ChildBodyOutcome::Completed) => "completed",
-        Some(ChildBodyOutcome::Interrupted { reason })
-        | Some(ChildBodyOutcome::Failed { reason })
-        | Some(ChildBodyOutcome::Lost { reason })
-        | Some(ChildBodyOutcome::Superseded { reason })
-        | Some(ChildBodyOutcome::LegacyStopped { reason }) => reason,
-        None => "",
-    };
-    activity(
-        ChildActivityKind::StateChanged,
-        &format!(
-            "{subject} body generation {} is {}",
-            process.generation,
-            process.state.as_str()
-        ),
-        summary,
-    )
 }
 
 fn activity(kind: ChildActivityKind, title: &str, summary: &str) -> ActivityFields {

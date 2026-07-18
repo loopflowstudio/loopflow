@@ -1,4 +1,4 @@
-use crate::child_session::ChildRef;
+use crate::child::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildFeedback,
     ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, Feedback, FlowPosition, Home,
@@ -66,6 +66,13 @@ impl Store {
         work: &WorkRef,
         trigger: RunTrigger,
     ) -> StoreResult<(Run, RunLease)> {
+        let _promotion_lock = crate::promotion_lock::acquire_shared()
+            .await
+            .map_err(|error| {
+                super::StoreError::InvalidData(format!(
+                    "acquire shared promotion lock before Run reservation: {error}"
+                ))
+            })?;
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.reserve_run(&work, &trigger)
@@ -83,6 +90,16 @@ impl Store {
         token: crate::durable::RunLeaseToken,
     ) -> StoreResult<RunLease> {
         run_sqlite(&self.sqlite, move |store| store.resolve_run_lease(&token)).await
+    }
+
+    pub(crate) async fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
+    }
+
+    pub(crate) async fn rotate_run_lease(&self, lease: &RunLease) -> StoreResult<RunLease> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| store.rotate_run_lease(&lease)).await
     }
 
     pub async fn advance_run(
@@ -159,9 +176,65 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.launch_surface(&launch_id)).await
     }
 
+    pub(crate) async fn current_launch(
+        &self,
+        lease: &RunLease,
+    ) -> StoreResult<Option<crate::durable::Launch>> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.validate_run_lease(&lease)?;
+            store.control_launch_for_run(&lease.run_id)
+        })
+        .await
+    }
+
+    pub(crate) async fn current_launch_for_run(
+        &self,
+        run_id: &crate::durable::RunId,
+    ) -> StoreResult<Option<crate::durable::Launch>> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.control_launch_for_run(&run_id)
+        })
+        .await
+    }
+
+    /// Reconcile an observed Run after its writer has disappeared.
+    ///
+    /// The exact Run and Launch ids fence the observation against a concurrent
+    /// handoff. Only proven absence releases the slot; live or unprovable
+    /// containment remains fenced for a later keeper pass.
+    pub(crate) async fn recover_run(
+        &self,
+        run_id: &crate::durable::RunId,
+        launch_id: Option<&LaunchId>,
+        containment: ContainmentObservation,
+    ) -> StoreResult<StopReceipt> {
+        let run_id = run_id.clone();
+        let launch_id = launch_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.recover_run(&run_id, launch_id.as_ref(), containment)
+        })
+        .await
+    }
+
     pub async fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
         run_sqlite(&self.sqlite, move |store| {
             store.launch_surfaces(active_only)
+        })
+        .await
+    }
+
+    pub async fn observe_launch_provider(
+        &self,
+        lease: &RunLease,
+        launch_id: &LaunchId,
+        resume_token: Option<String>,
+    ) -> StoreResult<crate::durable::Launch> {
+        let lease = lease.clone();
+        let launch_id = launch_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.observe_launch_provider(&lease, &launch_id, resume_token.as_deref())
         })
         .await
     }
@@ -428,14 +501,15 @@ mod tests {
         StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::session_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
 
     async fn wave_work() -> (super::Store, WorkRef) {
         let directory = tempfile::tempdir().unwrap().keep();
-        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
+        let database = directory.join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let wave = Wave::new(
@@ -447,10 +521,10 @@ mod tests {
         (store, WorkRef::Wave(wave.id().clone()))
     }
 
-    fn project_session(wave_id: WaveId) -> ProjectSession {
+    fn project(wave_id: WaveId) -> Project {
         let now = OffsetDateTime::now_utc();
-        ProjectSession {
-            id: ProjectSessionId::new(),
+        Project {
+            id: ProjectId::new(),
             launch: ProjectLaunchReceipt {
                 project: LinearProjectSnapshot {
                     id: LinearProjectId::new("project-feedback").unwrap(),
@@ -461,16 +535,12 @@ mod tests {
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id,
-            status: ProjectSessionStatus::Created,
-            status_reason: "created".to_string(),
-            status_at: now,
             iteration: 0,
             observation_cursor: 0,
             last_state_fingerprint: None,
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -519,6 +589,65 @@ mod tests {
             panic!("expected Launch receipt")
         };
         (lease, launch)
+    }
+
+    #[tokio::test]
+    async fn interrupt_ends_a_reserved_run_before_containment_exists() {
+        let (store, work) = wave_work().await;
+        let (run, _lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        let request = AuthenticatedRequest::cli();
+
+        let receipt = store
+            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .await
+            .unwrap();
+
+        assert_eq!(receipt.run_id, run.id);
+        assert_eq!(receipt.launch_id, None);
+        assert_eq!(receipt.turn_id, None);
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn one_run_can_own_sequential_launches_but_never_overlapping_launches() {
+        let (store, work) = wave_work().await;
+        let (lease, first) = start_launch(&store, &work, false).await;
+        let next = RunAdvance::LaunchStarting {
+            route: LaunchRoute {
+                provider: "claude".to_string(),
+                model: None,
+                account_id: None,
+            },
+            containment: Containment::Tmux {
+                name: "lf-runtime-2".to_string(),
+            },
+            cwd: PathBuf::from("/tmp/runtime"),
+            surface: "headless".to_string(),
+            opaque: false,
+            resume_token: None,
+        };
+
+        assert!(store.advance_run(&lease, next.clone()).await.is_err());
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchEnded {
+                    launch_id: first.id,
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .unwrap();
+        let rotated = store.rotate_run_lease(&lease).await.unwrap();
+        assert!(store.validate_run_lease(&lease).await.is_err());
+        let crate::durable::AdvanceReceipt::Launch(second) =
+            store.advance_run(&rotated, next).await.unwrap()
+        else {
+            panic!("expected second Launch")
+        };
+        assert_eq!(second.run_id, rotated.run_id);
+        assert_eq!(second.route.provider, "claude");
     }
 
     #[tokio::test]
@@ -658,13 +787,13 @@ mod tests {
     #[tokio::test]
     async fn active_parent_run_can_escalate_only_its_current_child_feedback() {
         let (store, parent) = wave_work().await;
-        let project = project_session(match &parent {
+        let project = project(match &parent {
             WorkRef::Wave(id) => id.clone(),
             _ => unreachable!(),
         });
-        store.create_project_session(&project).await.unwrap();
+        store.create_project(&project).await.unwrap();
         let child = store
-            .work_for_child(&crate::child_session::ChildRef::Project(project.id))
+            .work_for_child(&crate::child::ChildRef::Project(project.id))
             .await
             .unwrap();
         let (parent_lease, _) = start_launch(&store, &parent, false).await;
@@ -737,6 +866,95 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recovery.state, RunState::Reserved);
+    }
+
+    #[tokio::test]
+    async fn keeper_recovery_releases_only_the_exact_absent_launch() {
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, false).await;
+
+        let recovered = store
+            .recover_run(
+                &lease.run_id,
+                Some(&launch.id),
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered.run.state, RunState::Ended);
+        assert!(store.validate_run_lease(&lease).await.is_err());
+
+        let (next, _) = store
+            .reserve_run(
+                &work,
+                RunTrigger::Recovery {
+                    prior_run_id: recovered.run.id,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(next.state, RunState::Reserved);
+    }
+
+    #[tokio::test]
+    async fn keeper_recovery_cannot_reap_a_replacement_launch() {
+        let (store, work) = wave_work().await;
+        let (lease, first) = start_launch(&store, &work, false).await;
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchEnded {
+                    launch_id: first.id.clone(),
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .unwrap();
+        let lease = store.rotate_run_lease(&lease).await.unwrap();
+        let receipt = store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "claude".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "lf-runtime-replacement".to_string(),
+                    },
+                    cwd: PathBuf::from("/tmp/runtime"),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Launch(second) = receipt else {
+            panic!("expected Launch receipt")
+        };
+
+        assert!(matches!(
+            store
+                .recover_run(
+                    &lease.run_id,
+                    Some(&first.id),
+                    ContainmentObservation::Absent,
+                )
+                .await,
+            Err(StoreError::InvalidData(message)) if message.contains("advanced")
+        ));
+        assert_eq!(
+            store
+                .current_launch_for_run(&lease.run_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            second.id
+        );
+        assert!(store.validate_run_lease(&lease).await.is_ok());
     }
 
     #[tokio::test]

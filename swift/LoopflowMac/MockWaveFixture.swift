@@ -155,15 +155,15 @@ enum MockWaveFixture {
             ]
           },
           "runtime": {
-            "session_id": "ps_11111111111111111111111111111111",
-            "status": "waiting",
+            "work_id": "ps_11111111111111111111111111111111",
+            "status": "ready",
             "reason": "supervised Tasks are active",
-            "status_at": "2026-07-13T18:00:00Z",
+            "updated_at": "2026-07-13T18:00:00Z",
             "iteration": 2,
             "pending_observations": 0,
             "provider": "codex",
             "process_alive": false,
-            "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
+            "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
           },
           "directive": {
             "version": 1,
@@ -194,14 +194,14 @@ enum MockWaveFixture {
                 }
               },
               "runtime": {
-                "session_id": "ts_22222222222222222222222222222222",
-                "project_session_id": "ps_11111111111111111111111111111111",
-                "status": "waiting",
+                "work_id": "ts_22222222222222222222222222222222",
+                "project_id": "ps_11111111111111111111111111111111",
+                "status": "ready",
                 "reason": "waiting for review",
-                "status_at": "2026-07-13T19:00:00Z",
+                "updated_at": "2026-07-13T19:00:00Z",
                 "provider": "codex",
                 "process_alive": false,
-                "observation": {"category": "needs_input", "reason": "waiting for review", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
+                "observation": {"category": "needs_input", "reason": "waiting for review", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
               },
               "directive": {
                 "version": 2,
@@ -218,9 +218,9 @@ enum MockWaveFixture {
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": 7200,
                 "next_owner": "review",
-                "actions": {"recommended":"review","actions":[{"action":"recover","available":false,"reason":"body is not dead; PR is open for review"},{"action":"resume","available":false,"reason":"awaiting review; resume after review to address feedback"},{"action":"review","available":true,"reason":"checks passed; awaiting review"},{"action":"start_next_pr","available":false,"reason":"PR is open, not merged"},{"action":"complete","available":false,"reason":"PR is open, not merged"},{"action":"no_action","available":false,"reason":"action available: review the PR"}]},
+                "actions":{"recommended":"review","reason":"checks passed; awaiting review"},
                 "pm_completed": false,
-                "session_status": "waiting",
+                "work_status": "ready",
                 "process": {"state": "not_expected", "alive": null, "reason": null},
                 "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
                 "active_pr_phase": "open"
@@ -270,9 +270,9 @@ enum MockWaveFixture {
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": null,
                 "next_owner": "project",
-                "actions": {"recommended":null,"actions":[{"action":"recover","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"resume","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"review","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"start_next_pr","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"complete","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"no_action","available":false,"reason":"no Task Session; start one with `lf task run`"}]},
+                "actions":{"recommended":null,"reason":"Task is ready to start"},
                 "pm_completed": false,
-                "session_status": null,
+                "work_status": null,
                 "process": {"state": "not_applicable", "alive": null, "reason": null},
                 "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
                 "active_pr_phase": null

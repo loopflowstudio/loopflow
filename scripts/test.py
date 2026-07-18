@@ -551,7 +551,6 @@ class GateRun:
     worktree: str
     tree_fingerprint: Optional[str]
     plan_fingerprint: str
-    task_session_id: Optional[str]
     started_at: str
     finished_at: Optional[str]
     status: str
@@ -579,8 +578,6 @@ class GateRun:
             "status": self.status,
             "phases": [phase.as_record() for phase in self.phases],
         }
-        if self.task_session_id:
-            record["task_session_id"] = self.task_session_id
         return record
 
 
@@ -722,7 +719,6 @@ def _new_gate_run(
         worktree=str(REPO_ROOT.resolve()),
         tree_fingerprint=tree_fingerprint,
         plan_fingerprint=plan_fingerprint,
-        task_session_id=os.environ.get("LF_TASK_SESSION_ID"),
         started_at=_format_timestamp(started),
         finished_at=None,
         status="running",

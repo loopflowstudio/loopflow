@@ -90,6 +90,18 @@ durable_id!(SendId, "send_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(DoneProposalId, "done_");
 
+impl ProjectId {
+    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl TaskId {
+    pub(crate) fn from_raw(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum WorkRef {
@@ -125,14 +137,6 @@ pub enum EpochState {
 }
 
 impl EpochState {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Done => "done",
-            Self::Abandoned => "abandoned",
-        }
-    }
-
     pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
         match value {
             "open" => Ok(Self::Open),
@@ -838,7 +842,7 @@ pub struct StopReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterruptReceipt {
     pub run_id: RunId,
-    pub launch_id: LaunchId,
+    pub launch_id: Option<LaunchId>,
     pub turn_id: Option<TurnId>,
 }
 

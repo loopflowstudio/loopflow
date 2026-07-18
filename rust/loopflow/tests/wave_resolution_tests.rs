@@ -175,7 +175,7 @@ fn wave_field(output: &std::process::Output) -> String {
 
 /// The original reproduction: from a resident wave's environment
 /// (`LF_WAVE_ID=<uuid>`, no `--wave`), both `lf pm show` and `lf status` resolve
-/// the same wave. The Mac Project Session inherits the identical `LF_WAVE_ID`,
+/// the same wave. The Mac Project inherits the identical `LF_WAVE_ID`,
 /// so this cell stands for both.
 #[test]
 fn pm_show_and_status_agree_from_a_resident_uuid() {

@@ -1,6 +1,6 @@
 mod support;
 
-use loopflow::child_session::ChildRef;
+use loopflow::child::ChildRef;
 use loopflow::webhook::{ingest_event, WebhookEvent, WebhookOutcome};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
@@ -105,7 +105,7 @@ fn verified_webhooks_drive_task_control_exactly_once() {
         .expect("self comment");
     assert_eq!(outcome, WebhookOutcome::SelfAuthored);
 
-    // An issue with no Task Session is a no-op.
+    // An issue with no Task is a no-op.
     let outcome = rt
         .block_on(ingest_event(
             &task.store,

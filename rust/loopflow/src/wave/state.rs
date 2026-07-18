@@ -1,6 +1,6 @@
 //! The loop's state machine.
 //!
-//! This machine is about the Wave turn only. Project and Task Sessions have
+//! This machine is about the Wave turn only. Project and Tasks have
 //! independent lifecycle state and do not keep a Wave turn active. A failed *pass* is
 //! `TurnFinished { status: Failed }` and the loop returns to `Idle`;
 //! [`LoopState::Failed`] is reserved for the loop itself (consecutive

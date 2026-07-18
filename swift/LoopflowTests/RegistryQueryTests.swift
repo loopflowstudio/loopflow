@@ -55,16 +55,16 @@ struct RegistryQueryTests {
           "loop_state":"turning",
           "projects":[{
             "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
-            "runtime":{"session_id":"ps_1","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"observation":{"category":"needs_input","reason":"supervised Tasks are active","owner":"human","controls":["decide","resume","abandon"],"progress_age_secs":null,"deadline_in_secs":null,"step":"iteration 2"}},
+            "runtime":{"work_id":"project-1","status":{"waiting":{"wait":{"id":"wait_00000000000000000000000000000001","work":{"kind":"project","id":"project-1"},"epoch_id":"epoch_00000000000000000000000000000001","on":{"kind":"input","after":{"epoch_id":"epoch_00000000000000000000000000000001","revision":1}},"created_at":"2026-07-06T00:00:00Z","resolved_at":null}}},"reason":"supervised Tasks are active","updated_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"observation":{"category":"needs_input","reason":"supervised Tasks are active","owner":"user","controls":["decide","resume","abandon"],"progress_age_secs":null,"deadline_in_secs":null,"step":"iteration 2"}},
             "directive":null,
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
             "tasks":[{
               "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
               "reference":{"issue_url":"https://linear.app/loopflow/issue/INF-123/wire-it","workspace":{"slug":"wire-it","branch":"jack/inf-123","worktree":"/task-wt"}},
-              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true,"observation":{"category":"working","reason":"provider turn is active","owner":"session","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
+              "runtime":{"work_id":"issue-1","project_id":"project-1","status":{"running":{"run_id":"run_00000000000000000000000000000002"}},"reason":"provider turn is active","updated_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true,"observation":{"category":"working","reason":"provider turn is active","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
-              "attention":{"level":"green","reason":"provider turn is active","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","actions":[{"action":"recover","available":false,"reason":"body is alive; use attach/interrupt to interact"},{"action":"resume","available":false,"reason":"body is working; nothing to resume"},{"action":"review","available":false,"reason":"no open PR to review"},{"action":"start_next_pr","available":false,"reason":"no merged PR to advance from"},{"action":"complete","available":false,"reason":"implementation not finished"},{"action":"no_action","available":true,"reason":"Task body is working"}]},"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
+              "attention":{"level":"green","reason":"provider turn is active","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","reason":"Task body is working"},"pm_completed":false,"work_status":{"running":{"run_id":"run_00000000000000000000000000000002"}},"process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "prs":[],
               "active_pr":null
             }]
@@ -86,9 +86,11 @@ struct RegistryQueryTests {
         #expect(result.homeRuntime.action == .start(homeId: "home_00000000000000000000000000000001"))
         #expect(result.loopState == "turning")
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
-        #expect(result.workMap.projects[0].runtime?.status == .waiting)
+        if case .waiting = result.workMap.projects[0].runtime?.status {} else {
+            Issue.record("expected Project Work to be waiting")
+        }
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.projectSessionId == "ps_1")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.projectId == "project-1")
         #expect(result.workMap.projects[0].tasks[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")

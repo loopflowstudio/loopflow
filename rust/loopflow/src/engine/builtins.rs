@@ -297,7 +297,7 @@ mod tests {
         assert!(!project.contains("lf loop"));
 
         let task = get_builtin_skill("task_pursue").expect("task pursue");
-        assert!(task.contains("second Task Session"));
+        assert!(task.contains("second Task"));
         assert!(task.contains("lf pr land"));
         assert!(task.contains("lf task complete"));
         assert!(!task.contains("lf pm task done"));

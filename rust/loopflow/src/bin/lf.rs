@@ -601,17 +601,15 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 fn format_child_body(
     agent: &str,
     provider: &str,
-    process: Option<&loopflow::child_session::ChildProcessGeneration>,
+    launch: Option<&loopflow::durable::Launch>,
 ) -> String {
-    process.map_or_else(
+    launch.map_or_else(
         || format!("none; next agent {agent}, provider {provider}"),
-        |process| {
-            let generation = process.generation;
-            let provenance = process.provenance.as_ref().map_or_else(
-                || "binary unknown".to_string(),
-                |provenance| format!("binary {} ({})", provenance.version, provenance.provenance),
-            );
-            format!("generation {generation}; agent {agent}; provider {provider}; {provenance}")
+        |launch| {
+            format!(
+                "launch {}; agent {agent}; provider {}; {:?}",
+                launch.id, launch.route.provider, launch.state
+            )
         },
     )
 }
@@ -645,7 +643,7 @@ fn format_task_pr_line(pr: &loopflow::task::TaskPr) -> String {
     )
 }
 
-fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyhow::Result<()> {
+fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
     let snapshot = loopflow::ops::task::task_snapshot(session)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
@@ -662,15 +660,11 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
-        let body = format_child_body(
-            &session.agent,
-            &session.provider,
-            session.latest_process.as_ref(),
-        );
+        let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
-            "{}  {}\n  session: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.launch.issue.identifier,
-            session.status.as_str(),
+            work_status_label(&snapshot.status),
             session.id,
             session.lifecycle_phase.as_str(),
             session.lifecycle_cycle(),
@@ -682,24 +676,9 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
             session.worktree.display(),
             branch,
             pm_writeback,
-            session.status_reason,
+            work_status_label(&snapshot.status),
         );
-        // State the Task's parent-Project routing as fact: the historical owner
-        // and the live successor it routes to. No "terminal wake" warning — a
-        // broken chain is reported as a missing routing target, not a wake.
-        if snapshot.project_route_succeeded {
-            if let Some(routing) = &snapshot.routing_project_session_id {
-                println!(
-                    "  project: {} → routes to {}",
-                    session.project_session_id, routing,
-                );
-            }
-        } else if snapshot.routing_project_session_id.is_none() {
-            println!(
-                "  project: {} → no live successor; resume or restart the Project",
-                session.project_session_id,
-            );
-        }
+        println!("  project: {}", session.project_id);
         for pr in &snapshot.prs {
             println!("{}", format_task_pr_line(pr));
         }
@@ -721,24 +700,20 @@ fn print_task_session(session: &loopflow::task::TaskSession, json: bool) -> anyh
         }
         let actions = &snapshot.actions;
         if let Some(recommended) = actions.recommended {
-            let reason = actions
-                .status(recommended)
-                .map(|s| s.reason.as_str())
-                .unwrap_or("");
-            println!("  action: {}  ({})", recommended.as_str(), reason);
-            use loopflow::task::actions::TaskAction;
-            for status in &actions.actions {
-                if !status.available && status.action != TaskAction::NoAction {
-                    println!(
-                        "    blocked: {}  ({})",
-                        status.action.as_str(),
-                        status.reason,
-                    );
-                }
-            }
+            println!("  action: {}  ({})", recommended.as_str(), actions.reason);
         }
     }
     Ok(())
+}
+
+fn work_status_label(status: &loopflow::durable::WorkStatus) -> &'static str {
+    match status {
+        loopflow::durable::WorkStatus::Ready => "ready",
+        loopflow::durable::WorkStatus::Running { .. } => "running",
+        loopflow::durable::WorkStatus::Waiting { .. } => "waiting",
+        loopflow::durable::WorkStatus::Done => "done",
+        loopflow::durable::WorkStatus::Abandoned => "abandoned",
+    }
 }
 
 fn print_task_control(
@@ -774,27 +749,20 @@ fn print_task_control(
     Ok(())
 }
 
-fn print_project_session(
-    session: &loopflow::project_session::ProjectSession,
-    json: bool,
-) -> anyhow::Result<()> {
+fn print_project(session: &loopflow::project::Project, json: bool) -> anyhow::Result<()> {
+    let snapshot = loopflow::ops::project::project_snapshot(session)?;
     if json {
-        let snapshot = loopflow::ops::project::project_snapshot(session)?;
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let body = format_child_body(
-            &session.agent,
-            &session.provider,
-            session.latest_process.as_ref(),
-        );
+        let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
             "{}  {}\n  session: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             session.launch.project.slug,
-            session.status.as_str(),
+            work_status_label(&snapshot.status),
             session.id,
             body,
             session.iteration,
-            session.status_reason,
+            work_status_label(&snapshot.status),
         );
     }
     Ok(())
@@ -810,7 +778,7 @@ fn print_project_control(
         println!(
             "{} → {} ({})",
             result.receipt.label(),
-            result.project_id,
+            result.external_project_id,
             result.receipt.action(),
         );
     }
@@ -825,7 +793,7 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             json,
         } => {
             let session = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
-            print_project_session(&session, *json)
+            print_project(&session, *json)
         }
         ProjectCommand::Start {
             title,
@@ -839,11 +807,11 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
                 wave.as_deref(),
                 directive.clone(),
             )?;
-            print_project_session(&session, *json)
+            print_project(&session, *json)
         }
         ProjectCommand::Status { project_id, json } => {
             let session = loopflow::ops::project::project_status(project_id)?;
-            print_project_session(&session, *json)
+            print_project(&session, *json)
         }
         ProjectCommand::Steer {
             project_id,
@@ -870,7 +838,7 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             };
             let timeout = timeout.as_deref().map(parse_duration).transpose()?;
             let session = loopflow::ops::project::project_wait(project_id, until, timeout)?;
-            print_project_session(&session, *json)
+            print_project(&session, *json)
         }
         ProjectCommand::Resume {
             project_id,
@@ -921,7 +889,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     headless: *headless,
                 },
             )?;
-            print_task_session(&session, *json)
+            print_task(&session, *json)
         }
         TaskCommand::Start {
             title,
@@ -945,11 +913,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     headless: *headless,
                 },
             )?;
-            print_task_session(&session, *json)
+            print_task(&session, *json)
         }
         TaskCommand::Status { issue, json } => {
             let session = loopflow::ops::task::task_status(issue)?;
-            print_task_session(&session, *json)
+            print_task(&session, *json)
         }
         TaskCommand::Changes { issue, json } => {
             let snapshot = loopflow::ops::task::task_changes(issue)?;
@@ -1009,7 +977,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             json,
         } => {
             let session = loopflow::ops::task::task_complete(issue, summary.clone())?;
-            print_task_session(&session, *json)
+            print_task(&session, *json)
         }
         TaskCommand::Steer {
             issue,
@@ -1036,7 +1004,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             };
             let timeout = timeout.as_deref().map(parse_duration).transpose()?;
             let session = loopflow::ops::task::task_wait(issue, until, timeout)?;
-            print_task_session(&session, *json)
+            print_task(&session, *json)
         }
         TaskCommand::Resume {
             issue,
@@ -1053,7 +1021,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             json,
         } => {
             let session = loopflow::ops::task::task_recover(issue, reason.clone())?;
-            print_task_session(&session, *json)
+            print_task(&session, *json)
         }
         TaskCommand::Abandon {
             issue,
@@ -1338,24 +1306,13 @@ fn main() -> anyhow::Result<()> {
                 epoch_id,
                 *revision,
             ),
-            Some(Commands::TaskRunner {
-                session_id,
-                generation,
-            }) => {
-                let session_id = session_id.parse()?;
-                tokio::runtime::Runtime::new()?.block_on(loopflow::task::runner::run_task_session(
-                    session_id,
-                    *generation,
-                ))
-            }
-            Some(Commands::ProjectRunner {
-                session_id,
-                generation,
-            }) => {
-                let session_id = session_id.parse()?;
-                tokio::runtime::Runtime::new()?.block_on(
-                    loopflow::project_session::runner::run_project_session(session_id, *generation),
-                )
+            Some(Commands::WorkRunner { kind, work_id }) => {
+                let work = match kind.as_str() {
+                    "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),
+                    "task" => loopflow::durable::WorkRef::Task(work_id.parse()?),
+                    _ => unreachable!("clap validates Work kind"),
+                };
+                tokio::runtime::Runtime::new()?.block_on(loopflow::work_runner::run_work(work))
             }
             Some(Commands::Tokens { json, days }) => {
                 loopflow::lf::commands::tokens::run(*json, *days)
@@ -1549,13 +1506,13 @@ mod tests {
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
-    use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskPr, TaskPrId, TaskSessionId};
+    use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     fn published_pr() -> TaskPr {
         let now = time::OffsetDateTime::now_utc();
         TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "linear-pr-linkage".to_string(),
             branch: "jack/linear-pr-linkage".to_string(),
@@ -2122,60 +2079,5 @@ mod tests {
         let args = vec!["lf".to_string(), "-l".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-l"]);
-    }
-
-    #[test]
-    fn format_child_body_shows_binary_provenance() {
-        use loopflow::child_session::{BinaryProvenance, ChildLeaseState, ChildProcessGeneration};
-        use time::OffsetDateTime;
-
-        let process = ChildProcessGeneration {
-            generation: 3,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-x".to_string(),
-            agent: "claude".to_string(),
-            provider: "claude".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Active,
-            outcome: None,
-            provenance: Some(BinaryProvenance {
-                version: "0.12.0".to_string(),
-                provenance: "release".to_string(),
-                source_identity: "release".to_string(),
-            }),
-        };
-        let body = super::format_child_body("claude", "claude", Some(&process));
-        assert!(
-            body.contains("generation 3"),
-            "body shows generation: {body}"
-        );
-        assert!(
-            body.contains("binary 0.12.0 (release)"),
-            "body shows binary provenance: {body}"
-        );
-    }
-
-    #[test]
-    fn format_child_body_falls_back_when_provenance_absent() {
-        use loopflow::child_session::{ChildLeaseState, ChildProcessGeneration};
-        use time::OffsetDateTime;
-
-        let process = ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-legacy".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            started_at: OffsetDateTime::UNIX_EPOCH,
-            state: ChildLeaseState::Active,
-            outcome: None,
-            provenance: None,
-        };
-        let body = super::format_child_body("codex", "codex", Some(&process));
-        assert!(body.contains("binary unknown"), "legacy body: {body}");
     }
 }

@@ -1,9 +1,7 @@
-use std::path::PathBuf;
-
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child_session::ChildRef;
+use crate::child::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, BoundaryState, ChildFeedback,
     Containment, ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId,
@@ -14,10 +12,10 @@ use crate::durable::{
     ToolResponseWrite, Turn, TurnId, UserFeedback, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
-use crate::project_session::ProjectSession;
+use crate::project::Project;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::task::TaskSession;
+use crate::task::Task;
 
 use super::SqliteStore;
 
@@ -207,6 +205,48 @@ impl SqliteStore {
         Ok(RunLease::new(run.id, run.work, basis, token.clone()))
     }
 
+    pub(crate) fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        validate_run_lease(&conn, lease)?;
+        Ok(())
+    }
+
+    pub(crate) fn rotate_run_lease(&self, lease: &RunLease) -> StoreResult<RunLease> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        let live: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM agent_launches
+                WHERE product_run_id=?1 AND launch_state != 'ended'
+            )",
+            [run.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if live {
+            return Err(StoreError::InvalidData(format!(
+                "Run {} cannot rotate authority while a Launch is live",
+                run.id
+            )));
+        }
+        let token = RunLeaseToken::new();
+        if tx.execute(
+            "UPDATE runs SET lease_hash=?2
+             WHERE id=?1 AND lease_hash=?3 AND state IN ('reserved', 'active')",
+            params![run.id.as_str(), token.hash(), lease.token_hash()],
+        )? != 1
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} lost authority while rotating its Launch",
+                run.id
+            )));
+        }
+        let basis = current_epoch_in(&tx, &run.work)?.current_basis;
+        let rotated = RunLease::new(run.id, run.work, basis, token);
+        tx.commit()?;
+        Ok(rotated)
+    }
+
     pub fn advance_run(
         &self,
         lease: &RunLease,
@@ -239,6 +279,20 @@ impl SqliteStore {
                     return Err(StoreError::InvalidData(
                         "Launch provider and surface cannot be empty".to_string(),
                     ));
+                }
+                let live: bool = tx.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM agent_launches
+                        WHERE product_run_id=?1 AND launch_state != 'ended'
+                    )",
+                    [run.id.as_str()],
+                    |row| row.get(0),
+                )?;
+                if live {
+                    return Err(StoreError::InvalidData(format!(
+                        "Run {} already owns a live Launch",
+                        run.id
+                    )));
                 }
                 let basis = current_epoch_in(&tx, &run.work)?.current_basis;
                 let launch = Launch {
@@ -619,21 +673,80 @@ impl SqliteStore {
 
     pub(crate) fn control_launch_for_run(&self, run_id: &RunId) -> StoreResult<Option<Launch>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let launch_id = conn
-            .query_row(
-                "SELECT id FROM agent_launches
-                 WHERE product_run_id=?1 AND launch_state != 'ended'
-                 ORDER BY started_at DESC, rowid DESC LIMIT 1",
-                [run_id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        launch_id
-            .map(|id| {
-                let id = LaunchId::parse(&id).map_err(invalid_durable)?;
-                control_launch_in(&conn, &id)
-            })
-            .transpose()
+        control_launch_for_run_in(&conn, run_id)
+    }
+
+    pub(crate) fn recover_run(
+        &self,
+        run_id: &RunId,
+        launch_id: Option<&LaunchId>,
+        containment: ContainmentObservation,
+    ) -> StoreResult<StopReceipt> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = run_by_id_in(&tx, run_id)?;
+        if run.state == RunState::Ended {
+            tx.commit()?;
+            return Ok(StopReceipt { run, containment });
+        }
+        let current = control_launch_for_run_in(&tx, run_id)?;
+        match (launch_id, current.as_ref()) {
+            (Some(observed), Some(current)) if *observed == current.id => {}
+            (None, None) => {}
+            (Some(observed), Some(current)) => {
+                return Err(StoreError::InvalidData(format!(
+                    "Run {run_id} advanced from observed Launch {observed} to {}",
+                    current.id
+                )));
+            }
+            (Some(observed), None) => {
+                return Err(StoreError::InvalidData(format!(
+                    "Run {run_id} no longer owns observed Launch {observed}"
+                )));
+            }
+            (None, Some(current)) => {
+                return Err(StoreError::InvalidData(format!(
+                    "Run {run_id} gained Launch {} after an empty observation",
+                    current.id
+                )));
+            }
+        }
+        let cause = serde_json::to_string(&StopCause::Recovery).expect("Stop cause must serialize");
+        match containment {
+            ContainmentObservation::Absent => {
+                let now = now_unix();
+                tx.execute(
+                    "UPDATE agent_launches
+                     SET launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+                         outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
+                         handback_state=COALESCE(handback_state, 'unknown'),
+                         attention_kind=NULL, attention_work_kind=NULL,
+                         attention_work_id=NULL, attention_at=NULL
+                     WHERE product_run_id=?1 AND launch_state != 'ended'",
+                    params![run_id.as_str(), now],
+                )?;
+                tx.execute(
+                    "UPDATE runs SET state='ended', ended_at=?2, stop_reason=?3
+                     WHERE id=?1 AND state != 'ended'",
+                    params![run_id.as_str(), now, cause],
+                )?;
+            }
+            ContainmentObservation::Present | ContainmentObservation::Unprovable => {
+                tx.execute(
+                    "UPDATE runs SET state='stopping', stop_reason=?2
+                     WHERE id=?1 AND state IN ('reserved', 'active', 'stopping')",
+                    params![run_id.as_str(), cause],
+                )?;
+                tx.execute(
+                    "UPDATE agent_launches SET launch_state='stopping'
+                     WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')",
+                    [run_id.as_str()],
+                )?;
+            }
+        }
+        let run = run_by_id_in(&tx, run_id)?;
+        tx.commit()?;
+        Ok(StopReceipt { run, containment })
     }
 
     pub fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
@@ -656,6 +769,53 @@ impl SqliteStore {
                 launch_surface_in(&conn, &id)?.ok_or(StoreError::NotFound)
             })
             .collect()
+    }
+
+    /// Record what the provider actually turned out to be once the body is running.
+    ///
+    /// Route provider/model are known before spawn, but the resume token and the
+    /// real process group only exist after the harness starts and can change
+    /// mid-Run when a provider hands back a new session id. This is the write
+    /// path `agent_launches` previously lacked.
+    ///
+    /// This records observation only. `RunAdvance::LaunchLive` remains the sole
+    /// state transition, so there is never a second way for a Launch to go
+    /// live. Only an active Run's own Launch may be updated, so a fenced or
+    /// ended writer cannot revive itself by reporting a provider observation.
+    ///
+    /// Containment is deliberately **not** writable here. It is established at
+    /// spawn and is the fence a reaper trusts; a live tmux unit vetoes stale
+    /// process evidence, so letting a later pid observation overwrite a tmux
+    /// name would downgrade the strongest containment the Run has. A Launch
+    /// that needs different containment is a different Launch.
+    pub fn observe_launch_provider(
+        &self,
+        lease: &RunLease,
+        launch_id: &LaunchId,
+        resume_token: Option<&str>,
+    ) -> StoreResult<Launch> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = validate_run_lease(&tx, lease)?;
+        if !matches!(run.state, RunState::Reserved | RunState::Active) {
+            return Err(StoreError::InvalidData(format!(
+                "Run {} cannot observe a provider while {:?}",
+                run.id, run.state
+            )));
+        }
+        if tx.execute(
+            "UPDATE agent_launches
+             SET resume_token=COALESCE(?3, resume_token),
+                 provider_session_id=COALESCE(?3, provider_session_id)
+             WHERE id=?1 AND product_run_id=?2 AND launch_state IN ('starting','live')",
+            params![launch_id.as_str(), lease.run_id.as_str(), resume_token],
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        let launch = control_launch_in(&tx, launch_id)?;
+        tx.commit()?;
+        Ok(launch)
     }
 
     pub fn handback_launch(
@@ -857,13 +1017,30 @@ impl SqliteStore {
                 work.id()
             )));
         }
-        let launch_id: String = tx.query_row(
-            "SELECT id FROM agent_launches
-             WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')
-             ORDER BY started_at DESC LIMIT 1",
-            [run.id.as_str()],
-            |row| row.get(0),
-        )?;
+        let launch_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM agent_launches
+                 WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')
+                 ORDER BY started_at DESC LIMIT 1",
+                [run.id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(launch_id) = launch_id else {
+            let cause = serde_json::to_string(&StopCause::Interrupted)
+                .expect("interrupt cause must serialize");
+            tx.execute(
+                "UPDATE runs SET state='ended', ended_at=?2, stop_reason=?3 WHERE id=?1",
+                params![run.id.as_str(), now_unix(), cause],
+            )?;
+            let receipt = InterruptReceipt {
+                run_id: run.id,
+                launch_id: None,
+                turn_id: None,
+            };
+            tx.commit()?;
+            return Ok(receipt);
+        };
         let turn_id = tx
             .query_row(
                 "SELECT t.id FROM agent_turns t
@@ -889,7 +1066,7 @@ impl SqliteStore {
         }
         let receipt = InterruptReceipt {
             run_id: run.id,
-            launch_id: LaunchId::parse(&launch_id).map_err(invalid_durable)?,
+            launch_id: Some(LaunchId::parse(&launch_id).map_err(invalid_durable)?),
             turn_id: turn_id
                 .map(|id| TurnId::parse(&id).map_err(invalid_durable))
                 .transpose()?,
@@ -1033,22 +1210,18 @@ impl SqliteStore {
     pub(crate) fn boundary_seed_for_child(&self, target: &ChildRef) -> StoreResult<BoundarySeed> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let work = work_for_child_in(&conn, target)?;
-        let (epoch_id, revision) = match target {
-            ChildRef::Project(session_id) => conn.query_row(
-                "SELECT epoch_id, e.current_rev
-                 FROM project_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )?,
-            ChildRef::Task(session_id) => conn.query_row(
-                "SELECT epoch_id, e.current_rev
-                 FROM task_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )?,
+        let (column, id) = match &work {
+            WorkRef::Project(id) => ("project_id", id.as_str()),
+            WorkRef::Task(id) => ("task_id", id.as_str()),
+            WorkRef::Wave(_) => unreachable!("a child is Project or Task Work"),
         };
+        let (epoch_id, revision) = conn.query_row(
+            &format!(
+                "SELECT id, current_rev FROM epochs WHERE {column}=?1 ORDER BY number DESC LIMIT 1"
+            ),
+            [id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )?;
         let epoch_id = EpochId::parse(&epoch_id).map_err(|error| {
             StoreError::InvalidData(format!("invalid stored Epoch id: {error}"))
         })?;
@@ -1530,7 +1703,7 @@ fn resolve_wait_for_trigger(
     Ok(())
 }
 
-fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
+pub(crate) fn validate_run_lease(conn: &Connection, lease: &RunLease) -> StoreResult<Run> {
     let run = run_by_id_in(conn, &lease.run_id)?;
     if run.work != lease.work || !matches!(run.state, RunState::Reserved | RunState::Active) {
         return Err(StoreError::InvalidAuthority(format!(
@@ -1774,6 +1947,24 @@ fn require_live_launch_for_run(
         |_| Ok(()),
     )
     .map_err(StoreError::from)
+}
+
+fn control_launch_for_run_in(conn: &Connection, run_id: &RunId) -> StoreResult<Option<Launch>> {
+    let launch_id = conn
+        .query_row(
+            "SELECT id FROM agent_launches
+             WHERE product_run_id=?1 AND launch_state != 'ended'
+             ORDER BY started_at DESC, rowid DESC LIMIT 1",
+            [run_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    launch_id
+        .map(|id| {
+            let id = LaunchId::parse(&id).map_err(invalid_durable)?;
+            control_launch_in(conn, &id)
+        })
+        .transpose()
 }
 
 fn control_launch_in(conn: &Connection, launch_id: &LaunchId) -> StoreResult<Launch> {
@@ -2320,7 +2511,7 @@ fn validate_control_caller(
     }
 }
 
-fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
+pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
     let epoch = latest_epoch_in(conn, work)?;
     match epoch.state {
         EpochState::Done => return Ok(WorkStatus::Done),
@@ -2470,10 +2661,7 @@ pub(crate) fn create_wave_spine(
     )
 }
 
-pub(crate) fn create_project_spine(
-    tx: &Transaction<'_>,
-    session: &ProjectSession,
-) -> StoreResult<()> {
+pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> StoreResult<()> {
     let project_id = tx
         .query_row(
             "SELECT id FROM projects WHERE external_project_id=?1",
@@ -2507,19 +2695,16 @@ pub(crate) fn create_project_spine(
         [&project_id],
         |row| row.get(0),
     )?;
-    let (state, terminal_at) = epoch_state_for_project(session);
     tx.execute(
         "INSERT INTO epochs (
             id, number, wave_id, project_id, task_id, state, current_rev,
             created_at, terminal_at
-         ) VALUES (?1, ?2, NULL, ?3, NULL, ?4, 0, ?5, ?6)",
+         ) VALUES (?1, ?2, NULL, ?3, NULL, 'open', 0, ?4, NULL)",
         params![
             epoch_id.as_str(),
             number,
             project_id,
-            state.as_str(),
-            session.created_at.unix_timestamp(),
-            terminal_at,
+            session.updated_at.unix_timestamp(),
         ],
     )?;
     insert_truth(
@@ -2532,17 +2717,12 @@ pub(crate) fn create_project_spine(
             "prompt_context": session.launch.project.prompt_context,
             "pm_snapshot_synced_at": session.launch.pm_snapshot_synced_at,
         }),
-        session.created_at,
+        session.updated_at,
     )?;
-    tx.execute(
-        "UPDATE project_sessions SET epoch_id=?2 WHERE id=?1",
-        params![session.id.as_str(), epoch_id.as_str()],
-    )?;
-    import_project_run(tx, session)?;
     Ok(())
 }
 
-pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
+pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreResult<()> {
     let project_id: String = tx.query_row(
         "SELECT id FROM projects WHERE external_project_id=?1",
         [session.launch.project.id.as_str()],
@@ -2582,19 +2762,16 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> 
         [&task_id],
         |row| row.get(0),
     )?;
-    let (state, terminal_at) = epoch_state_for_task(session);
     tx.execute(
         "INSERT INTO epochs (
             id, number, wave_id, project_id, task_id, state, current_rev,
             created_at, terminal_at
-         ) VALUES (?1, ?2, NULL, NULL, ?3, ?4, 0, ?5, ?6)",
+         ) VALUES (?1, ?2, NULL, NULL, ?3, 'open', 0, ?4, NULL)",
         params![
             epoch_id.as_str(),
             number,
             task_id,
-            state.as_str(),
-            session.created_at.unix_timestamp(),
-            terminal_at,
+            session.updated_at.unix_timestamp(),
         ],
     )?;
     insert_truth(
@@ -2607,294 +2784,41 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &TaskSession) -> 
             "description": session.launch.issue.description,
             "pm_snapshot_synced_at": session.launch.pm_snapshot_synced_at,
         }),
-        session.created_at,
+        session.updated_at,
     )?;
-    tx.execute(
-        "UPDATE task_sessions SET epoch_id=?2 WHERE id=?1",
-        params![session.id.as_str(), epoch_id.as_str()],
-    )?;
-    import_task_run(tx, session)?;
     Ok(())
 }
 
-fn import_project_run(tx: &Transaction<'_>, session: &ProjectSession) -> StoreResult<()> {
-    let Some(process) = session.latest_process.as_ref() else {
-        return Ok(());
-    };
-    import_run_for_child(tx, &ChildRef::Project(session.id.clone()), process)
-}
-
-fn import_task_run(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
-    let Some(process) = session.latest_process.as_ref() else {
-        return Ok(());
-    };
-    import_run_for_child(tx, &ChildRef::Task(session.id.clone()), process)
-}
-
-fn import_run_for_child(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    process: &crate::child_session::ChildProcessGeneration,
-) -> StoreResult<()> {
-    use crate::child_session::ChildLeaseState;
-
-    let state = match process.state {
-        ChildLeaseState::Legacy | ChildLeaseState::Active => "active",
-        ChildLeaseState::Reserved => "reserved",
-        ChildLeaseState::Revoked => "stopping",
-        ChildLeaseState::Finished => return Ok(()),
-    };
-    let work = work_for_child_in(tx, target)?;
-    let epoch = current_epoch_in(tx, &work)?;
-    let home_id = reserving_home_in(tx, &work)?;
-    let trigger_json = serde_json::to_string(&RunTrigger::Input {
-        basis: epoch.current_basis,
-    })
-    .expect("run trigger must serialize");
-    // A legacy body never receives product Run authority by derivation. The
-    // imported slot stays fenced until containment is reconciled, and only a
-    // newly reserved Run gets a capability its process can inherit.
-    let lease_hash = crate::durable::RunLeaseToken::new().hash();
-    let run_id = RunId::new();
-    tx.execute(
-        "INSERT INTO runs (
-            id, epoch_id, home_id, state, trigger_json, lease_hash,
-            lease_generation, source_kind, source_id, created_at, ended_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)",
-        params![
-            run_id.as_str(),
-            epoch.id.as_str(),
-            home_id.as_str(),
-            state,
-            trigger_json,
-            lease_hash,
-            i64::from(process.generation),
-            target.target_kind(),
-            target.target_id(),
-            now_unix(),
-        ],
-    )?;
-    insert_child_control_launch(tx, target, &run_id, process, state)?;
-    Ok(())
-}
-
-pub(crate) fn reserve_run_for_child(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    process: &crate::child_session::ChildProcessGeneration,
-    trigger: Option<&RunTrigger>,
-) -> StoreResult<crate::durable::RunLeaseToken> {
-    let work = work_for_child_in(tx, target)?;
-    let epoch = current_epoch_in(tx, &work)?;
-    let home_id = reserving_home_in(tx, &work)?;
-    let default_trigger = RunTrigger::Input {
-        basis: epoch.current_basis.clone(),
-    };
-    let trigger_json = serde_json::to_string(trigger.unwrap_or(&default_trigger))
-        .expect("run trigger must serialize");
-    let token = crate::durable::RunLeaseToken::new();
-    let lease_hash = token.hash();
-    let run_id = RunId::new();
-    tx.execute(
-        "INSERT INTO runs (
-            id, epoch_id, home_id, state, trigger_json, lease_hash,
-            lease_generation, source_kind, source_id, created_at, ended_at
-         ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, ?7, ?8, ?9, NULL)",
-        params![
-            run_id.as_str(),
-            epoch.id.as_str(),
-            home_id.as_str(),
-            trigger_json,
-            lease_hash,
-            i64::from(process.generation),
-            target.target_kind(),
-            target.target_id(),
-            now_unix(),
-        ],
-    )?;
-    insert_child_control_launch(tx, target, &run_id, process, "reserved")?;
-    Ok(token)
-}
-
-fn insert_child_control_launch(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    run_id: &RunId,
-    process: &crate::child_session::ChildProcessGeneration,
-    run_state: &str,
-) -> StoreResult<()> {
-    let run = run_by_id_in(tx, run_id)?;
-    let cwd = match target {
-        ChildRef::Project(_) => PathBuf::from(work_labels(tx, &run.work)?.repo),
-        ChildRef::Task(session_id) => PathBuf::from(tx.query_row(
-            "SELECT worktree FROM task_sessions WHERE id=?1",
-            [session_id.as_str()],
-            |row| row.get::<_, String>(0),
-        )?),
-    };
-    let launch = Launch {
-        id: LaunchId::new(),
-        run_id: run.id.clone(),
-        home_id: run.home_id.clone(),
-        route: LaunchRoute {
-            provider: process.provider.clone(),
-            model: None,
-            account_id: None,
-        },
-        cwd,
-        surface: "headless".to_string(),
-        state: match run_state {
-            "reserved" => LaunchState::Starting,
-            "active" => LaunchState::Live,
-            "stopping" => LaunchState::Stopping,
-            _ => {
-                return Err(StoreError::InvalidData(format!(
-                    "legacy child Run cannot register a Launch while {run_state}"
-                )))
-            }
-        },
-        containment: Containment::Tmux {
-            name: process.tmux_name.clone(),
-        },
-        opaque_basis: None,
-        resume_token: process.provider_session_id.clone(),
-        started_at: process.started_at,
-        ended_at: None,
-    };
-    insert_control_launch(tx, &run, &launch)?;
-    if launch.state != LaunchState::Starting {
-        let launch_state = match launch.state {
-            LaunchState::Live => "live",
-            LaunchState::Stopping => "stopping",
-            LaunchState::Starting | LaunchState::Ended => unreachable!("filtered above"),
-        };
-        tx.execute(
-            "UPDATE agent_launches SET launch_state=?2 WHERE id=?1",
-            params![launch.id.as_str(), launch_state],
-        )?;
-    }
-    Ok(())
-}
-
-pub(crate) fn activate_run_for_child(
-    tx: &Transaction<'_>,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<()> {
-    let run_id = tx
-        .query_row(
-            "SELECT id FROM runs
-             WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-               AND state='reserved'",
-            params![
-                target.target_kind(),
-                target.target_id(),
-                i64::from(generation)
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .ok_or_else(|| {
-            StoreError::InvalidData(format!(
-                "{} generation {generation} has no reserved Run",
-                target.target_id()
-            ))
-        })?;
-    if tx.execute(
-        "UPDATE runs SET state='active'
-         WHERE id=?1 AND state='reserved'",
-        [&run_id],
-    )? == 0
-    {
-        return Err(StoreError::InvalidData(format!(
-            "{} generation {generation} has no reserved Run",
-            target.target_id()
-        )));
-    }
-    if tx.execute(
-        "UPDATE agent_launches SET launch_state='live'
-         WHERE product_run_id=?1 AND launch_state='starting'",
-        [&run_id],
-    )? != 1
-    {
-        return Err(StoreError::InvalidData(format!(
-            "{} generation {generation} has no starting Launch",
-            target.target_id()
-        )));
-    }
-    Ok(())
-}
-
-pub(crate) fn end_run_for_child(
+pub(crate) fn end_run_for_lease(
     conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
+    lease: &RunLease,
+    outcome: BoundaryState,
 ) -> StoreResult<()> {
+    if !outcome.is_terminal() {
+        return Err(StoreError::InvalidData(
+            "Run finish outcome must be terminal".to_string(),
+        ));
+    }
+    let run = validate_run_lease(conn, lease)?;
     let now = now_unix();
     conn.execute(
         "UPDATE agent_launches SET
-            launch_state='ended', ended_at=COALESCE(ended_at, ?4),
-            outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
-            handback_state=COALESCE(handback_state, 'unknown'),
+            launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+            outcome=?3, handback_state=?4,
             attention_kind=NULL, attention_work_kind=NULL,
             attention_work_id=NULL, attention_at=NULL
-         WHERE product_run_id IN (
-            SELECT id FROM runs
-            WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-         ) AND launch_state != 'ended'",
+         WHERE product_run_id=?1 AND launch_state != 'ended'",
         params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation),
-            now
+            run.id.as_str(),
+            now,
+            outcome.as_launch_outcome(),
+            handback_state(outcome)
         ],
     )?;
     conn.execute(
-        "UPDATE runs SET state='ended', ended_at=?4
-         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-           AND state != 'ended'",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation),
-            now
-        ],
-    )?;
-    Ok(())
-}
-
-pub(crate) fn fence_run_for_child(
-    conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<()> {
-    if conn.execute(
-        "UPDATE runs SET state='stopping'
-         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-           AND state IN ('reserved', 'active')",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
-    )? == 0
-    {
-        return Err(StoreError::InvalidData(format!(
-            "{} generation {generation} has no Run to stop",
-            target.target_id()
-        )));
-    }
-    conn.execute(
-        "UPDATE agent_launches SET launch_state='stopping'
-         WHERE product_run_id IN (
-            SELECT id FROM runs
-            WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-         ) AND launch_state IN ('starting', 'live')",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
+        "UPDATE runs SET state='ended', ended_at=?2
+         WHERE id=?1 AND state != 'ended'",
+        params![run.id.as_str(), now],
     )?;
     Ok(())
 }
@@ -2966,34 +2890,6 @@ fn insert_truth(
     Ok(())
 }
 
-fn epoch_state_for_project(session: &ProjectSession) -> (EpochState, Option<i64>) {
-    use crate::project_session::ProjectSessionStatus;
-    match session.status {
-        ProjectSessionStatus::Completed => {
-            (EpochState::Done, Some(session.updated_at.unix_timestamp()))
-        }
-        ProjectSessionStatus::Abandoned => (
-            EpochState::Abandoned,
-            Some(session.updated_at.unix_timestamp()),
-        ),
-        _ => (EpochState::Open, None),
-    }
-}
-
-fn epoch_state_for_task(session: &TaskSession) -> (EpochState, Option<i64>) {
-    use crate::task::TaskSessionStatus;
-    match session.status {
-        TaskSessionStatus::Completed => {
-            (EpochState::Done, Some(session.updated_at.unix_timestamp()))
-        }
-        TaskSessionStatus::Abandoned => (
-            EpochState::Abandoned,
-            Some(session.updated_at.unix_timestamp()),
-        ),
-        _ => (EpochState::Open, None),
-    }
-}
-
 fn validate_basis(current: &Basis, expected: &Basis) -> StoreResult<()> {
     if current == expected {
         return Ok(());
@@ -3056,29 +2952,21 @@ fn validate_author(tx: &Transaction<'_>, target: &WorkRef, author: &Author) -> S
 
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {
     match target {
-        ChildRef::Project(session_id) => {
-            let id: String = conn.query_row(
-                "SELECT e.project_id
-                 FROM project_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| row.get(0),
+        ChildRef::Project(project_id) => {
+            conn.query_row(
+                "SELECT 1 FROM projects WHERE id=?1",
+                [project_id.as_str()],
+                |_| Ok(()),
             )?;
-            Ok(WorkRef::Project(ProjectId::parse(&id).map_err(
-                |error| StoreError::InvalidData(format!("invalid stored Project id: {error}")),
-            )?))
+            Ok(WorkRef::Project(project_id.clone()))
         }
-        ChildRef::Task(session_id) => {
-            let id: String = conn.query_row(
-                "SELECT e.task_id
-                 FROM task_sessions s JOIN epochs e ON e.id=s.epoch_id
-                 WHERE s.id=?1",
-                [session_id.as_str()],
-                |row| row.get(0),
+        ChildRef::Task(task_id) => {
+            conn.query_row(
+                "SELECT 1 FROM tasks WHERE id=?1",
+                [task_id.as_str()],
+                |_| Ok(()),
             )?;
-            Ok(WorkRef::Task(TaskId::parse(&id).map_err(|error| {
-                StoreError::InvalidData(format!("invalid stored Task id: {error}"))
-            })?))
+            Ok(WorkRef::Task(task_id.clone()))
         }
     }
 }
@@ -3384,4 +3272,151 @@ fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
             error.to_string(),
         )),
     )
+}
+
+#[cfg(test)]
+mod observe_launch_provider_tests {
+    use crate::durable::{Containment, LaunchRoute, RunAdvance, RunTrigger, StopCause, WorkRef};
+    use crate::id::WaveId;
+    use crate::store::sqlite::SqliteStore;
+    use crate::store::StoreError;
+    use std::path::{Path, PathBuf};
+
+    /// A registered Wave is the cheapest real Work: `upsert_wave` is the only
+    /// public path that mints an Epoch, and Wave Work needs no PM binding.
+    fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("loopflow.db");
+        let store = SqliteStore::new(&path).expect("open a fresh store");
+        let wave_id = WaveId::new();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
+             VALUES (?1, 'probe', '/repo', 1700000000, NULL)",
+            [wave_id.as_str()],
+        )
+        .unwrap();
+        drop(conn);
+        // Reach the crate-private spine builder the public upsert path calls.
+        {
+            let mut raw = rusqlite::Connection::open(&path).unwrap();
+            let tx = raw.transaction().unwrap();
+            super::create_wave_spine(&tx, &wave_id, "probe", "/repo", 1_700_000_000).unwrap();
+            tx.commit().unwrap();
+        }
+        let work = WorkRef::Wave(wave_id);
+        (dir, store, work)
+    }
+
+    fn start_launch(store: &SqliteStore, work: &WorkRef) -> (crate::durable::RunLease, PathBuf) {
+        let (_, lease) = store
+            .reserve_run(work, &RunTrigger::User)
+            .expect("reserve a Run");
+        let cwd = PathBuf::from("/repo");
+        store
+            .advance_run(
+                &lease,
+                &RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "probe".to_string(),
+                    },
+                    cwd: cwd.clone(),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .expect("start a Launch");
+        (lease, cwd)
+    }
+
+    fn live_launch_id(store: &SqliteStore, path: &Path) -> crate::durable::LaunchId {
+        let _ = store;
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let id: String = conn
+            .query_row("SELECT id FROM agent_launches LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        crate::durable::LaunchId::parse(&id).unwrap()
+    }
+
+    /// The provider's resume token and real process group only exist after the
+    /// harness starts, and can change mid-Run. This is the write path that
+    /// makes Launch the durable owner of provider continuity.
+    #[test]
+    fn a_running_launch_records_its_provider_continuity() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+
+        let launch = store
+            .observe_launch_provider(&lease, &launch_id, Some("thread_abc"))
+            .expect("record the observed provider");
+
+        assert_eq!(launch.resume_token.as_deref(), Some("thread_abc"));
+        assert_eq!(
+            launch.containment,
+            Containment::Tmux {
+                name: "probe".to_string()
+            },
+            "containment is spawn-time fencing evidence and must survive a provider observation"
+        );
+    }
+
+    /// A later observation that carries no token must not erase the one already
+    /// recorded — losing it would cost the Run its provider continuity across a
+    /// relaunch, which is exactly what recovery depends on.
+    #[test]
+    fn an_empty_observation_never_erases_recorded_continuity() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+
+        store
+            .observe_launch_provider(&lease, &launch_id, Some("thread_abc"))
+            .unwrap();
+        let launch = store
+            .observe_launch_provider(&lease, &launch_id, None)
+            .unwrap();
+
+        assert_eq!(launch.resume_token.as_deref(), Some("thread_abc"));
+    }
+
+    /// Fail closed: once the Run is stopped it is no longer a writer, so it
+    /// cannot report a provider observation. A dead process that wakes up and
+    /// reports must be rejected, not allowed to touch its old Launch.
+    #[test]
+    fn a_stopped_run_cannot_record_a_provider_observation() {
+        let (dir, store, work) = store_with_wave();
+        let path = dir.path().join("loopflow.db");
+        let (lease, _) = start_launch(&store, &work);
+        let launch_id = live_launch_id(&store, &path);
+        store
+            .stop_run(
+                &lease,
+                &StopCause::Requested,
+                crate::durable::ContainmentObservation::Absent,
+            )
+            .expect("stop the Run with proven containment absence");
+
+        let error = store
+            .observe_launch_provider(&lease, &launch_id, Some("thread_zzz"))
+            .expect_err("a stopped Run must not remain a writer");
+
+        assert!(
+            matches!(
+                error,
+                StoreError::InvalidAuthority(_) | StoreError::InvalidData(_)
+            ),
+            "expected an authority refusal, got {error:?}"
+        );
+    }
 }

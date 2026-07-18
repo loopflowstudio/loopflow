@@ -169,7 +169,7 @@ pub fn parse_event(raw_body: &[u8]) -> Result<(WebhookEvent, i64), WebhookError>
 pub enum WebhookOutcome {
     /// Not an event that carries direction (metadata edit, removal, unknown).
     Ignored,
-    /// A real event on an issue that has no Task Session — nothing to steer.
+    /// A real event on an issue that has no Task — nothing to steer.
     NoTarget,
     /// Loopflow's own edit/comment, skipped to avoid a feedback loop.
     SelfAuthored,
@@ -184,7 +184,7 @@ fn is_human(author_id: Option<&str>, viewer_id: &str) -> bool {
 }
 
 /// Map one verified, parsed event onto the durable Task control substrate.
-/// Resolves the target Task Session by Linear issue id; a missing Session or a
+/// Resolves the target Task by Linear issue id; a missing Session or a
 /// self-authored change writes nothing.
 pub async fn ingest_event(
     store: &Store,
@@ -198,7 +198,7 @@ pub async fn ingest_event(
         }
         WebhookEvent::Ignored => return Ok(WebhookOutcome::Ignored),
     };
-    let Some(session) = store.get_task_session_by_issue(&issue_id).await? else {
+    let Some(session) = store.get_task_by_issue(&issue_id).await? else {
         return Ok(WebhookOutcome::NoTarget);
     };
     match event {

@@ -40,7 +40,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 2. **Read runtime state.** For each member wave:
    - `lf status <wave-name> --json` — Wave presence, resident state, Project
-     Sessions, Task Sessions, next owners, worktrees, PRs, and attention
+     Sessions, Tasks, next owners, worktrees, PRs, and attention
    - `lf task status <issue-id> --json` or
      `lf project status <project-id> --json` only when the Wave snapshot needs
      deeper inspection
@@ -49,18 +49,18 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 3. **Read recent activity.** For each member wave:
    - `git log main --since="1 week ago"` filtered to the wave's area paths
-   - Open PRs owned by the Wave's Task Sessions
+   - Open PRs owned by the Wave's Tasks
    - CI status on open PRs
    - Any `scratch/` artifacts from in-progress work
 
 4. **Read unlanded branches.** Look for work that was pushed but never landed:
-   - Start from each Task Session's persisted branch and worktree
+   - Start from each Task's persisted branch and worktree
    - For each Task branch ahead of main, show `git log main..<branch> --oneline`
      and `git diff --stat main..<branch>`
    - Check whether a PR exists for the branch (`gh pr list --head <branch>`)
    - Note branches with significant unlanded commits — these represent
      work the wave already did that the chord can't see from main alone
-   - Check Task Session worktrees too (`lf wt list`) — a worktree with
+   - Check Task worktrees too (`lf wt list`) — a worktree with
      uncommitted changes or unpushed commits is the same signal. Low-level
      worktrees not attached to a Task are diagnostic state, not roadmap work.
 
@@ -106,13 +106,13 @@ Write `scratch/garden-scan.md`:
 <objective, cadence, policy, PM binding>
 
 ### Runtime
-<Wave presence and resident state, active Project/Task Sessions, attention>
+<Wave presence and resident state, active Project/Tasks, attention>
 
 ### Progress
 <what shipped recently, what's in flight>
 
 ### Projects
-<Project KRs, Project Session state, next owner>
+<Project KRs, Project state, next owner>
 
 ### Tasks
 <[identifier](provider URL) — readable active PR/workspace slug — status/next owner,

@@ -2350,6 +2350,26 @@ mod tests {
         assert!(project_lease.0.starts_with("cl_"));
         assert_eq!(project_lease.1, "legacy");
         assert_eq!(project_lease.2, None);
+        let project_launch: (String, String, String, String) = conn
+            .query_row(
+                "SELECT agent_launches.launch_state, agent_launches.containment_kind,
+                        agent_launches.containment_id, agent_launches.provider
+                 FROM agent_launches
+                 JOIN runs ON runs.id = agent_launches.product_run_id
+                 WHERE runs.source_kind = 'project' AND runs.source_id = 'ps_legacy'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            project_launch,
+            (
+                "live".to_string(),
+                "tmux".to_string(),
+                "project-legacy".to_string(),
+                "codex".to_string(),
+            )
+        );
         let task_lease: (String, String, String) = conn
             .query_row(
                 "SELECT process_lease_token, process_lease_state, process_outcome_json

@@ -725,7 +725,7 @@ impl SqliteStore {
         let run_token = reserve_run_for_child(
             &transaction,
             &ChildRef::Task(session.id.clone()),
-            process.generation,
+            process,
             trigger,
         )?;
         insert_task_event_in(
@@ -1777,7 +1777,7 @@ impl SqliteStore {
         let run_token = reserve_run_for_child(
             &transaction,
             &ChildRef::Project(session.id.clone()),
-            process.generation,
+            process,
             trigger,
         )?;
         insert_project_event_in(

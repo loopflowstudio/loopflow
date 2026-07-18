@@ -1579,56 +1579,105 @@ impl SqliteStore {
                 )
             })
             .unwrap_or((None, None, None, None, None, None, None, None));
-        tx.execute(
-            "INSERT INTO agent_launches (
-                id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                skill, project, task, provider, model, surface, capture_status,
-                incomplete_reason, outcome, artifact_dir, conversation_path,
-                provider_events_path, provider_session_id, provider_session_path,
-                conversation_event_count, conversation_bytes, product_run_id, home_id,
-                account_id, launch_state, containment_kind, containment_id, resume_token,
-                opaque_epoch_id, opaque_basis_rev
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-                ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
-            params![
-                launch.id,
-                launch.run_id,
-                launch.process_id,
-                launch.started_at,
-                launch.ended_at,
-                launch.repo,
-                launch.worktree,
-                launch.wave,
-                launch.flow,
-                launch.skill,
-                launch.project,
-                launch.task,
-                launch.provider,
-                launch.model,
-                launch.surface,
-                launch.capture_status,
-                launch.incomplete_reason,
-                launch.outcome,
-                launch.artifact_dir,
-                launch.conversation_path,
-                launch.provider_events_path,
-                launch.provider_session_id,
-                launch.provider_session_path,
-                launch.conversation_event_count,
-                launch.conversation_bytes,
-                product_run_id,
-                home_id,
-                account_id,
-                product_run_id.map(|_| "live"),
-                containment_kind,
-                containment_id,
-                resume_token,
-                opaque_epoch_id,
-                opaque_basis_rev,
-            ],
-        )?;
-        if let Some(run_id) = product_run_id {
+        let registered = product_run_id.is_some()
+            && tx.query_row(
+                "SELECT EXISTS(
+                        SELECT 1 FROM agent_launches
+                        WHERE id=?1 AND product_run_id=?2
+                     )",
+                params![launch.id, product_run_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+        if registered {
+            tx.execute(
+                "UPDATE agent_launches SET
+                    run_id=?2, process_id=?3, repo=?4, worktree=?5, wave=?6,
+                    flow=?7, skill=?8, project=?9, task=?10, provider=?11,
+                    model=?12, surface=?13, capture_status=?14,
+                    incomplete_reason=?15, outcome=?16, artifact_dir=?17,
+                    conversation_path=?18, provider_events_path=?19,
+                    provider_session_id=?20, provider_session_path=?21,
+                    conversation_event_count=?22, conversation_bytes=?23
+                 WHERE id=?1 AND product_run_id=?24",
+                params![
+                    launch.id,
+                    launch.run_id,
+                    launch.process_id,
+                    launch.repo,
+                    launch.worktree,
+                    launch.wave,
+                    launch.flow,
+                    launch.skill,
+                    launch.project,
+                    launch.task,
+                    launch.provider,
+                    launch.model,
+                    launch.surface,
+                    launch.capture_status,
+                    launch.incomplete_reason,
+                    launch.outcome,
+                    launch.artifact_dir,
+                    launch.conversation_path,
+                    launch.provider_events_path,
+                    launch.provider_session_id,
+                    launch.provider_session_path,
+                    launch.conversation_event_count,
+                    launch.conversation_bytes,
+                    product_run_id,
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO agent_launches (
+                    id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                    ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
+                params![
+                    launch.id,
+                    launch.run_id,
+                    launch.process_id,
+                    launch.started_at,
+                    launch.ended_at,
+                    launch.repo,
+                    launch.worktree,
+                    launch.wave,
+                    launch.flow,
+                    launch.skill,
+                    launch.project,
+                    launch.task,
+                    launch.provider,
+                    launch.model,
+                    launch.surface,
+                    launch.capture_status,
+                    launch.incomplete_reason,
+                    launch.outcome,
+                    launch.artifact_dir,
+                    launch.conversation_path,
+                    launch.provider_events_path,
+                    launch.provider_session_id,
+                    launch.provider_session_path,
+                    launch.conversation_event_count,
+                    launch.conversation_bytes,
+                    product_run_id,
+                    home_id,
+                    account_id,
+                    product_run_id.map(|_| "live"),
+                    containment_kind,
+                    containment_id,
+                    resume_token,
+                    opaque_epoch_id,
+                    opaque_basis_rev,
+                ],
+            )?;
+        }
+        if let Some(run_id) = product_run_id.filter(|_| !registered) {
             if tx.execute(
                 "UPDATE runs SET state='active' WHERE id=?1 AND state='reserved'",
                 [run_id],

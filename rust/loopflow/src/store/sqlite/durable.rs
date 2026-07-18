@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use time::OffsetDateTime;
 
@@ -551,6 +553,25 @@ impl SqliteStore {
     pub fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         launch_surface_in(&conn, launch_id)
+    }
+
+    pub(crate) fn control_launch_for_run(&self, run_id: &RunId) -> StoreResult<Option<Launch>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let launch_id = conn
+            .query_row(
+                "SELECT id FROM agent_launches
+                 WHERE product_run_id=?1 AND launch_state != 'ended'
+                 ORDER BY started_at DESC, rowid DESC LIMIT 1",
+                [run_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        launch_id
+            .map(|id| {
+                let id = LaunchId::parse(&id).map_err(invalid_durable)?;
+                control_launch_in(&conn, &id)
+            })
+            .transpose()
     }
 
     pub fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
@@ -2277,35 +2298,24 @@ fn import_project_run(tx: &Transaction<'_>, session: &ProjectSession) -> StoreRe
     let Some(process) = session.latest_process.as_ref() else {
         return Ok(());
     };
-    import_run_for_child(
-        tx,
-        &ChildRef::Project(session.id.clone()),
-        process.generation,
-        process.state,
-    )
+    import_run_for_child(tx, &ChildRef::Project(session.id.clone()), process)
 }
 
 fn import_task_run(tx: &Transaction<'_>, session: &TaskSession) -> StoreResult<()> {
     let Some(process) = session.latest_process.as_ref() else {
         return Ok(());
     };
-    import_run_for_child(
-        tx,
-        &ChildRef::Task(session.id.clone()),
-        process.generation,
-        process.state,
-    )
+    import_run_for_child(tx, &ChildRef::Task(session.id.clone()), process)
 }
 
 fn import_run_for_child(
     tx: &Transaction<'_>,
     target: &ChildRef,
-    generation: u32,
-    lease_state: crate::child_session::ChildLeaseState,
+    process: &crate::child_session::ChildProcessGeneration,
 ) -> StoreResult<()> {
     use crate::child_session::ChildLeaseState;
 
-    let state = match lease_state {
+    let state = match process.state {
         ChildLeaseState::Legacy | ChildLeaseState::Active => "active",
         ChildLeaseState::Reserved => "reserved",
         ChildLeaseState::Revoked => "stopping",
@@ -2326,31 +2336,33 @@ fn import_run_for_child(
     // imported slot stays fenced until containment is reconciled, and only a
     // newly reserved Run gets a capability its process can inherit.
     let lease_hash = crate::durable::RunLeaseToken::new().hash();
+    let run_id = RunId::new();
     tx.execute(
         "INSERT INTO runs (
             id, epoch_id, home_id, state, trigger_json, lease_hash,
             lease_generation, source_kind, source_id, created_at, ended_at
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)",
         params![
-            RunId::new().as_str(),
+            run_id.as_str(),
             epoch.id.as_str(),
             home_id,
             state,
             trigger_json,
             lease_hash,
-            i64::from(generation),
+            i64::from(process.generation),
             target.target_kind(),
             target.target_id(),
             now_unix(),
         ],
     )?;
+    insert_child_control_launch(tx, target, &run_id, process, state)?;
     Ok(())
 }
 
 pub(crate) fn reserve_run_for_child(
     tx: &Transaction<'_>,
     target: &ChildRef,
-    generation: u32,
+    process: &crate::child_session::ChildProcessGeneration,
     trigger: Option<&RunTrigger>,
 ) -> StoreResult<crate::durable::RunLeaseToken> {
     let work = work_for_child_in(tx, target)?;
@@ -2379,13 +2391,74 @@ pub(crate) fn reserve_run_for_child(
             home_id,
             trigger_json,
             lease_hash,
-            i64::from(generation),
+            i64::from(process.generation),
             target.target_kind(),
             target.target_id(),
             now_unix(),
         ],
     )?;
+    insert_child_control_launch(tx, target, &run_id, process, "reserved")?;
     Ok(token)
+}
+
+fn insert_child_control_launch(
+    tx: &Transaction<'_>,
+    target: &ChildRef,
+    run_id: &RunId,
+    process: &crate::child_session::ChildProcessGeneration,
+    run_state: &str,
+) -> StoreResult<()> {
+    let run = run_by_id_in(tx, run_id)?;
+    let cwd = match target {
+        ChildRef::Project(_) => PathBuf::from(work_labels(tx, &run.work)?.repo),
+        ChildRef::Task(session_id) => PathBuf::from(tx.query_row(
+            "SELECT worktree FROM task_sessions WHERE id=?1",
+            [session_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )?),
+    };
+    let launch = Launch {
+        id: LaunchId::new(),
+        run_id: run.id.clone(),
+        home_id: run.home_id.clone(),
+        route: LaunchRoute {
+            provider: process.provider.clone(),
+            model: None,
+            account_id: None,
+        },
+        cwd,
+        surface: "headless".to_string(),
+        state: match run_state {
+            "reserved" => LaunchState::Starting,
+            "active" => LaunchState::Live,
+            "stopping" => LaunchState::Stopping,
+            _ => {
+                return Err(StoreError::InvalidData(format!(
+                    "legacy child Run cannot register a Launch while {run_state}"
+                )))
+            }
+        },
+        containment: Containment::Tmux {
+            name: process.tmux_name.clone(),
+        },
+        opaque_basis: None,
+        resume_token: process.provider_session_id.clone(),
+        started_at: process.started_at,
+        ended_at: None,
+    };
+    insert_control_launch(tx, &run, &launch)?;
+    if launch.state != LaunchState::Starting {
+        let launch_state = match launch.state {
+            LaunchState::Live => "live",
+            LaunchState::Stopping => "stopping",
+            LaunchState::Starting | LaunchState::Ended => unreachable!("filtered above"),
+        };
+        tx.execute(
+            "UPDATE agent_launches SET launch_state=?2 WHERE id=?1",
+            params![launch.id.as_str(), launch_state],
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn activate_run_for_child(
@@ -2393,19 +2466,44 @@ pub(crate) fn activate_run_for_child(
     target: &ChildRef,
     generation: u32,
 ) -> StoreResult<()> {
+    let run_id = tx
+        .query_row(
+            "SELECT id FROM runs
+             WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
+               AND state='reserved'",
+            params![
+                target.target_kind(),
+                target.target_id(),
+                i64::from(generation)
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            StoreError::InvalidData(format!(
+                "{} generation {generation} has no reserved Run",
+                target.target_id()
+            ))
+        })?;
     if tx.execute(
         "UPDATE runs SET state='active'
-         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-           AND state='reserved'",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
+         WHERE id=?1 AND state='reserved'",
+        [&run_id],
     )? == 0
     {
         return Err(StoreError::InvalidData(format!(
             "{} generation {generation} has no reserved Run",
+            target.target_id()
+        )));
+    }
+    if tx.execute(
+        "UPDATE agent_launches SET launch_state='live'
+         WHERE product_run_id=?1 AND launch_state='starting'",
+        [&run_id],
+    )? != 1
+    {
+        return Err(StoreError::InvalidData(format!(
+            "{} generation {generation} has no starting Launch",
             target.target_id()
         )));
     }
@@ -2417,6 +2515,25 @@ pub(crate) fn end_run_for_child(
     target: &ChildRef,
     generation: u32,
 ) -> StoreResult<()> {
+    let now = now_unix();
+    conn.execute(
+        "UPDATE agent_launches SET
+            launch_state='ended', ended_at=COALESCE(ended_at, ?4),
+            outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
+            handback_state=COALESCE(handback_state, 'unknown'),
+            attention_kind=NULL, attention_work_kind=NULL,
+            attention_work_id=NULL, attention_at=NULL
+         WHERE product_run_id IN (
+            SELECT id FROM runs
+            WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
+         ) AND launch_state != 'ended'",
+        params![
+            target.target_kind(),
+            target.target_id(),
+            i64::from(generation),
+            now
+        ],
+    )?;
     conn.execute(
         "UPDATE runs SET state='ended', ended_at=?4
          WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
@@ -2425,7 +2542,7 @@ pub(crate) fn end_run_for_child(
             target.target_kind(),
             target.target_id(),
             i64::from(generation),
-            now_unix()
+            now
         ],
     )?;
     Ok(())
@@ -2452,6 +2569,18 @@ pub(crate) fn fence_run_for_child(
             target.target_id()
         )));
     }
+    conn.execute(
+        "UPDATE agent_launches SET launch_state='stopping'
+         WHERE product_run_id IN (
+            SELECT id FROM runs
+            WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
+         ) AND launch_state IN ('starting', 'live')",
+        params![
+            target.target_kind(),
+            target.target_id(),
+            i64::from(generation)
+        ],
+    )?;
     Ok(())
 }
 

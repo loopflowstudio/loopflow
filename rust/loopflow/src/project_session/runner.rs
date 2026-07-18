@@ -292,7 +292,15 @@ async fn run_project_session_inner(
                     provider_turn_active,
                     active_turn_id.as_deref(),
                 ).await? {
-                    return finish_command_stop(&store, &mut session, lease, harness.as_mut(), stop).await;
+                    return finish_command_stop(
+                        &store,
+                        &mut session,
+                        lease,
+                        harness.as_mut(),
+                        stop,
+                        capture.as_ref(),
+                    )
+                    .await;
                 }
                 if provider_turn_active {
                     if let Some(capture) = &capture {
@@ -343,7 +351,15 @@ async fn run_project_session_inner(
             }
             event = event_rx.recv() => {
                 let Some(event) = event else {
-                    return finish_failed(&store, &mut session, lease, harness.as_mut(), "provider event stream closed").await;
+                    return finish_failed(
+                        &store,
+                        &mut session,
+                        lease,
+                        harness.as_mut(),
+                        "provider event stream closed",
+                        capture.as_ref(),
+                    )
+                    .await;
                 };
                 if let Some(capture) = &capture {
                     capture.record_conversation(event.clone());
@@ -392,6 +408,7 @@ async fn run_project_session_inner(
                                 &mut event_rx,
                                 "provider turn failed",
                             );
+                            finish_capture(capture.as_ref(), "failed");
                             return handle_body_failure(
                                 &store,
                                 &mut session,
@@ -411,6 +428,7 @@ async fn run_project_session_inner(
                                     lease,
                                     harness.as_mut(),
                                     &error.to_string(),
+                                    capture.as_ref(),
                                 )
                                 .await;
                             }
@@ -594,11 +612,13 @@ async fn run_project_session_inner(
                                 }
                             });
                         }
+                        finish_capture(capture.as_ref(), "completed");
                         store.finish_project_process(&session, lease).await?;
                         return Ok(());
                     }
                     ConversationEvent::Error { code, message } => {
                         let reason = format!("{code}: {message}");
+                        finish_capture(capture.as_ref(), "failed");
                         return handle_body_failure(
                             &store,
                             &mut session,
@@ -941,13 +961,22 @@ async fn set_and_record_status(
     Ok(())
 }
 
+fn finish_capture(capture: Option<&crate::trace::CaptureHandle>, outcome: &str) {
+    let Some(capture) = capture else { return };
+    if let Err(error) = capture.finish(outcome, false) {
+        tracing::warn!(%error, "failed to finish Project trace capture");
+    }
+}
+
 async fn finish_failed(
     store: &SharedStore,
     session: &mut ProjectSession,
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     error: &str,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    finish_capture(capture, "failed");
     let _ = harness.stop().await;
     set_and_record_status(store, session, lease, ProjectSessionStatus::Failed, error).await?;
     store
@@ -1030,9 +1059,9 @@ async fn handle_body_failure(
             let non_convergence = format!(
                 "{reason}; not replay-safe (durable side effects this turn) and no backup agent configured"
             );
-            finish_failed(store, session, lease, harness, &non_convergence).await
+            finish_failed(store, session, lease, harness, &non_convergence, None).await
         }
-        _ => finish_failed(store, session, lease, harness, reason).await,
+        _ => finish_failed(store, session, lease, harness, reason, None).await,
     }
 }
 
@@ -1042,7 +1071,9 @@ async fn finish_abandoned(
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     reason: String,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
+    finish_capture(capture, "interrupted");
     let _ = harness.interrupt().await;
     let _ = harness.stop().await;
     set_and_record_status(
@@ -1067,9 +1098,11 @@ async fn finish_command_stop(
     lease: &ChildWriteLease,
     harness: &mut dyn Harness,
     stop: CommandStop,
+    capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
     match stop {
         CommandStop::Interrupted => {
+            finish_capture(capture, "interrupted");
             let _ = harness.stop().await;
             set_and_record_status(
                 store,
@@ -1089,7 +1122,7 @@ async fn finish_command_stop(
             Ok(())
         }
         CommandStop::Abandoned(reason) => {
-            finish_abandoned(store, session, lease, harness, reason).await
+            finish_abandoned(store, session, lease, harness, reason, capture).await
         }
     }
 }

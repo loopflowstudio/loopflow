@@ -927,7 +927,17 @@ impl TraceCapture {
     ) -> StoreResult<Self> {
         validate_input_op(&start.input_op)?;
         let persist_start = Instant::now();
-        let launch_id = LaunchId::new();
+        let ledger = crate::journal::open_ledger()?;
+        let registered_launch = start
+            .control
+            .as_ref()
+            .map(|control| ledger.control_launch_for_run(&control.run_id))
+            .transpose()?
+            .flatten();
+        let launch_id = registered_launch
+            .as_ref()
+            .map(|launch| launch.id.clone())
+            .unwrap_or_default();
         let turn_id = TurnId::new();
         let root = trace_root();
         create_private_dir(&root)?;
@@ -993,7 +1003,10 @@ impl TraceCapture {
             .as_ref()
             .map(|path| artifact_dir.join(path.strip_prefix(&staging_dir).expect("staged path")));
 
-        let started_at = OffsetDateTime::now_utc().unix_timestamp();
+        let started_at = registered_launch
+            .as_ref()
+            .map(|launch| launch.started_at.unix_timestamp())
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp());
         let system_tokens = prepared.system.as_ref().map_or(0, |channel| channel.tokens) as i64;
         let task_tokens = prepared.task.tokens as i64;
         let persist_ms = persist_start.elapsed().as_millis() as i64;
@@ -1080,9 +1093,7 @@ impl TraceCapture {
                 decision,
             })
             .collect::<Vec<_>>();
-        if let Err(error) =
-            crate::journal::open_ledger()?.insert_trace_capture(&launch, &turn, &assets, &decisions)
-        {
+        if let Err(error) = ledger.insert_trace_capture(&launch, &turn, &assets, &decisions) {
             let _ = fs::remove_dir_all(&artifact_dir);
             return Err(error);
         }
@@ -1896,6 +1907,125 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn capture_hydrates_the_registered_product_launch() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (run, launch) = runtime.block_on(async {
+            let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
+                guard.home().join("loopflow.db"),
+            ))
+            .await
+            .unwrap();
+            let wave = crate::wave::Wave::new(
+                crate::id::WaveId::new(),
+                "capture-launch".to_string(),
+                guard.home().display().to_string(),
+            );
+            store.create_wave(&wave).await.unwrap();
+            let home = store.home("test-home").await.unwrap();
+            let work = crate::durable::WorkRef::Wave(wave.id().clone());
+            let (run, lease) = store
+                .reserve_run(&work, &home.id, crate::durable::RunTrigger::User)
+                .await
+                .unwrap();
+            let receipt = store
+                .advance_run(
+                    &lease,
+                    crate::durable::RunAdvance::LaunchStarting {
+                        route: crate::durable::LaunchRoute {
+                            provider: "codex".to_string(),
+                            model: Some("gpt-5".to_string()),
+                            account_id: None,
+                        },
+                        containment: crate::durable::Containment::Tmux {
+                            name: "lf-capture-launch".to_string(),
+                        },
+                        cwd: guard.home().to_path_buf(),
+                        surface: "headless".to_string(),
+                        opaque: false,
+                        resume_token: None,
+                    },
+                )
+                .await
+                .unwrap();
+            let crate::durable::AdvanceReceipt::Launch(launch) = receipt else {
+                panic!("expected Launch receipt")
+            };
+            store
+                .advance_run(
+                    &lease,
+                    crate::durable::RunAdvance::LaunchLive {
+                        launch_id: launch.id.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            (run, launch)
+        });
+
+        let capture = CaptureHandle::begin(
+            TraceCaptureContext {
+                run_id: TraceId::new(),
+                process_id: ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("capture-launch".to_string()),
+                project: None,
+                task: None,
+                flow: Some("wave".to_string()),
+                skill: Some("pursue".to_string()),
+            },
+            PreparedTurnContext::from_prompts("system", "task"),
+            super::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+                basis: None,
+                control: Some(super::ControlLaunch {
+                    run_id: run.id.clone(),
+                    home_id: run.home_id.clone(),
+                    account_id: None,
+                    containment: launch.containment.clone(),
+                    resume_token: None,
+                    opaque_basis: None,
+                }),
+            },
+        )
+        .unwrap();
+        assert_eq!(capture.launch_id(), launch.id);
+        capture.finish("completed", false).unwrap();
+
+        let launches = crate::journal::open_ledger()
+            .unwrap()
+            .agent_launches_since(0)
+            .unwrap()
+            .into_iter()
+            .filter(|row| {
+                row.control
+                    .as_ref()
+                    .is_some_and(|control| control.run_id == run.id)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(launches.len(), 1);
+        assert_eq!(launches[0].id, launch.id.as_str());
+        assert_eq!(launches[0].capture_status, "complete");
+        let surface = crate::journal::open_ledger()
+            .unwrap()
+            .launch_surface(&launch.id)
+            .unwrap()
+            .expect("captured Launch remains historical evidence");
+        assert_eq!(surface.launch.state, crate::durable::LaunchState::Ended);
+        assert_eq!(
+            surface.handback,
+            Some(crate::durable::BoundaryState::Succeeded)
+        );
     }
 
     #[test]

@@ -1031,8 +1031,8 @@ mod tests {
         ObservationRecipient,
     };
     use crate::durable::{
-        AttentionRoute, Author, Containment, ContainmentObservation, ControlCtx, FlowPosition,
-        LaunchRoute, RunAdvance, SendState, StopCause,
+        AttentionRoute, AuthenticatedRequest, Author, Containment, ContainmentObservation,
+        ControlCtx, FlowPosition, RunAdvance, SendState, StopCause,
     };
     use crate::id::WaveId;
     use crate::profile::EmailAddress;
@@ -1383,6 +1383,160 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_legacy_children_register_their_product_launch_before_control() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project_session(&wave);
+        store.create_project_session(&project).await.unwrap();
+
+        let project_work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        let project_run = store.current_run(&project_work).await.unwrap().unwrap();
+        let project_launch = store
+            .sqlite
+            .control_launch_for_run(&project_run.id)
+            .unwrap()
+            .expect("live Project body has a product Launch");
+        assert_eq!(project_launch.state, crate::durable::LaunchState::Live);
+        assert_eq!(
+            project_launch.containment,
+            Containment::Tmux {
+                name: "lf-project-test".to_string()
+            }
+        );
+
+        let mut task = make_task_session(&wave, &project);
+        task.status = TaskSessionStatus::Running;
+        task.latest_process = Some(ChildProcessGeneration {
+            generation: 1,
+            pid: None,
+            process_group_id: None,
+            tmux_name: "lf-task-test".to_string(),
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: Some("thread-task".to_string()),
+            started_at: task.created_at,
+            state: ChildLeaseState::Active,
+            outcome: None,
+            provenance: None,
+        });
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+        let task_work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let task_run = store.current_run(&task_work).await.unwrap().unwrap();
+        let task_launch = store
+            .sqlite
+            .control_launch_for_run(&task_run.id)
+            .unwrap()
+            .expect("live Task body has a product Launch");
+        assert_eq!(task_launch.state, crate::durable::LaunchState::Live);
+        assert_eq!(
+            task_launch.containment,
+            Containment::Tmux {
+                name: "lf-task-test".to_string()
+            }
+        );
+
+        let request = AuthenticatedRequest::cli();
+        let receipt = store
+            .interrupt(&ControlCtx::User(&request), &task_work, &task_run.id)
+            .await
+            .unwrap();
+        assert_eq!(receipt.launch_id, task_launch.id);
+        assert_eq!(receipt.turn_id, None);
+    }
+
+    #[tokio::test]
+    async fn legacy_body_lifecycle_keeps_its_run_launch_honest() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let mut project = make_project_session(&wave);
+        project.status = ProjectSessionStatus::Created;
+        project.latest_process = None;
+        store.create_project_session(&project).await.unwrap();
+        let mut task = make_task_session(&wave, &project);
+        store
+            .create_task_session(&task, &make_task_pr(&task))
+            .await
+            .unwrap();
+
+        task.begin_generation("lf-task-lifecycle".to_string());
+        let reservation = store
+            .reserve_task_process(&task, TaskSessionStatus::Created)
+            .await
+            .unwrap()
+            .unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let run = store.current_run(&work).await.unwrap().unwrap();
+        let launch = store
+            .sqlite
+            .control_launch_for_run(&run.id)
+            .unwrap()
+            .expect("reservation registered a starting Launch");
+        assert_eq!(launch.state, crate::durable::LaunchState::Starting);
+
+        task.latest_process.as_mut().unwrap().state = ChildLeaseState::Active;
+        task.set_status(TaskSessionStatus::Running, "active");
+        store
+            .activate_task_process(&task, &reservation)
+            .await
+            .unwrap();
+        let active = store
+            .launch_surface(&launch.id)
+            .await
+            .unwrap()
+            .expect("active Launch remains addressable");
+        assert_eq!(active.launch.state, crate::durable::LaunchState::Live);
+
+        let revoked = store
+            .revoke_task_process(
+                &task.id,
+                &ChildBodyOutcome::Lost {
+                    reason: "provider exited".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let stopping = store
+            .launch_surface(&launch.id)
+            .await
+            .unwrap()
+            .expect("stopping Launch remains observable");
+        assert_eq!(stopping.launch.state, crate::durable::LaunchState::Stopping);
+
+        store
+            .finish_revoked_task_process(&task.id, revoked.generation)
+            .await
+            .unwrap();
+        let ended = store
+            .launch_surface(&launch.id)
+            .await
+            .unwrap()
+            .expect("ended Launch remains historical evidence");
+        assert_eq!(ended.launch.state, crate::durable::LaunchState::Ended);
+        assert_eq!(ended.handback, Some(crate::durable::BoundaryState::Unknown));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn steers_are_one_ordered_basis_checked_input_stream() {
         let directory = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
@@ -1492,37 +1646,17 @@ mod tests {
             .await
             .unwrap();
         let launch = store
-            .advance_run(
-                &task_run_lease,
-                RunAdvance::LaunchStarting {
-                    route: LaunchRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    containment: Containment::Tmux {
-                        name: "task-child".to_string(),
-                    },
-                    cwd: PathBuf::from("/repo.inf-123"),
-                    surface: "headless".to_string(),
-                    opaque: false,
-                    resume_token: None,
-                },
-            )
-            .await
-            .unwrap();
-        let crate::durable::AdvanceReceipt::Launch(launch) = launch else {
-            panic!("expected child Launch")
-        };
-        store
-            .advance_run(
-                &task_run_lease,
-                RunAdvance::LaunchLive {
-                    launch_id: launch.id.clone(),
-                },
-            )
-            .await
-            .unwrap();
+            .sqlite
+            .control_launch_for_run(&task_run_lease.run_id)
+            .unwrap()
+            .expect("Task reservation registered its product Launch");
+        assert_eq!(launch.state, crate::durable::LaunchState::Live);
+        assert_eq!(
+            launch.containment,
+            Containment::Tmux {
+                name: "child-run".to_string()
+            }
+        );
         let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
         store
             .set_flow_position(

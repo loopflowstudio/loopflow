@@ -4,6 +4,7 @@ mod commit;
 pub mod cron;
 mod error;
 mod flow;
+pub(crate) mod git_operation;
 pub mod home;
 mod land;
 pub mod linear_observe;
@@ -30,14 +31,15 @@ pub use cron::{
 };
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;
+pub(crate) use land::{finish_land_after_rebase, finish_submit_after_rebase};
 pub use land::{land, mark_ready, submit, LandOptions};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
 pub use rebase::{
     abort_rebase_for_resolution, continue_rebase_for_resolution, plan_rebase, rebase_class_name,
-    rebase_strategy_name, rebase_with_recovery, start_rebase_for_resolution, RebaseClass,
-    RebaseOptions, RebasePlan, RebaseStrategy,
+    rebase_strategy_name, rebase_with_recovery, recover_rebase, start_rebase_for_resolution,
+    RebaseClass, RebaseOptions, RebasePlan, RebaseRecovery, RebaseStrategy, RebaseVerification,
 };
 pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,

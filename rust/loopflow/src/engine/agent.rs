@@ -170,6 +170,8 @@ pub struct ProcessConfig {
     pub timeout: Option<Duration>,
     /// Durable local capture for this provider invocation.
     pub capture: Option<crate::trace::CaptureHandle>,
+    /// Environment scoped to this subprocess and its descendants.
+    pub env: BTreeMap<String, String>,
 }
 
 /// Agent capability flags.
@@ -847,7 +849,7 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
 }
 
 pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
-    let mut env = BTreeMap::new();
+    let mut env = process.env.clone();
     let agent = launch.agent.as_deref().unwrap_or("claude");
     let (harness, _) = parse_agent(agent);
     match harness.as_str() {
@@ -1223,6 +1225,21 @@ fn _launch_agent_once(
     if let Some(ref cwd) = launch.cwd {
         cmd.current_dir(cwd);
     }
+
+    let mut scoped_env = process.env.clone();
+    let writer_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
+    let writer_guard = writer_worktree
+        .as_deref()
+        .map(|cwd| crate::ops::git_operation::prepare_agent_writer(cwd, &scoped_env))
+        .transpose()
+        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+        .flatten();
+    if let Some(guard) = writer_guard.as_ref() {
+        scoped_env
+            .entry(crate::ops::git_operation::LF_WORKTREE_WRITER_ID_ENV.to_string())
+            .or_insert_with(|| guard.writer_id().to_string());
+    }
+    cmd.envs(&scoped_env);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
     // can request parent-shell actions (for example auto-cd after `lf wt switch`).

@@ -1210,6 +1210,7 @@ fn main() -> anyhow::Result<()> {
                 manual,
                 continue_rebase,
                 abort,
+                adopt,
                 onto,
             }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_rebase(
@@ -1218,6 +1219,7 @@ fn main() -> anyhow::Result<()> {
                     *manual,
                     *continue_rebase,
                     *abort,
+                    *adopt,
                 )
             }),
             Some(Commands::Commit {

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
-use crate::engine::git::{current_branch, fetch, get_default_branch, rev_parse, sync_main};
+use crate::engine::git::{current_branch, get_default_branch, rev_parse};
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -25,7 +25,6 @@ pub struct PrOptions {
 pub struct PrResult {
     pub url: String,
     pub created: bool,
-    pub updated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,58 +81,38 @@ pub fn create_or_update_pr(
         None => pr_target(repo, &main_repo, &default_branch)?,
     };
 
-    // Prove the Task PR range is uncontaminated before the first GitHub side
-    // effect (commit_workflow pushes). No-op for non-Task worktrees.
-    crate::ops::task::verify_task_pr_range(repo)?;
+    // Prove the Task PR range without healing integration metadata before the
+    // first remote side effect. No-op for non-Task worktrees.
+    crate::ops::task::verify_task_pr_range_without_healing(repo)?;
 
-    // Commit the feature branch before syncing so PR context reflects pushed state.
+    // Publication owns no integration. Commit locally, prove the resulting
+    // range, then push exactly the branch the user has now. A PR may honestly
+    // remain behind its base until an explicit integration boundary.
     let commit_options = CommitOptions {
         add: true,
-        push: true,
+        push: false,
         message: Some("lf pr open: prepare branch".to_string()),
         agent: options.agent.clone(),
         ..CommitOptions::for_task("commit")
     };
     commit_workflow(repo, &commit_options, progress)?;
-
-    if base_branch == default_branch {
-        let _ = sync_main(&main_repo, &default_branch);
-    } else {
-        fetch(&main_repo, "origin", &base_branch)?;
-    }
-
-    let base_ref = format!("origin/{base_branch}");
-    let stack_needs_rebase = stack.as_ref().is_some_and(|stack| {
-        stack.parent_branch.is_none()
-            || rev_parse(repo, &base_ref).is_ok_and(|tip| tip != stack.fork_base)
-    });
-    if stack_needs_rebase || (stack.is_none() && commits_behind(repo, &base_branch)? > 0) {
-        progress.status("Branch behind base, rebasing...");
-        crate::ops::rebase::rebase_with_recovery(
-            repo,
-            &crate::ops::rebase::RebaseOptions {
-                onto: base_ref.clone(),
-                push: true,
-                fork_base: stack.as_ref().map(|stack| stack.fork_base.clone()),
-            },
-            progress,
-        )?;
-        if let Some(stack) = &stack {
-            let new_base = rev_parse(repo, &base_ref)?;
-            crate::ops::task::record_stack_rebase(stack, &new_base, stack.parent_branch.is_none())?;
-        }
-    }
-
-    // The rebase advanced the fork point. Re-run the proof to heal the recorded
-    // base forward and refuse an empty range, so `lf task changes` and the
-    // GitHub range describe the same non-empty commits before any `gh pr` call.
-    crate::ops::task::require_task_pr_range_nonempty(repo)?;
-
-    let copy = resolve_pr_copy(repo, options, progress)?;
-    let title = copy.title.trim();
-    let body = copy.body.trim();
+    crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    let published_head = rev_parse(repo, "HEAD")?;
+    crate::ops::commit::push_with_upstream_if_needed(repo)?;
+
+    let copy = resolve_pr_copy(repo, options, progress)?;
+    let current_branch = current_branch(repo)?;
+    let current_head = rev_parse(repo, "HEAD")?;
+    if current_branch.as_deref() != Some(branch.as_str()) || current_head != published_head {
+        return Err(OpsError::Message(format!(
+            "PR copy generation changed the published branch/HEAD; expected {branch} at {published_head}"
+        )));
+    }
+    crate::ops::commit::verify_remote_branch_head(repo, &branch, &published_head)?;
+    let title = copy.title.trim();
+    let body = copy.body.trim();
     crate::ops::task::request_task_pr_publication(repo, crate::task::AfterMerge::Review, None)?;
 
     let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
@@ -147,7 +126,6 @@ pub fn create_or_update_pr(
             PrResult {
                 url: info.url.clone(),
                 created: false,
-                updated: true,
             },
             Some(info),
         )
@@ -171,14 +149,7 @@ pub fn create_or_update_pr(
                 head_sha: None,
             }),
         };
-        (
-            PrResult {
-                url,
-                created: true,
-                updated: false,
-            },
-            info,
-        )
+        (PrResult { url, created: true }, info)
     };
     crate::ops::task::attach_task_github_pr(repo, pr.as_ref())?;
     Ok(result)
@@ -767,25 +738,32 @@ fn create_pr(repo: &Path, title: &str, body: &str, base: &str) -> OpsResult<Stri
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn resolve_main_repo(repo: &Path) -> PathBuf {
-    main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+/// Create the review surface for a branch already committed, integrated, and
+/// pushed by submit/land. This deliberately performs no Git mutation.
+pub(crate) fn create_pr_from_pushed_branch(
+    repo: &Path,
+    title: &str,
+    body: &str,
+    base: &str,
+) -> OpsResult<PrInfo> {
+    let url = create_pr(repo, title, body, base)?;
+    let number = pr_number_from_url(&url).ok_or_else(|| {
+        OpsError::Message(format!("could not read PR number from created URL {url}"))
+    })?;
+    let branch =
+        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
+    Ok(PrInfo {
+        url,
+        number,
+        state: "open".to_string(),
+        branch,
+        merge_commit: None,
+        head_sha: Some(rev_parse(repo, "HEAD")?),
+    })
 }
 
-fn commits_behind(repo: &Path, base_branch: &str) -> OpsResult<i32> {
-    let output = Command::new("git")
-        .arg("rev-list")
-        .arg("--count")
-        .arg(format!("HEAD..origin/{}", base_branch))
-        .current_dir(repo)
-        .output()?;
-    if !output.status.success() {
-        return Ok(0);
-    }
-    let count = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<i32>()
-        .unwrap_or(0);
-    Ok(count)
+fn resolve_main_repo(repo: &Path) -> PathBuf {
+    main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf())
 }
 
 fn pr_target(repo: &Path, main_repo: &Path, default_branch: &str) -> OpsResult<String> {

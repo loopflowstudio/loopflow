@@ -545,7 +545,6 @@ Test skill body.
                     interactive: Some(true),
                     feedback: false,
                     content: Some("Skill body".to_string()),
-                    fast_path: None,
                 }),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()

@@ -2379,7 +2379,6 @@ mod tests {
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2403,7 +2402,6 @@ mod tests {
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             ..Default::default()
         };
@@ -2504,7 +2502,6 @@ mod tests {
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -3098,7 +3095,6 @@ directions:
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             ..Default::default()
         };
@@ -3135,7 +3131,6 @@ directions:
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             ..Default::default()
         };
@@ -3181,7 +3176,6 @@ directions:
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             ..Default::default()
         };
@@ -3221,7 +3215,6 @@ directions:
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -3243,7 +3236,6 @@ directions:
                 action_style: None,
                 interactive: None,
                 feedback: false,
-                fast_path: None,
             }),
             ..Default::default()
         };

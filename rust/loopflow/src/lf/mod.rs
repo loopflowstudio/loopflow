@@ -194,6 +194,9 @@ pub enum Commands {
         /// Abort the local rebase in progress
         #[arg(long, conflicts_with_all = ["plan", "manual", "continue_rebase"])]
         abort: bool,
+        /// Explicitly claim a raw rebase that has no Loopflow owner
+        #[arg(long, conflicts_with_all = ["plan", "manual"])]
+        adopt: bool,
         /// Branch to rebase onto
         onto: Option<String>,
     },

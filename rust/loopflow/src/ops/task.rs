@@ -1274,6 +1274,82 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     })
 }
 
+/// Publication proof: require ancestry parity without changing the recorded
+/// fork. Only an explicit integration boundary may advance Task stack/base
+/// metadata.
+pub(crate) fn verify_task_pr_range_without_healing(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            StaleBaseAction::Refuse,
+            None,
+        )
+        .await
+    })
+}
+
+/// Prove the post-rebase Task range against the operation's immutable target
+/// without advancing durable metadata before a requested push is verified.
+pub(crate) fn validate_task_pr_range_for_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+) -> OpsResult<()> {
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Accept)
+}
+
+/// Record the immutable base only after every requested Git postcondition,
+/// including remote-head equality, has passed.
+pub(crate) fn record_task_pr_range_after_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+) -> OpsResult<()> {
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Heal)
+}
+
+fn verify_task_pr_range_for_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+    stale_base: StaleBaseAction,
+) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    let target_ref = target_ref.to_string();
+    let target_sha = target_sha.to_string();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            stale_base,
+            Some((target_ref, target_sha)),
+        )
+        .await
+    })
+}
+
 /// Prove the active Task PR's range is **authoritative and non-empty** before
 /// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
 /// proof (healing a stale base), then refuses when the tree at HEAD matches the
@@ -1294,6 +1370,30 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
             return Ok(());
         };
         require_task_pr_range_nonempty_with_authority(&store, &session, lease.as_ref(), &repo).await
+    })
+}
+
+/// Publication's post-commit proof: require a non-empty authoritative range
+/// while leaving integration metadata untouched.
+pub(crate) fn require_task_pr_range_nonempty_without_healing(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        require_task_pr_range_nonempty_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            StaleBaseAction::Refuse,
+        )
+        .await
     })
 }
 
@@ -1346,6 +1446,32 @@ async fn verify_task_pr_range_with_authority(
     lease: Option<&ChildWriteLease>,
     repo: &Path,
 ) -> OpsResult<()> {
+    verify_task_pr_range_with_authority_mode(
+        store,
+        session,
+        lease,
+        repo,
+        StaleBaseAction::Heal,
+        None,
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleBaseAction {
+    Accept,
+    Refuse,
+    Heal,
+}
+
+async fn verify_task_pr_range_with_authority_mode(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&ChildWriteLease>,
+    repo: &Path,
+    stale_base: StaleBaseAction,
+    upstream_override: Option<(String, String)>,
+) -> OpsResult<()> {
     let mut pr = store
         .active_task_pr(&session.id)
         .await
@@ -1365,8 +1491,13 @@ async fn verify_task_pr_range_with_authority(
         )));
     }
 
-    let default_branch = get_default_branch(repo)?;
-    let (base_ref, upstream) = resolve_verifier_upstream(store, &pr, repo, &default_branch).await?;
+    let (base_ref, upstream) = match upstream_override {
+        Some(target) => target,
+        None => {
+            let default_branch = get_default_branch(repo)?;
+            resolve_verifier_upstream(store, &pr, repo, &default_branch).await?
+        }
+    };
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
     let base = pr.base_commit.clone();
@@ -1406,6 +1537,17 @@ async fn verify_task_pr_range_with_authority(
         // B < M: the upstream advanced past a stale or squash-merged base.
         // Heal the recorded base to the true fork point so lf task changes and
         // the durable evidence report the minimal M..HEAD range.
+        match stale_base {
+            StaleBaseAction::Accept => return Ok(()),
+            StaleBaseAction::Refuse => {
+                return Err(task_error(format!(
+                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
+                    short(&base),
+                    short(&merge_base),
+                )));
+            }
+            StaleBaseAction::Heal => {}
+        }
         pr.base_commit = merge_base.clone();
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease {
@@ -1451,7 +1593,24 @@ async fn require_task_pr_range_nonempty_with_authority(
     lease: Option<&ChildWriteLease>,
     repo: &Path,
 ) -> OpsResult<()> {
-    verify_task_pr_range_with_authority(store, session, lease, repo).await?;
+    require_task_pr_range_nonempty_with_authority_mode(
+        store,
+        session,
+        lease,
+        repo,
+        StaleBaseAction::Heal,
+    )
+    .await
+}
+
+async fn require_task_pr_range_nonempty_with_authority_mode(
+    store: &SharedStore,
+    session: &TaskSession,
+    lease: Option<&ChildWriteLease>,
+    repo: &Path,
+    stale_base: StaleBaseAction,
+) -> OpsResult<()> {
+    verify_task_pr_range_with_authority_mode(store, session, lease, repo, stale_base, None).await?;
     let pr = store
         .active_task_pr(&session.id)
         .await

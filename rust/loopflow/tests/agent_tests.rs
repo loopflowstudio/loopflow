@@ -1,5 +1,6 @@
 mod support;
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use loopflow::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -59,6 +60,20 @@ fn launch_captures_stderr() {
     )
     .expect("launch");
     assert!(result.stderr.contains("error"));
+}
+
+#[test]
+fn launch_scopes_process_environment_to_child() {
+    let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nprintf '%s' \"$LF_TEST_SCOPED_ENV\"\n")]);
+    let process = ProcessConfig {
+        env: BTreeMap::from([("LF_TEST_SCOPED_ENV".to_string(), "owned".to_string())]),
+        ..base_process()
+    };
+
+    let result = launch_agent(&base_launch(), &process, &AgentCapabilities::default())
+        .expect("launch with scoped environment");
+
+    assert_eq!(result.stdout, "owned");
 }
 
 #[test]

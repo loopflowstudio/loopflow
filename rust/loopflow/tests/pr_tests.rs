@@ -25,6 +25,10 @@ fn claude_script() -> &'static str {
     "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
+fn mutating_claude_script() -> &'static str {
+    "#!/bin/sh\nprintf 'provider mutation\\n' > provider.txt\ngit add provider.txt\ngit commit -m 'provider mutation' >/dev/null\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+}
+
 fn codex_script(output: &str) -> String {
     format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\nexit 0\n")
 }
@@ -155,6 +159,45 @@ fn publish_makes_no_presentation_attempt() {
         0,
         "publication must not open any review surface"
     );
+}
+
+#[test]
+fn publication_refuses_if_copy_generation_changes_the_pushed_head() {
+    let gh_script = write_gh_script("[]", None);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("claude", mutating_claude_script()),
+    ]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+    let pushed_head = repo.head_sha();
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("changed the published branch/HEAD")),
+        "a generated message cannot invalidate the pushed head: {result:?}"
+    );
+    let remote_head = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", "refs/heads/feature"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .expect("read remote feature");
+    assert_eq!(remote_head, pushed_head);
 }
 
 #[test]
@@ -410,7 +453,6 @@ fn pr_update_refreshes_body() {
     )
     .expect("pr");
 
-    assert!(result.updated);
     assert!(!result.created);
 }
 

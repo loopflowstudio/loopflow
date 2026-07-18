@@ -2385,6 +2385,28 @@ mod frontier_tests {
         apply_all_but_head(&conn).unwrap();
     }
 
+    fn seed_completed_trace(path: &Path) {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO run_events
+                (run_id, process_id, seq, ts, node, event)
+             VALUES
+                ('trace-before-promotion', 'process-before-promotion', 0, 100, 'run', 'started'),
+                ('trace-before-promotion', 'process-before-promotion', 1, 101, 'run', 'completed')",
+        )
+        .unwrap();
+    }
+
+    fn trace_events(path: &Path) -> Vec<String> {
+        SqliteStore::open_run_ledger_read_only(path)
+            .unwrap()
+            .list_run_events_since(0)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.event)
+            .collect()
+    }
+
     /// (a) An ordinary open of an absent shared store must refuse actionably and
     /// leave no file behind. Sabotage guard: an `open_with` that creates the
     /// SQLite file before deciding authority (or that lets Forbidden bootstrap)
@@ -2483,6 +2505,52 @@ mod frontier_tests {
             frontier(&advanced_path).as_deref(),
             Some(latest_known_version().as_str())
         );
+    }
+
+    /// The 2026-07-17 incident shape, exercised as two binary generations: a
+    /// branch candidate knows one migration the installed release does not.
+    /// Ordinary candidate use must leave both the shared frontier and existing
+    /// trace status untouched; explicit promotion advances once, after which
+    /// both current opens and the stable ledger reader retain the trace.
+    #[test]
+    fn branch_candidate_cannot_advance_shared_store_or_damage_trace_status_outside_promotion() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        seed_shared_store_at_prior_head(&path);
+        seed_completed_trace(&path);
+        let installed_frontier = prior_known_version();
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(installed_frontier.as_str())
+        );
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+
+        open(&path, Published, &shared.home, Forbidden)
+            .expect_err("ordinary branch candidate must not promote its draft migration");
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(installed_frontier.as_str())
+        );
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        let installed = rusqlite::Connection::open(&path).unwrap();
+        assert!(
+            crate::store::migrations::old_reader_recognizes(&installed),
+            "the installed release must still recognize the candidate's untouched store"
+        );
+        drop(installed);
+
+        open(&path, Published, &shared.home, Authorized)
+            .expect("explicit promotion advances the shared frontier");
+        let promoted_frontier = latest_known_version();
+        assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+
+        open(&path, Published, &shared.home, Authorized)
+            .expect("repeating promotion at the same frontier is a no-op");
+        assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        open(&path, Published, &shared.home, Forbidden)
+            .expect("ordinary current binary opens after promotion");
     }
 
     /// A validation-only build never advances the shared store even at the

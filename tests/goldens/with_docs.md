@@ -29,15 +29,17 @@ Three commitment levels — pick by how done the work is and who lands it. All
 three publish the PR headlessly and open no browser:
 
 - **`lf pr publish`** — push and create or refresh the PR while work is still in
-  flight. Rebases only if behind, writes title/body, prints state + URL, leaves
-  the PR up. Use it to make work visible mid-stream; nothing is finalized and
-  nothing is presented. This is the agent's default "make a PR" verb.
+  flight. Never rebases: a PR may honestly remain behind until an explicit
+  integration command. Writes title/body, prints state + URL, and leaves the PR
+  up. Use it to make work visible mid-stream; nothing is finalized or presented.
+  This is the agent's default "make a PR" verb.
 - **`lf pr submit`** — the work is done and a **human** lands it. Rebases onto
-  main, clears `scratch/`, marks the PR ready, and assigns it to you. Stops
-  there: no auto-merge. Your merge click on GitHub is the one required gate —
-  the button unlocks once checks pass. (GitHub blocks approving your own PR, so
-  the gate is the merge click, not a review approval.) Use this as the default
-  finish for anything a person should land by hand.
+  main, clears `scratch/`, collapses checkpoint history into one authored
+  commit, verifies and pushes once, marks the PR ready, and assigns it to you.
+  Stops there: no auto-merge. Your merge click on GitHub is the one required
+  gate — the button unlocks once checks pass. (GitHub blocks approving your own
+  PR, so the gate is the merge click, not a review approval.) Use this as the
+  default finish for anything a person should land by hand.
 - **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge so it merges when checks pass.
   Use it in headless/auto runs where no human is gating. Inside a Task, bare

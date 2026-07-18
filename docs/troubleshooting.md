@@ -85,13 +85,15 @@ lf wt prune --dry-run    # show what would be removed
 lf wt prune              # force-remove unprotected worktrees and their branches
 ```
 
-If the default branch looks stale after a PR operation you ran from a sibling worktree, rebase the current branch:
+Feature-worktree integration fetches and pins `origin/<default>` without
+moving the default-branch checkout:
 
 ```bash
 lf rebase
 ```
 
-Loopflow updates the default-branch worktree as part of the rebase path.
+The feature branch uses the current remote base even when the sibling default
+checkout has not moved.
 
 ## Project or Task is waiting
 

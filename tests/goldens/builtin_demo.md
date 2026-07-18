@@ -200,6 +200,15 @@ Choose the surface that most directly proves each claim:
 - **Operations:** inspect admin state, logs, counters, stats, or metrics when
   the result is observable there rather than in the product.
 
+Prefer the real configured or deployed path when it can be exercised through a
+normal user action, a read-only observation, or disposable data. Use a local
+simulation only when the real boundary is unavailable or unsafe, and label the
+claim as simulated. Never mutate production solely to make a demo possible.
+
+Product proof and automated proof are peers. A real workflow can prove that
+the system delivers value; focused tests still protect deterministic contracts
+and edge cases that a demo cannot cover.
+
 A diff proves construction, not behavior. Use code alone only when the Done
 When is itself structural. For authentication, account, or permissions work,
 exercise a real sign-in/login path with a real configured profile. Do not

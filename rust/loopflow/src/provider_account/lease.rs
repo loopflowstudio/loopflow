@@ -277,7 +277,7 @@ fn resolve_selectors(
             if !seen.insert((matched.provider, matched.account_id.clone())) {
                 return Err(ProviderAccountError::Runtime(format!(
                     "account selector duplicates {}/{}",
-                    matched.provider, matched.account_id
+                    matched.provider, selector.account
                 )));
             }
             resolved.push(matched);
@@ -1063,7 +1063,7 @@ mod tests {
             account(Provider::Claude, "shared", "claude@example.com"),
             account(Provider::Codex, "shared", "codex@example.com"),
         ];
-        let selection = AccountSelection::from_flags(&["codex=shared".to_string()], &[]).unwrap();
+        let selection = AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
         let grants = grants_for_selection(
             HashMap::from([(Provider::Claude, vec![id("shared")])]),
             &resolved(&catalog, &selection),
@@ -1089,8 +1089,16 @@ mod tests {
     #[test]
     fn ambiguous_and_duplicate_selectors_fail_before_launch() {
         let catalog = vec![
-            account(Provider::Codex, "engineering-one", "one@example.com"),
-            account(Provider::Codex, "engineering-two", "two@example.com"),
+            account(
+                Provider::Codex,
+                "engineering-one",
+                "engineering-one@example.com",
+            ),
+            account(
+                Provider::Codex,
+                "engineering-two",
+                "engineering-two@example.com",
+            ),
         ];
         let ambiguous = resolve_selectors(
             &catalog,
@@ -1101,14 +1109,14 @@ mod tests {
         let duplicate = resolve_selectors(
             &catalog,
             &[
-                ProviderAccountSelector::parse("codex=engineering-one").unwrap(),
-                ProviderAccountSelector::parse("codex=engineering-one").unwrap(),
+                ProviderAccountSelector::parse("codex=engineering-one@").unwrap(),
+                ProviderAccountSelector::parse("codex=engineering-one@").unwrap(),
             ],
         )
         .unwrap_err();
         assert!(duplicate
             .to_string()
-            .contains("duplicates codex/engineering-one"));
+            .contains("duplicates codex/engineering-one@"));
     }
     #[test]
     fn nested_account_flags_are_rejected() {

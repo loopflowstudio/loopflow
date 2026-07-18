@@ -1387,7 +1387,7 @@ mod account_first_tests {
                 .await
                 .unwrap_err()
                 .to_string(),
-            "configured claude route has no eligible account: 'missing' credential is missing"
+            "configured claude route has no eligible account: 'missing@example.com' credential is missing"
         );
     }
 }

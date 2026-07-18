@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::{parse_agent, Config, DEFAULT_AGENT};
+use crate::engine::config::{default_agent, parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
@@ -155,7 +155,7 @@ pub fn prepare_launch_prompt(
                 .as_ref()
                 .and_then(|skill| skill.default_agent.clone())
         })
-        .unwrap_or_else(|| DEFAULT_AGENT.to_string());
+        .unwrap_or_else(|| default_agent().to_string());
     validate_agent_policy(&agent)?;
 
     // Keep only system-safe sections (operate/surface/directions) in

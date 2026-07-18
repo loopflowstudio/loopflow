@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::engine::error::LoadError;
 
 /// Agent used when neither the caller, config, nor skill chooses one.
-pub const DEFAULT_AGENT: &str = "codex";
+pub fn default_agent() -> &'static str {
+    "codex"
+}
 
 /// Keys that combine lists from global + repo config.
 const ADDITIVE_KEYS: &[&str] = &[
@@ -269,6 +271,16 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// Return the configured agent or Loopflow's compiled default.
+    pub fn agent(&self) -> &str {
+        match self.agent.as_deref() {
+            Some(agent) => agent,
+            None => default_agent(),
+        }
+    }
+}
+
 /// Parse agent string like 'claude:opus' into (harness, model).
 ///
 /// Applies smart defaults when no model is specified:
@@ -478,6 +490,7 @@ linear:
     fn default_config_values() {
         let config = Config::default();
         assert!(config.agent.is_none());
+        assert_eq!(config.agent(), "codex");
         assert!(config.supported_harnesses.is_empty());
         assert!(!config.yolo);
         assert!(config.docs.is_empty());
@@ -529,6 +542,7 @@ chrome: true
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(config.agent(), "codex:o3");
         assert!(config.yolo);
         assert!(config.chrome);
     }

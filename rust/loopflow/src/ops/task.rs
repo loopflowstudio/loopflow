@@ -11,7 +11,7 @@ use crate::child_session::{
     StrandedPlan, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
 };
 use crate::durable::{AttentionRoute, AuthenticatedRequest, ControlCtx, Feedback};
-use crate::engine::config::{load_config_or_default, parse_agent, DEFAULT_AGENT};
+use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
     fetch, get_default_branch, is_ancestor, is_clean, merge_base, push_with_upstream, ref_exists,
@@ -567,7 +567,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     let project_session_id = task_project_session_id(&project_session)?;
     let wave_id = project_session.wave_id.clone();
     let config = load_config_or_default(Some(&main_repo));
-    let agent = config.agent.as_deref().unwrap_or(DEFAULT_AGENT);
+    let agent = config.agent();
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {

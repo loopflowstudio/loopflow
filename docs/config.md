@@ -183,15 +183,20 @@ Glob patterns to exclude from file listings.
 
 ---
 
-### Model
+### Agent
 
-Default model for all skills.
+Set the default harness, with an optional model.
 
 | | |
 |---|---|
 | **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
 | **Default** | unset (resolution falls back to skill defaults, then `codex`) |
+
+```yaml
+agent: codex          # harness default
+# agent: claude:opus  # harness plus model
+```
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
 

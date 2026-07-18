@@ -61,7 +61,6 @@ use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::durable::{ChildFeedback, RunLease, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
-use crate::engine::DEFAULT_AGENT;
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
 use crate::store::{open_store, storage_config_from_env, Store};
 use crate::wave::journal::{MessageId, MessageOp, PendingMessage};
@@ -253,7 +252,7 @@ fn lf_command() -> std::process::Command {
 
 fn body_provenance(step: &StepRef, cwd: &Path) -> BodyProvenance {
     let configured = crate::engine::load_config_or_default(Some(cwd));
-    let agent = configured.agent.as_deref().unwrap_or(DEFAULT_AGENT);
+    let agent = configured.agent();
     let (harness, model) = crate::engine::parse_agent(agent);
     let mut body = BodyProvenance::for_step(step, cwd);
     body.harness = Some(harness);

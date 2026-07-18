@@ -2,7 +2,7 @@ use crate::engine::{
     check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
     write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
     LaunchPromptInput, LaunchTarget, ProcessConfig, PromptComponents, SkillSyncOptions,
-    StreamFormat, Surface, DEFAULT_AGENT,
+    StreamFormat, Surface,
 };
 use crate::lf::commands::util::{find_repo_root, launch_session};
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -111,7 +111,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         "loaded config"
     );
     trace!(
-        agent = config.agent.as_deref().unwrap_or(DEFAULT_AGENT),
+        agent = config.agent(),
         ?config.yolo,
         "loaded config"
     );

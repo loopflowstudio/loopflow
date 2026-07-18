@@ -316,7 +316,8 @@ fn open_pr_model(evidence: &TaskActionEvidence) -> TaskActionModel {
 /// An open PR whose checks admit review: recommend Review, block the rest. Shared
 /// by a passing head and a head red only on land-time preconditions.
 fn open_pr_reviewable(reason: &str) -> TaskActionModel {
-    one_action(TaskAction::Review, reason, |a| match a {
+    one_action(TaskAction::Review, reason, |a| {
+        match a {
         TaskAction::Review => unreachable!(),
         TaskAction::Resume => "awaiting review; resume after review to address feedback".into(),
         TaskAction::Complete => "PR is open, not merged".into(),
@@ -324,6 +325,7 @@ fn open_pr_reviewable(reason: &str) -> TaskActionModel {
         TaskAction::Recover => "body is not dead; PR is open for review".into(),
         TaskAction::Reconcile => "reconcile applies only to a merged, complete Task with an applied but unincorporated directive".into(),
         TaskAction::NoAction => "action available: review the PR".into(),
+    }
     })
 }
 

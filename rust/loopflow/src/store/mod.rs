@@ -1593,11 +1593,101 @@ mod tests {
             receipt.steer.author,
             Author::Run(parent_lease.run_id.clone())
         );
-        let review = store
+        let parked = store
             .review(&task_work)
             .await
             .unwrap()
             .expect("steering does not close Review attention");
+        assert!(parked.attention_at.is_none());
+        assert!(store
+            .child_attention(&parent_lease.work)
+            .await
+            .unwrap()
+            .is_empty());
+        store
+            .route_review(
+                &task_run_lease,
+                &launch.id,
+                AttentionRoute::Parent(parent_lease.work.clone()),
+            )
+            .await
+            .unwrap();
+        assert!(
+            store
+                .review(&task_work)
+                .await
+                .unwrap()
+                .expect("re-entering the same flow keeps the route")
+                .attention_at
+                .is_none(),
+            "only a later terminal child Turn may re-arm attention"
+        );
+
+        let parent_basis = store
+            .current_epoch(&parent_lease.work)
+            .await
+            .unwrap()
+            .current_basis;
+        turn_row.status = "completed".to_string();
+        turn_row.ended_at = Some(OffsetDateTime::now_utc().unix_timestamp());
+        store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
+        let rearmed = store
+            .review(&task_work)
+            .await
+            .unwrap()
+            .expect("the child's next reply keeps the Review open");
+        assert!(rearmed.attention_at.is_some());
+        assert_eq!(
+            store
+                .child_attention(&parent_lease.work)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .current_epoch(&parent_lease.work)
+                .await
+                .unwrap()
+                .current_basis
+                .revision,
+            parent_basis.revision + 1
+        );
+
+        store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
+        assert_eq!(
+            store
+                .current_epoch(&parent_lease.work)
+                .await
+                .unwrap()
+                .current_basis
+                .revision,
+            parent_basis.revision + 1,
+            "one child Turn allocates one parent evidence revision"
+        );
+
+        let answered = store
+            .steer(
+                &ControlCtx::Run(&parent_lease),
+                &task_work,
+                "the failed head must be observed fresh",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(store
+            .child_attention(&parent_lease.work)
+            .await
+            .unwrap()
+            .is_empty());
+        let review = store
+            .review(&task_work)
+            .await
+            .unwrap()
+            .expect("answering a child parks but does not close its Review");
+        assert!(review.attention_at.is_none());
+        assert_eq!(review.basis, answered.steer.basis);
         store
             .close_review(&ControlCtx::Run(&parent_lease), &task_work, &review.basis)
             .await

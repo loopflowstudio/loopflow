@@ -473,6 +473,12 @@ mod tests {
             )
             .await
             .unwrap();
+        let parked = store
+            .review(&work)
+            .await
+            .unwrap()
+            .expect("a User response does not close the Review");
+        assert!(parked.attention_at.is_none());
         assert!(matches!(
             store
                 .close_review(&ControlCtx::User(&request), &work, &initial)

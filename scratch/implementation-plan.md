@@ -71,8 +71,9 @@ Current evidence:
 - Work status, Wait, Run reserve/advance/stop, direct Work controls, and typed
   CI Run claims exist;
 - promotion and reteam fence writers through active Run/containment evidence;
-- committed source is 121,818 physical / 119,126 normalized Rust lines; the
-  review's live-preemption correction adds ten lines before the next deletion;
+- the committed checkpoint is 121,818 physical / 119,126 normalized Rust lines;
+  handshake, Wave-priority, and settlement proof add code before the next
+  authority deletion;
 - 1,552 Rust library tests, affected integration tests, clippy, migration
   checks, formatting, and Swift DTO fixtures pass. Isolated-home smoke passes;
   the umbrella flow's failure was the host's divergent dev database.
@@ -86,9 +87,9 @@ Current state against the phases below:
 | 2. Run/Launch/containment | Exact capability, duplicate executor | Shared transitions, Launch facts, and direct lease validation exist; Project/Task Session runners still reserve/revoke/reap |
 | 3. Steer/typed control | Authoritative | Steer/Send/Basis/ToolResponse and typed CI remain; ChildCommand/directive storage and Session-derived Run authority are deleted |
 | 4. Provider reconstruction | Partial | Dynamic Send, fixed Basis, root output, and conformance exist; fallback Launch routing and transcript-free recovery proof remain |
-| 5. Review/attention/status | Project lane partial | Review/Handoff storage is deleted and Project schedules durable child output; route/pending turn-taking, parent evidence revision, Wave parity, and deterministic live/seed proof remain |
+| 5. Review/attention/status | Handshake and both parent lanes implemented | Route/pending turn-taking, parent evidence revision, Wave/Project priority, and deterministic live/seed playhead proof exist; the shared Session-free executor remains |
 | 6. Turn usage | Store/query complete | Every additive reader uses Turn spend; OpenCode still needs one producer/parser |
-| 7. Purge | Size target met | Committed code is one line below the normalized target; Session/body process authority and duplicate runners remain, and focused behavioral tests must replace deleted suites |
+| 7. Purge | Controller deletion open | The committed checkpoint met the size target; current proof adds code until Session/body process authority and duplicate runners are deleted |
 
 ### Findings that determine the next pass
 
@@ -112,16 +113,18 @@ Current state against the phases below:
 5. **Child reply must advance parent Basis.** When terminal output re-arms
    attention, allocate one idempotent parent `evidence` revision sourced by that
    child Turn. Otherwise stale parent completion can race the reply.
-6. **Project responsiveness is partial; Wave is absent.** Project checks oldest
-   child attention before background and live/interrupt delivery now preserves
-   its playhead. Wave needs the same projection and deterministic harness proof.
+6. **Wave and Project now share the attention priority.** Both check oldest
+   child attention before background; live/interrupt delivery preserves the
+   playhead, and deterministic Wave harnesses pin live and seed-only behavior.
+   Wave provider captures attach to the same product Run with an isolated
+   resident process-group containment identity.
 7. **Session/body remains the real controller.** Project and Task still have
    separate statuses, generation leases, process reservation, revocation,
    reaping, successor, and settlement paths. Run mirrors them. The next pass
    must delete the bridge rather than add another adapter.
 8. **The LOC goal is no longer the forcing function.** The committed checkpoint
-   is one line below target; the review correction is ten lines above it before
-   the next deletion. Do not delete tests for size.
+   is one line below target; current handshake and scheduling proof put the
+   working tree above it before the next deletion. Do not delete tests for size.
    The removed 2,767-line CI suite needs focused proofs for exact Run claim,
    one-shot preemption, non-actionable evidence, and fresh repaired-head
    settlement.

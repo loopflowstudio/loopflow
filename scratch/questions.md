@@ -1,5 +1,27 @@
 # Open implementation notes
 
+- Review route and pending attention are now separate without another table:
+  `attention_kind/work` stays for the interactive flow interval while
+  `attention_at` clears after the routed Steer. A later terminal child Turn
+  re-arms it transactionally and allocates one idempotent `evidence` revision
+  on the open parent Epoch. Launch surfaces expose the nullable pending time so
+  Swift does not mistake a parked User route for current attention.
+- Wave now reserves one exact Run lease for a listener life, clears inherited
+  Run/Session authority before spawning its resident, and drains direct input,
+  oldest child Review, then other child evidence. Live and seed-only tests pin
+  interruption of the repurposed background body, saved playhead, and no
+  duplicate delivery of one unanswered child turn. Dirty canonical main no
+  longer blocks the read-only resident.
+- Wave provider captures now become product Run Launches using the resident's
+  isolated process group. Recovery of a listener that dies after reserving but
+  before its first Launch still belongs to the shared keeper transition; do
+  not add a second Wave-specific recovery controller.
+- The isolated full Rust integration run reaches the remaining controller
+  split directly: `task_github_cache_tests::rest_failure...` constructs a live
+  legacy Task process whose mirrored Run has no product Launch, so direct Run
+  interrupt finds no boundary (`Query returned no rows`). Do not restore a
+  Session interrupt fallback; the Session/body deletion must make every live
+  writer a Run Launch.
 - This pass now mints an independent opaque `LF_RUN_LEASE`, stores only its
   hash, resolves it directly to the exact active Run, clears it across distinct
   child launches, and fails closed when an agent context loses it. The old

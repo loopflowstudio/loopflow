@@ -155,13 +155,14 @@ fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<(
                 .run
                 .as_ref()
                 .map_or("none", |run| run.id.as_str()),
-            projection
-                .review
-                .as_ref()
-                .map_or("none", |review| match &review.attention {
-                    crate::durable::AttentionRoute::User => "user",
-                    crate::durable::AttentionRoute::Parent(_) => "parent",
-                }),
+            projection.review.as_ref().map_or("none", |review| {
+                match (&review.attention, review.attention_at.is_some()) {
+                    (crate::durable::AttentionRoute::User, true) => "user (pending)",
+                    (crate::durable::AttentionRoute::User, false) => "user (parked)",
+                    (crate::durable::AttentionRoute::Parent(_), true) => "parent (pending)",
+                    (crate::durable::AttentionRoute::Parent(_), false) => "parent (parked)",
+                }
+            }),
         );
     }
     Ok(())

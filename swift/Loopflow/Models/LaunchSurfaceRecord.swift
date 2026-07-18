@@ -104,6 +104,7 @@ public struct LaunchSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
     public let waveId: String
     public let homeRoute: String
     public let attention: LaunchAttentionRecord?
+    public let attentionAt: String?
     public let handback: LaunchBoundaryState?
     public let attachArgv: [String]?
 
@@ -117,7 +118,9 @@ public struct LaunchSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
     public var home: String { homeRoute }
     public var host: String { homeRoute }
     public var cwd: String { launch.cwd }
-    public var reason: String { attention?.kind == "user" ? "User attention" : launch.surface }
+    public var reason: String {
+        attention?.kind == "user" && attentionAt != nil ? "User attention" : launch.surface
+    }
     public var createdAt: String { launch.startedAt }
     public var updatedAt: String { launch.endedAt ?? launch.startedAt }
     public var ageSecs: Int? { nil }
@@ -128,6 +131,7 @@ public struct LaunchSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
         case launch, work, attention, handback
         case waveId = "wave_id"
         case homeRoute = "home_route"
+        case attentionAt = "attention_at"
         case attachArgv = "attach_argv"
     }
 }

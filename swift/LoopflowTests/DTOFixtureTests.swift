@@ -156,6 +156,7 @@ struct DTOFixtureTests {
         #expect(surface.work.kind == "task")
         #expect(surface.status == .live)
         #expect(surface.attention?.kind == "user")
+        #expect(surface.attentionAt == "2026-07-17T12:01:00Z")
         #expect(surface.argv == ["tmux", "attach-session", "-t", "lf-task"])
 
         let encoded = try JSONEncoder().encode(surface)

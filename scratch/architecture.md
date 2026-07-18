@@ -24,13 +24,16 @@ large control cut:
 - observed root assistant output is durable on Turn and Project drains oldest
   child attention before background work with live or interrupt-and-seed
   delivery;
+- Wave uses the same oldest-child projection and live/seed priority before
+  background work, with one exact Run lease for its listener life;
 - the trace-only `LF_RUN_ID` collision is renamed `LF_TRACE_ID`;
-- the committed branch is 121,818 physical / 119,126 normalized Rust source
-  lines, one below the adjusted target. The live-delivery playhead correction
-  adds ten lines pending the next Session deletion.
+- the committed checkpoint is 121,818 physical / 119,126 normalized Rust source
+  lines. Handshake, Wave-priority, and focused settlement proof add code in the
+  working tree pending the next Session deletion.
 
 Do not recreate Review, Handoff, ChildCommand, or a generic inbox. The line
-target is achieved; behavioral proof and one authority path now decide done.
+checkpoint target is achieved; the working tree must regain it through the
+remaining authority deletion, never by removing behavioral proof.
 
 ## What the implementation review exposed
 
@@ -42,12 +45,12 @@ target is achieved; behavioral proof and one authority path now decide done.
    parent Epoch evidence revision. Parent completion can therefore race new
    child attention without becoming stale.
 3. Live child delivery initially allowed the repurposed background Turn to
-   complete its flow step. The review fixed this locally by closing that flow
-   body as Interrupted; deterministic live/seed-only tests still need to pin it.
+   complete its flow step. Both parent lanes now close that body as Interrupted,
+   and deterministic Wave live/seed-only tests pin the saved playhead.
 4. Project and Task still have separate reservation/status/revoke/reap runners.
    They mirror lifecycle into Run instead of executing through it.
-5. Project drains child attention, but the Wave resident does not yet use the
-   same projection.
+5. Wave and Project drain the same child projection. Wave provider captures now
+   attach to its product Run with the resident's isolated process group.
 6. Persisting every assistant delta makes partial output crash-visible but
    rewrites the growing Turn row repeatedly. Keep correctness first; batch only
    after the attention protocol is proven.

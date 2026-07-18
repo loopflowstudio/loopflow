@@ -213,7 +213,9 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
         // Only User-routed attention paints the external attention queue red.
         // Parent-routed Reviews remain on the parent's control lane.
-        let userLaunches = launches.filter { $0.attention?.kind == "user" }
+        let userLaunches = launches.filter {
+            $0.attention?.kind == "user" && $0.attentionAt != nil
+        }
         let blockingParentIds = Set(userLaunches.map(\.parentId))
         let waveLevelBlocking = userLaunches.contains { $0.parentKind == "wave" }
 
@@ -371,7 +373,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         parentRowId: String?,
         staleThresholdSecs: Int
     ) -> ActiveSessionRow {
-        let userAttention = launch.attention?.kind == "user"
+        let userAttention = launch.attention?.kind == "user" && launch.attentionAt != nil
         let openable = userAttention && !launch.argv.isEmpty
         return ActiveSessionRow(
             id: "launch:\(launch.sessionId)",

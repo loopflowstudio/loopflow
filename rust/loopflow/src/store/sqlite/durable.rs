@@ -300,11 +300,14 @@ impl SqliteStore {
                     ));
                 }
                 require_turn_for_run(&tx, turn_id, &run.id)?;
-                tx.execute(
+                let ended = tx.execute(
                     "UPDATE agent_turns SET status=?2, ended_at=COALESCE(ended_at, ?3)
                      WHERE id=?1 AND status='running'",
                     params![turn_id.as_str(), outcome.as_turn_status(), now_unix()],
                 )?;
+                if ended == 1 {
+                    rearm_review_attention(&tx, turn_id)?;
+                }
                 AdvanceReceipt::Turn(control_turn_in(&tx, turn_id)?)
             }
             RunAdvance::Wait { on } => {
@@ -497,19 +500,44 @@ impl SqliteStore {
             AttentionRoute::User => ("user", None, None),
             AttentionRoute::Parent(work) => ("parent", Some(work.kind()), Some(work.id())),
         };
-        tx.execute(
-            "UPDATE agent_launches SET
-                attention_kind=?2, attention_work_kind=?3,
-                attention_work_id=?4, attention_at=COALESCE(attention_at, ?5)
-             WHERE id=?1 AND launch_state='live'",
-            params![
-                launch_id.as_str(),
-                attention_kind,
-                attention_work_kind,
-                attention_work_id,
-                now_unix(),
-            ],
+        let existing = tx.query_row(
+            "SELECT attention_kind, attention_work_kind, attention_work_id
+             FROM agent_launches WHERE id=?1",
+            [launch_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
         )?;
+        match existing {
+            (None, None, None) => {
+                tx.execute(
+                    "UPDATE agent_launches SET
+                        attention_kind=?2, attention_work_kind=?3,
+                        attention_work_id=?4, attention_at=?5
+                     WHERE id=?1 AND launch_state='live' AND attention_kind IS NULL",
+                    params![
+                        launch_id.as_str(),
+                        attention_kind,
+                        attention_work_kind,
+                        attention_work_id,
+                        now_unix(),
+                    ],
+                )?;
+            }
+            (Some(kind), work_kind, work_id)
+                if kind == attention_kind
+                    && work_kind.as_deref() == attention_work_kind
+                    && work_id.as_deref() == attention_work_id => {}
+            _ => {
+                return Err(StoreError::InvalidData(
+                    "Review attention route cannot change during an interactive flow".to_string(),
+                ));
+            }
+        }
         let review = review_in(&tx, &run.work)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(review)
@@ -590,6 +618,7 @@ impl SqliteStore {
              JOIN epochs e ON e.id=r.epoch_id
              WHERE l.launch_state='live' AND l.attention_kind='parent'
                AND l.attention_work_kind=?1 AND l.attention_work_id=?2
+               AND l.attention_at IS NOT NULL
              ORDER BY l.attention_at, l.id",
         )?;
         let rows = statement.query_map(params![parent.kind(), parent.id()], |row| {
@@ -644,7 +673,7 @@ impl SqliteStore {
         let review = review_in(&tx, work)?.ok_or(StoreError::NotFound)?;
         validate_basis(&review.basis, if_basis)?;
         validate_review_caller(&tx, caller, &review)?;
-        tx.execute(
+        if tx.execute(
             "UPDATE work_flow_positions
              SET step_index=step_index+1, interactive=0, updated_at=?2
              WHERE epoch_id=?1 AND flow=?3 AND step=?4 AND step_index=?5 AND interactive=1",
@@ -655,12 +684,17 @@ impl SqliteStore {
                 review.position.step,
                 i64::from(review.position.step_index),
             ],
-        )?;
+        )? == 0
+        {
+            return Err(StoreError::InvalidData(
+                "Review flow position is no longer current".to_string(),
+            ));
+        }
         tx.execute(
             "UPDATE agent_launches SET attention_kind=NULL, attention_work_kind=NULL,
                 attention_work_id=NULL, attention_at=NULL
-             WHERE id=?1 AND attention_at=?2",
-            params![review.launch_id.as_str(), review.opened_at.unix_timestamp()],
+             WHERE id=?1 AND attention_kind IS NOT NULL",
+            [review.launch_id.as_str()],
         )?;
         let status = work_status_in(&tx, work)?;
         tx.commit()?;
@@ -745,6 +779,24 @@ impl SqliteStore {
         if live {
             return Err(StoreError::InvalidData(
                 "Run containment is not absent".to_string(),
+            ));
+        }
+        let child_review_open: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM agent_launches l
+                JOIN runs child_run ON child_run.id=l.product_run_id
+                JOIN epochs child_epoch ON child_epoch.id=child_run.epoch_id
+                JOIN work_flow_positions position ON position.epoch_id=child_epoch.id
+                WHERE l.launch_state='live' AND child_run.state='active'
+                  AND position.interactive=1 AND l.attention_kind='parent'
+                  AND l.attention_work_kind=?1 AND l.attention_work_id=?2
+             )",
+            params![run.work.kind(), run.work.id()],
+            |row| row.get(0),
+        )?;
+        if child_review_open {
+            return Err(StoreError::InvalidData(
+                "Run cannot complete while a child Review is open".to_string(),
             ));
         }
         let proposal = DoneProposal {
@@ -909,6 +961,7 @@ impl SqliteStore {
         validate_control_caller(&tx, caller, work)?;
         let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
         let receipt = Self::append_steer_in(&tx, work, &author, text)?;
+        clear_answered_attention(&tx, caller, work)?;
         tx.commit()?;
         Ok(receipt)
     }
@@ -1527,7 +1580,7 @@ fn launch_surface_in(
         .query_row(
             "SELECT r.id, e.wave_id, e.project_id, e.task_id, h.route,
                     l.attention_kind, l.attention_work_kind, l.attention_work_id,
-                    l.handback_state
+                    l.attention_at, l.handback_state
              FROM agent_launches l
              JOIN runs r ON r.id=l.product_run_id
              JOIN epochs e ON e.id=r.epoch_id
@@ -1544,7 +1597,8 @@ fn launch_surface_in(
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
@@ -1565,8 +1619,13 @@ fn launch_surface_in(
             ))
         }
     };
-    let handback = row
+    let attention_at = row
         .8
+        .map(OffsetDateTime::from_unix_timestamp)
+        .transpose()
+        .map_err(invalid_durable)?;
+    let handback = row
+        .9
         .as_deref()
         .map(BoundaryState::parse_handback)
         .transpose()
@@ -1608,6 +1667,7 @@ fn launch_surface_in(
         wave_id,
         home_route: row.4,
         attention,
+        attention_at,
         handback,
         attach_argv,
     }))
@@ -1757,11 +1817,11 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
     let row = conn
         .query_row(
             "SELECT l.id, l.attention_kind, l.attention_work_kind,
-                    l.attention_work_id, l.attention_at
+                    l.attention_work_id, l.started_at, l.attention_at
              FROM runs r JOIN agent_launches l ON l.product_run_id=r.id
              WHERE r.epoch_id=?1 AND r.state='active' AND l.launch_state='live'
                AND l.attention_kind IS NOT NULL
-             ORDER BY l.attention_at LIMIT 1",
+             ORDER BY l.started_at LIMIT 1",
             [epoch.id.as_str()],
             |row| {
                 Ok((
@@ -1770,11 +1830,12 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((launch_id, kind, parent_kind, parent_id, opened_at)) = row else {
+    let Some((launch_id, kind, parent_kind, parent_id, opened_at, attention_at)) = row else {
         return Ok(None);
     };
     let position = flow_position_in(conn, work, &epoch.id)?;
@@ -1797,7 +1858,99 @@ fn review_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Review>> {
         position,
         attention,
         opened_at: OffsetDateTime::from_unix_timestamp(opened_at).map_err(invalid_durable)?,
+        attention_at: attention_at
+            .map(OffsetDateTime::from_unix_timestamp)
+            .transpose()
+            .map_err(invalid_durable)?,
     }))
+}
+
+fn clear_answered_attention(
+    tx: &Transaction<'_>,
+    caller: Option<&RunLease>,
+    work: &WorkRef,
+) -> StoreResult<()> {
+    let Some(review) = review_in(tx, work)? else {
+        return Ok(());
+    };
+    if review.attention_at.is_none() || validate_review_caller(tx, caller, &review).is_err() {
+        return Ok(());
+    }
+    tx.execute(
+        "UPDATE agent_launches SET attention_at=NULL
+         WHERE id=?1 AND attention_at=?2",
+        params![
+            review.launch_id.as_str(),
+            review
+                .attention_at
+                .expect("pending Review has an attention timestamp")
+                .unix_timestamp(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(super) fn rearm_review_attention(tx: &Transaction<'_>, turn_id: &TurnId) -> StoreResult<()> {
+    let route = tx
+        .query_row(
+            "SELECT l.id, l.attention_kind, l.attention_work_kind, l.attention_work_id
+             FROM agent_turns turn
+             JOIN agent_launches l ON l.id=turn.launch_id
+             JOIN work_flow_positions position ON position.epoch_id=turn.epoch_id
+             WHERE turn.id=?1 AND l.launch_state='live' AND position.interactive=1
+               AND l.attention_kind IS NOT NULL AND l.attention_at IS NULL",
+            [turn_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((launch_id, kind, parent_kind, parent_id)) = route else {
+        return Ok(());
+    };
+    let now = now_unix();
+    if tx.execute(
+        "UPDATE agent_launches SET attention_at=?2
+         WHERE id=?1 AND attention_kind IS NOT NULL AND attention_at IS NULL",
+        params![launch_id, now],
+    )? == 0
+    {
+        return Ok(());
+    }
+    let parent = match (kind.as_str(), parent_kind, parent_id) {
+        ("user", None, None) => return Ok(()),
+        ("parent", Some(kind), Some(id)) => parse_work_ref(&kind, &id)?,
+        _ => {
+            return Err(StoreError::InvalidData(
+                "stored attention route is inconsistent".to_string(),
+            ))
+        }
+    };
+    let parent_epoch = current_epoch_in(tx, &parent)?;
+    let revision = parent_epoch.current_basis.revision + 1;
+    let inserted = tx.execute(
+        "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
+         VALUES (?1, ?2, 'evidence', ?3, ?4)
+         ON CONFLICT(kind, source_id) DO NOTHING",
+        params![
+            parent_epoch.id.as_str(),
+            revision as i64,
+            turn_id.as_str(),
+            now,
+        ],
+    )?;
+    if inserted == 1 {
+        tx.execute(
+            "UPDATE epochs SET current_rev=?2 WHERE id=?1 AND state='open'",
+            params![parent_epoch.id.as_str(), revision as i64],
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_review_caller(
@@ -2415,7 +2568,7 @@ fn validate_author(tx: &Transaction<'_>, target: &WorkRef, author: &Author) -> S
         .query_row(
             "SELECT e.wave_id, e.project_id, e.task_id
              FROM runs r JOIN epochs e ON e.id=r.epoch_id
-             WHERE r.id=?1 AND r.state='active'",
+             WHERE r.id=?1 AND r.state IN ('reserved', 'active')",
             [run_id.as_str()],
             |row| {
                 Ok((
@@ -2426,7 +2579,9 @@ fn validate_author(tx: &Transaction<'_>, target: &WorkRef, author: &Author) -> S
             },
         )
         .optional()?
-        .ok_or_else(|| StoreError::InvalidAuthority("Run lease is not active".to_string()))?;
+        .ok_or_else(|| {
+            StoreError::InvalidAuthority("Run no longer holds execution authority".to_string())
+        })?;
     let allowed = match target {
         WorkRef::Project(project_id) => {
             let parent: String = tx.query_row(

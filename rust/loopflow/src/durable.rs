@@ -614,6 +614,10 @@ impl RunLease {
     pub(crate) fn token_hash(&self) -> String {
         self._token.hash()
     }
+
+    pub(crate) fn env_value(&self) -> &str {
+        self._token.env_value()
+    }
 }
 
 /// Opaque capability for the one active Run. It is never serialized or shown.
@@ -695,8 +699,13 @@ pub struct Review {
     pub launch_id: LaunchId,
     pub basis: Basis,
     pub position: FlowPosition,
+    /// Stable route for the entire interactive flow step.
     pub attention: AttentionRoute,
+    #[serde(with = "time::serde::rfc3339")]
     pub opened_at: OffsetDateTime,
+    /// The current unanswered child Turn; absent while the child is acting.
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub attention_at: Option<OffsetDateTime>,
 }
 
 /// Oldest-first parent control input reconstructed from durable child facts.
@@ -717,7 +726,7 @@ impl ChildReview {
         let facts = serde_json::to_string_pretty(self).expect("Child Review facts must serialize");
         format!(
             "<lf:child-review work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
-             Service this child before background Project work. Use \
+             Service this child before background parent work. Use \
              `lf work steer {kind} {id} \"<response>\"` to continue or \
              `lf work close {kind} {id}` to finish. Delivery alone does not clear attention.\n\n\
              Durable child output and current evidence:\n{facts}\n</lf:child-review>",
@@ -735,6 +744,8 @@ pub struct LaunchSurface {
     pub wave_id: WaveId,
     pub home_route: String,
     pub attention: Option<AttentionRoute>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub attention_at: Option<OffsetDateTime>,
     pub handback: Option<BoundaryState>,
     pub attach_argv: Option<Vec<String>>,
 }
@@ -827,6 +838,7 @@ mod tests {
             surface.attention,
             Some(super::AttentionRoute::User)
         ));
+        assert!(surface.attention_at.is_some());
 
         let encoded = serde_json::to_string(&surface).unwrap();
         let decoded: LaunchSurface = serde_json::from_str(&encoded).unwrap();

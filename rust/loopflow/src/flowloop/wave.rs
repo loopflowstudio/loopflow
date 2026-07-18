@@ -49,6 +49,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -57,9 +58,11 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use crate::durable::{ChildReview, RunLease, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
+use crate::store::{open_store, storage_config_from_env, Store};
 use crate::wave::journal::{MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::wave::resident::ListenerClient;
@@ -338,11 +341,52 @@ pub async fn run_loop(
     wave: String,
     config: LoopConfig,
 ) -> Result<()> {
+    let control = wave_control(&wave).await?;
     let backend = BodyBackend::Harness {
         prepare: Box::new(crate::lf::commands::run::prepare_harness_turn),
         create: Box::new(default_create_harness),
     };
-    run_loop_with(client, inbox_rx, cwd, origin_repo, wave, config, backend).await
+    run_loop_with(
+        client,
+        inbox_rx,
+        cwd,
+        origin_repo,
+        wave,
+        config,
+        backend,
+        control,
+    )
+    .await
+}
+
+struct WaveControl {
+    store: Arc<Store>,
+    lease: RunLease,
+}
+
+fn child_key(child: &ChildReview) -> (crate::durable::LaunchId, u64) {
+    (child.review.launch_id.clone(), child.review.basis.revision)
+}
+
+async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
+    if std::env::var_os(crate::durable::RUN_LEASE_ENV).is_none()
+        && std::env::var_os(crate::durable::RUN_CONTEXT_ENV).is_none()
+    {
+        return Ok(None);
+    }
+    let store = Arc::new(open_store(&storage_config_from_env()?).await?);
+    let lease = crate::ops::required_run_lease(&store).await?;
+    let registered = store
+        .get_wave_by_name(wave)
+        .await?
+        .ok_or_else(|| anyhow!("Wave {wave} is absent from the control store"))?;
+    if lease.work != WorkRef::Wave(registered.id().clone()) {
+        return Err(anyhow!(
+            "ambient Run {} does not own Wave {wave}",
+            lease.run_id
+        ));
+    }
+    Ok(Some(WaveControl { store, lease }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -354,6 +398,7 @@ async fn run_loop_with(
     wave: String,
     config: LoopConfig,
     backend: BodyBackend,
+    control: Option<WaveControl>,
 ) -> Result<()> {
     let mut wave_loop = WaveLoop {
         client,
@@ -362,18 +407,42 @@ async fn run_loop_with(
         wave,
         config,
         queue: Vec::new(),
+        evidence_queue: Vec::new(),
         seen: HashSet::new(),
         backend,
         consecutive_failures: 0,
         idle_since: Instant::now(),
         cron_last_fired: HashMap::new(),
         provider_session: None,
+        control,
+        servicing_child: None,
+        delivered_child: None,
         end: None,
     };
 
     while wave_loop.end.is_none() {
         if !wave_loop.queue.is_empty() {
             wave_loop.start_queued_pass(&mut inbox_rx).await;
+            continue;
+        }
+        if let Some(child) = wave_loop.oldest_child().await? {
+            let key = child_key(&child);
+            if wave_loop.delivered_child.as_ref() == Some(&key) {
+                tokio::select! {
+                    item = inbox_rx.recv() => match item {
+                        Some(item) => wave_loop.on_inbox(item).await,
+                        None => wave_loop.end = Some(LoopEnd::ListenerGone),
+                    },
+                    _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                }
+            } else {
+                wave_loop.start_child_pass(child, &mut inbox_rx).await;
+            }
+            continue;
+        }
+        wave_loop.delivered_child = None;
+        if !wave_loop.evidence_queue.is_empty() {
+            wave_loop.start_evidence_pass(&mut inbox_rx).await;
             continue;
         }
         let heartbeat_at = wave_loop.heartbeat_deadline();
@@ -409,11 +478,15 @@ struct WaveLoop {
     config: LoopConfig,
     backend: BodyBackend,
     queue: Vec<PendingMessage>,
+    evidence_queue: Vec<PendingMessage>,
     seen: HashSet<MessageId>,
     consecutive_failures: u32,
     idle_since: Instant,
     cron_last_fired: HashMap<String, DateTime<Utc>>,
     provider_session: Option<ProviderSessionRef>,
+    control: Option<WaveControl>,
+    servicing_child: Option<(crate::durable::LaunchId, u64)>,
+    delivered_child: Option<(crate::durable::LaunchId, u64)>,
     end: Option<LoopEnd>,
 }
 
@@ -450,13 +523,13 @@ impl WaveLoop {
             InboxItem::Task(observation) => {
                 let message = crate::wave::journal::task_observation_message(&observation);
                 if self.seen.insert(message.id.clone()) {
-                    self.queue.push(message);
+                    self.evidence_queue.push(message);
                 }
             }
             InboxItem::Project(observation) => {
                 let message = crate::wave::journal::project_observation_message(&observation);
                 if self.seen.insert(message.id.clone()) {
-                    self.queue.push(message);
+                    self.evidence_queue.push(message);
                 }
             }
             InboxItem::Interrupt | InboxItem::Skip => {}
@@ -493,6 +566,19 @@ impl WaveLoop {
 
     async fn start_queued_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
         let messages = std::mem::take(&mut self.queue);
+        self.start_message_pass(messages, inbox_rx).await;
+    }
+
+    async fn start_evidence_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
+        let messages = std::mem::take(&mut self.evidence_queue);
+        self.start_message_pass(messages, inbox_rx).await;
+    }
+
+    async fn start_message_pass(
+        &mut self,
+        messages: Vec<PendingMessage>,
+        inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
+    ) {
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
         let content = messages
             .iter()
@@ -503,6 +589,75 @@ impl WaveLoop {
             .collect::<Vec<_>>()
             .join("\n\n");
         self.run_pass(content, answers, inbox_rx).await;
+    }
+
+    async fn oldest_child(&mut self) -> Result<Option<ChildReview>> {
+        let Some(control) = &self.control else {
+            return Ok(None);
+        };
+        Ok(control
+            .store
+            .child_attention(&control.lease.work)
+            .await?
+            .into_iter()
+            .next())
+    }
+
+    async fn capture_control(
+        &mut self,
+    ) -> Result<(
+        Option<crate::durable::Basis>,
+        Option<crate::trace::ControlLaunch>,
+    )> {
+        let Some(control) = &self.control else {
+            return Ok((None, None));
+        };
+        let epoch = control.store.current_epoch(&control.lease.work).await?;
+        let run = control
+            .store
+            .current_run(&control.lease.work)
+            .await?
+            .ok_or_else(|| anyhow!("Wave Run authority disappeared before Launch"))?;
+        if run.id != control.lease.run_id {
+            anyhow::bail!(
+                "Wave Run {} was replaced before Launch by {}",
+                control.lease.run_id,
+                run.id
+            );
+        }
+        let process_group = crate::engine::process::current_process_group_id()
+            .ok_or_else(|| anyhow!("Wave resident has no isolated process group"))?;
+        Ok((
+            Some(epoch.current_basis),
+            Some(crate::trace::ControlLaunch {
+                run_id: run.id,
+                home_id: run.home_id,
+                account_id: None,
+                containment: crate::durable::Containment::ProcessGroup {
+                    id: i64::from(process_group),
+                },
+                resume_token: None,
+                opaque_basis: None,
+            }),
+        ))
+    }
+
+    async fn start_child_pass(
+        &mut self,
+        child: ChildReview,
+        inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
+    ) {
+        let key = child_key(&child);
+        let failures_before = self.consecutive_failures;
+        self.servicing_child = Some(key.clone());
+        self.delivered_child = Some(key.clone());
+        self.run_pass(child.render(), Vec::new(), inbox_rx).await;
+        self.servicing_child = None;
+        if self.consecutive_failures > failures_before
+            && self.delivered_child.as_ref() == Some(&key)
+        {
+            self.delivered_child = None;
+        }
     }
 
     async fn run_pass(
@@ -536,6 +691,7 @@ impl WaveLoop {
             } else {
                 self.run_process_pass(step, seed, answers, inbox_rx).await;
             }
+            self.servicing_child = None;
             if self.end.is_some() {
                 return;
             }
@@ -588,6 +744,8 @@ impl WaveLoop {
         };
         let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
+        let mut control_poll = tokio::time::interval(Duration::from_millis(200));
+        control_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -600,6 +758,26 @@ impl WaveLoop {
                         InboxAction::Deliver(item) => self.on_inbox(*item).await,
                         InboxAction::ListenerGone => {
                             wait_task.abort();
+                            return;
+                        }
+                    }
+                }
+                _ = control_poll.tick(), if self.control.is_some() => {
+                    match self.oldest_child().await {
+                        Ok(Some(child)) => {
+                            let key = child_key(&child);
+                            if self.delivered_child.as_ref() != Some(&key) {
+                                self.preempt_child(&body_id, &mut wait_task).await;
+                                return;
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            wait_task.abort();
+                            self.finish_failed_pass(
+                                &body_id,
+                                &format!("failed to read Wave control lane: {error:#}"),
+                            ).await;
                             return;
                         }
                     }
@@ -664,6 +842,19 @@ impl WaveLoop {
         };
         body.harness = Some(prepared.harness.clone());
         body.model = prepared.model.clone();
+        let (basis, control) = match self.capture_control().await {
+            Ok(control) => control,
+            Err(error) => {
+                let body_id = body.body_id.clone();
+                self.open_body(body, answers).await;
+                self.finish_failed_pass(
+                    &body_id,
+                    &format!("failed to establish Wave Run Launch: {error}"),
+                )
+                .await;
+                return;
+            }
+        };
 
         let capture = match crate::journal::trace_capture_context(
             &self.cwd,
@@ -681,8 +872,8 @@ impl WaveLoop {
                     gather_ms: prepared.context_gather_ms,
                     render_ms: prepared.context_render_ms,
                     raw_provider: true,
-                    basis: None,
-                    control: None,
+                    basis,
+                    control,
                 },
             ) {
                 Ok(capture) => Some(capture),
@@ -786,6 +977,8 @@ impl WaveLoop {
         let mut terminal_wait = Box::pin(tokio::time::sleep(Duration::from_secs(86_400)));
         let mut terminal_status: Option<Lifecycle> = None;
         let mut usage = TurnUsage::default();
+        let mut control_poll = tokio::time::interval(Duration::from_millis(200));
+        control_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -810,6 +1003,43 @@ impl WaveLoop {
                         InboxAction::ListenerGone => {
                             let _ = harness.stop().await;
                             finish_capture(capture.as_ref(), "interrupted");
+                            return;
+                        }
+                    }
+                }
+                _ = control_poll.tick(), if self.control.is_some() => {
+                    match self.oldest_child().await {
+                        Ok(Some(child)) => {
+                            let key = child_key(&child);
+                            if self.servicing_child.as_ref() != Some(&key)
+                                && self.delivered_child.as_ref() != Some(&key)
+                            {
+                                match harness.send_current(&child.render()).await {
+                                    SendCurrentOutcome::Sent { .. } => {
+                                        self.delivered_child = Some(key.clone());
+                                        self.servicing_child = Some(key);
+                                        timeout.as_mut().reset(
+                                            Instant::now() + self.config.pass_timeout
+                                        );
+                                    }
+                                    SendCurrentOutcome::NotSteerable
+                                    | SendCurrentOutcome::Failed { .. }
+                                    | SendCurrentOutcome::Unknown { .. } => {
+                                        self.preempt_harness(&body_id, harness.as_mut()).await;
+                                        finish_capture(capture.as_ref(), "interrupted");
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            let _ = harness.stop().await;
+                            self.finish_failed_pass(
+                                &body_id,
+                                &format!("failed to read Wave control lane: {error:#}"),
+                            ).await;
+                            finish_capture(capture.as_ref(), "failed");
                             return;
                         }
                     }
@@ -862,6 +1092,11 @@ impl WaveLoop {
                             }]).await;
                             if terminal_status.is_some() {
                                 let status = terminal_status.take().expect("checked");
+                                let status = if self.servicing_child.is_some() {
+                                    Lifecycle::Interrupted
+                                } else {
+                                    status
+                                };
                                 let outcome = if status == Lifecycle::Completed {
                                     "completed"
                                 } else if status == Lifecycle::Interrupted {
@@ -911,6 +1146,11 @@ impl WaveLoop {
                 }
                 _ = &mut terminal_wait, if terminal_status.is_some() => {
                     let status = terminal_status.take().expect("checked");
+                    let status = if self.servicing_child.is_some() {
+                        Lifecycle::Interrupted
+                    } else {
+                        status
+                    };
                     let outcome = if status == Lifecycle::Completed {
                         "completed"
                     } else if status == Lifecycle::Interrupted {
@@ -1031,9 +1271,6 @@ impl WaveLoop {
                 }
                 InboxAction::Interrupt { skip: false }
             }
-            Some(InboxItem::Task(observation)) => InboxAction::Deliver(Box::new(
-                InboxItem::Message(crate::wave::journal::task_observation_message(&observation)),
-            )),
             Some(item) => InboxAction::Deliver(Box::new(item)),
             None => {
                 self.end = Some(LoopEnd::ListenerGone);
@@ -1086,6 +1323,9 @@ impl WaveLoop {
                 self.finish_pass(body_id, StepOutcome::Completed, None, cost_usd)
                     .await;
             }
+            Lifecycle::Interrupted if self.servicing_child.is_some() => {
+                self.finish_control_pass(body_id).await
+            }
             Lifecycle::Interrupted => self.finish_interrupted_pass(body_id, false).await,
             Lifecycle::Failed => {
                 self.finish_failed_pass(body_id, "harness turn failed")
@@ -1107,8 +1347,12 @@ impl WaveLoop {
             Ok(output) if output.status.success() => {
                 self.consecutive_failures = 0;
                 self.ship_output(output).await;
-                self.finish_pass(body_id, StepOutcome::Completed, None, None)
-                    .await;
+                if self.servicing_child.is_some() {
+                    self.finish_control_pass(body_id).await;
+                } else {
+                    self.finish_pass(body_id, StepOutcome::Completed, None, None)
+                        .await;
+                }
             }
             Ok(output) => {
                 self.ship_output(output).await;
@@ -1145,6 +1389,21 @@ impl WaveLoop {
         self.announce_interrupt().await;
         wait_task.abort();
         self.finish_interrupted_pass(body_id, skip).await;
+    }
+
+    async fn preempt_child(
+        &mut self,
+        body_id: &str,
+        wait_task: &mut tokio::task::JoinHandle<std::io::Result<std::process::Output>>,
+    ) {
+        wait_task.abort();
+        self.finish_control_pass(body_id).await;
+    }
+
+    async fn preempt_harness(&mut self, body_id: &str, harness: &mut dyn Harness) {
+        let _ = harness.interrupt().await;
+        let _ = harness.stop().await;
+        self.finish_control_pass(body_id).await;
     }
 
     /// Every terminal end of a body, and the only place the pair is built: the
@@ -1189,6 +1448,17 @@ impl WaveLoop {
         };
         self.finish_pass(body_id, outcome, Some(reason.to_string()), None)
             .await;
+    }
+
+    async fn finish_control_pass(&mut self, body_id: &str) {
+        self.consecutive_failures = 0;
+        self.finish_pass(
+            body_id,
+            StepOutcome::Interrupted,
+            Some("preempted by child attention".to_string()),
+            None,
+        )
+        .await;
     }
 
     async fn finish_failed_pass(&mut self, body_id: &str, reason: &str) {
@@ -1398,6 +1668,7 @@ mod tests {
             BodyBackend::Process(spawn_pass),
             seeds,
             pass_rx,
+            None,
         )
         .await
     }
@@ -1412,6 +1683,7 @@ mod tests {
         backend: BodyBackend,
         seeds: Arc<Mutex<Vec<String>>>,
         passes: mpsc::UnboundedReceiver<String>,
+        control: Option<WaveControl>,
     ) -> TestLoop {
         let runtime =
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
@@ -1453,6 +1725,7 @@ mod tests {
             "ship".into(),
             config,
             backend,
+            control,
         ));
         TestLoop {
             runtime,
@@ -1493,6 +1766,234 @@ mod tests {
         let start = seed.find("<wake>\n").expect("seed has a wake") + "<wake>\n".len();
         let end = seed.find("\n</wake>").expect("seed closes the wake");
         seed[start..end].to_string()
+    }
+
+    struct ReviewRig {
+        control: WaveControl,
+        parent_lease: RunLease,
+        child_lease: RunLease,
+        child_work: WorkRef,
+        child_launch: crate::durable::Launch,
+    }
+
+    async fn review_rig(tmp: &tempfile::TempDir, route: bool) -> ReviewRig {
+        use crate::child_session::ChildRef;
+        use crate::durable::{AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance};
+        use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
+        use crate::session_context::{
+            LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt,
+        };
+
+        let store = Arc::new(
+            open_store(&crate::store::StorageConfig::sqlite(
+                tmp.path().join("control.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = crate::wave::Wave::new(
+            crate::id::WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let project = ProjectSession {
+            id: ProjectSessionId::new(),
+            launch: ProjectLaunchReceipt {
+                project: LinearProjectSnapshot {
+                    id: LinearProjectId::new("project-uuid").unwrap(),
+                    slug: "delivery".to_string(),
+                    name: "Delivery".to_string(),
+                    prompt_context: "Prove child control ordering.".to_string(),
+                },
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            status: ProjectSessionStatus::Created,
+            status_reason: "created".to_string(),
+            status_at: now,
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            latest_process: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project_session(&project).await.unwrap();
+        let child_work = store
+            .work_for_child(&ChildRef::Project(project.id))
+            .await
+            .unwrap();
+        let home = store.home("test-home").await.unwrap();
+        let (_, parent_lease) = store
+            .reserve_run(
+                &WorkRef::Wave(wave.id().clone()),
+                &home.id,
+                crate::durable::RunTrigger::User,
+            )
+            .await
+            .unwrap();
+        let (_, child_lease) = store
+            .reserve_run(&child_work, &home.id, crate::durable::RunTrigger::User)
+            .await
+            .unwrap();
+        let launch = store
+            .advance_run(
+                &child_lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "child-review".to_string(),
+                    },
+                    cwd: tmp.path().join("child"),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Launch(child_launch) = launch else {
+            panic!("expected child Launch")
+        };
+        store
+            .advance_run(
+                &child_lease,
+                RunAdvance::LaunchLive {
+                    launch_id: child_launch.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let child_basis = store
+            .current_epoch(&child_work)
+            .await
+            .unwrap()
+            .current_basis;
+        store
+            .set_flow_position(
+                &child_lease,
+                FlowPosition {
+                    work: child_work.clone(),
+                    epoch_id: child_basis.epoch_id,
+                    flow: "project".to_string(),
+                    step: "review".to_string(),
+                    step_index: 0,
+                    iteration: 0,
+                    interactive: true,
+                    updated_at: now,
+                },
+            )
+            .await
+            .unwrap();
+        if route {
+            store
+                .route_review(
+                    &child_lease,
+                    &child_launch.id,
+                    AttentionRoute::Parent(parent_lease.work.clone()),
+                )
+                .await
+                .unwrap();
+        }
+        ReviewRig {
+            control: WaveControl {
+                store,
+                lease: parent_lease.clone(),
+            },
+            parent_lease,
+            child_lease,
+            child_work,
+            child_launch,
+        }
+    }
+
+    #[tokio::test]
+    async fn seed_only_wave_services_child_once_without_advancing_background() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rig = review_rig(&tmp, true).await;
+        let store = rig.control.store.clone();
+        let parent_lease = rig.parent_lease.clone();
+        let child_work = rig.child_work.clone();
+        let seeds = Arc::new(Mutex::new(Vec::new()));
+        let recorded = seeds.clone();
+        let (pass_tx, pass_rx) = mpsc::unbounded_channel();
+        let backend = BodyBackend::Process(Box::new(move |cwd, _step, seed, _| {
+            recorded.lock().unwrap().push(seed.to_string());
+            let _ = pass_tx.send(seed.to_string());
+            tokio::process::Command::new("sh")
+                .args(["-c", "printf handled"])
+                .current_dir(cwd)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+        }));
+        let mut loop_ = boot_backend(
+            tmp,
+            test_config(Duration::from_secs(600)),
+            backend,
+            seeds,
+            pass_rx,
+            Some(rig.control),
+        )
+        .await;
+
+        let seed = loop_.next_seed().await;
+        let wake = wake_of(&seed);
+        assert!(wake.contains("<lf:child-review"));
+        assert!(wake.contains("Service this child before background parent work"));
+        wait_for("seed-only control turn ends", || {
+            loop_.runtime.thread_snapshot().iter().any(|turn| {
+                turn.role == ChatRole::Assistant && turn.status == Lifecycle::Interrupted
+            })
+        })
+        .await;
+        let playhead = loop_.runtime.playhead().expect("playhead remains durable");
+        assert_eq!(
+            playhead
+                .now
+                .expect("background step remains selected")
+                .index,
+            0
+        );
+        assert!(playhead.active.is_none());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(350), loop_.next_seed())
+                .await
+                .is_err()
+        );
+
+        store
+            .steer(
+                &crate::durable::ControlCtx::Run(&parent_lease),
+                &child_work,
+                "continue with the fresh evidence",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(store
+            .child_attention(&parent_lease.work)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .review(&child_work)
+            .await
+            .unwrap()
+            .expect("Review stays open")
+            .attention_at
+            .is_none());
     }
 
     struct SteeringHarness {
@@ -1570,6 +2071,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_wave_preempts_background_for_child_and_preserves_playhead() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git init");
+        assert!(status.success());
+        let rig = review_rig(&tmp, false).await;
+        let store = rig.control.store.clone();
+        let parent_lease = rig.parent_lease.clone();
+        let child_work = rig.child_work.clone();
+        let child_launch_id = rig.child_launch.id.clone();
+        let child_lease = rig.child_lease.clone();
+        let inputs = Arc::new(Mutex::new(Vec::new()));
+        let harness_inputs = inputs.clone();
+        let backend = BodyBackend::Harness {
+            prepare: Box::new(|skill, seed, _wave, max_turns| {
+                Ok(crate::lf::commands::run::PreparedHarnessTurn {
+                    config: crate::engine::AgentConfig {
+                        agent: Some("fake".to_string()),
+                        max_turns,
+                        ..crate::engine::AgentConfig::default()
+                    },
+                    input: format!("{skill}\n{seed}"),
+                    context: crate::trace::PreparedTurnContext::from_prompts(
+                        "",
+                        &format!("{skill}\n{seed}"),
+                    ),
+                    harness: "fake".to_string(),
+                    model: None,
+                    context_gather_ms: 0,
+                    context_render_ms: 0,
+                })
+            }),
+            create: Box::new(move |_name, _approval, events| {
+                Ok(Box::new(SteeringHarness {
+                    events,
+                    inputs: harness_inputs.clone(),
+                    accepts_current_send: true,
+                }))
+            }),
+        };
+        let loop_ = boot_backend(
+            tmp,
+            test_config(Duration::from_secs(600)),
+            backend,
+            Arc::new(Mutex::new(Vec::new())),
+            mpsc::unbounded_channel().1,
+            Some(rig.control),
+        )
+        .await;
+        loop_
+            .runtime
+            .deliver(MessageOp::Message, "begin background".into())
+            .expect("user turn");
+        wait_for("background Turn starts", || {
+            inputs.lock().unwrap().len() == 1
+        })
+        .await;
+
+        store
+            .route_review(
+                &child_lease,
+                &child_launch_id,
+                crate::durable::AttentionRoute::Parent(parent_lease.work.clone()),
+            )
+            .await
+            .unwrap();
+        wait_for("child is live-delivered", || {
+            inputs.lock().unwrap().len() == 2
+        })
+        .await;
+        assert!(inputs.lock().unwrap()[1].contains("<lf:child-review"));
+        wait_for("repurposed background Turn is interrupted", || {
+            loop_.runtime.thread_snapshot().iter().any(|turn| {
+                turn.role == ChatRole::Assistant && turn.status == Lifecycle::Interrupted
+            })
+        })
+        .await;
+        let playhead = loop_.runtime.playhead().expect("playhead remains durable");
+        assert_eq!(
+            playhead
+                .now
+                .expect("background step remains selected")
+                .index,
+            0
+        );
+        assert!(playhead.active.is_none());
+
+        store
+            .steer(
+                &crate::durable::ControlCtx::Run(&parent_lease),
+                &child_work,
+                "continue after checking the fresh head",
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(store
+            .child_attention(&parent_lease.work)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn steer_reaches_the_live_body_and_streams_into_one_turn() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let status = std::process::Command::new("git")
@@ -1616,6 +2224,7 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
             // A harness body runs in-process; it spawns no pass to await.
             mpsc::unbounded_channel().1,
+            None,
         )
         .await;
         let runtime = loop_.runtime.clone();
@@ -1701,6 +2310,7 @@ mod tests {
             Arc::new(Mutex::new(Vec::new())),
             // A harness body runs in-process; it spawns no pass to await.
             mpsc::unbounded_channel().1,
+            None,
         )
         .await;
         let runtime = loop_.runtime.clone();

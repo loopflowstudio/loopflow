@@ -32,6 +32,7 @@
   "attention": {
     "kind": "user"
   },
+  "attention_at": "2026-07-17T12:01:00Z",
   "handback": null,
   "attach_argv": ["tmux", "attach-session", "-t", "lf-task"]
 }

@@ -1667,8 +1667,23 @@ impl SqliteStore {
     }
 
     pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        update_agent_turn(&conn, turn)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let was_running = tx
+            .query_row(
+                "SELECT status='running' FROM agent_turns WHERE id=?1",
+                [&turn.id],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        update_agent_turn(&tx, turn)?;
+        if was_running && turn.status != "running" {
+            let turn_id = crate::durable::TurnId::parse(&turn.id)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            durable::rearm_review_attention(&tx, &turn_id)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

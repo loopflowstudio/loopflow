@@ -834,34 +834,27 @@ Execution still crosses one legacy bridge. Project/Task Session runners own
 process reservation, generations, status, revocation, and recovery, then mirror
 them into Run. Product control authority no longer crosses that bridge: one
 opaque `LF_RUN_LEASE` hash resolves the exact active Run and missing agent
-authority fails closed. Turn retains observed root assistant output, and the
-Project runner drains direct input then oldest child Review before background
-work with live-send or interrupt-and-seed fallback. The Wave resident does not
-yet drain the same projection, and the duplicate Session lifecycle remains.
+authority fails closed. Turn retains observed root assistant output. Project
+and Wave drain direct input then oldest child Review before background work
+with live-send or interrupt-and-seed fallback. Review route remains open across
+the conversation while nullable pending attention clears on the routed Steer;
+the next terminal child Turn re-arms it and advances the parent Basis once.
+The duplicate Session lifecycle remains.
 
 The remaining pass finishes the authority cut rather than adding another
 bridge:
 
-1. separate the durable Review route from the currently pending attention;
-   parent Steer clears only pending, and the child's next terminal Turn re-arms
-   it with one parent evidence revision;
-2. give the Wave resident the same ordered control projection the Project
-   runner now executes;
-3. prove live and seed-only child control against deterministic parent harnesses,
-   including that a live-repurposed Turn cannot advance background playhead;
-4. replace Project/Task reservation, status, revocation, reaping, settlement,
+1. replace Project/Task reservation, status, revocation, reaping, settlement,
    and recovery with shared Run reserve/advance/stop;
-5. delete Session/body process authority, env vars, DTOs, and duplicate runners;
-6. restore focused CI preemption and fresh-settlement tests removed with the
-   command-ledger suite;
-7. consolidate unpublished schema work under main's dependency-ordered draft
+2. delete Session/body process authority, env vars, DTOs, and duplicate runners;
+3. consolidate unpublished schema work under main's dependency-ordered draft
    migration contract, leaving no supported intermediate architecture.
 
-The size objective is already met, which removes any incentive to delete proof.
-Current source is 121,818 physical / 119,126 normalized Rust lines, one below
-both adjusted targets. Remaining deletion must remove duplicate truth rather
-than spending that margin; behavioral proof may not be traded away for the
-count.
+The committed checkpoint met the size objective at 121,818 physical / 119,126
+normalized Rust lines. Handshake, Wave-priority, and focused settlement proof
+put the working tree above that interim count. The remaining Session deletion
+must restore the target by removing duplicate truth; behavioral proof may not
+be traded away for the count.
 
 It is done when:
 

@@ -1992,7 +1992,8 @@ mod tests {
 
     use super::{
         ci_fix_seed, handle_body_failure, infra_blocked_reason, prepare_task_flow_step,
-        progress_summary, resume_task_phase, run_task_session_with, PreparedTaskStep,
+        progress_summary, resume_task_phase, run_task_session_with, settle_ci_fix_turn, CiFixWake,
+        PreparedTaskStep,
     };
     use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
     use crate::child_session::{ChildProcessReservation, ChildRef, ChildWriteLease};
@@ -2006,8 +2007,9 @@ mod tests {
     };
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
-        PmWritebackState, TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
-        TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
+        AfterMerge, CiIncident, CiObservation, CiState, GithubPr, PmWritebackState, PrPublication,
+        TaskEventKind, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
+        TaskSession, TaskSessionId, TaskSessionStatus,
     };
     use crate::wave::playhead::Playhead;
     use crate::wave::Wave;
@@ -2348,6 +2350,90 @@ mod tests {
             crate::journal::LfNode::Run,
             crate::journal::LfEventType::Completed,
             crate::journal::LfEventFields::default(),
+        );
+    }
+
+    #[tokio::test]
+    async fn ci_settlement_records_the_first_fresh_repaired_head() {
+        let (store, mut session, lease) = conformance_session("codex").await;
+        let mut observed_pr = store
+            .active_task_pr(&session.id)
+            .await
+            .unwrap()
+            .expect("active PR");
+        let now = OffsetDateTime::now_utc();
+        observed_pr.publication = Some(PrPublication {
+            requested_at: now,
+            after_merge: AfterMerge::Review,
+            next_slug: None,
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/owner/repo/pull/42".to_string(),
+                head_sha: Some("fresh-repaired-head".to_string()),
+            }),
+        });
+        observed_pr.ci_observation = Some(CiObservation {
+            head_sha: "cached-failed-head".to_string(),
+            state: CiState::Failing,
+            failing_checks: Vec::new(),
+            observed_at: now,
+        });
+        let incident = CiIncident {
+            identity: "github:ci:owner/repo:42:cached-failed-head:test".to_string(),
+            task_session_id: session.id.clone(),
+            pr_id: observed_pr.id.clone(),
+            repo: "owner/repo".to_string(),
+            pr_number: 42,
+            failed_head_sha: "cached-failed-head".to_string(),
+            repaired_head_sha: None,
+            failure_set: vec!["test".to_string()],
+            provider_completed_at: None,
+            poll_observed_at: Some(now),
+            webhook_received_at: None,
+            claimed_run_id: None,
+            responded_at: None,
+            green_at: None,
+            merged_at: None,
+            blocked_at: None,
+            blocked_reason: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.observe_ci_incident(&incident).await.unwrap();
+        let wake = CiFixWake {
+            incident_identity: incident.identity.clone(),
+            pr_number: 42,
+            head_sha: incident.failed_head_sha.clone(),
+            failing_checks: Vec::new(),
+        };
+
+        settle_ci_fix_turn(
+            &store,
+            &mut session,
+            &lease,
+            &wake,
+            Some(&observed_pr),
+            Some("cached-failed-head"),
+            Lifecycle::Completed,
+            None,
+        )
+        .await
+        .unwrap();
+        store
+            .mark_ci_incident_repaired(&incident.identity, "later-unrelated-head", now)
+            .await
+            .unwrap();
+
+        let row = store
+            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.incident.identity == incident.identity)
+            .expect("incident remains queryable");
+        assert_eq!(
+            row.incident.repaired_head_sha.as_deref(),
+            Some("fresh-repaired-head")
         );
     }
 

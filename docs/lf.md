@@ -307,6 +307,8 @@ parent merges. The two Tasks keep separate identities, worktrees, and workers.
 tmux remains containment and read-only inspection; Review input never writes
 terminal bytes into the provider process.
 
+## Presenting an Opaque Launch
+
 ```bash
 lf launch list --active --json
 lf launch status launch_... --json
@@ -314,16 +316,15 @@ lf launch present launch_...                 # exec the tmux/provider attach rou
 lf launch handback launch_... --outcome succeeded
 ```
 
-Closing the app or terminal does not end the Launch. For an opaque TUI, record
-the observed boundary result with
-`handback --outcome succeeded|failed|interrupted|unknown`; process exit alone
-does not claim success.
+`present` is the generic presentation adapter for an opaque TUI Launch: it
+executes that Launch's attach route but does not create a Review or become its
+identity. The descriptor carries stable Work and Wave identity, Home route,
+provider, cwd, attention route, explicit handback evidence, and optional attach
+argv; tmux or the provider owns terminal bytes.
 
-`lf launch present <launch-id>` remains the generic presentation adapter for an
-opaque TUI Launch. It executes that Launch's attach route but does not create a
-Review or become its identity. The descriptor carries stable Work and Wave
-identity, Home route, provider, cwd, attention route, explicit handback
-evidence, and optional attach argv. tmux or the provider owns terminal bytes.
+Closing the app or terminal does not end the Launch. Record the observed
+boundary result with `handback --outcome succeeded|failed|interrupted|unknown`;
+process exit alone does not claim success.
 
 ## Speaking to Waves
 

@@ -11,11 +11,22 @@ title: Architecture
 > the existing Turn ledger. Stored Feedback/Handoff and `ChildCommand` are gone;
 > Feedback is an interactive flow interval routed by Launch attention, and direct
 > Work controls exist. Work placement now names a stable Home authority, and one
-> Home-local keeper serves all placed Waves. Project/Task Session runners and
-> body leases still own process execution and reconstruct Run authority from
-> legacy generations.
-> Child attention is queryable but parent loops do not yet prioritize it. Run is
-> therefore the durable authority, but not yet the only executor.
+> Home-local keeper serves all placed Waves.
+>
+> Child-first responsiveness has shipped. Both the Wave loop
+> (`flowloop/wave.rs`) and the Project runner drain direct User input, then the
+> oldest child Feedback awaiting them, before resuming background cadence, with
+> live-send or interrupt-and-seed fallback and no loss of the durable playhead.
+>
+> One bridge remains, and it is execution. Project and Task Session runners
+> still own process reservation, status, revocation, reaping, and recovery
+> against `ProjectSessionStatus` / `TaskSessionStatus` and a `u32` process
+> generation, then mirror those transitions into Run through
+> `reserve_run_for_child` / `activate_run_for_child`. Control *authority* no
+> longer crosses that bridge — one opaque `LF_RUN_LEASE` resolves the exact
+> active Run and missing in-Run credentials fail closed — but execution still
+> does. Run is therefore the durable authority, and not yet the only executor.
+> Removing that duplicate stack is the next and final cut.
 >
 > This page is deliberately a working architecture ledger during that cutover.
 > It keeps the current reality, target decisions, research evidence, and open
@@ -138,11 +149,12 @@ These are the implementation being replaced, not compatibility contracts.
     caller-supplied Work, Session, generation, or Author. Observed root Turn
     output feeds the Project runner's oldest-first child control lane.
 
-The structural gap is now shared execution. Session/body stores still reserve,
-activate, revoke, and reap through duplicated Project/Task paths, then mirror
-those transitions into Run. The Wave resident also lacks the Project runner's
-ordered child control lane. The next cut moves both through shared Run
-execution and deletes the Session/body controller.
+The structural gap is now shared execution, and only that. Session/body stores
+still reserve, activate, revoke, and reap through duplicated Project/Task
+paths, then mirror those transitions into Run. The ordered child control lane
+is no longer a gap: the Wave resident now runs it alongside the Project runner.
+The next cut routes Project and Task through shared Run execution and deletes
+the Session/body controller.
 
 ## Target contract
 

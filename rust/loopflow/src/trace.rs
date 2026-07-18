@@ -879,19 +879,7 @@ impl CaptureHandle {
                 "a control Launch successor must be reserved before capture".to_string(),
             ));
         }
-        let context = TraceCaptureContext {
-            run_id: TraceId::parse(&capture.launch.run_id)
-                .expect("TraceCapture stores a generated trace id"),
-            process_id: ExecId::parse(&capture.launch.process_id)
-                .expect("TraceCapture stores a generated exec id"),
-            repo: PathBuf::from(&capture.launch.repo),
-            worktree: PathBuf::from(&capture.launch.worktree),
-            wave: capture.launch.wave.clone(),
-            project: capture.launch.project.clone(),
-            task: capture.launch.task.clone(),
-            flow: capture.launch.flow.clone(),
-            skill: capture.launch.skill.clone(),
-        };
+        let context = capture.context.clone();
         let start = CaptureStart {
             provider,
             model,
@@ -953,6 +941,7 @@ impl CaptureHandle {
 
 #[derive(Debug)]
 struct TraceCapture {
+    context: TraceCaptureContext,
     launch: AgentLaunchRow,
     turn: AgentTurnRow,
     conversation_path: PathBuf,
@@ -1063,11 +1052,11 @@ impl TraceCapture {
             ended_at: None,
             repo: context.repo.display().to_string(),
             worktree: context.worktree.display().to_string(),
-            wave: context.wave,
-            flow: context.flow,
-            skill: context.skill,
-            project: context.project,
-            task: context.task,
+            wave: context.wave.clone(),
+            flow: context.flow.clone(),
+            skill: context.skill.clone(),
+            project: context.project.clone(),
+            task: context.task.clone(),
             provider: start.provider,
             model: start.model,
             surface: start.surface,
@@ -1144,6 +1133,7 @@ impl TraceCapture {
         }
 
         Ok(Self {
+            context,
             launch,
             turn,
             conversation_path: published_conversation_path,

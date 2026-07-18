@@ -58,7 +58,7 @@ the account unavailable until its reported reset and immediately tries the next
 account in the grant. `--account` retains the normal route as fallback;
 `--only-account` stays inside the accounts it names.
 
-If the retries exhaust, resume a durable Session on another provider:
+If the retries exhaust for a managed Task, resume it on another provider:
 
 ```bash
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"

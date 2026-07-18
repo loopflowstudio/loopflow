@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, send_outstanding_steers,
     take_current_input as take_child_input, CommandStop, PendingInput,
 };
-use crate::child_session::{ChildBodyHandoff, ChildBodyOutcome, ChildLeaseState, ChildRef};
+use crate::child_session::{ChildBodyHandoff, ChildRef};
 use crate::durable::{Basis, BoundarySeed, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
@@ -63,11 +63,11 @@ async fn spawn_failover(
     lease: &RunLease,
     wave: &Wave,
 ) -> Result<()> {
-    let tmux_name = session
-        .latest_process
-        .as_ref()
-        .map(|process| process.tmux_name.clone())
-        .ok_or_else(|| anyhow!("Project failover has no reserved Launch containment"))?;
+    let tmux_name = format!(
+        "lf-project-{}-{}",
+        &session.id.as_str()[3..11],
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     crate::ops::launch_in_run(
         store,
         lease,
@@ -97,9 +97,6 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
         .await?
         .ok_or_else(|| anyhow!("Project Session {session_id} not found"))?;
     let wave = owning_wave(&store, &session).await?;
-    if let Some(process) = &mut session.latest_process {
-        process.mark_booted();
-    }
     let from = session.status;
     session.set_status(
         ProjectSessionStatus::Running,
@@ -194,13 +191,6 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
     store
         .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
         .await?;
-    if let Some(process) = &mut session.latest_process {
-        process.observe_provider(
-            &session.provider,
-            session.provider_session_id.clone(),
-            harness.process_group_id(),
-        );
-    }
     if let Err(error) = store.update_project_session_for_run(&session, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
@@ -389,13 +379,6 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != session.provider_session_id {
                     session.provider_session_id = provider_session_id;
-                    if let Some(process) = &mut session.latest_process {
-                        process.observe_provider(
-                            &session.provider,
-                            session.provider_session_id.clone(),
-                            harness.process_group_id(),
-                        );
-                    }
                     store.update_project_session_for_run(&session, lease).await?;
                 }
                 match event {
@@ -624,18 +607,13 @@ async fn run_project_session_inner(session_id: ProjectSessionId, lease: &RunLeas
                                 )
                                 .await?;
                         }
-                        if let Some(process) = &mut session.latest_process {
-                            process.state = ChildLeaseState::Finished;
-                            process.outcome = Some(if session.status == ProjectSessionStatus::Completed {
-                                ChildBodyOutcome::Completed
-                            } else {
-                                ChildBodyOutcome::Interrupted {
-                                    reason: session.status_reason.clone(),
-                                }
-                            });
-                        }
                         finish_capture(capture.as_ref(), "completed");
-                        store.finish_project_process_for_run(&session, lease).await?;
+                        let outcome = if session.status == ProjectSessionStatus::Completed {
+                            crate::durable::BoundaryState::Succeeded
+                        } else {
+                            crate::durable::BoundaryState::Interrupted
+                        };
+                        store.finish_project_run(&session, lease, outcome).await?;
                         return Ok(());
                     }
                     ConversationEvent::Error { code, message } => {
@@ -998,13 +976,9 @@ async fn finish_failed(
             },
         )
         .await?;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Failed {
-            reason: error.to_string(),
-        });
-    }
-    store.finish_project_process_for_run(session, lease).await?;
+    store
+        .finish_project_run(session, lease, crate::durable::BoundaryState::Failed)
+        .await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1045,12 +1019,6 @@ async fn handle_body_failure(
                     },
                 )
                 .await?;
-            if let Some(process) = &mut session.latest_process {
-                process.state = ChildLeaseState::Finished;
-                process.outcome = Some(ChildBodyOutcome::Failed {
-                    reason: reason.to_string(),
-                });
-            }
             store.update_project_session_for_run(session, lease).await?;
             let launch = store.current_launch(lease).await?.ok_or_else(|| {
                 anyhow!("Project Run {} has no Launch to hand back", lease.run_id)
@@ -1088,15 +1056,6 @@ async fn handle_body_failure(
                 )
                 .await?;
             let rotated = store.rotate_run_lease(lease).await?;
-            let next_generation = session
-                .latest_process
-                .as_ref()
-                .map_or(1, |process| process.generation + 1);
-            let tmux_name = format!(
-                "lf-project-{}-{next_generation}",
-                &session.id.as_str()[3..11]
-            );
-            session.begin_generation(tmux_name);
             store
                 .update_project_session_for_run(session, &rotated)
                 .await?;
@@ -1160,11 +1119,9 @@ async fn finish_abandoned(
         format!("Project Session explicitly abandoned: {reason}"),
     )
     .await?;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Interrupted { reason });
-    }
-    store.finish_project_process_for_run(session, lease).await?;
+    store
+        .finish_project_run(session, lease, crate::durable::BoundaryState::Interrupted)
+        .await?;
     Ok(())
 }
 
@@ -1188,13 +1145,9 @@ async fn finish_command_stop(
                 "Project turn interrupted; waiting for resume or another instruction",
             )
             .await?;
-            if let Some(process) = &mut session.latest_process {
-                process.state = ChildLeaseState::Finished;
-                process.outcome = Some(ChildBodyOutcome::Interrupted {
-                    reason: "Project turn interrupted".to_string(),
-                });
-            }
-            store.finish_project_process_for_run(session, lease).await?;
+            store
+                .finish_project_run(session, lease, crate::durable::BoundaryState::Interrupted)
+                .await?;
             Ok(())
         }
         CommandStop::Abandoned(reason) => {
@@ -1254,11 +1207,9 @@ async fn record_unhandled_failure(
             },
         )
         .await;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Failed { reason: message });
-    }
-    let _ = store.finish_project_process_for_run(&session, lease).await;
+    let _ = store
+        .finish_project_run(&session, lease, crate::durable::BoundaryState::Failed)
+        .await;
 }
 
 fn project_seed(

@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child_session::{
-    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildBodyOutcome, ChildLeaseState,
+    AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildLeaseState,
     ChildProcessGeneration, ChildRef, ObservationRecipient,
 };
 use crate::durable::{Author, RunLease};
@@ -36,8 +36,8 @@ use crate::task::{
 };
 
 use super::durable::{
-    create_project_spine, create_task_spine, end_run_for_child, end_run_for_lease,
-    fence_run_for_child, validate_run_lease, work_for_child_in,
+    create_project_spine, create_task_spine, end_run_for_lease, validate_run_lease,
+    work_for_child_in,
 };
 use super::SqliteStore;
 
@@ -307,14 +307,6 @@ impl SqliteStore {
         lease: &RunLease,
     ) -> StoreResult<()> {
         validate_task_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Task activation requires process evidence".to_string())
-        })?;
-        if process.state != ChildLeaseState::Active {
-            return Err(StoreError::InvalidData(
-                "Task activation requires Active process evidence".to_string(),
-            ));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if update_task_session_for_run_in(&transaction, session, lease)? == 0 {
@@ -323,13 +315,6 @@ impl SqliteStore {
                 lease.run_id, session.id
             )));
         }
-        insert_task_event_in(
-            &transaction,
-            session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -350,20 +335,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn finish_task_process_for_run(
+    pub(crate) fn finish_task_run(
         &self,
         session: &TaskSession,
         lease: &RunLease,
+        outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         validate_task_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Task finish requires process evidence".to_string())
-        })?;
-        if process.state != ChildLeaseState::Finished || process.outcome.is_none() {
-            return Err(StoreError::InvalidData(
-                "Task finish requires Finished process evidence and outcome".to_string(),
-            ));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if update_task_session_for_run_in(&transaction, session, lease)? == 0 {
@@ -372,206 +350,10 @@ impl SqliteStore {
                 lease.run_id, session.id
             )));
         }
-        insert_task_event_in(
-            &transaction,
-            session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        end_run_for_lease(&transaction, lease)?;
+        end_run_for_lease(&transaction, lease, outcome)?;
         close_task_epoch_if_quiescent(&transaction, session)?;
         transaction.commit()?;
         Ok(())
-    }
-
-    pub(crate) fn revoke_task_process(
-        &self,
-        session_id: &TaskSessionId,
-        outcome: &ChildBodyOutcome,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                TASK_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_task_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let process = session.latest_process.as_mut().ok_or_else(|| {
-            StoreError::InvalidData(format!("Task Session {session_id} has no body to revoke"))
-        })?;
-        if process.state == ChildLeaseState::Finished {
-            return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} generation {} is already finished",
-                process.generation
-            )));
-        }
-        process.state = ChildLeaseState::Revoked;
-        process.outcome = Some(outcome.clone());
-        let outcome_json = serde_json::to_string(outcome)?;
-        let changed = transaction.execute(
-            "UPDATE task_sessions
-             SET process_lease_state='revoked', process_outcome_json=?3
-             WHERE id=?1 AND process_generation=?2
-               AND process_lease_state IN ('legacy', 'reserved', 'active')",
-            params![
-                session_id.as_str(),
-                i64::from(process.generation),
-                outcome_json
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} body is already revoked"
-            )));
-        }
-        let process = process.clone();
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        fence_run_for_child(
-            &transaction,
-            &ChildRef::Task(session_id.clone()),
-            process.generation,
-        )?;
-        transaction.commit()?;
-        Ok(process)
-    }
-
-    /// Revoke a body only if the progress evidence a supervisor observed is
-    /// still current. The immediate transaction closes the gap between the
-    /// final progress check and lease revocation: a body that completed or
-    /// appended an event in that gap wins, and supervision leaves it alone.
-    pub(crate) fn revoke_task_process_if_unchanged(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-        status_at: OffsetDateTime,
-        latest_event_id: Option<i64>,
-        outcome: &ChildBodyOutcome,
-    ) -> StoreResult<Option<ChildProcessGeneration>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                TASK_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_task_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let current_event_id: Option<i64> = transaction.query_row(
-            "SELECT MAX(id) FROM task_events WHERE session_id = ?1",
-            params![session_id.as_str()],
-            |row| row.get(0),
-        )?;
-        if session.status_at != status_at
-            || current_event_id != latest_event_id
-            || !session.status.is_process_active()
-        {
-            transaction.commit()?;
-            return Ok(None);
-        }
-        let Some(process) = session.latest_process.as_mut() else {
-            transaction.commit()?;
-            return Ok(None);
-        };
-        if process.generation != generation || process.state != ChildLeaseState::Active {
-            transaction.commit()?;
-            return Ok(None);
-        }
-        process.state = ChildLeaseState::Revoked;
-        process.outcome = Some(outcome.clone());
-        let outcome_json = serde_json::to_string(outcome)?;
-        if transaction.execute(
-            "UPDATE task_sessions
-             SET process_lease_state='revoked', process_outcome_json=?3
-             WHERE id=?1 AND process_generation=?2
-               AND process_lease_state='active' AND status_at=?4",
-            params![
-                session_id.as_str(),
-                i64::from(generation),
-                outcome_json,
-                status_at.unix_timestamp(),
-            ],
-        )? == 0
-        {
-            transaction.commit()?;
-            return Ok(None);
-        }
-        let process = process.clone();
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        fence_run_for_child(
-            &transaction,
-            &ChildRef::Task(session_id.clone()),
-            generation,
-        )?;
-        transaction.commit()?;
-        Ok(Some(process))
-    }
-
-    pub(crate) fn finish_revoked_task_process(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                TASK_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_task_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let process = session.latest_process.as_mut().ok_or_else(|| {
-            StoreError::InvalidData(format!("Task Session {session_id} has no revoked body"))
-        })?;
-        if process.generation != generation || process.state != ChildLeaseState::Revoked {
-            return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} generation {generation} is not awaiting reap"
-            )));
-        }
-        process.state = ChildLeaseState::Finished;
-        if transaction.execute(
-            "UPDATE task_sessions SET process_lease_state='finished'
-             WHERE id=?1 AND process_generation=?2 AND process_lease_state='revoked'",
-            params![session_id.as_str(), i64::from(generation)],
-        )? == 0
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Task Session {session_id} generation {generation} changed during reap"
-            )));
-        }
-        let process = process.clone();
-        insert_task_event_in(
-            &transaction,
-            &session,
-            &TaskEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        end_run_for_child(
-            &transaction,
-            &ChildRef::Task(session_id.clone()),
-            generation,
-        )?;
-        transaction.commit()?;
-        Ok(process)
     }
 
     pub fn complete_task_session(
@@ -1398,14 +1180,6 @@ impl SqliteStore {
         lease: &RunLease,
     ) -> StoreResult<()> {
         validate_project_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Project activation requires process evidence".to_string())
-        })?;
-        if process.state != ChildLeaseState::Active {
-            return Err(StoreError::InvalidData(
-                "Project activation requires Active process evidence".to_string(),
-            ));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if update_project_session_for_run_in(&transaction, session, lease)? == 0 {
@@ -1414,13 +1188,6 @@ impl SqliteStore {
                 lease.run_id, session.id
             )));
         }
-        insert_project_event_in(
-            &transaction,
-            session,
-            &ProjectEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -1441,20 +1208,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn finish_project_process_for_run(
+    pub(crate) fn finish_project_run(
         &self,
         session: &ProjectSession,
         lease: &RunLease,
+        outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         validate_project_session(session)?;
-        let process = session.latest_process.as_ref().ok_or_else(|| {
-            StoreError::InvalidData("Project finish requires process evidence".to_string())
-        })?;
-        if process.state != ChildLeaseState::Finished || process.outcome.is_none() {
-            return Err(StoreError::InvalidData(
-                "Project finish requires Finished process evidence and outcome".to_string(),
-            ));
-        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if update_project_session_for_run_in(&transaction, session, lease)? == 0 {
@@ -1463,130 +1223,10 @@ impl SqliteStore {
                 lease.run_id, session.id
             )));
         }
-        insert_project_event_in(
-            &transaction,
-            session,
-            &ProjectEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        end_run_for_lease(&transaction, lease)?;
+        end_run_for_lease(&transaction, lease, outcome)?;
         close_project_epoch_if_quiescent(&transaction, session)?;
         transaction.commit()?;
         Ok(())
-    }
-
-    pub(crate) fn revoke_project_process(
-        &self,
-        session_id: &ProjectSessionId,
-        outcome: &ChildBodyOutcome,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                PROJECT_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_project_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let process = session.latest_process.as_mut().ok_or_else(|| {
-            StoreError::InvalidData(format!(
-                "Project Session {session_id} has no body to revoke"
-            ))
-        })?;
-        if process.state == ChildLeaseState::Finished {
-            return Err(StoreError::InvalidData(format!(
-                "Project Session {session_id} generation {} is already finished",
-                process.generation
-            )));
-        }
-        process.state = ChildLeaseState::Revoked;
-        process.outcome = Some(outcome.clone());
-        let outcome_json = serde_json::to_string(outcome)?;
-        let changed = transaction.execute(
-            "UPDATE project_sessions
-             SET process_lease_state='revoked', process_outcome_json=?3
-             WHERE id=?1 AND process_generation=?2
-               AND process_lease_state IN ('legacy', 'reserved', 'active')",
-            params![
-                session_id.as_str(),
-                i64::from(process.generation),
-                outcome_json
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "Project Session {session_id} body is already revoked"
-            )));
-        }
-        let process = process.clone();
-        insert_project_event_in(
-            &transaction,
-            &session,
-            &ProjectEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        fence_run_for_child(
-            &transaction,
-            &ChildRef::Project(session_id.clone()),
-            process.generation,
-        )?;
-        transaction.commit()?;
-        Ok(process)
-    }
-
-    pub(crate) fn finish_revoked_project_process(
-        &self,
-        session_id: &ProjectSessionId,
-        generation: u32,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(
-                PROJECT_SESSION_SELECT,
-                params![session_id.as_str()],
-                map_project_session_row,
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound)?;
-        let process = session.latest_process.as_mut().ok_or_else(|| {
-            StoreError::InvalidData(format!("Project Session {session_id} has no revoked body"))
-        })?;
-        if process.generation != generation || process.state != ChildLeaseState::Revoked {
-            return Err(StoreError::InvalidData(format!(
-                "Project Session {session_id} generation {generation} is not awaiting reap"
-            )));
-        }
-        process.state = ChildLeaseState::Finished;
-        if transaction.execute(
-            "UPDATE project_sessions SET process_lease_state='finished'
-             WHERE id=?1 AND process_generation=?2 AND process_lease_state='revoked'",
-            params![session_id.as_str(), i64::from(generation)],
-        )? == 0
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Project Session {session_id} generation {generation} changed during reap"
-            )));
-        }
-        let process = process.clone();
-        insert_project_event_in(
-            &transaction,
-            &session,
-            &ProjectEventKind::BodyLeaseChanged {
-                process: process.clone(),
-            },
-        )?;
-        end_run_for_child(
-            &transaction,
-            &ChildRef::Project(session_id.clone()),
-            generation,
-        )?;
-        transaction.commit()?;
-        Ok(process)
     }
 
     pub fn handoff_project_body(

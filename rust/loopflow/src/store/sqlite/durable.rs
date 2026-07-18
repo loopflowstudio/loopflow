@@ -675,21 +675,80 @@ impl SqliteStore {
 
     pub(crate) fn control_launch_for_run(&self, run_id: &RunId) -> StoreResult<Option<Launch>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let launch_id = conn
-            .query_row(
-                "SELECT id FROM agent_launches
-                 WHERE product_run_id=?1 AND launch_state != 'ended'
-                 ORDER BY started_at DESC, rowid DESC LIMIT 1",
-                [run_id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        launch_id
-            .map(|id| {
-                let id = LaunchId::parse(&id).map_err(invalid_durable)?;
-                control_launch_in(&conn, &id)
-            })
-            .transpose()
+        control_launch_for_run_in(&conn, run_id)
+    }
+
+    pub(crate) fn recover_run(
+        &self,
+        run_id: &RunId,
+        launch_id: Option<&LaunchId>,
+        containment: ContainmentObservation,
+    ) -> StoreResult<StopReceipt> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let run = run_by_id_in(&tx, run_id)?;
+        if run.state == RunState::Ended {
+            tx.commit()?;
+            return Ok(StopReceipt { run, containment });
+        }
+        let current = control_launch_for_run_in(&tx, run_id)?;
+        match (launch_id, current.as_ref()) {
+            (Some(observed), Some(current)) if *observed == current.id => {}
+            (None, None) => {}
+            (Some(observed), Some(current)) => {
+                return Err(StoreError::InvalidData(format!(
+                    "Run {run_id} advanced from observed Launch {observed} to {}",
+                    current.id
+                )));
+            }
+            (Some(observed), None) => {
+                return Err(StoreError::InvalidData(format!(
+                    "Run {run_id} no longer owns observed Launch {observed}"
+                )));
+            }
+            (None, Some(current)) => {
+                return Err(StoreError::InvalidData(format!(
+                    "Run {run_id} gained Launch {} after an empty observation",
+                    current.id
+                )));
+            }
+        }
+        let cause = serde_json::to_string(&StopCause::Recovery).expect("Stop cause must serialize");
+        match containment {
+            ContainmentObservation::Absent => {
+                let now = now_unix();
+                tx.execute(
+                    "UPDATE agent_launches
+                     SET launch_state='ended', ended_at=COALESCE(ended_at, ?2),
+                         outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
+                         handback_state=COALESCE(handback_state, 'unknown'),
+                         attention_kind=NULL, attention_work_kind=NULL,
+                         attention_work_id=NULL, attention_at=NULL
+                     WHERE product_run_id=?1 AND launch_state != 'ended'",
+                    params![run_id.as_str(), now],
+                )?;
+                tx.execute(
+                    "UPDATE runs SET state='ended', ended_at=?2, stop_reason=?3
+                     WHERE id=?1 AND state != 'ended'",
+                    params![run_id.as_str(), now, cause],
+                )?;
+            }
+            ContainmentObservation::Present | ContainmentObservation::Unprovable => {
+                tx.execute(
+                    "UPDATE runs SET state='stopping', stop_reason=?2
+                     WHERE id=?1 AND state IN ('reserved', 'active', 'stopping')",
+                    params![run_id.as_str(), cause],
+                )?;
+                tx.execute(
+                    "UPDATE agent_launches SET launch_state='stopping'
+                     WHERE product_run_id=?1 AND launch_state IN ('starting', 'live')",
+                    [run_id.as_str()],
+                )?;
+            }
+        }
+        let run = run_by_id_in(&tx, run_id)?;
+        tx.commit()?;
+        Ok(StopReceipt { run, containment })
     }
 
     pub fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
@@ -1881,6 +1940,24 @@ fn require_live_launch_for_run(
     .map_err(StoreError::from)
 }
 
+fn control_launch_for_run_in(conn: &Connection, run_id: &RunId) -> StoreResult<Option<Launch>> {
+    let launch_id = conn
+        .query_row(
+            "SELECT id FROM agent_launches
+             WHERE product_run_id=?1 AND launch_state != 'ended'
+             ORDER BY started_at DESC, rowid DESC LIMIT 1",
+            [run_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    launch_id
+        .map(|id| {
+            let id = LaunchId::parse(&id).map_err(invalid_durable)?;
+            control_launch_in(conn, &id)
+        })
+        .transpose()
+}
+
 fn control_launch_in(conn: &Connection, launch_id: &LaunchId) -> StoreResult<Launch> {
     let row = conn.query_row(
         "SELECT product_run_id, home_id, provider, model, account_id, worktree,
@@ -2843,97 +2920,36 @@ fn insert_child_control_launch(
     Ok(())
 }
 
-pub(crate) fn end_run_for_child(
+pub(crate) fn end_run_for_lease(
     conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
+    lease: &RunLease,
+    outcome: BoundaryState,
 ) -> StoreResult<()> {
-    let now = now_unix();
-    conn.execute(
-        "UPDATE agent_launches SET
-            launch_state='ended', ended_at=COALESCE(ended_at, ?4),
-            outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
-            handback_state=COALESCE(handback_state, 'unknown'),
-            attention_kind=NULL, attention_work_kind=NULL,
-            attention_work_id=NULL, attention_at=NULL
-         WHERE product_run_id IN (
-            SELECT id FROM runs
-            WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-         ) AND launch_state != 'ended'",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation),
-            now
-        ],
-    )?;
-    conn.execute(
-        "UPDATE runs SET state='ended', ended_at=?4
-         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-           AND state != 'ended'",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation),
-            now
-        ],
-    )?;
-    Ok(())
-}
-
-pub(crate) fn end_run_for_lease(conn: &Connection, lease: &RunLease) -> StoreResult<()> {
+    if !outcome.is_terminal() {
+        return Err(StoreError::InvalidData(
+            "Run finish outcome must be terminal".to_string(),
+        ));
+    }
     let run = validate_run_lease(conn, lease)?;
     let now = now_unix();
     conn.execute(
         "UPDATE agent_launches SET
             launch_state='ended', ended_at=COALESCE(ended_at, ?2),
-            outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
-            handback_state=COALESCE(handback_state, 'unknown'),
+            outcome=?3, handback_state=?4,
             attention_kind=NULL, attention_work_kind=NULL,
             attention_work_id=NULL, attention_at=NULL
          WHERE product_run_id=?1 AND launch_state != 'ended'",
-        params![run.id.as_str(), now],
+        params![
+            run.id.as_str(),
+            now,
+            outcome.as_launch_outcome(),
+            handback_state(outcome)
+        ],
     )?;
     conn.execute(
         "UPDATE runs SET state='ended', ended_at=?2
          WHERE id=?1 AND state != 'ended'",
         params![run.id.as_str(), now],
-    )?;
-    Ok(())
-}
-
-pub(crate) fn fence_run_for_child(
-    conn: &Connection,
-    target: &ChildRef,
-    generation: u32,
-) -> StoreResult<()> {
-    if conn.execute(
-        "UPDATE runs SET state='stopping'
-         WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-           AND state IN ('reserved', 'active')",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
-    )? == 0
-    {
-        return Err(StoreError::InvalidData(format!(
-            "{} generation {generation} has no Run to stop",
-            target.target_id()
-        )));
-    }
-    conn.execute(
-        "UPDATE agent_launches SET launch_state='stopping'
-         WHERE product_run_id IN (
-            SELECT id FROM runs
-            WHERE source_kind=?1 AND source_id=?2 AND lease_generation=?3
-         ) AND launch_state IN ('starting', 'live')",
-        params![
-            target.target_kind(),
-            target.target_id(),
-            i64::from(generation)
-        ],
     )?;
     Ok(())
 }

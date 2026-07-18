@@ -1,8 +1,6 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
-use crate::child_session::{
-    ChildBodyHandoffRequest, ChildBodyOutcome, ChildProcessGeneration, ObservationRecipient,
-};
+use crate::child_session::{ChildBodyHandoffRequest, ObservationRecipient};
 use crate::durable::{Author, RunLease};
 use crate::id::WaveId;
 use crate::project_session::{
@@ -176,15 +174,16 @@ impl Store {
         self.update_task_session_for_run(session, lease).await
     }
 
-    pub(crate) async fn finish_task_process_for_run(
+    pub(crate) async fn finish_task_run(
         &self,
         session: &TaskSession,
         lease: &RunLease,
+        outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         let session = session.clone();
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.finish_task_process_for_run(&session, &lease)
+            store.finish_task_run(&session, &lease, outcome)
         })
         .await
     }
@@ -195,54 +194,8 @@ impl Store {
         session: &TaskSession,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        self.finish_task_process_for_run(session, lease).await
-    }
-
-    pub(crate) async fn revoke_task_process(
-        &self,
-        session_id: &TaskSessionId,
-        outcome: &ChildBodyOutcome,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let session_id = session_id.clone();
-        let outcome = outcome.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.revoke_task_process(&session_id, &outcome)
-        })
-        .await
-    }
-
-    pub(crate) async fn revoke_task_process_if_unchanged(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-        status_at: OffsetDateTime,
-        latest_event_id: Option<i64>,
-        outcome: &ChildBodyOutcome,
-    ) -> StoreResult<Option<ChildProcessGeneration>> {
-        let session_id = session_id.clone();
-        let outcome = outcome.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.revoke_task_process_if_unchanged(
-                &session_id,
-                generation,
-                status_at,
-                latest_event_id,
-                &outcome,
-            )
-        })
-        .await
-    }
-
-    pub(crate) async fn finish_revoked_task_process(
-        &self,
-        session_id: &TaskSessionId,
-        generation: u32,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let session_id = session_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_revoked_task_process(&session_id, generation)
-        })
-        .await
+        self.finish_task_run(session, lease, crate::durable::BoundaryState::Unknown)
+            .await
     }
 
     pub async fn complete_task_session(
@@ -271,17 +224,6 @@ impl Store {
             store.complete_task_session_for_run(&session, skipped_pr.as_ref(), &lease)
         })
         .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn complete_task_session_for_lease(
-        &self,
-        session: &TaskSession,
-        skipped_pr: Option<&TaskPr>,
-        lease: &RunLease,
-    ) -> StoreResult<()> {
-        self.complete_task_session_for_run(session, skipped_pr, lease)
-            .await
     }
 
     #[cfg(test)]
@@ -409,15 +351,6 @@ impl Store {
             store.update_task_pr_for_run(&pr, &lease)
         })
         .await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn update_task_pr_for_lease(
-        &self,
-        pr: &TaskPr,
-        lease: &RunLease,
-    ) -> StoreResult<()> {
-        self.update_task_pr_for_run(pr, lease).await
     }
 
     pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
@@ -738,17 +671,6 @@ impl Store {
         Ok(event)
     }
 
-    #[cfg(test)]
-    pub(crate) async fn append_task_event_for_lease(
-        &self,
-        session_id: &TaskSessionId,
-        lease: &RunLease,
-        kind: &TaskEventKind,
-    ) -> StoreResult<TaskEvent> {
-        self.append_task_event_for_run(session_id, lease, kind)
-            .await
-    }
-
     pub async fn task_events_after(
         &self,
         session_id: &TaskSessionId,
@@ -858,15 +780,16 @@ impl Store {
         self.update_project_session_for_run(session, lease).await
     }
 
-    pub(crate) async fn finish_project_process_for_run(
+    pub(crate) async fn finish_project_run(
         &self,
         session: &ProjectSession,
         lease: &RunLease,
+        outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         let session = session.clone();
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.finish_project_process_for_run(&session, &lease)
+            store.finish_project_run(&session, &lease, outcome)
         })
         .await
     }
@@ -916,31 +839,6 @@ impl Store {
         let run_token = crate::durable::RunLeaseToken::parse(lease.env_value())
             .expect("a resolved Run lease has a valid token");
         Ok(Some(TestRunReservation { run_token, lease }))
-    }
-
-    pub(crate) async fn revoke_project_process(
-        &self,
-        session_id: &ProjectSessionId,
-        outcome: &ChildBodyOutcome,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let session_id = session_id.clone();
-        let outcome = outcome.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.revoke_project_process(&session_id, &outcome)
-        })
-        .await
-    }
-
-    pub(crate) async fn finish_revoked_project_process(
-        &self,
-        session_id: &ProjectSessionId,
-        generation: u32,
-    ) -> StoreResult<ChildProcessGeneration> {
-        let session_id = session_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.finish_revoked_project_process(&session_id, generation)
-        })
-        .await
     }
 
     pub async fn handoff_project_body(

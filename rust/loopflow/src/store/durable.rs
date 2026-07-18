@@ -181,6 +181,36 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn current_launch_for_run(
+        &self,
+        run_id: &crate::durable::RunId,
+    ) -> StoreResult<Option<crate::durable::Launch>> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.control_launch_for_run(&run_id)
+        })
+        .await
+    }
+
+    /// Reconcile an observed Run after its writer has disappeared.
+    ///
+    /// The exact Run and Launch ids fence the observation against a concurrent
+    /// handoff. Only proven absence releases the slot; live or unprovable
+    /// containment remains fenced for a later keeper pass.
+    pub(crate) async fn recover_run(
+        &self,
+        run_id: &crate::durable::RunId,
+        launch_id: Option<&LaunchId>,
+        containment: ContainmentObservation,
+    ) -> StoreResult<StopReceipt> {
+        let run_id = run_id.clone();
+        let launch_id = launch_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.recover_run(&run_id, launch_id.as_ref(), containment)
+        })
+        .await
+    }
+
     pub async fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
         run_sqlite(&self.sqlite, move |store| {
             store.launch_surfaces(active_only)
@@ -830,6 +860,95 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recovery.state, RunState::Reserved);
+    }
+
+    #[tokio::test]
+    async fn keeper_recovery_releases_only_the_exact_absent_launch() {
+        let (store, work) = wave_work().await;
+        let (lease, launch) = start_launch(&store, &work, false).await;
+
+        let recovered = store
+            .recover_run(
+                &lease.run_id,
+                Some(&launch.id),
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered.run.state, RunState::Ended);
+        assert!(store.validate_run_lease(&lease).await.is_err());
+
+        let (next, _) = store
+            .reserve_run(
+                &work,
+                RunTrigger::Recovery {
+                    prior_run_id: recovered.run.id,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(next.state, RunState::Reserved);
+    }
+
+    #[tokio::test]
+    async fn keeper_recovery_cannot_reap_a_replacement_launch() {
+        let (store, work) = wave_work().await;
+        let (lease, first) = start_launch(&store, &work, false).await;
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchEnded {
+                    launch_id: first.id.clone(),
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .unwrap();
+        let lease = store.rotate_run_lease(&lease).await.unwrap();
+        let receipt = store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "claude".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "lf-runtime-replacement".to_string(),
+                    },
+                    cwd: PathBuf::from("/tmp/runtime"),
+                    surface: "headless".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Launch(second) = receipt else {
+            panic!("expected Launch receipt")
+        };
+
+        assert!(matches!(
+            store
+                .recover_run(
+                    &lease.run_id,
+                    Some(&first.id),
+                    ContainmentObservation::Absent,
+                )
+                .await,
+            Err(StoreError::InvalidData(message)) if message.contains("advanced")
+        ));
+        assert_eq!(
+            store
+                .current_launch_for_run(&lease.run_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            second.id
+        );
+        assert!(store.validate_run_lease(&lease).await.is_ok());
     }
 
     #[tokio::test]

@@ -2,8 +2,10 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::child_session::{ChildProcessGeneration, ChildRef};
-use crate::durable::{AuthenticatedRequest, Author, ControlCtx};
+use crate::child_session::ChildRef;
+use crate::durable::{
+    AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx, Launch, RunState,
+};
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
 use crate::engine::process::{
@@ -38,7 +40,7 @@ pub struct ProjectSessionSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub latest_process: Option<ChildProcessGeneration>,
+    pub launch: Option<Launch>,
     pub latest_event: Option<crate::project_session::ProjectEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -333,15 +335,6 @@ pub(crate) async fn launch_project_process(
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, session).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
-    let next_generation = session
-        .latest_process
-        .as_ref()
-        .map_or(1, |process| process.generation + 1);
-    let tmux_name = format!(
-        "lf-project-{}-{}-{next_generation}",
-        tmux_session_slug(&session.launch.project.slug),
-        &session.id.as_str()[3..11]
-    );
     let work = store
         .work_for_child(&ChildRef::Project(session.id.clone()))
         .await
@@ -359,11 +352,20 @@ pub(crate) async fn launch_project_process(
         .await
         .map_err(|error| project_error(error.to_string()))?
         .current_basis;
-    let (_, lease) = store
+    let (run, lease) = store
         .reserve_run(&work, crate::durable::RunTrigger::Input { basis })
         .await
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
-    session.begin_generation(tmux_name.clone());
+    let tmux_name = format!(
+        "lf-project-{}-{}-{}",
+        tmux_session_slug(&session.launch.project.slug),
+        &session.id.as_str()[3..11],
+        &run.id.as_str()[4..12]
+    );
+    session.set_status(
+        ProjectSessionStatus::Starting,
+        "project process is starting",
+    );
     store
         .update_project_session_for_run(session, &lease)
         .await
@@ -421,57 +423,65 @@ async fn reconcile_project_liveness(
     store: &SharedStore,
     session: &mut ProjectSession,
 ) -> OpsResult<()> {
-    if session
-        .latest_process
-        .as_ref()
-        .is_some_and(super::child::child_body_reservation_is_fresh)
-    {
+    let work = store
+        .work_for_child(&ChildRef::Project(session.id.clone()))
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
+    let Some(run) = store
+        .current_run(&work)
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+    else {
+        if session.status.is_process_active() {
+            mark_project_body_lost(store, session).await?;
+        }
         return Ok(());
-    }
-    let alive = match session.latest_process.as_ref() {
-        Some(process) => tmux_session_exists(&process.tmux_name)
-            .await
-            .map_err(|error| project_error(error.to_string()))?,
-        None => false,
     };
-    if alive {
-        return Ok(());
+    let launch = store
+        .current_launch_for_run(&run.id)
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
+    if run.state == RunState::Reserved && launch.is_none() {
+        let still_starting =
+            run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
+        if still_starting {
+            return Ok(());
+        }
     }
-    // A dead lease is reaped regardless of Session status. A Waiting, Failed, or
-    // Blocked Project can still carry a stale Legacy/Reserved/Active lease from a
-    // body that vanished without a terminal outcome; an explicit resume must
-    // revoke it here, or the fresh process can never reserve the slot.
-    let lost_reason = "project process disappeared before recording a terminal outcome";
-    if session.latest_process.as_ref().is_some_and(|process| {
-        matches!(
-            process.state,
-            crate::child_session::ChildLeaseState::Legacy
-                | crate::child_session::ChildLeaseState::Reserved
-                | crate::child_session::ChildLeaseState::Active
+    if let Some(launch) = &launch {
+        let alive = match &launch.containment {
+            Containment::Tmux { name } => tmux_session_exists(name)
+                .await
+                .map_err(|error| project_error(error.to_string()))?,
+            Containment::ProcessGroup { .. } => true,
+        };
+        if alive {
+            return Ok(());
+        }
+        if launch.state == crate::durable::LaunchState::Starting
+            && launch.started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
+        {
+            return Ok(());
+        }
+    }
+    store
+        .recover_run(
+            &run.id,
+            launch.as_ref().map(|launch| &launch.id),
+            ContainmentObservation::Absent,
         )
-    }) {
-        let outcome = super::child::lost_child_body_outcome(
-            session
-                .latest_process
-                .as_ref()
-                .expect("matched child process must still be present"),
-            lost_reason,
-        );
-        session.latest_process = Some(
-            super::child::revoke_and_reap_child_body(
-                store,
-                &ChildRef::Project(session.id.clone()),
-                outcome,
-            )
-            .await?,
-        );
-    }
-    // Only a Project whose status still claims a live process gets the terminal
-    // transition. One already Waiting/Failed/Blocked keeps its status; the resume
-    // that follows relaunches it against the now-reaped lease.
+        .await
+        .map_err(|error| project_error(error.to_string()))?;
     if !session.status.is_process_active() {
         return Ok(());
     }
+    mark_project_body_lost(store, session).await
+}
+
+async fn mark_project_body_lost(
+    store: &SharedStore,
+    session: &mut ProjectSession,
+) -> OpsResult<()> {
     let from = session.status;
     session.set_status(
         ProjectSessionStatus::Failed,
@@ -513,15 +523,27 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
     block_on_project(async move {
         let store = project_store().await?;
         let wave = owning_wave(&store, &session).await?;
-        let process_alive = if session.status.is_process_active() {
-            match session.latest_process.as_ref() {
-                Some(process) => tmux_session_exists(&process.tmux_name)
-                    .await
-                    .map_err(|error| project_error(error.to_string()))?,
-                None => false,
-            }
-        } else {
-            false
+        let work = store
+            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        let launch = match store
+            .current_run(&work)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+        {
+            Some(run) => store
+                .current_launch_for_run(&run.id)
+                .await
+                .map_err(|error| project_error(error.to_string()))?,
+            None => None,
+        };
+        let process_alive = match launch.as_ref().map(|launch| &launch.containment) {
+            Some(Containment::Tmux { name }) => tmux_session_exists(name)
+                .await
+                .map_err(|error| project_error(error.to_string()))?,
+            Some(Containment::ProcessGroup { .. }) => true,
+            None => false,
         };
         let latest_event = store
             .project_events_after(&session.id, 0)
@@ -589,7 +611,7 @@ pub fn project_snapshot(session: &ProjectSession) -> OpsResult<ProjectSessionSna
             provider: session.provider,
             provider_session_id: session.provider_session_id,
             process_alive,
-            latest_process: session.latest_process,
+            launch,
             latest_event,
             created_at: session.created_at,
             updated_at: session.updated_at,
@@ -749,13 +771,6 @@ pub fn project_wait(
 
 pub fn project_attach(project: &str) -> OpsResult<()> {
     let session = project_status(project)?;
-    let process = session.latest_process.ok_or_else(|| {
-        project_error(format!(
-            "Project {} has no process; run `lf project resume {}` first",
-            session.launch.project.slug,
-            session.launch.project.id.as_str()
-        ))
-    })?;
     if !session.status.is_process_active() {
         return Err(project_error(format!(
             "Project {} is {}; run `lf project resume {}` first",
@@ -764,8 +779,28 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
             session.launch.project.id.as_str()
         )));
     }
+    let launch = block_on_project(async {
+        let store = project_store().await?;
+        let work = store
+            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .await
+            .map_err(|error| project_error(error.to_string()))?;
+        let run = store
+            .current_run(&work)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error("Project has no active Run"))?;
+        store
+            .current_launch_for_run(&run.id)
+            .await
+            .map_err(|error| project_error(error.to_string()))?
+            .ok_or_else(|| project_error("Project Run has no active Launch"))
+    })?;
+    let Containment::Tmux { name } = launch.containment else {
+        return Err(project_error("Project Launch is not attachable"));
+    };
     let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &process.tmux_name])
+        .args(["attach-session", "-t", &name])
         .status()
         .map_err(|error| project_error(format!("failed to attach Project Session: {error}")))?;
     if !status.success() {
@@ -1050,6 +1085,7 @@ fn promotion_session_name(repo: &Path, wave: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::child_session::ChildProcessGeneration;
     use crate::lf::{Cli, Commands};
     use crate::store::{open_store, StorageConfig};
     use clap::Parser;

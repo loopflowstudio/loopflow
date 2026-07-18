@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, input_is_current,
     send_outstanding_steers, CommandStop, PendingInput,
 };
-use crate::child_session::{ChildBodyHandoff, ChildBodyOutcome, ChildLeaseState, ChildRef};
+use crate::child_session::{ChildBodyHandoff, ChildRef};
 use crate::durable::{AttentionRoute, Basis, BoundarySeed, FlowPosition, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::engine::InteractionPolicy;
@@ -78,11 +78,11 @@ async fn spawn_failover(
     session: &TaskSession,
     lease: &RunLease,
 ) -> Result<()> {
-    let tmux_name = session
-        .latest_process
-        .as_ref()
-        .map(|process| process.tmux_name.clone())
-        .ok_or_else(|| anyhow!("Task failover has no reserved Launch containment"))?;
+    let tmux_name = format!(
+        "lf-task-{}-{}",
+        &session.id.as_str()[3..11],
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     crate::ops::launch_in_run(
         store,
         lease,
@@ -112,9 +112,6 @@ async fn run_task_session_with(
         .await?
         .ok_or_else(|| anyhow!("Task Session {session_id} not found"))?;
     let wave = owning_wave(&store, &session).await?;
-    if let Some(process) = &mut session.latest_process {
-        process.mark_booted();
-    }
     let from = session.status;
     session.set_status(TaskSessionStatus::Running, "provider turn is active");
     store.activate_task_process_for_run(&session, lease).await?;
@@ -192,13 +189,6 @@ async fn run_task_session_with(
     store
         .observe_launch_provider(lease, &launch.id, session.provider_session_id.clone())
         .await?;
-    if let Some(process) = &mut session.latest_process {
-        process.observe_provider(
-            &session.provider,
-            session.provider_session_id.clone(),
-            harness.process_group_id(),
-        );
-    }
     if let Err(error) = store.update_task_session_for_run(&session, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
@@ -409,13 +399,6 @@ async fn run_task_session_with(
                 let provider_session_id = harness.provider_session_id();
                 if provider_session_id != session.provider_session_id {
                     session.provider_session_id = provider_session_id;
-                    if let Some(process) = &mut session.latest_process {
-                        process.observe_provider(
-                            &session.provider,
-                            session.provider_session_id.clone(),
-                            harness.process_group_id(),
-                        );
-                    }
                     store.update_task_session_for_run(&session, lease).await?;
                 }
                 match event {
@@ -530,13 +513,13 @@ async fn run_task_session_with(
                         }
                         if session.status == TaskSessionStatus::Abandoned {
                             let _ = harness.stop().await;
-                            if let Some(process) = &mut session.latest_process {
-                                process.state = ChildLeaseState::Finished;
-                                process.outcome = Some(ChildBodyOutcome::Interrupted {
-                                    reason: session.status_reason.clone(),
-                                });
-                            }
-                            store.finish_task_process_for_run(&session, lease).await?;
+                            store
+                                .finish_task_run(
+                                    &session,
+                                    lease,
+                                    crate::durable::BoundaryState::Interrupted,
+                                )
+                                .await?;
                             return Ok(());
                         }
                         // A ci-fix body is one bounded turn, and this is its exit.
@@ -895,7 +878,7 @@ async fn run_task_session_with(
                                         &mut session,
                                         lease,
                                         Some(harness.as_mut()),
-                                        ChildBodyOutcome::Completed,
+                                        crate::durable::BoundaryState::Succeeded,
                                         capture.as_ref(),
                                     )
                                     .await;
@@ -972,17 +955,12 @@ async fn run_task_session_with(
                                     reason: session.status_reason.clone(),
                                 },
                             ).await?;
-                            if let Some(process) = &mut session.latest_process {
-                                process.state = ChildLeaseState::Finished;
-                                process.outcome = Some(if session.status == TaskSessionStatus::Completed {
-                                    ChildBodyOutcome::Completed
-                                } else {
-                                    ChildBodyOutcome::Interrupted {
-                                        reason: session.status_reason.clone(),
-                                    }
-                                });
-                            }
-                            store.finish_task_process_for_run(&session, lease).await?;
+                            let outcome = if session.status == TaskSessionStatus::Completed {
+                                crate::durable::BoundaryState::Succeeded
+                            } else {
+                                crate::durable::BoundaryState::Interrupted
+                            };
+                            store.finish_task_run(&session, lease, outcome).await?;
                         return Ok(());
                     }
                     ConversationEvent::Error { code, message } => {
@@ -1246,18 +1224,14 @@ async fn finish_parked(
     session: &mut TaskSession,
     lease: &RunLease,
     harness: Option<&mut dyn Harness>,
-    outcome: ChildBodyOutcome,
+    outcome: crate::durable::BoundaryState,
     capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
     finish_capture(capture, "completed");
     if let Some(harness) = harness {
         let _ = harness.stop().await;
     }
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(outcome);
-    }
-    store.finish_task_process_for_run(session, lease).await?;
+    store.finish_task_run(session, lease, outcome).await?;
     Ok(())
 }
 
@@ -1467,11 +1441,9 @@ async fn record_unhandled_failure(
             },
         )
         .await;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Failed { reason: message });
-    }
-    let _ = store.finish_task_process_for_run(&session, lease).await;
+    let _ = store
+        .finish_task_run(&session, lease, crate::durable::BoundaryState::Failed)
+        .await;
 }
 
 async fn apply_input(
@@ -1562,13 +1534,9 @@ async fn finish_failed(
             },
         )
         .await?;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Failed {
-            reason: error.to_string(),
-        });
-    }
-    store.finish_task_process_for_run(session, lease).await?;
+    store
+        .finish_task_run(session, lease, crate::durable::BoundaryState::Failed)
+        .await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1602,13 +1570,9 @@ async fn finish_infra_blocked(
         .and_then(|pr| pr.github().map(|g| g.number));
     let reason = infra_blocked_reason(capability, detail, pr_number);
     set_and_record_status(store, session, lease, TaskSessionStatus::Blocked, &reason).await?;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Failed {
-            reason: reason.clone(),
-        });
-    }
-    store.finish_task_process_for_run(session, lease).await?;
+    store
+        .finish_task_run(session, lease, crate::durable::BoundaryState::Failed)
+        .await?;
     Ok(())
 }
 
@@ -1651,12 +1615,6 @@ async fn handle_body_failure(
                     },
                 )
                 .await?;
-            if let Some(process) = &mut session.latest_process {
-                process.state = ChildLeaseState::Finished;
-                process.outcome = Some(ChildBodyOutcome::Failed {
-                    reason: reason.to_string(),
-                });
-            }
             store.update_task_session_for_run(session, lease).await?;
             let launch = store
                 .current_launch(lease)
@@ -1695,12 +1653,6 @@ async fn handle_body_failure(
                 )
                 .await?;
             let rotated = store.rotate_run_lease(lease).await?;
-            let next_generation = session
-                .latest_process
-                .as_ref()
-                .map_or(1, |process| process.generation + 1);
-            let tmux_name = format!("lf-task-{}-{next_generation}", &session.id.as_str()[3..11]);
-            session.begin_generation(tmux_name);
             store.update_task_session_for_run(session, &rotated).await?;
             Ok(Some(rotated))
         }
@@ -1778,11 +1730,9 @@ async fn finish_abandoned(
         format!("Task Session explicitly abandoned: {reason}"),
     )
     .await?;
-    if let Some(process) = &mut session.latest_process {
-        process.state = ChildLeaseState::Finished;
-        process.outcome = Some(ChildBodyOutcome::Interrupted { reason });
-    }
-    store.finish_task_process_for_run(session, lease).await?;
+    store
+        .finish_task_run(session, lease, crate::durable::BoundaryState::Interrupted)
+        .await?;
     Ok(())
 }
 
@@ -1812,13 +1762,9 @@ async fn finish_command_stop(
                 "Task turn interrupted; waiting for resume or another instruction",
             )
             .await?;
-            if let Some(process) = &mut session.latest_process {
-                process.state = ChildLeaseState::Finished;
-                process.outcome = Some(ChildBodyOutcome::Interrupted {
-                    reason: "Task turn interrupted".to_string(),
-                });
-            }
-            store.finish_task_process_for_run(session, lease).await?;
+            store
+                .finish_task_run(session, lease, crate::durable::BoundaryState::Interrupted)
+                .await?;
             Ok(())
         }
         CommandStop::Abandoned(reason) => {
@@ -1955,9 +1901,9 @@ async fn settle_ci_fix_turn(
     // that ran to the end Completed, whatever it found. Only a turn cut short was
     // Interrupted — and that is the one that leaves the wake reclaimable.
     let outcome = if status == Lifecycle::Interrupted {
-        ChildBodyOutcome::Interrupted { reason }
+        crate::durable::BoundaryState::Interrupted
     } else {
-        ChildBodyOutcome::Completed
+        crate::durable::BoundaryState::Succeeded
     };
     finish_parked(store, session, lease, None, outcome, capture).await
 }
@@ -2904,20 +2850,14 @@ mod tests {
             .await
             .unwrap();
 
-        let outcome = crate::child_session::ChildBodyOutcome::Interrupted {
-            reason: session.status_reason.clone(),
-        };
+        let outcome = crate::durable::BoundaryState::Interrupted;
         super::finish_parked(&store, &mut session, &lease, None, outcome, None)
             .await
             .unwrap();
 
         assert_eq!(session.status, TaskSessionStatus::Waiting);
         assert!(!session.status.is_terminal());
-        let process = session.latest_process.as_ref().unwrap();
-        assert_eq!(
-            process.state,
-            crate::child_session::ChildLeaseState::Finished
-        );
+        assert!(store.current_run(&lease.work).await.unwrap().is_none());
         // The parked body leaves the Session durably non-terminal, so a later
         // resume can reconcile the handoff outcome.
         let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
@@ -3104,14 +3044,15 @@ mod tests {
             "provider session cleared on cross-provider handoff"
         );
 
-        // The replacement is reserved in the same Run. The failed provider is
-        // retained by the ended Launch, not copied into the next controller.
-        let process = session.latest_process.as_ref().expect("process retained");
-        assert_eq!(
-            process.state,
-            crate::child_session::ChildLeaseState::Reserved
-        );
-        assert_eq!(process.outcome, None);
+        // The replacement keeps the same Run but has not started its next
+        // Launch yet. The failed provider remains on the ended Launch.
+        let run = store.current_run(&lease.work).await.unwrap().unwrap();
+        assert_eq!(run.id, lease.run_id);
+        assert!(store
+            .current_launch_for_run(&run.id)
+            .await
+            .unwrap()
+            .is_none());
 
         // The BodyHandedOff event is in the ledger.
         let events = store.task_events_after(&session.id, 0).await.unwrap();
@@ -3127,7 +3068,7 @@ mod tests {
         );
 
         // Fencing: a late write from the dead opencode body is rejected.
-        // The process is Finished, so the old lease can no longer update.
+        // Run authority rotated, so the old lease can no longer update.
         let mut late_session = store.get_task_session(&session.id).await.unwrap().unwrap();
         late_session.status_reason = "late write from dead body".to_string();
         let write_result = store

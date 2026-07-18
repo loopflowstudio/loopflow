@@ -157,12 +157,6 @@ impl ProjectSession {
     }
 
     pub fn validate(&self) -> Result<(), ProjectDataError> {
-        if self.status.is_process_active() && self.latest_process.is_none() {
-            return Err(ProjectDataError::InvalidInvariant(format!(
-                "{} requires a latest process generation",
-                self.status.as_str()
-            )));
-        }
         Ok(())
     }
 

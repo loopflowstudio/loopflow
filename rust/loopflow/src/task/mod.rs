@@ -879,12 +879,6 @@ impl TaskSession {
     }
 
     pub fn validate(&self) -> Result<(), TaskDataError> {
-        if self.status.is_process_active() && self.latest_process.is_none() {
-            return Err(TaskDataError::InvalidInvariant(format!(
-                "{} requires a latest process generation",
-                self.status.as_str()
-            )));
-        }
         if self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "Task Session {} requires a workspace slug",
@@ -1031,14 +1025,6 @@ pub enum TaskEventKind {
     },
     BodyLeaseChanged {
         process: ChildProcessGeneration,
-    },
-    /// Loopflow re-dispatched a Session whose body died, with no human asking.
-    /// The durable record of a recovery: `attempt` bounds the retry and this
-    /// event is what [`crate::child_session::count_recovery_attempts`] counts.
-    BodyRecoveryAttempted {
-        generation: u32,
-        attempt: u32,
-        reason: String,
     },
     StatusChanged {
         from: TaskSessionStatus,

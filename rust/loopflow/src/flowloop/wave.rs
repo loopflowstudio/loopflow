@@ -1955,10 +1955,15 @@ mod tests {
         let wake = wake_of(&seed);
         assert!(wake.contains("<lf:child-feedback"));
         assert!(wake.contains("Service this child before background parent work"));
-        wait_for("seed-only control turn ends", || {
-            loop_.runtime.thread_snapshot().iter().any(|turn| {
+        wait_for("seed-only control turn and body end", || {
+            let turn_ended = loop_.runtime.thread_snapshot().iter().any(|turn| {
                 turn.role == ChatRole::Assistant && turn.status == Lifecycle::Interrupted
-            })
+            });
+            let body_ended = loop_
+                .runtime
+                .playhead()
+                .is_some_and(|playhead| playhead.active.is_none());
+            turn_ended && body_ended
         })
         .await;
         let playhead = loop_.runtime.playhead().expect("playhead remains durable");
@@ -2148,10 +2153,15 @@ mod tests {
         })
         .await;
         assert!(inputs.lock().unwrap()[1].contains("<lf:child-feedback"));
-        wait_for("repurposed background Turn is interrupted", || {
-            loop_.runtime.thread_snapshot().iter().any(|turn| {
+        wait_for("repurposed background Turn and body end", || {
+            let turn_ended = loop_.runtime.thread_snapshot().iter().any(|turn| {
                 turn.role == ChatRole::Assistant && turn.status == Lifecycle::Interrupted
-            })
+            });
+            let body_ended = loop_
+                .runtime
+                .playhead()
+                .is_some_and(|playhead| playhead.active.is_none());
+            turn_ended && body_ended
         })
         .await;
         let playhead = loop_.runtime.playhead().expect("playhead remains durable");

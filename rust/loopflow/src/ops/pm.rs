@@ -517,15 +517,9 @@ impl PmClient {
         }
     }
 
-    async fn link_attachment(
-        &self,
-        issue_id: &str,
-        url: &str,
-        title: &str,
-        subtitle: &str,
-    ) -> PmResult<String> {
+    async fn link_attachment(&self, issue_id: &str, url: &str, title: &str) -> PmResult<String> {
         match self {
-            Self::Linear(client) => client.link_attachment(issue_id, url, title, subtitle).await,
+            Self::Linear(client) => client.link_attachment(issue_id, url, title).await,
         }
     }
 
@@ -1494,12 +1488,7 @@ async fn link_pr_with_client(
             }
         }
         None => match client
-            .link_attachment(
-                &request.issue_id,
-                &request.url,
-                &request.title,
-                &request.subtitle,
-            )
+            .link_attachment(&request.issue_id, &request.url, &request.title)
             .await
         {
             Ok(id) => ids.attachment_id = Some(id),
@@ -2684,7 +2673,7 @@ mod tests {
     };
     use crate::wave::Wave;
     use axum::http::StatusCode;
-    use serde_json::json;
+    use serde_json::{json, Value};
     use std::path::PathBuf;
     use time::OffsetDateTime;
 
@@ -4046,9 +4035,17 @@ mod tests {
         assert!(outcome.error.is_none());
 
         let requests = requests.lock().await;
-        assert!(requests
+        let link = requests
             .iter()
-            .any(|req| req.body.contains("attachmentLinkURL")));
+            .find(|req| req.body.contains("attachmentLinkURL"))
+            .expect("create sends attachmentLinkURL");
+        // The create path must never send an argument Linear rejects: the
+        // `subtitle` on attachmentLinkURL is the 400 that shipped in #1010.
+        let link_body: Value = serde_json::from_str(&link.body).expect("link body is json");
+        assert!(
+            link_body["variables"].get("subtitle").is_none(),
+            "attachmentLinkURL must not send a subtitle variable"
+        );
         assert!(requests
             .iter()
             .any(|req| req.body.contains("commentCreate")));

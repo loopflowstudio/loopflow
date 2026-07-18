@@ -254,8 +254,13 @@ const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $b
   }
 }"#;
 
-const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: String!, $url: String!, $title: String!, $subtitle: String!) {
-  attachmentLinkURL(issueId: $issueId, url: $url, title: $title, subtitle: $subtitle) {
+// `attachmentLinkURL` links a URL and dedupes on it — re-linking the same PR
+// returns the existing attachment rather than duplicating. It accepts `issueId`,
+// `url`, and `title`, but not `subtitle` (that lives on `attachmentUpdate`'s
+// input). PR state is carried in the managed comment body and filled onto the
+// attachment as a subtitle by the later `attachmentUpdate`.
+const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: String!, $url: String!, $title: String!) {
+  attachmentLinkURL(issueId: $issueId, url: $url, title: $title) {
     attachment {
       id
     }
@@ -876,7 +881,6 @@ impl LinearClient {
         issue_id: &str,
         url: &str,
         title: &str,
-        subtitle: &str,
     ) -> PmResult<String> {
         let response: AttachmentLinkData = self
             .graphql(
@@ -885,7 +889,6 @@ impl LinearClient {
                     "issueId": issue_id,
                     "url": url,
                     "title": title,
-                    "subtitle": subtitle,
                 }),
             )
             .await?;
@@ -1455,6 +1458,22 @@ mod tests {
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
     }
 
+    /// A wrong argument on a Linear mutation must fail here, not ship a 400 on
+    /// every publish (#1010, where `subtitle` on `attachmentLinkURL` shipped green
+    /// because the mock echoed success). `subtitle` is legal on `attachmentUpdate`
+    /// but not on `attachmentLinkURL`, so pin each mutation directly.
+    #[test]
+    fn attachment_link_omits_subtitle_and_update_keeps_it() {
+        assert!(
+            !LINK_ATTACHMENT_MUTATION.contains("subtitle"),
+            "attachmentLinkURL rejects subtitle; it must not appear in the create mutation"
+        );
+        assert!(
+            UPDATE_ATTACHMENT_MUTATION.contains("subtitle: $subtitle"),
+            "attachmentUpdate carries PR state as its input subtitle"
+        );
+    }
+
     #[test]
     fn workflow_state_filters_use_linear_team_id() {
         assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
@@ -1984,7 +2003,7 @@ mod tests {
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let attachment_id = client
-            .link_attachment("issue-1", "https://example/pr/7", "GitHub PR #7", "Open")
+            .link_attachment("issue-1", "https://example/pr/7", "GitHub PR #7")
             .await
             .expect("link attachment succeeds");
         assert_eq!(attachment_id, "att-1");
@@ -2007,6 +2026,13 @@ mod tests {
             .contains("attachmentLinkURL"));
         assert_eq!(link["variables"]["issueId"], json!("issue-1"));
         assert_eq!(link["variables"]["url"], json!("https://example/pr/7"));
+        // The create path must not send an argument Linear rejects.
+        // `attachmentLinkURL` has no `subtitle`; sending one is the 400 that
+        // shipped in #1010. PR state rides the managed comment body instead.
+        assert!(
+            link["variables"].get("subtitle").is_none(),
+            "attachmentLinkURL must not send a subtitle variable"
+        );
 
         let update: Value =
             serde_json::from_str(&requests[1].body).expect("attachment update body is json");

@@ -4552,6 +4552,10 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
         let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
         let resume_refusal =
             no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest);
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
         let work_status = store
             .work_status(&work)
             .await

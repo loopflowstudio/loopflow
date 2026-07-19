@@ -211,8 +211,8 @@
                   "evidence_age_secs": 7200,
                   "next_owner": "review",
                   "actions": {
-                    "recommended": "review",
-                    "reason": "checks passed; awaiting review"
+                    "recommended": "open_pr",
+                    "reason": "checks passed; open the PR"
                   },
                   "pm_completed": false,
                   "work_status": "ready",
@@ -241,7 +241,7 @@
                   "empty": null,
                   "publication": {
                     "requested_at": "2026-07-14T22:05:00Z",
-                    "after_merge": "review",
+                    "after_merge": "continue_task",
                     "next_slug": null,
                     "github": {
                       "number": 899,

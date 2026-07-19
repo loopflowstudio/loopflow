@@ -238,8 +238,7 @@ pub enum TaskAttentionLevel {
 }
 
 pub use crate::task::actions::{
-    ci_failure_reason, derive_task_actions, ReviewGateState, TaskAction, TaskActionEvidence,
-    TaskActionModel,
+    ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1357,16 +1356,11 @@ async fn snapshot_task_detail(
                     latest_pr_after_merge: latest
                         .and_then(|pr| pr.publication.as_ref())
                         .map(|p| p.after_merge),
-                    latest_pr_next_slug: latest
-                        .and_then(|pr| pr.publication.as_ref())
-                        .and_then(|p| p.next_slug.as_deref()),
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
-                    pending_directive: false,
                     ci: active.and_then(|pr| pr.fresh_ci()),
                     process_alive: process.alive,
                     predecessor_phase,
-                    review_gate: None,
                     abandon_intent: session.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
                 }),

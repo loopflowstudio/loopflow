@@ -411,14 +411,14 @@ impl PrPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AfterMerge {
-    Review,
+    ContinueTask,
     CompleteTask,
 }
 
 impl AfterMerge {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Review => "review",
+            Self::ContinueTask => "continue_task",
             Self::CompleteTask => "complete_task",
         }
     }
@@ -429,7 +429,7 @@ impl FromStr for AfterMerge {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "review" => Ok(Self::Review),
+            "continue_task" => Ok(Self::ContinueTask),
             "complete_task" => Ok(Self::CompleteTask),
             _ => Err(TaskDataError::InvalidInvariant(format!(
                 "invalid after-merge disposition: {value}"
@@ -1148,7 +1148,7 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: now,
-            after_merge: AfterMerge::Review,
+            after_merge: AfterMerge::ContinueTask,
             next_slug: None,
             github: None,
         });
@@ -1183,7 +1183,7 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::Review,
+                after_merge: AfterMerge::ContinueTask,
                 next_slug: Some("released_upgrade".to_string()),
                 github: Some(GithubPr {
                     number: 872,
@@ -1248,7 +1248,7 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::Review,
+                after_merge: AfterMerge::ContinueTask,
                 next_slug: None,
                 github: Some(GithubPr {
                     number: 900,

@@ -489,6 +489,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "release",
         sql: include_str!("migrations/0.12.3.001_release.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 2,
+        },
+        name: "after_merge_continue_task",
+        sql: include_str!("migrations/0.12.3.002_after_merge_continue_task.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -2944,6 +2954,42 @@ mod tests {
             .collect::<Vec<_>>();
         decisions.sort_unstable();
         assert_eq!(decisions, vec![false, false, false, false, false, true]);
+    #[test]
+    fn after_merge_review_rows_become_continue_task() {
+        let conn = open();
+        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute(
+            "INSERT INTO task_prs (
+                id, task_id, sequence, slug, branch, base_commit,
+                publication_requested_at, after_merge, next_slug,
+                github_number, github_url, merge_commit, abandoned_at,
+                created_at, updated_at
+             ) VALUES (
+                'pr_legacy', 'task_legacy', 1, 'proof', 'jack/proof', 'base',
+                10, 'review', 'follow-up', 17, 'https://example.test/pull/17',
+                'merge', NULL, 1, 11
+             )",
+            [],
+        )
+        .unwrap();
+
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        let disposition: String = conn
+            .query_row(
+                "SELECT after_merge FROM task_prs WHERE id='pr_legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(disposition, "continue_task");
+        assert!(conn
+            .execute(
+                "UPDATE task_prs SET after_merge='review' WHERE id='pr_legacy'",
+                [],
+            )
+            .is_err());
     }
 
     #[test]

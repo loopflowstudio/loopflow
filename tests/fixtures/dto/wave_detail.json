@@ -138,8 +138,8 @@
             "evidence_age_secs": 7200,
             "next_owner": "review",
             "actions": {
-              "recommended": "review",
-              "reason": "checks passed; awaiting review"
+              "recommended": "open_pr",
+              "reason": "checks passed; open the PR"
             },
             "pm_completed": false,
             "work_status": "ready",

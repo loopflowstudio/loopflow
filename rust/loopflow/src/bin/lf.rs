@@ -1543,7 +1543,7 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::Review,
+                after_merge: AfterMerge::ContinueTask,
                 next_slug: None,
                 github: Some(GithubPr {
                     number: 931,

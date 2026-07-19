@@ -289,10 +289,10 @@ delete orphan receipts, and rename Work/Launch identities still called Session.
 
 ### PR state
 
-- [ ] `ReviewGateState`, `TaskAction::Review`, and `AfterMerge::Review` are absent.
-- [ ] `OpenPr` is presentational only.
-- [ ] Stored `after_merge` accepts only `continue_task|complete_task`.
-- [ ] Merged `ContinueTask` work proceeds without an approval record.
+- [x] `ReviewGateState`, `TaskAction::Review`, and `AfterMerge::Review` are absent.
+- [x] `OpenPr` is presentational only.
+- [x] Stored `after_merge` accepts only `continue_task|complete_task`.
+- [x] Merged `ContinueTask` work proceeds without an approval record.
 
 ### Communication and memory
 

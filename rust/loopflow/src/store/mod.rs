@@ -2151,7 +2151,7 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
-            after_merge: AfterMerge::Review,
+            after_merge: AfterMerge::ContinueTask,
             next_slug: None,
             github: Some(GithubPr {
                 number: 902,
@@ -2227,7 +2227,7 @@ mod tests {
 
         first.publication = Some(PrPublication {
             requested_at: first.updated_at,
-            after_merge: AfterMerge::Review,
+            after_merge: AfterMerge::ContinueTask,
             next_slug: None,
             github: Some(GithubPr {
                 number: 101,
@@ -2365,7 +2365,7 @@ mod tests {
         // The parent is published but not merged — the child stacks on it.
         parent.publication = Some(PrPublication {
             requested_at: parent.updated_at,
-            after_merge: AfterMerge::Review,
+            after_merge: AfterMerge::ContinueTask,
             next_slug: None,
             github: Some(GithubPr {
                 number: 200,

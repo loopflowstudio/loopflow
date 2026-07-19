@@ -778,7 +778,7 @@ fn latest_land_disposition_wins_before_merge() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Open);
     let publication = pr.publication.expect("publication");
-    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert_eq!(publication.after_merge, AfterMerge::ContinueTask);
     assert_eq!(publication.next_slug.as_deref(), Some("follow-up-proof"));
     assert_eq!(publication.github.map(|pr| pr.number), Some(912));
 }

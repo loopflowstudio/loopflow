@@ -2650,7 +2650,7 @@ async fn reconcile_task_pr_with_authority(
     let previous_pm_writeback = session.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
-        after_merge: AfterMerge::Review,
+        after_merge: AfterMerge::ContinueTask,
         next_slug: None,
         github: None,
     });
@@ -4152,12 +4152,8 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
             latest_pr_after_merge: latest
                 .and_then(|pr| pr.publication.as_ref())
                 .map(|p| p.after_merge),
-            latest_pr_next_slug: latest
-                .and_then(|pr| pr.publication.as_ref())
-                .and_then(|p| p.next_slug.as_deref()),
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
-            pending_directive: false,
             ci: active.and_then(|pr| pr.fresh_ci()),
             process_alive: if matches!(work_status, WorkStatus::Running { .. }) {
                 Some(process_alive)
@@ -4165,7 +4161,6 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
                 None
             },
             predecessor_phase,
-            review_gate: None,
             abandon_intent: session.abandon_intent.is_some(),
             local_progress_unsettled: None,
         };

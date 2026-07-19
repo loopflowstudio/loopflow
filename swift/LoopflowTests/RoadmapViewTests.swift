@@ -18,8 +18,8 @@ struct RoadmapViewTests {
 
         // Waiting on an open PR advertises Review, not Resume: the server
         // recommends review, and the app must not re-derive Resume from status.
-        #expect(tasks[1].attention.actions.recommended == .review)
-        #expect(roadmapTaskAction(tasks[1]) == .review)
+        #expect(tasks[1].attention.actions.recommended == .openPr)
+        #expect(roadmapTaskAction(tasks[1]) == .openPr)
         #expect(!roadmapTaskCanInterrupt(tasks[1]))
 
         // No Session yet, and a terminal Task offers nothing.
@@ -33,7 +33,7 @@ struct RoadmapViewTests {
         let project = try #require(snapshot.waves.first?.projects.items.first)
         let reviewing = project.tasks[1].attention.actions
 
-        #expect(reviewing.recommended == .review)
+        #expect(reviewing.recommended == .openPr)
         #expect(reviewing.reason == "checks passed; awaiting review")
     }
 

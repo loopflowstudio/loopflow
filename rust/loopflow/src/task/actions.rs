@@ -11,7 +11,7 @@ use crate::task::{AfterMerge, CiObservation, CiState, PrPhase};
 pub enum TaskAction {
     Recover,
     Resume,
-    Review,
+    OpenPr,
     StartNextPr,
     Complete,
     NoAction,
@@ -22,7 +22,7 @@ impl TaskAction {
         match self {
             Self::Recover => "recover",
             Self::Resume => "resume",
-            Self::Review => "review",
+            Self::OpenPr => "open_pr",
             Self::StartNextPr => "start_next_pr",
             Self::Complete => "complete",
             Self::NoAction => "no_action",
@@ -45,28 +45,15 @@ impl TaskActionModel {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ReviewGateState {
-    Requested,
-    Active,
-    Approved,
-    ChangesRequested,
-}
-
 pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_after_merge: Option<AfterMerge>,
-    pub latest_pr_next_slug: Option<&'a str>,
     pub completion_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
-    pub pending_directive: bool,
     pub ci: Option<&'a CiObservation>,
     pub process_alive: Option<bool>,
     pub predecessor_phase: Option<PrPhase>,
-    pub review_gate: Option<ReviewGateState>,
     pub abandon_intent: bool,
     pub local_progress_unsettled: Option<bool>,
 }
@@ -76,16 +63,6 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         action(TaskAction::NoAction, "Task is terminal")
     } else if evidence.abandon_intent {
         action(TaskAction::NoAction, "Task is being abandoned")
-    } else if matches!(
-        evidence.review_gate,
-        Some(ReviewGateState::Requested | ReviewGateState::Active)
-    ) && evidence.latest_pr_phase != Some(PrPhase::Merged)
-    {
-        action(TaskAction::Review, "awaiting review disposition")
-    } else if evidence.review_gate == Some(ReviewGateState::ChangesRequested)
-        && evidence.resume_refusal.is_none()
-    {
-        action(TaskAction::Resume, "address requested changes")
     } else {
         phase_action(evidence)
     };
@@ -96,7 +73,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
-                action(TaskAction::Review, "checks passed; awaiting review")
+                action(TaskAction::OpenPr, "checks passed; open the PR")
             }
             Some(ci) if ci.state == CiState::Failing => {
                 action(TaskAction::Resume, ci_failure_reason(ci))
@@ -122,31 +99,18 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
 }
 
 fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if let Some(refusal) = evidence.completion_refusal {
-        let next = if evidence.pending_directive
-            || evidence.review_gate == Some(ReviewGateState::ChangesRequested)
-        {
-            TaskAction::StartNextPr
-        } else {
-            TaskAction::Review
-        };
-        return action(next, refusal);
-    }
-    match evidence.latest_pr_after_merge {
-        Some(AfterMerge::CompleteTask) | None => {
-            action(TaskAction::Complete, "PR merged; complete the Task")
-        }
-        Some(AfterMerge::Review) if evidence.review_gate != Some(ReviewGateState::Approved) => {
-            action(TaskAction::Review, "merged; answer the post-merge review")
-        }
-        Some(AfterMerge::Review) if evidence.latest_pr_next_slug.is_some() => action(
+    match evidence
+        .latest_pr_after_merge
+        .expect("a merged Task PR has an after-merge disposition")
+    {
+        AfterMerge::ContinueTask => action(
             TaskAction::StartNextPr,
-            "merged and reviewed; start the next PR",
+            "PR merged; continue the Task on its next PR",
         ),
-        Some(AfterMerge::Review) => action(
-            TaskAction::Complete,
-            "merged and reviewed; complete the Task",
-        ),
+        AfterMerge::CompleteTask => match evidence.completion_refusal {
+            Some(refusal) => action(TaskAction::NoAction, refusal),
+            None => action(TaskAction::Complete, "PR merged; complete the Task"),
+        },
     }
 }
 
@@ -201,5 +165,61 @@ pub fn ci_failure_reason(ci: &CiObservation) -> String {
         "required checks failed".into()
     } else {
         format!("required checks failed: {}", names.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use time::OffsetDateTime;
+
+    use super::{derive_task_actions, TaskAction, TaskActionEvidence};
+    use crate::durable::WorkStatus;
+    use crate::task::{AfterMerge, CiObservation, CiState, PrPhase};
+
+    fn evidence<'a>(
+        phase: PrPhase,
+        after_merge: Option<AfterMerge>,
+        ci: Option<&'a CiObservation>,
+    ) -> TaskActionEvidence<'a> {
+        TaskActionEvidence {
+            status: WorkStatus::Ready,
+            latest_pr_phase: Some(phase),
+            latest_pr_after_merge: after_merge,
+            completion_refusal: None,
+            resume_refusal: None,
+            ci,
+            process_alive: None,
+            predecessor_phase: None,
+            abandon_intent: false,
+            local_progress_unsettled: Some(false),
+        }
+    }
+
+    #[test]
+    fn merged_continue_task_starts_the_next_pr_without_review_state() {
+        let model = derive_task_actions(&evidence(
+            PrPhase::Merged,
+            Some(AfterMerge::ContinueTask),
+            None,
+        ));
+
+        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
+        assert_eq!(model.reason, "PR merged; continue the Task on its next PR");
+    }
+
+    #[test]
+    fn passing_open_pr_only_recommends_opening_the_pr() {
+        let ci = CiObservation {
+            head_sha: "head".to_string(),
+            state: CiState::Passing,
+            failing_checks: Vec::new(),
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let evidence = evidence(PrPhase::Open, Some(AfterMerge::ContinueTask), Some(&ci));
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::OpenPr));
+        assert_eq!(model.reason, "checks passed; open the PR");
     }
 }

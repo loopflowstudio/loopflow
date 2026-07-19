@@ -261,7 +261,8 @@ public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
 /// The six lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
 public enum TaskAction: String, Decodable, Sendable, Hashable {
-    case recover, resume, review
+    case recover, resume
+    case openPr = "open_pr"
     case startNextPr = "start_next_pr"
     case complete
     case noAction = "no_action"
@@ -372,7 +373,7 @@ public struct PrPublicationSnapshot: Decodable, Sendable, Hashable {
 }
 
 public enum PrAfterMerge: String, Decodable, Sendable, Hashable {
-    case review
+    case continueTask = "continue_task"
     case completeTask = "complete_task"
 }
 

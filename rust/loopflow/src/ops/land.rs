@@ -135,7 +135,7 @@ fn prepare_pr(
         if options.complete {
             crate::task::AfterMerge::CompleteTask
         } else {
-            crate::task::AfterMerge::Review
+            crate::task::AfterMerge::ContinueTask
         },
         options.next_slug.as_deref(),
     )?;

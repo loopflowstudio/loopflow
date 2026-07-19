@@ -219,7 +219,7 @@ enum MockWaveFixture {
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": 7200,
                 "next_owner": "review",
-                "actions":{"recommended":"review","reason":"checks passed; awaiting review"},
+                "actions":{"recommended":"open_pr","reason":"checks passed; open the PR"},
                 "pm_completed": false,
                 "work_status": "ready",
                 "process": {"state": "not_expected", "alive": null, "reason": null},

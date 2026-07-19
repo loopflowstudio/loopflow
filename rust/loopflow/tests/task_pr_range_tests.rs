@@ -735,7 +735,7 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
             .expect("active PR exists");
         pr.publication = Some(PrPublication {
             requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
+            after_merge: AfterMerge::ContinueTask,
             next_slug: None,
             github: Some(GithubPr {
                 number: 925,

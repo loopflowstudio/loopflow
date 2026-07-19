@@ -267,7 +267,7 @@ fn github_failure_leaves_publication_intent_observable() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
     let publication = pr.publication.expect("durable publication request");
-    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert_eq!(publication.after_merge, AfterMerge::ContinueTask);
     assert!(publication.github.is_none());
 }
 
@@ -284,7 +284,7 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::Review,
+        after_merge: AfterMerge::ContinueTask,
         next_slug: None,
         github: Some(GithubPr {
             number: 912,
@@ -314,7 +314,7 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
     let publication = prs[0].publication.as_ref().expect("adopted publication");
-    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert_eq!(publication.after_merge, AfterMerge::ContinueTask);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
     let work = runtime
         .block_on(

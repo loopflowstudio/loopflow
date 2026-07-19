@@ -13,7 +13,7 @@ use time::{Duration, OffsetDateTime};
 fn publish_task(task: &mut RegisteredTask) {
     task.pr.publication = Some(PrPublication {
         requested_at: OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::Review,
+        after_merge: AfterMerge::ContinueTask,
         next_slug: None,
         github: Some(GithubPr {
             number: 928,

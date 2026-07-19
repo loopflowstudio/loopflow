@@ -54,7 +54,7 @@ struct RegistryQueryTests {
           "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":"turning",
           "projects":[{
-            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
+            "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","flows":{"first":"task-design","loop":"slice","finally":"ship"},"krs":[{"text":"Fast loops","holds":false}]},
             "runtime":{"work_id":"project-1","status":{"waiting":{"wait":{"id":"wait_00000000000000000000000000000001","work":{"kind":"project","id":"project-1"},"epoch_id":"epoch_00000000000000000000000000000001","on":{"kind":"input","after":{"epoch_id":"epoch_00000000000000000000000000000001","revision":1}},"created_at":"2026-07-06T00:00:00Z","resolved_at":null}}},"reason":"supervised Tasks are active","updated_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"observation":{"category":"needs_input","reason":"supervised Tasks are active","owner":"user","controls":["decide","resume","abandon"],"progress_age_secs":null,"deadline_in_secs":null,"step":"iteration 2"}},
             "directive":null,
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
@@ -365,7 +365,7 @@ struct RegistryQueryTests {
     func planDecodesProjects() async throws {
         let json = """
         {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"]}
+          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"first":null,"loop":null,"finally":null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"]}
         ],"items":[]}
         """
         let query = RegistryQuery { args, cwd in

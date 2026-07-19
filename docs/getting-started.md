@@ -78,7 +78,7 @@ lf : "add type hints to utils.py"
 Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task start "add OAuth login" --project <linear-project-id>
+lf task start <linear-project-id> "add OAuth login"
 lf task status <issue-id>
 lf task steer <issue-id> "support passkeys too"
 lf task wait <issue-id> --until terminal
@@ -110,11 +110,11 @@ Chain skills manually, or use a named flow (a flow is a sequence of steps; each 
 
 ```bash
 lf design && lf implement && lf gate    # manual chain
-lf build                                # one design → code → demo/review → gate pass
+lf build                                # one design → code → review-slice → gate pass
 ```
 
 Flows automate steps within one bounded pass. `build` runs kickoff →
-review-design → implement → compress → lint → demo/review → gate. Use `ship` or
+review-design → implement → compress → lint → review-slice → gate. Use `ship` or
 `deploy` for the explicit delivery workflow. Repetition belongs to Wave,
 Project, and Task runtimes.
 

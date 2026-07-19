@@ -1,0 +1,10 @@
+name: builtin_review_slice
+repo: tests/parity/fixtures/basic
+skill: review-slice
+surface: headless
+directions: []
+docs: []
+diff_files: false
+diff: false
+clipboard: false
+wave: null

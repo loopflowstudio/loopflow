@@ -877,12 +877,4 @@ mod tests {
         let err = discover_skill(tmp.path(), "gstack:office-hours").unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
-
-    #[test]
-    fn list_directions_includes_imported_builtin_directions() {
-        let directions = list_directions(None);
-
-        assert!(directions.contains(&"gstack".to_string()));
-        assert!(directions.contains(&"openclaw".to_string()));
-    }
 }

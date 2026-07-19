@@ -50,7 +50,20 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let name: String
     public let summary: String
     public let definition: String
+    public let flows: ProjectFlowPlanSnapshot
     public let krs: [PlanningKeyResult]
+}
+
+public struct ProjectFlowPlanSnapshot: Decodable, Sendable, Hashable {
+    public let first: String?
+    public let loopFlow: String?
+    public let finallyFlow: String?
+
+    enum CodingKeys: String, CodingKey {
+        case first
+        case loopFlow = "loop"
+        case finallyFlow = "finally"
+    }
 }
 
 public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {

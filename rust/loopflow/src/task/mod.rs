@@ -35,31 +35,35 @@ prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskLifecyclePhase {
-    Kickoff,
-    Iterate,
-    Gate,
+    First,
+    Loop,
+    Finally,
 }
 
 impl TaskLifecyclePhase {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Kickoff => "kickoff",
-            Self::Iterate => "iterate",
-            Self::Gate => "gate",
+            Self::First => "first",
+            Self::Loop => "loop",
+            Self::Finally => "finally",
         }
     }
-}
 
-impl FromStr for TaskLifecyclePhase {
-    type Err = TaskDataError;
+    pub(crate) fn storage_str(self) -> &'static str {
+        match self {
+            Self::First => "kickoff",
+            Self::Loop => "iterate",
+            Self::Finally => "gate",
+        }
+    }
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
+    pub(crate) fn from_storage_str(value: &str) -> Result<Self, TaskDataError> {
         match value {
-            "kickoff" => Ok(Self::Kickoff),
-            "iterate" => Ok(Self::Iterate),
-            "gate" => Ok(Self::Gate),
+            "kickoff" => Ok(Self::First),
+            "iterate" => Ok(Self::Loop),
+            "gate" => Ok(Self::Finally),
             _ => Err(TaskDataError::InvalidInvariant(format!(
-                "invalid Task lifecycle phase: {value}"
+                "invalid stored Task lifecycle phase: {value}"
             ))),
         }
     }
@@ -85,46 +89,65 @@ impl TaskPhasePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLifecyclePlan {
-    pub kickoff: TaskPhasePlan,
-    pub iterate: TaskPhasePlan,
-    pub gate: TaskPhasePlan,
+    pub first: TaskPhasePlan,
+    #[serde(rename = "loop")]
+    pub loop_: TaskPhasePlan,
+    pub finally: TaskPhasePlan,
 }
 
 impl TaskLifecyclePlan {
-    pub fn standard(iterate_flow: impl Into<String>) -> Self {
+    pub fn standard(
+        first_flow: impl Into<String>,
+        loop_flow: impl Into<String>,
+        finally_flow: impl Into<String>,
+    ) -> Self {
         Self {
-            kickoff: TaskPhasePlan {
-                flow: "task-kickoff".to_string(),
+            first: TaskPhasePlan {
+                flow: first_flow.into(),
                 interaction_policy: InteractionPolicy::Require,
             },
-            iterate: TaskPhasePlan {
-                flow: iterate_flow.into(),
+            loop_: TaskPhasePlan {
+                flow: loop_flow.into(),
                 interaction_policy: InteractionPolicy::Defer,
             },
-            gate: TaskPhasePlan {
-                flow: "task-gate".to_string(),
+            finally: TaskPhasePlan {
+                flow: finally_flow.into(),
                 interaction_policy: InteractionPolicy::Require,
             },
         }
     }
 
-    pub fn headless(iterate_flow: impl Into<String>) -> Self {
-        let mut plan = Self::standard(iterate_flow);
+    pub fn defaults() -> Self {
+        Self::standard("task-design", "slice", "ship")
+    }
+
+    pub fn headless(
+        first_flow: impl Into<String>,
+        loop_flow: impl Into<String>,
+        finally_flow: impl Into<String>,
+    ) -> Self {
+        let mut plan = Self::standard(first_flow, loop_flow, finally_flow);
+        plan.defer_all_interactions();
+        plan
+    }
+
+    pub fn headless_defaults() -> Self {
+        let mut plan = Self::defaults();
         plan.defer_all_interactions();
         plan
     }
 
     pub fn defer_all_interactions(&mut self) {
-        self.kickoff.interaction_policy = InteractionPolicy::Defer;
-        self.iterate.interaction_policy = InteractionPolicy::Defer;
-        self.gate.interaction_policy = InteractionPolicy::Defer;
+        self.first.interaction_policy = InteractionPolicy::Defer;
+        self.loop_.interaction_policy = InteractionPolicy::Defer;
+        self.finally.interaction_policy = InteractionPolicy::Defer;
     }
 
     pub fn all_interactions_deferred(&self) -> bool {
         [
-            self.kickoff.interaction_policy,
-            self.iterate.interaction_policy,
-            self.gate.interaction_policy,
+            self.first.interaction_policy,
+            self.loop_.interaction_policy,
+            self.finally.interaction_policy,
         ]
         .into_iter()
         .all(|policy| policy == InteractionPolicy::Defer)
@@ -132,16 +155,16 @@ impl TaskLifecyclePlan {
 
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
         match phase {
-            TaskLifecyclePhase::Kickoff => &self.kickoff,
-            TaskLifecyclePhase::Iterate => &self.iterate,
-            TaskLifecyclePhase::Gate => &self.gate,
+            TaskLifecyclePhase::First => &self.first,
+            TaskLifecyclePhase::Loop => &self.loop_,
+            TaskLifecyclePhase::Finally => &self.finally,
         }
     }
 
     fn validate(&self) -> Result<(), TaskDataError> {
-        self.kickoff.validate(TaskLifecyclePhase::Kickoff)?;
-        self.iterate.validate(TaskLifecyclePhase::Iterate)?;
-        self.gate.validate(TaskLifecyclePhase::Gate)
+        self.first.validate(TaskLifecyclePhase::First)?;
+        self.loop_.validate(TaskLifecyclePhase::Loop)?;
+        self.finally.validate(TaskLifecyclePhase::Finally)
     }
 }
 
@@ -216,7 +239,7 @@ impl CiCheck {
     /// This is the one class of required check a Task body cannot act on.
     /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
     /// which is true of every PR carrying its own design doc — i.e. every Task PR
-    /// during kickoff and iterate, by construction — and
+    /// during first and loop, by construction — and
     /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
     /// body woken to "repair" it could only delete the artifact the reviewer
     /// reads, to green a check land greens anyway.
@@ -650,7 +673,7 @@ pub struct Task {
     /// Three pinned phase flows and their reviewer-routing policies.
     pub lifecycle: TaskLifecyclePlan,
     /// Current phase entry. `phase_epoch` advances on every transition,
-    /// including Gate → Iterate, so stale bodies cannot rewind the Task.
+    /// including Finally → Loop, so stale bodies cannot rewind the Task.
     pub lifecycle_phase: TaskLifecyclePhase,
     pub phase_epoch: u32,
     pub phase_cursor: u32,
@@ -788,14 +811,14 @@ impl Task {
                 "Task lifecycle phase epoch must be positive".to_string(),
             ));
         }
-        if self.lifecycle_phase == TaskLifecyclePhase::Gate && self.gate_proposal.is_none() {
+        if self.lifecycle_phase == TaskLifecyclePhase::Finally && self.gate_proposal.is_none() {
             return Err(TaskDataError::InvalidInvariant(
-                "Task gate phase requires a proposed outcome".to_string(),
+                "Task finally phase requires a proposed outcome".to_string(),
             ));
         }
-        if self.lifecycle_phase != TaskLifecyclePhase::Gate && self.gate_proposal.is_some() {
+        if self.lifecycle_phase != TaskLifecyclePhase::Finally && self.gate_proposal.is_some() {
             return Err(TaskDataError::InvalidInvariant(
-                "Task gate proposal is valid only during gate phase".to_string(),
+                "Task gate proposal is valid only during finally phase".to_string(),
             ));
         }
         if let Some(proposal) = &self.gate_proposal {
@@ -815,21 +838,21 @@ impl Task {
 
     pub fn lifecycle_cycle(&self) -> u32 {
         match self.lifecycle_phase {
-            TaskLifecyclePhase::Kickoff => 0,
-            TaskLifecyclePhase::Iterate => self.gate_cycle + 1,
-            TaskLifecyclePhase::Gate => self.gate_cycle,
+            TaskLifecyclePhase::First => 0,
+            TaskLifecyclePhase::Loop => self.gate_cycle + 1,
+            TaskLifecyclePhase::Finally => self.gate_cycle,
         }
     }
 
-    pub fn enter_iterate(&mut self) -> Result<(), TaskDataError> {
-        if self.lifecycle_phase != TaskLifecyclePhase::Kickoff
-            && self.lifecycle_phase != TaskLifecyclePhase::Gate
+    pub fn enter_loop(&mut self) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::First
+            && self.lifecycle_phase != TaskLifecyclePhase::Finally
         {
             return Err(TaskDataError::InvalidInvariant(
-                "only kickoff or gate may enter iterate".to_string(),
+                "only first or finally may enter loop".to_string(),
             ));
         }
-        self.lifecycle_phase = TaskLifecyclePhase::Iterate;
+        self.lifecycle_phase = TaskLifecyclePhase::Loop;
         self.phase_epoch += 1;
         self.phase_cursor = 0;
         self.phase_iteration = 0;
@@ -838,14 +861,14 @@ impl Task {
         Ok(())
     }
 
-    pub fn enter_gate(&mut self, proposal: TaskGateProposal) -> Result<(), TaskDataError> {
-        if self.lifecycle_phase != TaskLifecyclePhase::Iterate {
+    pub fn enter_finally(&mut self, proposal: TaskGateProposal) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::Loop {
             return Err(TaskDataError::InvalidInvariant(
-                "only iterate may enter gate".to_string(),
+                "only loop may enter finally".to_string(),
             ));
         }
         proposal.validate()?;
-        self.lifecycle_phase = TaskLifecyclePhase::Gate;
+        self.lifecycle_phase = TaskLifecyclePhase::Finally;
         self.phase_epoch += 1;
         self.phase_cursor = 0;
         self.phase_iteration = 0;
@@ -856,9 +879,9 @@ impl Task {
     }
 
     pub fn approved_gate_proposal(&self) -> Result<TaskGateProposal, TaskDataError> {
-        if self.lifecycle_phase != TaskLifecyclePhase::Gate {
+        if self.lifecycle_phase != TaskLifecyclePhase::Finally {
             return Err(TaskDataError::InvalidInvariant(
-                "only gate may approve a proposed outcome".to_string(),
+                "only finally may approve a proposed outcome".to_string(),
             ));
         }
         self.gate_proposal.clone().ok_or_else(|| {
@@ -1040,8 +1063,8 @@ mod tests {
             project_id: crate::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            lifecycle: TaskLifecyclePlan::defaults(),
+            lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,
             phase_iteration: 0,
@@ -1466,18 +1489,18 @@ mod tests {
         session.gate_cycle = 1;
         assert!(session.validate().is_ok());
 
-        session.lifecycle.iterate.flow.clear();
+        session.lifecycle.loop_.flow.clear();
         assert!(session.validate().is_err());
     }
 
     #[test]
-    fn task_lifecycle_repeats_iterate_and_gate_until_approval() {
+    fn task_lifecycle_repeats_loop_and_finally_until_approval() {
         let mut session = task();
-        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
+        session.lifecycle_phase = TaskLifecyclePhase::First;
 
         assert_eq!(session.lifecycle_cycle(), 0);
-        session.enter_iterate().unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
+        session.enter_loop().unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Loop);
         assert_eq!(session.lifecycle_cycle(), 1);
         assert_eq!(session.phase_epoch, 2);
 
@@ -1487,31 +1510,47 @@ mod tests {
         };
         session.phase_cursor = 2;
         session.phase_iteration = 3;
-        session.enter_gate(proposal.clone()).unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Gate);
+        session.enter_finally(proposal.clone()).unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Finally);
         assert_eq!(session.lifecycle_cycle(), 1);
         assert_eq!(session.gate_cycle, 1);
         assert_eq!(session.approved_gate_proposal().unwrap(), proposal);
         assert_eq!((session.phase_cursor, session.phase_iteration), (0, 0));
 
-        session.enter_iterate().unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
+        session.enter_loop().unwrap();
+        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Loop);
         assert_eq!(session.lifecycle_cycle(), 2);
         assert_eq!(session.gate_proposal, None);
         assert_eq!(session.phase_epoch, 4);
     }
 
     #[test]
+    fn task_lifecycle_uses_public_names_without_rewriting_storage() {
+        for (phase, public, stored) in [
+            (TaskLifecyclePhase::First, "first", "kickoff"),
+            (TaskLifecyclePhase::Loop, "loop", "iterate"),
+            (TaskLifecyclePhase::Finally, "finally", "gate"),
+        ] {
+            assert_eq!(phase.as_str(), public);
+            assert_eq!(phase.storage_str(), stored);
+            assert_eq!(TaskLifecyclePhase::from_storage_str(stored).unwrap(), phase);
+        }
+    }
+
+    #[test]
     fn headless_policy_defers_every_phase_without_changing_its_flows() {
-        let mut plan = TaskLifecyclePlan::standard("code");
+        let mut plan = TaskLifecyclePlan::standard("task-design", "code", "ship");
         assert!(!plan.all_interactions_deferred());
 
         plan.defer_all_interactions();
 
         assert!(plan.all_interactions_deferred());
-        assert_eq!(plan.kickoff.flow, "task-kickoff");
-        assert_eq!(plan.iterate.flow, "code");
-        assert_eq!(plan.gate.flow, "task-gate");
-        assert_eq!(plan, TaskLifecyclePlan::headless("code"));
+        assert_eq!(plan.first.flow, "task-design");
+        assert_eq!(plan.loop_.flow, "code");
+        assert_eq!(plan.finally.flow, "ship");
+        assert_eq!(
+            plan,
+            TaskLifecyclePlan::headless("task-design", "code", "ship")
+        );
     }
 }

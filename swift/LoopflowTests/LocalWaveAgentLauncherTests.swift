@@ -79,8 +79,7 @@ struct LocalWaveAgentLauncherTests {
             project: "context-lab",
             directive: "Refine text for LOOPFLOW.md."
         ) == [
-            lf, "task", "start", "Refine LOOPFLOW.md 5e41e69b",
-            "--project", "context-lab",
+            lf, "task", "start", "context-lab", "Refine LOOPFLOW.md 5e41e69b",
             "--directive", "Refine text for LOOPFLOW.md.",
             "--json",
         ])

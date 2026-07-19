@@ -21,7 +21,7 @@ lf                                 # open or focus Loopflow.app
 lf desktop                         # explicit alias
 lf <skill>                        # run a skill file
 lf <skill>: args                  # run with arguments
-lf <namespace>/<skill>            # run a namespaced skill (e.g. gstack/office-hours)
+lf <namespace>/<skill>            # run a repo-local or installed namespaced skill
 lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
 lf : "inline prompt"             # no skill file, just prompt
 lf --list                        # show all available skills
@@ -32,8 +32,7 @@ lf --list                        # show all available skills
 ```bash
 lf gate                           # run the gate skill
 lf implement: add auth            # pass arguments after colon
-lf gstack/office-hours            # run a built-in gstack skill
-lf office-hours                   # bare name works when unambiguous
+lf team/review                    # run .lf/skills/team/review.md
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
@@ -49,10 +48,9 @@ Names resolve in this order:
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
 4. Core built-in skills — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
-5. Namespaced built-in skills — e.g. `gstack/<skill>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
-6. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
+5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
-Namespaced skills and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
+Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
 
 ### Skill Arguments
 
@@ -92,8 +90,7 @@ Build skills — you invoke these, often interactively:
 | `triage` | Assess QA findings, separate blocking from polish |
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
-| `demo` | Experience-first walkthrough of observable changes |
-| `code-review` | Walk through structural and architectural decisions |
+| `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
@@ -123,7 +120,6 @@ Ops skills — wrappers around git, PR, release, and wave state:
 | `land` | Land the PR and prune its merged worker worktree |
 | `lint` | Run linter, fix issues |
 | `update-wave` | Create, update, or delete wave state |
-| `split-wave` | Split a wave into smaller independent waves |
 | `release` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
 | `token-compress` | Compress text into a token budget without silently dropping information |
@@ -219,13 +215,16 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → review-design → implement → compress → lint → xor(demo, code-review) → gate |
+| `build` | kickoff → review-design → implement → compress → lint → review-slice → gate |
 | `code` | implement → compress → lint → gate |
 | `pair` | design → code |
-| `ship` | refresh-plan → implement → gate → op: pr publish → op: pr land |
+| `task-design` | kickoff → review-design |
+| `slice` | code → review-slice → publish/refresh Task PR |
+| `ship` | task-gate → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land --create-pr |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
-| `incident` | debug → 5whys → code → deploy |
+| `incident` | restore → 5whys |
+| `ship-5whys` | implement the next open prevention from the 5 Whys |
 | `queue` | compress → update-wave → gate |
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
@@ -252,7 +251,8 @@ lf start designer                                  # serve it from its placed Ho
 lf wave designer                                   # foreground development mode
 lf stop designer                                   # stop it; leave the Home keeper running
 lf project run <linear-project-id>                  # durable Project Session
-lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
+lf task start <linear-project-id> "fix the flaky chord-timeout test"
+pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-125 --headless                       # route Feedback to the Project
 lf task run DES-124 --stack-on DES-123
@@ -285,11 +285,13 @@ Its provider process and transcript are replaceable execution state: plain
 Work, durable Steers, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
-Every Task runs `kickoff → iterate N → gate`. A flow step declares
+Every Task runs `first → loop N → finally`. Its Project supplies those three
+flows; Task launch pins their resolved names. `--first`, `--loop`, and
+`--finally` override them only while creating the Task. A flow step declares
 `feedback: true`; the active Launch routes that Feedback to the User or the
 immediate parent Run.
-Standard Tasks route kickoff and gate to the human, while the owning Project
-conducts interactive iteration steps. `--headless` routes all three to the
+Standard Tasks route first and finally Feedback to the human, while the owning
+Project conducts interactive loop steps. `--headless` routes all three to the
 Project without skipping their skills.
 
 Feedback is the current flow step plus its live Launch and route; there is no
@@ -617,7 +619,7 @@ lf npx/vercel-labs/deep-research   # fetch + run from the npx skills catalog
 lf npx/explain-code                # already-cached skill (no network)
 ```
 
-`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The bundled `gstack/` namespace and core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
+`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. Core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
 
 ## PR Operations
 
@@ -781,8 +783,10 @@ lf pm sync --plan                           # report drift without writing
 lf pm show --wave designer                  # read; refresh when stale
 lf pm show --wave designer --no-sync        # cache-only agent/app read
 lf pm show --wave designer --project ui     # filter to one project
-lf pm project create --wave designer --title "..." --definition "..." --kr "..."
-lf pm project update --wave designer --project ui --definition "..." --kr "..."
+lf pm project create --wave designer --title "..." --definition "..." \
+  --first task-design --loop slice --finally ship --kr "..."
+lf pm project update --wave designer --project ui --first incident \
+  --loop ship-5whys --finally ship
 lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"

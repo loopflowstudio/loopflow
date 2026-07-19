@@ -741,6 +741,7 @@ mod tests {
                 "name": "Evidence receipts",
                 "summary": "",
                 "definition": "",
+                "flows": {"first": null, "loop": null, "finally": null},
                 "krs": [],
                 "initiative_ids": [],
                 "team_ids": null,

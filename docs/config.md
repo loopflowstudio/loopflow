@@ -200,8 +200,8 @@ agent: codex          # harness default
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
 
-Five built-in skills intentionally default to Claude: `kickoff`,
-`review-design`, `demo`, `code-review`, and `prompt`. Every other unconfigured
+Four built-in skills intentionally default to Claude: `kickoff`,
+`review-design`, `review-slice`, and `prompt`. Every other unconfigured
 built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
 an explicit override.
 
@@ -429,14 +429,12 @@ and outlive the SSH process.
 
 ### External Skills
 
-Loopflow has two primary skill channels plus one compatibility shim. No config needed.
+Loopflow has one external skill channel plus one compatibility shim. No config needed.
 
-- **`gstack/<skill>`** — bundled in the binary. Upstream is [garrytan/gstack](https://github.com/garrytan/gstack). Maintainers run the `refresh-gstack` skill inside the loopflow repo to resync the bundled catalog; users just get the version their `lf` was built with.
 - **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
 - **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash
-lf gstack/office-hours                # bundled
 lf npx/vercel-labs/deep-research      # live fetch, cached on first run
 lf rams/rams                          # legacy compatibility alias, if installed
 ```

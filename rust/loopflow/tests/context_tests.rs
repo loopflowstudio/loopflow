@@ -148,40 +148,6 @@ fn gather_context_with_directions() {
 }
 
 #[test]
-fn gather_context_expands_builtin_direction_group() {
-    let temp = TempDir::new().unwrap();
-    let repo = temp.path();
-    init_repo(repo);
-    write_skill(repo, "review", "Review the code.");
-    make_commit(repo, "initial");
-
-    let components = gather_context(&GatherContextOpts {
-        repo_root: repo.to_path_buf(),
-        skill: Some("review".to_string()),
-        message: None,
-        operate: false,
-        surface: Surface::Headless,
-        directions: vec!["infra".to_string()],
-        files: vec![],
-        docs: vec![],
-        wave: None,
-        related_repos: Vec::new(),
-        ..Default::default()
-    })
-    .unwrap();
-
-    let direction_names: Vec<String> = components
-        .directions
-        .iter()
-        .map(|direction| direction.name.clone())
-        .collect();
-    assert!(direction_names.contains(&"security".to_string()));
-    assert!(direction_names.contains(&"performance".to_string()));
-    assert!(direction_names.contains(&"reliability".to_string()));
-    assert!(direction_names.contains(&"observability".to_string()));
-}
-
-#[test]
 fn gather_context_expands_user_direction_group() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();

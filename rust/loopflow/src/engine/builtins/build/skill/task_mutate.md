@@ -12,13 +12,9 @@ Inspect the worktree, focused verification, diff, PR, CI, and review state.
   operation to publish or refresh the active PR to `main`.
 - If CI or review has an obvious fix, make the bounded repair in this Task
   worktree, verify it, and update the same PR.
-- Treat an open or approved PR as submitted, never complete. A merge settles
-  that PR; it does not inherently complete the Task.
-- Use bare `lf pr land --next <slug>` when another PR follows. Use
-  `lf pr land -c` only when this merge proves the whole Task complete. Use
-  `lf pr abandon` to discard the active PR without abandoning the Task.
-- Use `lf task complete <issue> --summary "..."` only for a clean Task that
-  honestly needs no PR. Loopflow owns Linear completion and pending writeback.
+- Treat an open or approved PR as submitted, never complete. Do not land or
+  complete from this loop; the pinned final flow owns that decision.
+- Use `lf pr abandon` only to discard an active PR that cannot advance.
 
 Return concise evidence and the next external wait or repair. The Task runner
 independently observes PR/worktree state to choose repeat, wait, block, or

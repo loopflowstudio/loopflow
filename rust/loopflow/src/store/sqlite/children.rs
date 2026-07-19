@@ -1636,27 +1636,21 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
                 .as_ref()
                 .map(|intent| intent.reason.clone()),
         ),
-        Box::new(task.lifecycle.iterate.flow.clone()),
-        Box::new(
-            task.lifecycle
-                .iterate
-                .interaction_policy
-                .as_str()
-                .to_string(),
-        ),
+        Box::new(task.lifecycle.loop_.flow.clone()),
+        Box::new(task.lifecycle.loop_.interaction_policy.as_str().to_string()),
         Box::new(i64::from(task.phase_cursor)),
         Box::new(i64::from(task.phase_iteration)),
-        Box::new(task.lifecycle.kickoff.flow.clone()),
+        Box::new(task.lifecycle.first.flow.clone()),
+        Box::new(task.lifecycle.first.interaction_policy.as_str().to_string()),
+        Box::new(task.lifecycle.finally.flow.clone()),
         Box::new(
             task.lifecycle
-                .kickoff
+                .finally
                 .interaction_policy
                 .as_str()
                 .to_string(),
         ),
-        Box::new(task.lifecycle.gate.flow.clone()),
-        Box::new(task.lifecycle.gate.interaction_policy.as_str().to_string()),
-        Box::new(task.lifecycle_phase.as_str().to_string()),
+        Box::new(task.lifecycle_phase.storage_str().to_string()),
         Box::new(i64::from(task.phase_epoch)),
         Box::new(i64::from(task.gate_cycle)),
         Box::new(task.gate_proposal.as_ref().map(|proposal| {
@@ -1950,21 +1944,21 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: PathBuf::from(row.get::<_, String>(10)?),
         workspace_slug: row.get(11)?,
         lifecycle: TaskLifecyclePlan {
-            kickoff: TaskPhasePlan {
+            first: TaskPhasePlan {
                 flow: row.get(26)?,
                 interaction_policy: row
                     .get::<_, String>(27)?
                     .parse::<InteractionPolicy>()
                     .map_err(|error| invalid_column(27, error))?,
             },
-            iterate: TaskPhasePlan {
+            loop_: TaskPhasePlan {
                 flow: row.get(22)?,
                 interaction_policy: row
                     .get::<_, String>(23)?
                     .parse::<InteractionPolicy>()
                     .map_err(|error| invalid_column(23, error))?,
             },
-            gate: TaskPhasePlan {
+            finally: TaskPhasePlan {
                 flow: row.get(28)?,
                 interaction_policy: row
                     .get::<_, String>(29)?
@@ -1972,9 +1966,7 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
                     .map_err(|error| invalid_column(29, error))?,
             },
         },
-        lifecycle_phase: row
-            .get::<_, String>(30)?
-            .parse::<TaskLifecyclePhase>()
+        lifecycle_phase: TaskLifecyclePhase::from_storage_str(&row.get::<_, String>(30)?)
             .map_err(|error| invalid_column(30, error))?,
         phase_epoch: row.get::<_, i64>(31)? as u32,
         phase_cursor: row.get::<_, i64>(24)? as u32,

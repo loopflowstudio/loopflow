@@ -36,6 +36,11 @@
               "name": "Loopflow API",
               "summary": "One coherent model everywhere.",
               "definition": "The product contract for goal-authored computation.",
+              "flows": {
+                "first": null,
+                "loop": null,
+                "finally": null
+              },
               "krs": [
                 {
                   "text": "A parallel concept anywhere is a failure event",

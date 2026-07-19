@@ -361,7 +361,7 @@ pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
     }
 
     // Fall back to built-in skills — exact match, then unique bare-name match
-    // across namespaces (so `office-hours` resolves to `gstack/office-hours`).
+    // across namespaces.
     if let Some(key) = crate::engine::builtins::resolve_builtin_skill(name) {
         let content = crate::engine::builtins::get_builtin_skill(key)
             .expect("resolve_builtin_skill returned a known key");
@@ -610,7 +610,7 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // Namespaced skills: "gstack/office-hours" → <dir>/.lf/skills/gstack/office-hours.md
+    // Namespaced skills: "team/review" → <dir>/.lf/skills/team/review.md
     // Check repo first, then home (so users can override namespaced builtins).
     if let Some((prefix, skill_name)) = name.split_once('/') {
         let repo_ns = markdown_path(&repo.join(".lf/skills").join(prefix), skill_name);
@@ -1486,12 +1486,15 @@ Be careful.
     }
 
     #[test]
-    fn load_direction_finds_builtin_direction() {
+    fn load_direction_finds_repo_direction() {
         let tmp = TempDir::new().unwrap();
+        let directions = tmp.path().join(".lf/directions");
+        fs::create_dir_all(&directions).unwrap();
+        fs::write(directions.join("focus.md"), "Stay focused.").unwrap();
         let result = load_direction("focus", tmp.path());
         assert!(
             result.is_ok(),
-            "builtin direction should be found: {:?}",
+            "repo direction should be found: {:?}",
             result.err()
         );
     }
@@ -1821,15 +1824,6 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_expands_ceo_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["ceo".to_string()], tmp.path());
-        assert!(result.contains(&"focus".to_string()));
-        assert!(result.contains(&"immediacy".to_string()));
-        assert!(result.contains(&"truth".to_string()));
-    }
-
-    #[test]
     fn expand_direction_names_expands_user_group() {
         let tmp = TempDir::new().unwrap();
         let group_dir = tmp.path().join(".lf/directions/mygroup");
@@ -1842,7 +1836,7 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_user_group_overrides_builtin_group() {
+    fn expand_direction_names_accepts_retired_builtin_group_name() {
         let tmp = TempDir::new().unwrap();
         let group_dir = tmp.path().join(".lf/directions/craft");
         fs::create_dir_all(&group_dir).unwrap();
@@ -1865,39 +1859,21 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_expands_builtin_craft_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["craft".to_string()], tmp.path());
-        assert!(result.contains(&"care".to_string()));
-        assert!(result.contains(&"clarity".to_string()));
-        assert!(!result.contains(&"scale".to_string()));
-        assert!(result.contains(&"simplicity".to_string()));
-    }
-
-    #[test]
-    fn expand_direction_names_expands_builtin_creativity_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["creativity".to_string()], tmp.path());
-        assert!(result.contains(&"alive".to_string()));
-        assert!(result.contains(&"musical".to_string()));
-    }
-
-    #[test]
     fn expand_direction_names_recursive_group() {
         let tmp = TempDir::new().unwrap();
         let group_dir = tmp.path().join(".lf/directions/quality");
+        let nested_group_dir = tmp.path().join(".lf/directions/craft");
         fs::create_dir_all(&group_dir).unwrap();
-        // "craft" is a builtin group — should expand recursively
+        fs::create_dir_all(&nested_group_dir).unwrap();
         fs::write(group_dir.join("craft.md"), "Craft direction").unwrap();
         fs::write(group_dir.join("extra.md"), "Extra direction").unwrap();
+        fs::write(nested_group_dir.join("care.md"), "Care direction").unwrap();
+        fs::write(nested_group_dir.join("clarity.md"), "Clarity direction").unwrap();
 
         let result = expand_direction_names(&["quality".to_string()], tmp.path());
-        // "craft" should NOT appear — it should expand to its members
         assert!(!result.contains(&"craft".to_string()));
-        // But its members should be present
         assert!(result.contains(&"care".to_string()));
         assert!(result.contains(&"clarity".to_string()));
-        // And the non-group member should be present
         assert!(result.contains(&"extra".to_string()));
     }
 

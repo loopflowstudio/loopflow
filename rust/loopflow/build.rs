@@ -87,6 +87,8 @@ fn main() {
 }
 
 fn emit_build_provenance(manifest_dir: &Path) {
+    let package_version =
+        env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION not set by Cargo");
     let git_root = manifest_dir
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists());
@@ -120,7 +122,7 @@ fn emit_build_provenance(manifest_dir: &Path) {
             "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
         );
     }
-    let mut source_revision = git_root
+    let source_revision = git_root
         .and_then(|root| {
             Command::new("git")
                 .args(["rev-parse", "HEAD"])
@@ -140,6 +142,28 @@ fn emit_build_provenance(manifest_dir: &Path) {
             .output()
             .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
     });
+    let version_tag = format!("v{package_version}");
+    let is_tagged_release = !dirty
+        && git_root.is_some_and(|root| {
+            Command::new("git")
+                .args(["tag", "--points-at", "HEAD", "--list", &version_tag])
+                .current_dir(root)
+                .output()
+                .is_ok_and(|output| {
+                    output.status.success()
+                        && String::from_utf8_lossy(&output.stdout)
+                            .lines()
+                            .any(|tag| tag == version_tag)
+                })
+        });
+    let build_version = if is_tagged_release || source_revision == "unknown" {
+        package_version
+    } else {
+        let short_revision = source_revision.get(..9).unwrap_or(&source_revision);
+        let dirty_suffix = if dirty { ".dirty" } else { "" };
+        format!("{package_version}+{short_revision}{dirty_suffix}")
+    };
+    let mut source_revision = source_revision;
     if dirty {
         source_revision.push_str("-dirty");
     }
@@ -147,10 +171,15 @@ fn emit_build_provenance(manifest_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
     println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
+    println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_AUTHORITY");
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("src").display()
+    );
     if let Some(root) = git_root {
-        for git_path in ["HEAD", "refs/heads"] {
+        for git_path in ["HEAD", "refs/heads", "refs/tags", "packed-refs"] {
             if let Ok(output) = Command::new("git")
                 .args(["rev-parse", "--git-path", git_path])
                 .current_dir(root)
@@ -158,7 +187,13 @@ fn emit_build_provenance(manifest_dir: &Path) {
             {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout);
-                    println!("cargo:rerun-if-changed={}", path.trim());
+                    let path = Path::new(path.trim());
+                    let path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        root.join(path)
+                    };
+                    println!("cargo:rerun-if-changed={}", path.display());
                 }
             }
         }

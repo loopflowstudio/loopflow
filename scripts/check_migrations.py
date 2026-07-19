@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Verify the migration set before it can be released.
 
-Fails when a migration is malformed, namespaced ahead of the package version,
+Fails when a migration is malformed, newly canonicalized behind the active package
+namespace, namespaced ahead of the package version,
 collides with another id, is not registered in Rust (or is registered under a
 different id or name), diverges from current main, or — the rule that matters —
 when a migration that already shipped has been edited, renamed, or deleted.
@@ -232,6 +233,32 @@ def _check_current_main(local: dict[tuple[int, int, int], str]) -> None:
             _fail(f"{local_name} differs from origin/main and is already durable history")
 
 
+def _check_new_canonical_namespaces(
+    local: dict[tuple[int, int, int], str],
+    active: tuple[int, int],
+    tag: str | None,
+) -> None:
+    """Only historical canonical files may remain behind the active namespace."""
+    canonical = _migrations_at_ref("origin/main")
+    if not canonical:
+        canonical = _migrations_at_ref("main")
+    known = set(canonical)
+    if tag is not None:
+        for name in _shipped_migrations(tag):
+            match = MIGRATION_NAME.match(name)
+            if match:
+                major, minor, ordinal, _ = match.groups()
+                known.add((int(major), int(minor), int(ordinal)))
+
+    for key, name in sorted(local.items()):
+        if key[:2] < active and key not in known:
+            _fail(
+                f"new canonical migration {name} is namespaced behind the active package "
+                f"namespace {active[0]}.{active[1]}; author an ordinal-free draft and let "
+                "the release cut assign its namespace"
+            )
+
+
 def _draft_cycle(drafts: dict[str, list[str]]) -> list[str] | None:
     """A dependency cycle among drafts as a node path, or None. Ordinals are
     assigned at the release cut by a topological sort, so a cycle has no order
@@ -328,6 +355,7 @@ def _fail(message: str) -> None:
 
 def main() -> None:
     active = _package_version()
+    tag = _last_release_tag()
 
     if not MIGRATIONS_DIR.is_dir():
         _fail(f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)} is missing")
@@ -360,6 +388,7 @@ def main() -> None:
 
     _check_registry(ids)
     _check_current_main(ids)
+    _check_new_canonical_namespaces(ids, active, tag)
 
     released_names = {
         match.group(4) for name in ids.values() if (match := MIGRATION_NAME.match(name))
@@ -372,7 +401,6 @@ def main() -> None:
     for key in sorted(ids):
         print(f"  {ids[key]}")
 
-    tag = _last_release_tag()
     if tag is None:
         print("no release tag yet — skipping the immutability check")
         return

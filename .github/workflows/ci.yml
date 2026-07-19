@@ -52,7 +52,7 @@ jobs:
       - name: Materialize draft migrations for tests
         run: |
           VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION"
+          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - uses: Swatinem/rust-cache@v2
         with:
           key: test

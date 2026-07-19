@@ -258,6 +258,7 @@ fn canonicalize_migrations(repo: &Path, version: &str) -> OpsResult<()> {
     let output = Command::new("python3")
         .arg(&script)
         .arg(version)
+        .arg("--release-cut")
         .current_dir(repo)
         .output()
         .map_err(|err| {

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Freeze the draft migration set into a canonical, ordered, ordinal-assigned tail.
 
-    uv run python scripts/canonicalize_migrations.py 0.11.30           # patch cut
-    uv run python scripts/canonicalize_migrations.py 0.12.0 --check    # plan only
+    uv run python scripts/canonicalize_migrations.py 0.12.2 --release-cut
+    uv run python scripts/canonicalize_migrations.py 0.12.2 --check
 
 The release cut is the single publication boundary that turns drafts into
 canonical migrations. `lf release run` invokes this inside its release worktree,
@@ -29,7 +29,10 @@ produce the same ids, files, and diff, so an aborted release regenerates
 identically. The draft id is authoring-time identity only; it never appears in
 canonical output. An empty draft set is a no-op.
 
-Stdlib only, so the release path needs no Python environment — only an interpreter.
+Writing requires explicit release-cut authority. CI may materialize the same tree
+in its disposable checkout with `--materialize-for-tests`; all other invocations
+are previews. Stdlib only, so the release path needs no Python environment — only
+an interpreter.
 """
 
 from __future__ import annotations
@@ -282,14 +285,34 @@ def _install(plan: list[tuple[int, int, int, Draft]], registry_text: str) -> Non
 
 def main() -> None:
     check = False
+    write_mode: str | None = None
     positional: list[str] = []
     for argument in sys.argv[1:]:
         if argument in ("--check", "--dry-run"):
             check = True
+        elif argument in ("--release-cut", "--materialize-for-tests"):
+            if write_mode is not None:
+                print("choose one canonical migration write authority", file=sys.stderr)
+                raise SystemExit(2)
+            write_mode = argument
         else:
             positional.append(argument)
     if len(positional) != 1:
-        print("usage: canonicalize_migrations.py <version> [--check]", file=sys.stderr)
+        print(
+            "usage: canonicalize_migrations.py <version> "
+            "[--check|--release-cut|--materialize-for-tests]",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if check and write_mode is not None:
+        print("--check cannot be combined with a write authority", file=sys.stderr)
+        raise SystemExit(2)
+    if not check and write_mode is None:
+        print(
+            "refusing to create canonical migrations outside the release cut; "
+            "use --check to preview",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
     version = VERSION.match(positional[0])
     if not version:

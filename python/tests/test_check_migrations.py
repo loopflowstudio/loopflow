@@ -177,6 +177,19 @@ def test_a_migration_ahead_of_the_package_version_fails(repo: Path):
     assert "namespaced ahead" in result.stderr
 
 
+def test_a_new_canonical_migration_behind_the_active_namespace_fails(repo: Path):
+    (repo / "Cargo.toml").write_text('[workspace.package]\nversion = "0.11.0"\n')
+    (repo / "pyproject.toml").write_text('[project]\nversion = "0.11.0"\n')
+    (repo / MIGRATIONS / "0.10.002_too_old.sql").write_text("SELECT 1;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "too_old"))
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "namespaced behind the active package namespace 0.11" in result.stderr
+    assert "ordinal-free draft" in result.stderr
+
+
 def test_a_malformed_migration_name_fails(repo: Path):
     (repo / MIGRATIONS / "002_oops.sql").write_text("SELECT 1;\n")
 

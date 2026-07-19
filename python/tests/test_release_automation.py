@@ -258,6 +258,7 @@ def test_rust_ci_materializes_drafts_before_running_tests():
 
     assert materialize < test
     assert "scripts/canonicalize_migrations.py" in command
+    assert "--materialize-for-tests" in command
     assert '["workspace"]["package"]["version"]' in command
 
 

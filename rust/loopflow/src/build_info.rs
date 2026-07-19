@@ -147,6 +147,8 @@ pub fn source_revision() -> &'static str {
     env!("LOOPFLOW_BUILD_SOURCE_REVISION")
 }
 
+pub const BUILD_VERSION: &str = env!("LOOPFLOW_BUILD_VERSION");
+
 pub fn migration_authority() -> MigrationAuthority {
     match env!("LOOPFLOW_MIGRATION_AUTHORITY") {
         "published" => MigrationAuthority::Published,
@@ -187,8 +189,9 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        classify_revision, migration_authority, parse_provenance, provenance, source_identity_for,
-        source_revision, source_root, BuildFreshness, BuildProvenance, MigrationAuthority,
+        classify_revision, migration_authority, parse_provenance, provenance, short_revision,
+        source_identity_for, source_revision, source_root, BuildFreshness, BuildProvenance,
+        MigrationAuthority, BUILD_VERSION,
     };
 
     /// A throwaway `A -> B -> C` repo keeps classifier tests offline.
@@ -338,5 +341,13 @@ mod tests {
             MigrationAuthority::Published | MigrationAuthority::ValidationOnly
         ));
         assert!(!source_revision().is_empty());
+        let package_version = env!("CARGO_PKG_VERSION");
+        assert!(
+            BUILD_VERSION == package_version
+                || BUILD_VERSION.starts_with(&format!("{package_version}+"))
+        );
+        if source_revision() != "unknown" && BUILD_VERSION != package_version {
+            assert!(BUILD_VERSION.contains(short_revision(source_revision())));
+        }
     }
 }

@@ -22,7 +22,7 @@ migration), not by a serial number.
 ## The release cut assigns canonical ids
 
 The release PR is the single publication boundary that turns drafts into canonical
-migrations. `lf release run` invokes `scripts/canonicalize_migrations.py` inside the
+migrations. `lf release run` invokes the canonicalizer with `--release-cut` inside the
 release worktree, **after the version bump and before the commit**, so the generated
 files are part of the release PR and run under real Rust CI before the queue merges
 and tags. It freezes the draft set, rejects missing or cyclic dependencies (and two
@@ -34,8 +34,10 @@ plans the whole tail in memory, then installs it atomically — writing
 `<major>.<minor>.<ordinal>_<name>.sql`, appending the `Migration` entry, and deleting
 the draft — and on any failure restores the tree byte-for-byte. Same drafts and
 version always produce the same ids and diff, so an aborted release regenerates
-identically. The manual script is a `--check` preview only; the release run is the
-authority that installs.
+identically. The manual script is a `--check` preview only; creating canonical files
+requires `--release-cut`. Rust CI uses the separate `--materialize-for-tests`
+authority in its disposable checkout. The release run is the authority that
+publishes.
 
 Only the merged release commit is canonical migration authority. Between releases,
 ordinary merges add drafts, so main's canonical set does not move and a branch
@@ -72,7 +74,8 @@ the last release tag and fails the build if one moved.
 - The directory and the `MIGRATIONS` registry name the same migrations, with the
   same ids and names. A file nobody registered never runs; a registry entry whose
   id, name, and file disagree is a lie about what a database applied.
-- The registry is in id order, and no id is namespaced ahead of the package version.
+- The registry is in id order. No id is namespaced ahead of the package version,
+  and no new canonical migration is introduced behind the active package namespace.
 - Every canonical migration already on `origin/main` has the same ordinal, name, and
   bytes.
 - Nothing that shipped in the last release tag has changed.

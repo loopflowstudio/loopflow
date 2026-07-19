@@ -39,15 +39,30 @@ loss from dead residue, and cleanup requires repeated human interpretation. The
 design advances “avoidable human-in-the-loop setup or repair steps ... fall to
 zero” and “no Task strands on a dead body.”
 
-## The demo
+## User-visible outcome
 
-Against a copy-on-write clone of the production Home, run
-`lf runs reconcile --all --apply`, run it a second time, then run `lf doctor`.
-The first pass reports 777 unclaimed directories removed, 78 intact stale
-captures transitioned to `interrupted`, and 10 acknowledged ENOSPC captures
-transitioned to `lost`. The second reports zero changes. Doctor reports zero
-capture failures, explicitly counts 78 interrupted and 10 lost captures, and
-exits zero without calling any intact evidence pruned.
+An operator sees a red capture check only for evidence that is newly missing,
+still partial, structurally invalid, or otherwise unacknowledged. Historical
+absence is visible as `pruned`, a dead owner with retained evidence is visible
+as `interrupted`, and acknowledged write loss with retained evidence is visible
+as `lost`; each state keeps an actionable reason. A single explicit reconcile
+converges the historical store, and normal completed, failed, and interrupted
+runs add no new capture failures.
+
+## End-to-end proof
+
+Create two private Homes from one SQLite online backup and copy-on-write clone
+of the production trace root. The published `1a3079a94` binary records the
+787-failure baseline against one clone. Against the other, the fixed binary
+migrates the untouched copied store, then runs
+`lf runs reconcile --all --apply --json` twice and `lf doctor --json`. The first
+reconcile removes 777 unclaimed directories, interrupts 78 intact stale
+captures, marks 10 intact ENOSPC partials lost, and prunes zero intact captures.
+The second reports zero transitions and zero removals. Doctor reports 78
+interrupted, 10 lost, zero capture failures, and exits zero. Direct queries of
+the copied `agent_launches` and `agent_turns` prove the terminal state and reason
+invariants; each command's store report names the copied Home, never
+`~/.lf/loopflow.db`.
 
 ## Approach
 
@@ -100,18 +115,81 @@ the writer is already healthy.
    hook to terminal worktree pruning: current placement keeps new private trace
    artifacts out of the production root, and reconciliation owns old shared
    residue.
-7. Repair pending migration `0.11.031_durable_input_spine` before promotion.
-   It currently copies `provider_session_id` into `resume_token` on 1,749 legacy
-   trace launches that have no product Run/Home/containment metadata; the main
-   reader then rejects the lone token as an incomplete control Launch. Restrict
-   that backfill to actual control launches. This correction stays limited to
-   the demonstrated blocker to opening the untouched copy on current main; it
-   does not change capture lifecycle semantics or add compatibility parsing.
+7. Repair the resume-token backfill in pending durable-input follow-on
+   `0.11.032_run_launch_attention` before promotion. It currently copies
+   `provider_session_id` into `resume_token` on 1,749 legacy trace launches that
+   have no product Run/Home/containment metadata; the main reader then rejects
+   the lone token as an incomplete control Launch. Restrict that one statement
+   to rows already carrying product Run authority. This correction stays
+   limited to the demonstrated blocker to opening the untouched copy on current
+   main; it does not change capture lifecycle semantics or add compatibility
+   parsing.
 
 The live `~/.lf/loopflow.db` and trace root are never mutation targets during
 implementation or proof. SQLite backup plus copy-on-write trace clones provide
 the production shape; all reconciliation writes and artifact deletions stay in
 the clone.
+
+## Source of truth
+
+`agent_launches` is authoritative for capture status, terminal outcome,
+end time, artifact references, and `incomplete_reason`. `agent_turns` is
+authoritative for each Turn's terminality. The Home-scoped trace root is
+authoritative only for whether referenced evidence exists; filesystem presence
+does not invent or change ledger state. `lf runs reconcile` is the sole writer
+for historical acknowledgment transitions, and its SQLite transaction keeps a
+Launch and its running Turns consistent. `lf doctor`, `lf runs`, context views,
+and `telemetry-daily` derive their presentation and exit status from those
+records plus read-only artifact validation.
+
+## Affected surfaces and consumers
+
+- The SQLite migration chain widens the closed `capture_status` CHECK and
+  preserves every `agent_launches` row, foreign key, and index. The pending
+  resume-token backfill remains the only adjacent migration edit.
+- `lf runs reconcile` planning, text output, and JSON output report `pruned`,
+  `interrupted`, `lost`, recent missing references, and removed orphan
+  directories separately. A second identical run is empty.
+- `lf doctor` text and JSON checks count the three acknowledged terminal states,
+  validate every intact state's retained artifacts, keep fresh `partial` red,
+  and ignore only recent directory-before-row races. `telemetry-daily` consumes
+  this exit status without a new telemetry store or exception list.
+- `lf context` capture-state validation accepts the widened state set; generic
+  `lf runs`, trace, usage, and receipt readers continue carrying the stored
+  status string without changing their wire DTOs. No Swift or app DTO models
+  mirror this database enum.
+
+## Absent and error states
+
+- A missing conversation from any intact state is a doctor failure until an
+  age-guarded reconcile explicitly records `pruned`; an unsafe artifact path is
+  always a failure and is never acknowledged.
+- `pruned` without a reason violates the ledger invariant. `interrupted` or
+  `lost` without their referenced retained files also fails doctor. A `partial`
+  without an actionable reason remains `partial` and red rather than being
+  silently acknowledged as `lost`.
+- A fresh unclaimed directory is ignored for 48 hours because capture creation
+  publishes the directory before its launch row. An aged unclaimed directory
+  is red until reconcile removes it; `--all` is an explicit quiescent-clone
+  override.
+- Each Launch/Turn transition commits atomically. A stale plan that no longer
+  matches the stored source state fails without changing either record. Orphan
+  deletion errors stop the command and remain retryable; the next plan derives
+  only work that still exists.
+- Migration or copied-Home open failure is surfaced directly. The reader does
+  not accept a resume token as a substitute for missing product Run, Home, or
+  containment authority.
+
+## Operational boundary
+
+Reconciliation is a local, network-free pass over the Home's launch ledger,
+run events, and trace-directory metadata. It preserves the 48-hour default
+guard and performs no provider subprocess or transcript reconstruction. The
+production-shaped proof runs only with `LF_HOME` and `LF_DB_PATH` resolved
+inside a disposable clone; command-reported paths are asserted before any
+`--apply`. The live database may continue changing under normal Loopflow work,
+so proof of isolation is target-path containment rather than comparing its
+incidental size or modification time.
 
 ## De-risking
 
@@ -169,7 +247,7 @@ by erasing fresh evidence or leaves launch/turn states contradictory. The age
 guard, transactional transition, and copied-store before/after proof are the
 lines against that failure.
 
-## Scope
+## Scope and exclusions
 
 - In scope: capture reconciliation planning; transactional launch/turn terminal
   transitions; a schema migration adding `interrupted` and `lost` while
@@ -216,8 +294,9 @@ lines against that failure.
   `lost`. It transitions zero intact captures to `pruned`. A second identical
   command reports zero changes; `lf doctor` reports 78 interrupted, 10 lost,
   zero capture failures, and exits zero.
-- The live database inode, size, modification time, and migration frontier are
-  unchanged by the proof.
+- Every mutating proof command reports a database and trace root inside the
+  disposable Home; no fixed-binary command with `--apply` targets the live
+  database or trace root.
 - `cargo fmt`, focused Rust tests, and `cargo clippy -- -D warnings` pass.
 
 ## Measure

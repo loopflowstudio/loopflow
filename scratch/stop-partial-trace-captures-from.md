@@ -4,10 +4,11 @@
 
 `telemetry-daily` is permanently red even though the retained evidence is mostly
 intact. On 2026-07-18, published revision `1a3079a94` reported 787 capture
-failures across 2,262 launches. A fresh read of the same production store found
-the failure count unchanged at 787 while healthy launches continued to grow,
-so this is accumulated terminal residue rather than evidence that every new
-launch loses its capture.
+failures across 2,262 launches and 2,272 turns. The 2026-07-19 daily run still
+reported exactly 787 failures after the ledger grew to 2,381 launches and 2,391
+turns. Those 119 new launches and 119 new turns added zero failures. This is
+strong forward evidence that current writes are healthy and the remaining
+defect is accumulated terminal residue, reconciliation, or classification.
 
 The exact 787 failures are:
 
@@ -51,7 +52,10 @@ capture failures and exits zero. A fixture that interrupts an intact
 ## Approach
 
 Keep the capture lifecycle in the existing ledger and make reconciliation an
-explicit terminal transition.
+explicit terminal transition. Do not change provider capture writing unless a
+fresh completed/failed/interrupted fixture against the copied current-main Home
+increases the capture-failure count; the observed default hypothesis is that
+the writer is already healthy.
 
 1. Broaden `pruned` from “artifact known absent” to “capture is explicitly
    terminal and its incomplete evidence is acknowledged.” It remains the
@@ -94,7 +98,7 @@ the clone.
 
 | Question | Finding | Impact on design |
 |---|---|---|
-| Are the 787 failures fresh partial captures? | No. They are exactly 10 disk-full partial rows plus 777 intact orphan directories. The count stayed at 787 while launch count increased. | Repair historical classification and terminal cleanup; do not rewrite provider capture. |
+| Are the 787 failures fresh partial captures? | No. They are exactly 10 disk-full partial rows plus 777 intact orphan directories. From the 2026-07-18 to 2026-07-19 daily run, launches and turns each grew by 119 while the failure count stayed exactly 787. | Repair historical classification and terminal cleanup. Treat provider-writer changes as disproven unless copied-state lifecycle proof produces a new failure. |
 | Did a merged change after `1a3079a94` already fix the issue? | Partly. Current main's Home-root test proves the cross-store artifact split is closed for new builds, but current main still reports 787 on the copied store. | Keep the placement fix and narrow implementation to reconciliation, doctor classification, and migration proof. |
 | Is current reconciliation safe and convergent? | Orphan deletion converges, but stale intact captures are finalized as `partial`; 78 were created on the first pass and the second pass merely preserved the wrong state. | Make finalization a terminal interrupted transition and prove state, not only a zero-change second pass. |
 | Can doctor simply ignore partial rows? | No. The 10 rows record genuine write loss, and a new partial is the signal doctor must retain. | Only an explicit age-guarded reconciliation turns partial into a non-failing tombstone. |
@@ -149,6 +153,9 @@ lines against that failure.
 - A focused lifecycle test drives an intact `capturing` launch whose process
   ends, applies reconciliation, and observes a `pruned`/`interrupted` launch and
   interrupted turn with an actionable reason. Doctor is green afterward.
+- Fresh completed, failed, and interrupted launches against the copied
+  current-main Home produce zero new capture failures. If that proof holds, no
+  provider capture-writer code changes in this PR.
 - A fresh `partial` launch still fails doctor before the 48-hour guard; an aged
   partial is tombstoned only by reconciliation (or `--all`).
 - A fresh unclaimed directory is tolerated; an aged one is reported and removed
@@ -173,6 +180,12 @@ Baseline on the 2026-07-18 copied Home:
 - Stale intact `capturing` launches the old reconciliation would turn partial:
   78 (38 Claude, 40 Codex; all outcome `running`, all conversations present).
 - Old reconciliation after one pass: 88 partial failures; after two passes: 88.
+
+Longitudinal production signal, read only:
+
+- 2026-07-18: 787 failures / 2,262 launches / 2,272 turns.
+- 2026-07-19: 787 failures / 2,381 launches / 2,391 turns.
+- Failure growth across 119 new launches and turns: 0.
 
 Target:
 

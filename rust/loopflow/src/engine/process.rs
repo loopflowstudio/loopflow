@@ -96,6 +96,16 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     })
 }
 
+/// Pin one process generation to immutable executable bytes.
+///
+/// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
+/// may repoint it while a resident body is running, so the body carries the
+/// canonical target in `LF_CONTROL_BIN`. A later body launch deliberately
+/// resolves the current Home again and picks up the promoted binary.
+pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
+    std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
+}
+
 /// Capture the current process's control context — this process's `lf`, store,
 /// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
 /// build this honors `LF_CONTROL_*`, so a running body hands its own session's
@@ -404,12 +414,34 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, lf_session_shell_command,
+        extend_session_control_context, lf_session_shell_command, pin_control_binary,
         reject_detached_forwarded_account, select_binary_override, select_current_home_binary,
         tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
+
+    #[test]
+    fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("lf-old");
+        let new = dir.path().join("lf-new");
+        let installed = dir.path().join("lf");
+        std::fs::write(&old, b"old").unwrap();
+        std::fs::write(&new, b"new").unwrap();
+        std::os::unix::fs::symlink(&old, &installed).unwrap();
+
+        let pinned = pin_control_binary(&installed);
+        assert_eq!(pinned, std::fs::canonicalize(&old).unwrap());
+        std::fs::remove_file(&installed).unwrap();
+        std::os::unix::fs::symlink(&new, &installed).unwrap();
+
+        assert_eq!(std::fs::read(&pinned).unwrap(), b"old");
+        assert_eq!(
+            std::fs::read(std::fs::canonicalize(&installed).unwrap()).unwrap(),
+            b"new"
+        );
+    }
 
     #[test]
     fn development_ignores_stale_control_binary_override() {

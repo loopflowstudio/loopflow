@@ -778,6 +778,33 @@ impl SqliteStore {
         self.record_provider_account_health(provider, account_id, None, None, None)
     }
 
+    pub fn record_provider_account_credential_invalidated(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        reason: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts
+             SET credential_state = 'missing',
+                 cooldown_until = NULL,
+                 cooldown_reason = ?3,
+                 updated_at = ?4
+             WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider,
+                account_id.as_str(),
+                reason,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     pub fn record_provider_account_health(
         &self,
         provider: &str,

@@ -97,6 +97,7 @@ pub fn create_or_update_pr(
     };
     commit_workflow(repo, &commit_options, progress)?;
     crate::ops::task::require_task_pr_range_nonempty_without_healing(repo)?;
+    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let published_head = rev_parse(repo, "HEAD")?;
@@ -222,10 +223,12 @@ pub fn generate_pr_copy(
         .ok_or_else(|| OpsError::Message("builtin pr_message prompt not found".to_string()))?;
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let base_branch = match crate::ops::task::task_stack(repo)? {
-        Some(stack) => stack.parent_branch.unwrap_or(default_branch),
+    let stack = crate::ops::task::task_stack(repo)?;
+    let base_branch = match stack.as_ref() {
+        Some(stack) => stack.parent_branch.clone().unwrap_or(default_branch),
         None => pr_target(repo, &main_repo, &default_branch)?,
     };
+    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let log = git_stdout(
         repo,
         &["log", &format!("origin/{base_branch}..HEAD"), "--oneline"],
@@ -281,6 +284,31 @@ pub fn generate_pr_copy(
                 format_pr_copy_parse_preview(&combined)
             ))
         })
+}
+
+fn require_non_task_pr_range_nonempty(
+    repo: &Path,
+    task_stack_present: bool,
+    base_branch: &str,
+) -> OpsResult<()> {
+    if task_stack_present {
+        return Ok(());
+    }
+    let range = format!("origin/{base_branch}...HEAD");
+    let output = Command::new("git")
+        .args(["diff", "--quiet", &range, "--"])
+        .current_dir(repo)
+        .output()?;
+    match output.status.code() {
+        Some(0) => Err(OpsError::Message(format!(
+            "branch has no changes from {base_branch}; it may already be landed. Refused before PR copy generation or GitHub mutation"
+        ))),
+        Some(1) => Ok(()),
+        _ => Err(OpsError::CommandFailed {
+            command: format!("git diff --quiet {range} --"),
+            stderr: stderr_from_output(&output),
+        }),
+    }
 }
 
 pub fn gh_available() -> bool {

@@ -44,6 +44,12 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     ]
     assert not any(term in commands for term in forbidden)
 
+    acceptance = workflow["jobs"]["release-acceptance"]
+    acceptance_commands = "\n".join(
+        step.get("run", "") for step in acceptance["steps"]
+    )
+    assert "release_acceptance_recovers_from_a_revoked_selected_account" in acceptance_commands
+
 
 def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tmp_path: Path):
     repo = tmp_path / "repo"

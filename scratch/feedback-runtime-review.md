@@ -61,6 +61,22 @@ Proof: journal 12/12, runtime 24/24, Wave context 17/17, thread 9/9, CLI memory
 7/7 pass. Exact current-source searches are empty; `cargo fmt --check` and
 all-target Clippy with warnings denied pass.
 
+Reopened documentation audit, July 19: the required `lf code` loop made no
+changes and was rejected as evidence. The Wave runtime README no longer
+advertises deleted memory SSE events or `/memory` routes, and the Swift chat
+client comment now names only the surviving SSE frames. The file-only runtime
+and direct-read CLI remain accepted.
+
+One current-context defect remains blocked rather than hidden:
+`wave/intelligence/MEMORY.md` still describes the deleted stream and write API.
+This repair did not edit it because the operating contract calls Wave memory
+server-owned and the repair explicitly prohibited a direct file write. No
+owned alternative exists: `lf memory` is read-only and the server has no memory
+route, while `update-wave` still prescribes the forbidden ordinary file edit.
+The exact authority/tooling contradiction is recorded in `scratch/questions.md`;
+Slice 3's implementation is complete, but its active Intelligence context is
+not curated until that ownership decision is resolved.
+
 ## Slice 4 — explicit prompt context
 
 Accepted. `PromptComponents` and launch seeding have no recent-Wave-chat field,

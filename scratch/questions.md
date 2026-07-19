@@ -19,6 +19,20 @@
   has a delivery surface.
 - Specialized Project/Task controls remain until Home can wake stopped Work.
 
+## File-only memory curation blocker
+
+`wave/intelligence/MEMORY.md` still describes the deleted live-memory stream,
+write routes, and `lf memory add|update` commands as current architecture. This
+repair leaves it untouched because the operating contract says Wave memory is
+server-owned and explicitly forbids a direct file edit.
+
+There is no compliant write path left: `lf memory --help` exposes only `show`,
+and the Wave server has no memory route. The `update-wave` skill still instructs
+an agent to edit `MEMORY.md` through the ordinary repository workflow, which is
+the direct write this repair is not authorized to perform. Either restore an
+owned curation command or explicitly make reviewed repository edits the
+authority; then curate the stale Intelligence memory through that chosen path.
+
 ## PR #1052 carry-forward
 
 The closed `make-task-gate-approval-the` branch should not be revived: its

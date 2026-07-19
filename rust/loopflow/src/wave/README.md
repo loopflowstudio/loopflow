@@ -66,12 +66,9 @@ do not require the resident token:
 | --- | --- |
 | `GET /health` | Reports listener and resident state. |
 | `GET /conversation` | Returns the durable thread; `?limit=N` tails it. |
-| `GET /events` | Replays the latest 12 human-thread turns, then streams thread, state, playhead, and memory events over SSE; `?limit=N` overrides the replay tail. |
+| `GET /events` | Replays the latest 12 human-thread turns, then streams turn, turn-delta, state, and playhead events over SSE; `?limit=N` overrides the replay tail. |
 | `POST /messages` | Sends `message`, `steer`, or `interrupt`. |
 | `GET /playhead` | Returns the durable pass cursor. |
-| `GET /memory` | Reads the Wave checkpoint. |
-| `GET /memory/log` | Reads facts added since the checkpoint. |
-| `POST /memory` | Updates the checkpoint or adds a fact. |
 | `POST /stop` | Gracefully stops the listener and resident. |
 
 The hidden `/resident/*` routes carry listener/resident coordination and require

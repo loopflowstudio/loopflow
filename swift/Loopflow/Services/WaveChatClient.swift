@@ -2,10 +2,10 @@ import Foundation
 
 // Live client for a wave's chat server. A running `lf wave <name>` publishes its
 // loopback address to `wave/<name>/.wave-endpoint`; this client discovers it,
-// consumes the unified `GET /events` SSE stream (turn + state + memory frames,
-// thread replay on connect), and posts messages back. When the pointer file is
-// absent or the server refuses the connection, the connection settles into
-// `.notRunning` and keeps polling so it attaches the moment the wave comes up.
+// consumes the unified `GET /events` SSE stream (turn, turn-delta, state, and
+// playhead frames; thread replay on connect), and posts messages back. When the
+// pointer file is absent or the server refuses the connection, the connection
+// settles into `.notRunning` and keeps polling so it attaches when the wave starts.
 
 public enum WaveChatError: Error, Sendable {
     case notRunning

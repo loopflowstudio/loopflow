@@ -1,20 +1,22 @@
-# Slice 6A: make Feedback presentation safe
+# Slice 6B: name Task Feedback reviewers
 
 ## Implement
 
-- Make `lf work feedback` presentation-only.
-- Delete `continue_on_success`, `continue_on_exit`, the hidden feedback-exit
-  guard, exit policy/retry/lock state, and conditional continuation store API.
-- Keep `lf work continue` as the only Feedback-closing operation.
-- Delete Feedback escalation command/store transition/receipt; Task Feedback
-  chooses User or immediate Parent when it opens and never changes route.
-- Update Swift launch argv, help, docs, parser/store/behavior tests with no
-  compatibility aliases.
+- Replace Task feedback-policy vocabulary with `FeedbackReviewer::{User, Parent}`.
+- Store the reviewer on each `TaskPhasePlan` and expose `lf task ... --reviewer
+  user|parent`; delete the overloaded `--headless` spelling.
+- Preserve the standard phase reviewers: clarify by User, pursue by Parent,
+  mutate by User. An explicit reviewer override affects future checkpoints only.
+- Rename persisted columns and values from require/defer policy language to
+  reviewer and user/parent in one migration, with no compatibility readers.
+- Delete `InteractionPolicy`, feedback-only `FlowAction` policy variants, and
+  dead next-action policy helpers.
 
 ## Done when
 
-- [x] presentation cannot advance flow on any process exit or signal.
-- [x] explicit `work continue` is the only close path.
-- [x] escalation API/state is absent.
-- [x] parser rejects retired flags/commands and focused Rust/Swift tests, fmt,
-      and clippy pass.
+- [ ] help and parser expose only `--reviewer user|parent`.
+- [ ] default mixed reviewers and explicit overrides are behaviorally proved.
+- [ ] an already-open Feedback keeps its recorded route.
+- [ ] stored Task phase plans contain reviewer/user|parent with no dual reader.
+- [ ] retired policy/headless symbols are absent; migration, focused behavior,
+      fmt, and all-target clippy pass.

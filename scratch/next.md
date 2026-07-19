@@ -1,31 +1,30 @@
-# Slice 2: delete Radio and channel identity
+# Slice 3: make Wave memory file-only
 
 ## Implement
 
-- Delete the Radio CLI, bus store/schema/runtime/listener/retention, and the
-  channel-family identity model.
-- Delete `LF_CHANNEL`, dotted channel placement helpers, `MessageOp::Say`, and
-  machine-authored bylines on chat/message DTOs.
-- Add the next migration dropping agent-bus tables.
-- Remove hidden compatibility commands and the legacy channel-open event.
-- Replace project-promotion and builtin uses with typed evidence already owned
-  by Work/Project/Wave.
-- Update Rust, Swift, fixtures, help, docs, prompts, and command-resolution
-  matrices with no alias or dual reader.
+- Make `wave/<name>/MEMORY.md` the only Wave memory truth.
+- Delete memory-added/updated journal variants, runtime folds/state/broadcasts,
+  memory facts, replay, HTTP writes, SSE frames, receipts, and Swift mirrors.
+- Delete `lf memory add|log|update`, hidden aliases, and the export-memory skill.
+  Keep exactly `lf memory show` as a direct read that works with all servers
+  stopped.
+- Assemble Project/Task memory directly from applicable ancestor Wave
+  `MEMORY.md` files, oldest-first. Do not read journal/live deltas.
+- Remove Doctor, cron, prompt, docs, golden, and builtin references to live
+  memory curation.
 
 ## Preserve
 
-- Human Wave conversation and generic Work Steer/Turn behavior.
-- `lf chat` as the current human surface pending the server-topology design.
-- Durable parent/child Work relationships; do not replace Radio with another
-  mailbox.
+- `GOAL.md` and `MEMORY.md` as authored/durable Wave files.
+- Generic mutation result types named `*Receipt`; evidence Receipt deletion is
+  a later slice.
+- Wave conversation itself; ambient transcript injection is the next slice.
 
 ## Done when
 
-- [ ] Radio/channel modules, commands, exports, store APIs, and current tables
-      are absent.
-- [ ] `LF_CHANNEL`, channel roles/positions, `MessageOp::Say`, and machine
-      bylines are absent.
-- [ ] Project promotion and builtin prompts use typed evidence, not Radio.
-- [ ] Exact current-source search is zero outside historical migrations.
-- [ ] Focused CLI/migration/Wave/Swift proofs, fmt, and clippy pass.
+- [ ] journal/runtime/server/SSE/Swift memory facts and writes are absent.
+- [ ] CLI exposes exactly `lf memory show`, usable without a server.
+- [ ] prompt memory reads only ancestor `MEMORY.md` files oldest-first.
+- [ ] export-memory and live-curation docs/prompts/tests are absent.
+- [ ] focused memory/journal/runtime/prompt/CLI/Swift proofs, fmt, and clippy
+      pass.

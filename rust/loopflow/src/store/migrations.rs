@@ -9,6 +9,7 @@ use std::time::Duration;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
 use rusqlite::OptionalExtension;
+use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
@@ -556,7 +557,8 @@ fn apply_sqlite_transaction(
         Ok(()) => {
             let result = before_migration(conn)
                 .and_then(|()| apply_set(conn, MIGRATIONS))
-                .and_then(|()| validate_foreign_keys(conn));
+                .and_then(|()| validate_foreign_keys(conn))
+                .and_then(|()| validate_persisted_json(conn));
             match result {
                 Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
                 Err(error) => {
@@ -577,6 +579,67 @@ fn apply_sqlite_transaction(
         Err(error) => Err(error),
         Ok(()) => restore_result,
     }
+}
+
+pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
+    validate_json_column::<crate::task::PmWritebackState>(
+        conn,
+        "tasks",
+        "id",
+        "pm_writeback_json",
+    )?;
+    validate_json_column::<crate::task::TaskGateProposal>(
+        conn,
+        "tasks",
+        "id",
+        "gate_proposal_json",
+    )?;
+    validate_json_column::<crate::task::CiObservation>(conn, "task_prs", "id", "ci_observation")?;
+    validate_json_column::<crate::task::GithubObservation>(
+        conn,
+        "task_prs",
+        "id",
+        "github_observation",
+    )?;
+    validate_json_column::<crate::task::TaskEventKind>(conn, "task_events", "id", "kind_json")?;
+    validate_json_column::<crate::project::ProjectEventKind>(
+        conn,
+        "project_events",
+        "id",
+        "kind_json",
+    )?;
+    validate_json_column::<crate::project::ChildEventPayload>(
+        conn,
+        "observation_outbox",
+        "id",
+        "payload_json",
+    )?;
+    validate_json_column::<Vec<String>>(conn, "ci_incidents", "identity", "failure_set_json")?;
+    validate_json_column::<crate::durable::RunTrigger>(conn, "runs", "id", "trigger_json")?;
+    validate_json_column::<crate::durable::WaitOn>(conn, "waits", "id", "on_json")
+}
+
+fn validate_json_column<T: DeserializeOwned>(
+    conn: &rusqlite::Connection,
+    table: &str,
+    key: &str,
+    column: &str,
+) -> StoreResult<()> {
+    let sql =
+        format!("SELECT CAST({key} AS TEXT), {column} FROM {table} WHERE {column} IS NOT NULL");
+    let mut statement = conn.prepare(&sql)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (row_key, json) = row?;
+        serde_json::from_str::<T>(&json).map_err(|error| {
+            StoreError::InvalidData(format!(
+                "semantic migration check failed for {table}.{column} row {row_key}: {error}"
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_sqlite_with_backup(
@@ -1379,6 +1442,7 @@ fn incompatible() -> StoreError {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
@@ -1388,9 +1452,11 @@ mod tests {
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
         latest_known_version, latest_version_sqlite, pending_migrations, product_schema,
-        validate_foreign_keys, validate_set, validate_sqlite, Migration, MigrationId,
-        DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_foreign_keys, validate_persisted_json, validate_set, validate_sqlite, Migration,
+        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
+
+    const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
 
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
@@ -1435,6 +1501,28 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    fn _reopen_repair_sql() -> String {
+        if let Some(migration) = MIGRATIONS
+            .iter()
+            .find(|migration| migration.name == REOPEN_REPAIR_NAME)
+        {
+            return migration.sql.to_string();
+        }
+        let drafts =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
+        let prefix = format!("{REOPEN_REPAIR_NAME}__");
+        let repair = fs::read_dir(&drafts)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
+            })
+            .expect("reopen repair is canonical or present as an ordinal-free draft");
+        fs::read_to_string(repair).unwrap()
     }
 
     fn apply_permuted_history(conn: &rusqlite::Connection) {
@@ -2540,6 +2628,108 @@ mod tests {
             )
             .unwrap();
         assert_eq!(events, 0);
+    }
+
+    #[test]
+    fn pending_reopen_writeback_upgrades_to_a_typed_stable_task() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('00000000-0000-0000-0000-000000000001', 'runtime', '/repo', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_sessions (
+                id, project_id, project_slug, project_name, project_prompt_context,
+                wave_id, pm_snapshot_synced_at, status, status_reason, status_at,
+                iteration, observation_cursor, agent, provider,
+                created_at, updated_at,
+                current_directive_version, incorporated_directive_version
+             ) VALUES (
+                'ps_reopen', 'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001', 9, 'running', 'active', 10, 1, 0, 'codex', 'codex',
+                10, 20, 1, 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO task_sessions (
+                id, issue_id, issue_identifier, issue_title, issue_description,
+                project_id, project_slug, project_name, project_prompt_context, wave_id,
+                status, status_reason, status_at, worktree, branch, base_commit,
+                agent, provider, created_at, updated_at,
+                pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                current_directive_version, incorporated_directive_version
+             ) VALUES (
+                'ts_reopen', 'issue-reopen', 'INF-REOPEN', 'Resume it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'waiting', 'writeback failed', 10, '/repo.inf-reopen',
+                'jack/inf-reopen', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"pending\",\"operation\":\"reopen_task\",\"error\":\"offline\"}',
+                'ps_reopen', 1, 1
+             )",
+            [],
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+        let stale: String = conn
+            .query_row(
+                "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !MIGRATIONS
+            .iter()
+            .any(|migration| migration.name == REOPEN_REPAIR_NAME)
+        {
+            assert!(stale.contains("reopen_task"));
+        }
+
+        conn.execute_batch(&_reopen_repair_sql()).unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        validate_persisted_json(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        let error = apply_sqlite_transaction(&conn, |conn| {
+            conn.execute(
+                "UPDATE tasks
+                 SET pm_writeback_json='{\"state\":\"pending\",\"operation\":\"invented\",\"error\":\"offline\"}'
+                 WHERE external_issue_id='issue-reopen'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("tasks.pm_writeback_json"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "{\"state\":\"current\"}"
+        );
+        drop(conn);
+
+        let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
+        store.health_check().unwrap();
+        let tasks = store.list_tasks(None).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert!(matches!(
+            tasks[0].pm_writeback,
+            crate::task::PmWritebackState::Current
+        ));
     }
 
     #[test]

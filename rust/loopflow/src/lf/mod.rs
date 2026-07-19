@@ -9,7 +9,7 @@ pub mod output;
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf")]
 #[command(about = "Open Loopflow or run its CLI")]
-#[command(version)]
+#[command(version = crate::build_info::BUILD_VERSION)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -1754,6 +1754,16 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn version_output_uses_the_embedded_build_identity() {
+        let error = Cli::try_parse_from(["lf", "--version"]).expect_err("version exits");
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert_eq!(
+            error.to_string(),
+            format!("lf {}\n", crate::build_info::BUILD_VERSION)
+        );
+    }
 
     #[test]
     fn ci_report_accepts_machine_wide_filters() {

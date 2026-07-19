@@ -70,8 +70,12 @@ def draft_names(repo: Path) -> set[str]:
 
 
 def run(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    arguments = list(args)
+    authorities = {"--check", "--dry-run", "--release-cut", "--materialize-for-tests"}
+    if not authorities.intersection(arguments):
+        arguments.append("--release-cut")
     return subprocess.run(
-        [sys.executable, "scripts/canonicalize_migrations.py", *args],
+        [sys.executable, "scripts/canonicalize_migrations.py", *arguments],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -169,6 +173,33 @@ def test_check_mode_writes_nothing(repo: Path) -> None:
     assert "0.11.002_add_wave_colour" in result.stdout
     assert (repo / MIGRATIONS_RS).read_text() == before
     assert draft_names(repo) == {"add_wave_colour"}
+
+
+def test_plain_invocation_cannot_create_canonical_migrations(repo: Path) -> None:
+    draft(repo, "add_wave_colour")
+    before = (repo / MIGRATIONS_RS).read_text()
+
+    result = subprocess.run(
+        [sys.executable, "scripts/canonicalize_migrations.py", "0.11.30"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "outside the release cut" in result.stderr
+    assert (repo / MIGRATIONS_RS).read_text() == before
+    assert canonical_files(repo) == ["0.11.001_initial.sql"]
+    assert draft_names(repo) == {"add_wave_colour"}
+
+
+def test_test_materialization_has_explicit_disposable_authority(repo: Path) -> None:
+    draft(repo, "add_wave_colour")
+
+    result = run(repo, "0.12.0", "--materialize-for-tests")
+
+    assert result.returncode == 0, result.stderr
+    assert (repo / MIGRATIONS / "0.12.001_add_wave_colour.sql").exists()
 
 
 def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:

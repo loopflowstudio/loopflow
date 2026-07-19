@@ -226,7 +226,7 @@ pub struct TaskRuntimeSnapshot {
 
 /// The compact Task attention signal shared by terminal and app surfaces. The
 /// names are deliberately the product's visual vocabulary: consumers do not
-/// reinterpret Session/process combinations into their own colors.
+/// reinterpret Work/process combinations into their own colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskAttentionLevel {
@@ -317,7 +317,7 @@ pub struct TaskReferenceSnapshot {
 pub struct TaskWorkspaceSnapshot {
     pub slug: String,
     /// Full branch name from the active PR, or the last recorded PR after the
-    /// Task settles. `None` is explicit for legacy Sessions with no PR record.
+    /// Task settles. `None` is explicit for legacy Tasks with no PR record.
     pub branch: Option<String>,
     pub worktree: String,
 }
@@ -439,7 +439,7 @@ pub struct WaveRoadmap {
     pub projects: Evidence<RoadmapProject>,
 }
 
-/// One Project in the roadmap: its plan, live Project-Session evidence when a
+/// One Project in the roadmap: its plan, live Project Work evidence when a
 /// loop exists, its section, and its Tasks. Reuses the same leaf snapshots
 /// `lf status` emits; adds the derived `section`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -451,7 +451,7 @@ pub struct RoadmapProject {
     pub tasks: Vec<RoadmapTask>,
 }
 
-/// One Task in the roadmap: plan row, live Task-Session evidence when a Session
+/// One Task in the roadmap: plan row, live Task Work evidence when a Task
 /// exists, its section, and its active PR. `runtime: None` is a Task nobody has
 /// started — never confused with a dead process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -706,7 +706,7 @@ fn roadmap_task(detail: TaskDetailSnapshot, liveness: Liveness) -> RoadmapTask {
 
 /// A Task's section, from the same primitives the row already carries. Order is
 /// load-bearing: a dead process outranks a terminal record (an audit finding),
-/// and a terminal Session is `Later` before its owner is consulted.
+/// and terminal Work is `Later` before its owner is consulted.
 fn task_section(task: &TaskDetailSnapshot, liveness: Liveness) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
         return if task.task.completed {
@@ -778,10 +778,10 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
         .ok_or_else(|| anyhow!("wave '{name}' is not in this machine's registry"))
 }
 
-/// One tmux reading for the whole command. `lf status` checks a handful of
-/// Sessions and `lf roadmap` checks every Session on the machine; both take a
-/// single `tmux list-sessions` snapshot here and look each name up in the set,
-/// never a `has-session` fork per Session. `installed` is kept distinct from an
+/// One tmux reading for the whole command. `lf status` checks a handful of tmux
+/// sessions and `lf roadmap` checks every tmux session on the machine; both take
+/// a single `tmux list-sessions` snapshot here and look each name up in the set,
+/// never a `has-session` fork per name. `installed` is kept distinct from an
 /// empty `live` set: no tmux means liveness is *unknowable*, not *nothing alive*.
 #[derive(Debug, Clone)]
 struct TmuxLiveness {
@@ -811,7 +811,7 @@ impl TmuxLiveness {
     }
 }
 
-/// Whether this machine can tell a live Session process from a dead one. Without
+/// Whether this machine can tell a live Work process from a dead one. Without
 /// tmux there is no way to look, and `process_alive: false` means "unknown", not
 /// "gone" — a surface that reports the difference as a finding is inventing one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -829,7 +829,7 @@ impl Liveness {
         }
     }
 
-    /// A Session that records a live process the machine looked for and did not
+    /// Work that records a live process the machine looked for and did not
     /// find.
     fn is_gone(self, claims_process: bool, process_alive: bool) -> bool {
         self == Self::Observable && claims_process && !process_alive
@@ -912,7 +912,7 @@ fn attention(
 
 fn attention_reason(dead: bool, status: &str, recorded: &str) -> String {
     if dead {
-        format!("process is gone but the Session still records '{status}'")
+        format!("process is gone but the Work still records '{status}'")
     } else {
         recorded.to_string()
     }
@@ -1151,7 +1151,7 @@ async fn snapshot_projects(
 
     for project in &projects {
         let status = child_work_status(store, &ChildRef::Project(project.id.clone())).await?;
-        let Some(index) = session_project_index(
+        let Some(index) = work_project_index(
             &details,
             project.definition.id.as_str(),
             &project.definition.slug,
@@ -1185,13 +1185,12 @@ async fn snapshot_projects(
             )
         })?;
         let index = project_index(&details, project_slug, project_slug)?;
-        let runtime_session = tasks.iter().find(|session| {
-            session.directive.id.as_str() == item.id
-                || session.directive.identifier == item.identifier
+        let runtime_task = tasks.iter().find(|task| {
+            task.directive.id.as_str() == item.id || task.directive.identifier == item.identifier
         });
-        details[index].tasks.push(
-            snapshot_task_detail(store, item, runtime_session, liveness, probe_pr_empty).await?,
-        );
+        details[index]
+            .tasks
+            .push(snapshot_task_detail(store, item, runtime_task, liveness, probe_pr_empty).await?);
     }
 
     for runtime_task in &tasks {
@@ -1206,7 +1205,7 @@ async fn snapshot_projects(
                     runtime_task.project_id
                 )
             })?;
-        let Some(project_index) = session_project_index(
+        let Some(project_index) = work_project_index(
             &details,
             parent.definition.id.as_str(),
             &parent.definition.slug,
@@ -1255,13 +1254,13 @@ async fn snapshot_projects(
     Ok(details)
 }
 
-fn session_project_index(
+fn work_project_index(
     projects: &[ProjectDetailSnapshot],
     id: &str,
     slug: &str,
     terminal: bool,
     wave: &str,
-    session: &str,
+    work: &str,
     recovery: &str,
 ) -> Result<Option<usize>> {
     if let Some(index) = find_project_index(projects, id, slug) {
@@ -1271,7 +1270,7 @@ fn session_project_index(
         return Ok(None);
     }
     Err(anyhow!(
-        "{session} references Project {slug} ({id}), which is absent from the current PM snapshot; run `lf pm sync --wave {wave}`. If the Project remains absent, settle the stale Session with `{recovery}`"
+        "{work} references Project {slug} ({id}), which is absent from the current PM snapshot; run `lf pm sync --wave {wave}`. If the Project remains absent, settle the stale Work with `{recovery}`"
     ))
 }
 
@@ -1293,26 +1292,26 @@ fn find_project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) 
 async fn snapshot_task_detail(
     store: &SharedStore,
     item: PmItem,
-    session: Option<&Task>,
+    task: Option<&Task>,
     liveness: &TmuxLiveness,
     probe_pr_empty: bool,
 ) -> Result<TaskDetailSnapshot> {
-    let prs = match session {
-        Some(session) => store.task_prs(&session.id).await?,
+    let prs = match task {
+        Some(task) => store.task_prs(&task.id).await?,
         None => Vec::new(),
     };
     let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     let observed_at = now();
-    let runtime = match session {
-        Some(session) => {
-            let status = child_work_status(store, &ChildRef::Task(session.id.clone())).await?;
-            Some(snapshot_task_runtime(store, session, status, liveness, observed_at).await?)
+    let runtime = match task {
+        Some(task) => {
+            let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
+            Some(snapshot_task_runtime(store, task, status, liveness, observed_at).await?)
         }
         None => None,
     };
-    let reference = task_reference(&item, session, active, &prs);
-    let next_move = match session {
+    let reference = task_reference(&item, task, active, &prs);
+    let next_move = match task {
         Some(_) => next_move_for_task(
             &runtime
                 .as_ref()
@@ -1331,24 +1330,24 @@ async fn snapshot_task_detail(
         },
     };
     let process = task_process_evidence(runtime.as_ref(), liveness);
-    let local_progress = task_local_progress(session, runtime.as_ref(), active, &process);
-    let completion_refusal = match session {
-        Some(session) => crate::ops::task::task_completion_gate(store, session)
+    let local_progress = task_local_progress(task, runtime.as_ref(), active, &process);
+    let completion_refusal = match task {
+        Some(task) => crate::ops::task::task_completion_gate(store, task)
             .await?
-            .refusal(&session.directive.identifier),
+            .refusal(&task.directive.identifier),
         None => None,
     };
-    let resume_refusal = session.and_then(|session| {
-        crate::ops::task::no_active_pr_resume_refusal(&session.directive.identifier, active, latest)
+    let resume_refusal = task.and_then(|task| {
+        crate::ops::task::no_active_pr_resume_refusal(&task.directive.identifier, active, latest)
     });
-    let (action_evidence, user_feedback) = match session {
-        Some(session) => {
+    let (action_evidence, user_feedback) = match task {
+        Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
                 None => None,
             };
             let work = store
-                .work_for_child(&ChildRef::Task(session.id.clone()))
+                .work_for_child(&ChildRef::Task(task.id.clone()))
                 .await?;
             let feedback = store.feedback(&work).await?;
             let user_feedback = feedback
@@ -1367,7 +1366,7 @@ async fn snapshot_task_detail(
                     ci: active.and_then(|pr| pr.fresh_ci()),
                     process_alive: process.alive,
                     predecessor_phase,
-                    abandon_intent: session.abandon_intent.is_some(),
+                    abandon_intent: task.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
                 }),
                 user_feedback,
@@ -1387,8 +1386,8 @@ async fn snapshot_task_detail(
         action_evidence.as_ref(),
         observed_at,
     );
-    let direction = match session {
-        Some(session) => current_direction(store, ChildRef::Task(session.id.clone())).await?,
+    let direction = match task {
+        Some(task) => current_direction(store, ChildRef::Task(task.id.clone())).await?,
         None => None,
     };
     Ok(TaskDetailSnapshot {
@@ -1404,9 +1403,9 @@ async fn snapshot_task_detail(
                 // PR emptiness is an execution-plane fact (`lf status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
                 // attention fold already carries the progress evidence it needs.
-                let empty = match (session, active) {
-                    (Some(session), Some(active)) if probe_pr_empty && active.id == pr.id => {
-                        task_pr_empty(session, pr)
+                let empty = match (task, active) {
+                    (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
+                        task_pr_empty(task, pr)
                     }
                     _ => None,
                 };
@@ -1450,12 +1449,12 @@ fn task_process_evidence(
 }
 
 fn task_local_progress(
-    session: Option<&Task>,
+    task: Option<&Task>,
     runtime: Option<&TaskRuntimeSnapshot>,
     active_pr: Option<&TaskPr>,
     process: &TaskProcessEvidence,
 ) -> LocalProgressEvidence {
-    let Some(session) = session else {
+    let Some(task) = task else {
         return LocalProgressEvidence {
             state: LocalProgressEvidenceState::NotApplicable,
             unsettled: Some(false),
@@ -1469,7 +1468,7 @@ fn task_local_progress(
         runtime
             .map(|runtime| &runtime.status)
             .expect("Task runtime exists when the durable Task exists"),
-        &session.worktree,
+        &task.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
         process,
     )
@@ -1638,18 +1637,18 @@ fn derive_task_attention(
 
 fn task_reference(
     item: &PmItem,
-    session: Option<&Task>,
+    task: Option<&Task>,
     active_pr: Option<&TaskPr>,
     prs: &[TaskPr],
 ) -> TaskReferenceSnapshot {
-    let workspace = session.map(|session| {
+    let workspace = task.map(|task| {
         let branch = active_pr
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
         TaskWorkspaceSnapshot {
-            slug: session.workspace_slug.clone(),
+            slug: task.workspace_slug.clone(),
             branch,
-            worktree: session.worktree.display().to_string(),
+            worktree: task.worktree.display().to_string(),
         }
     });
     TaskReferenceSnapshot {
@@ -1658,15 +1657,15 @@ fn task_reference(
     }
 }
 
-fn task_pr_empty(session: &Task, pr: &TaskPr) -> Option<bool> {
-    if !session.worktree.exists() {
+fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
+    if !task.worktree.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(&session.worktree).ok()?;
+    let clean = crate::engine::git::is_clean(&task.worktree).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(&session.worktree, "HEAD").ok()?;
+    let head = crate::engine::git::rev_parse(&task.worktree, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 

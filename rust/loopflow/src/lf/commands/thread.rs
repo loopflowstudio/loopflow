@@ -301,7 +301,7 @@ mod tests {
             "{{\"id\":\"{id}\",\"role\":\"user\",\"text\":\"\",\"status\":\"completed\",\
              \"items\":[],\"created_at\":\"2026-07-04T00:00:00Z\",\"from\":\"task\",\
              \"activity\":{{\"id\":\"activity-{id}\",\"subject\":\"task\",\"subject_id\":\"W2-132\",\
-             \"session_id\":\"ts_1\",\"kind\":\"{kind}\",\"title\":\"{title}\",\"summary\":\"{summary}\",\
+             \"work_id\":\"ts_1\",\"kind\":\"{kind}\",\"title\":\"{title}\",\"summary\":\"{summary}\",\
              \"directive_version\":null,\"command_id\":null,\"effect\":null,\"source\":null,\
              \"decision_id\":null,\"options\":[]}}}}"
         )

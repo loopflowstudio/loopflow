@@ -92,7 +92,7 @@ enum LocalWaveAgentLauncher {
     }
 
     /// Start a filed Task through the same durable lifecycle command as the CLI.
-    /// `lf task run` owns Project-Session creation, worktree placement, and the
+    /// `lf task run` owns Project Work startup, worktree placement, and the
     /// Task process; the app does not reproduce any of those decisions.
     static func runTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)

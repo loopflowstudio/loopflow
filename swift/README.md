@@ -54,8 +54,8 @@ and observation spans.
   send/steer/interrupt behavior.
 - **Projects and Tasks** appear in the Wave work map. Linear owns their planning
   identity; Loopflow's registry owns their runtime state.
-- **Task Sessions** own implementation worktrees and PR delivery. Every Task
-  reports through its Project Session; the Wave retains root inspection and
+- **Tasks** own implementation worktrees and PR delivery. Every Task
+  reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json` and
   opens blue Feedback through `lf work feedback task <id>` without advancing it.

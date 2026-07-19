@@ -94,7 +94,7 @@ public struct LaunchSurfaceRecord: Codable, Sendable, Hashable, Identifiable {
     public let attachArgv: [String]?
 
     public var id: String { launch.id }
-    public var sessionId: String { launch.id }
+    public var launchId: String { launch.id }
     public var parentKind: String { work.kind.rawValue }
     public var parentId: String { work.id }
     public var status: LaunchLifecycleState { launch.state }

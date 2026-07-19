@@ -1,7 +1,7 @@
 import Foundation
 
 /// A place to present an interactive launch. Every surface can open the
-/// worktree; only some can honestly *attach* the exact durable Session by
+/// worktree; only some can honestly *attach* the exact Launch by
 /// running the shared attach command against it.
 public enum LaunchTarget: String, Codable, Sendable, Hashable, CaseIterable {
     /// Embedded terminal. The required local fallback: always available, always
@@ -28,9 +28,9 @@ public enum LaunchTarget: String, Codable, Sendable, Hashable, CaseIterable {
     }
 }
 
-/// How honestly a surface reaches a launch's Session right now.
+/// How honestly a surface reaches a launch's provider session right now.
 public enum LaunchTargetReach: String, Codable, Sendable, Hashable {
-    /// Runs the exact shared attach command against the same Session.
+    /// Runs the exact shared attach command against the same provider session.
     case attach
     /// Opens the worktree only — a weaker action that never claims to attach.
     case worktreeOnly
@@ -141,7 +141,7 @@ public struct LaunchTargetCapability: Sendable, Hashable {
             guard !isRemoteHome, installedApps.contains(surface), workspaceProven else {
                 return .unavailable
             }
-            // Claude with a known session id can resume the exact durable Session
+            // Claude with a known session id can resume the exact Launch
             // in the IDE's integrated terminal. Without those, the IDE can only
             // open the worktree — a weaker action labeled as such.
             return ideCanAttach ? .attach : .worktreeOnly

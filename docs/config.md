@@ -252,11 +252,11 @@ Four built-in skills intentionally default to Claude: `kickoff`,
 built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
 an explicit override.
 
-Loopflow starts every Codex CLI and Session run on the standard service tier,
+Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
 TUI, run `/fast` to opt into Fast mode for that session.
 
-Gemini is supported for direct `lf` commands. Wave, Project, and Task Sessions
+Gemini is supported for direct `lf` commands. Wave, Project, and Tasks
 require `claude`, `codex`, or `opencode`.
 
 OpenCode model strings use `provider/model` form. Bare `opencode` resolves to

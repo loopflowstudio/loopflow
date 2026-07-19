@@ -10,7 +10,7 @@ import Foundation
 /// The rules that live here, and nowhere in the view:
 /// - **View-only by default.** Ordinary bodies expose no controls. Only an
 ///   active interactive launch exposes `.open`, which re-attaches the exact
-///   durable Session through `lf launch attach`.
+///   Launch through `lf launch attach`.
 /// - **Blue propagation.** A launch waiting on the user tints its Task, its
 ///   Project, and its Wave blue even while their bodies are alive.
 /// - **Honest evidence.** Missing, stale, unreachable, stopped, and unavailable
@@ -284,7 +284,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                                 staleThresholdSecs: staleThresholdSecs
                             )
                         )
-                        handledLaunchIds.insert(launch.sessionId)
+                        handledLaunchIds.insert(launch.launchId)
                     }
                 }
 
@@ -326,7 +326,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                             staleThresholdSecs: staleThresholdSecs
                         )
                     )
-                    handledLaunchIds.insert(launch.sessionId)
+                    handledLaunchIds.insert(launch.launchId)
                 }
             }
         }
@@ -335,7 +335,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             rows.append(directExecutionRow(run))
         }
         // Wave-level and orphaned launches (parent not found in this roadmap).
-        for launch in launches where !handledLaunchIds.contains(launch.sessionId) {
+        for launch in launches where !handledLaunchIds.contains(launch.launchId) {
             let row = launchRow(
                 launch,
                 parentRowId: nil,
@@ -392,7 +392,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         // makes a User-routed Feedback unopenable.
         let openable = userAttention
         return ActiveSessionRow(
-            id: "launch:\(launch.sessionId)",
+            id: "launch:\(launch.launchId)",
             kind: .launch,
             title: launch.reason,
             subtitle: "\(launch.parentKind) launch · \(launch.provider)",

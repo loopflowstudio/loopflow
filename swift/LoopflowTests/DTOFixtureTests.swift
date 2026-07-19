@@ -123,6 +123,7 @@ struct DTOFixtureTests {
 
         #expect(activity.subject == .task)
         #expect(activity.subjectId == "INF-123")
+        #expect(activity.workId == "ts_22222222222222222222222222222222")
         #expect(activity.kind == .prOpened)
         #expect(activity.title == "Opened PR #1073")
     }

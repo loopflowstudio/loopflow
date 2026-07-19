@@ -2626,11 +2626,11 @@ pub(crate) fn create_wave_spine(
     )
 }
 
-pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> StoreResult<()> {
+pub(crate) fn create_project_spine(tx: &Transaction<'_>, project: &Project) -> StoreResult<()> {
     let project_id = tx
         .query_row(
             "SELECT id FROM projects WHERE external_project_id=?1",
-            [session.definition.id.as_str()],
+            [project.definition.id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -2641,18 +2641,18 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
          ) VALUES (?1, ?2, ?3, ?4)",
         params![
             project_id,
-            session.wave_id.as_str(),
-            session.definition.id.as_str(),
-            session.created_at.unix_timestamp(),
+            project.wave_id.as_str(),
+            project.definition.id.as_str(),
+            project.created_at.unix_timestamp(),
         ],
     )?;
     let work = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Wave(session.wave_id.clone());
+    let parent = WorkRef::Wave(project.wave_id.clone());
     inherit_placement(
         tx,
         &work,
         Some(&parent),
-        session.created_at.unix_timestamp(),
+        project.created_at.unix_timestamp(),
     )?;
     let epoch_id = EpochId::new();
     let number: i64 = tx.query_row(
@@ -2669,30 +2669,30 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
             epoch_id.as_str(),
             number,
             project_id,
-            session.updated_at.unix_timestamp(),
+            project.updated_at.unix_timestamp(),
         ],
     )?;
     insert_truth(
         tx,
         &epoch_id,
         serde_json::json!({
-            "external_project_id": session.definition.id.as_str(),
-            "slug": session.definition.slug,
-            "name": session.definition.name,
-            "prompt_context": session.definition.prompt_context,
-            "pm_snapshot_synced_at": session.definition.pm_snapshot_synced_at,
+            "external_project_id": project.definition.id.as_str(),
+            "slug": project.definition.slug,
+            "name": project.definition.name,
+            "prompt_context": project.definition.prompt_context,
+            "pm_snapshot_synced_at": project.definition.pm_snapshot_synced_at,
         }),
-        session.updated_at,
+        project.updated_at,
     )?;
     Ok(())
 }
 
-pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreResult<()> {
-    let project_id = session.project_id.as_str().to_string();
+pub(crate) fn create_task_spine(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
+    let project_id = task.project_id.as_str().to_string();
     let task_id = tx
         .query_row(
             "SELECT id FROM tasks WHERE external_issue_id=?1",
-            [session.directive.id.as_str()],
+            [task.directive.id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -2704,19 +2704,14 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreRe
         params![
             task_id,
             project_id,
-            session.directive.id.as_str(),
-            session.directive.identifier,
-            session.created_at.unix_timestamp(),
+            task.directive.id.as_str(),
+            task.directive.identifier,
+            task.created_at.unix_timestamp(),
         ],
     )?;
     let work = WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?);
     let parent = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    inherit_placement(
-        tx,
-        &work,
-        Some(&parent),
-        session.created_at.unix_timestamp(),
-    )?;
+    inherit_placement(tx, &work, Some(&parent), task.created_at.unix_timestamp())?;
     let epoch_id = EpochId::new();
     let number: i64 = tx.query_row(
         "SELECT COALESCE(MAX(number), 0) + 1 FROM epochs WHERE task_id=?1",
@@ -2732,20 +2727,20 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreRe
             epoch_id.as_str(),
             number,
             task_id,
-            session.updated_at.unix_timestamp(),
+            task.updated_at.unix_timestamp(),
         ],
     )?;
     insert_truth(
         tx,
         &epoch_id,
         serde_json::json!({
-            "external_issue_id": session.directive.id.as_str(),
-            "identifier": session.directive.identifier,
-            "title": session.directive.title,
-            "description": session.directive.description,
-            "pm_snapshot_synced_at": session.directive.pm_snapshot_synced_at,
+            "external_issue_id": task.directive.id.as_str(),
+            "identifier": task.directive.identifier,
+            "title": task.directive.title,
+            "description": task.directive.description,
+            "pm_snapshot_synced_at": task.directive.pm_snapshot_synced_at,
         }),
-        session.updated_at,
+        task.updated_at,
     )?;
     Ok(())
 }

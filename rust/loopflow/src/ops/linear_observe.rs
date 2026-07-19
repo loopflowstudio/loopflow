@@ -44,19 +44,13 @@ pub(crate) fn linear_follow_up_text(body: &str) -> String {
 /// Read one Linear observation into durable, exactly-once Task direction.
 pub async fn reconcile_linear_observation(
     store: &Store,
-    session: &Task,
+    task: &Task,
     observation: IssueObservation,
     viewer_id: &str,
     observed_at: OffsetDateTime,
 ) -> StoreResult<LinearObservationOutcome> {
-    let cursor = store.task_linear_observation(&session.id).await?;
-    let apply = plan_apply(
-        session,
-        observation,
-        viewer_id,
-        observed_at,
-        cursor.as_ref(),
-    );
+    let cursor = store.task_linear_observation(&task.id).await?;
+    let apply = plan_apply(task, observation, viewer_id, observed_at, cursor.as_ref());
     store.apply_linear_observation(apply).await
 }
 
@@ -65,7 +59,7 @@ pub async fn reconcile_linear_observation(
 /// content changed; every user comment rides as a candidate Steer, and the
 /// store drops the ones already seen.
 pub(crate) fn plan_apply(
-    session: &Task,
+    task: &Task,
     observation: IssueObservation,
     viewer_id: &str,
     observed_at: OffsetDateTime,
@@ -93,7 +87,7 @@ pub(crate) fn plan_apply(
         })
         .collect();
     LinearObservationApply {
-        task_id: session.id.clone(),
+        task_id: task.id.clone(),
         revision: observation.revision,
         title: observation.title,
         description: observation.description,
@@ -133,7 +127,7 @@ mod tests {
         }
     }
 
-    fn session() -> Task {
+    fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::from_raw("ts_plan"),
@@ -204,13 +198,7 @@ mod tests {
                 comment("c-2", "PR: x", Some(VIEWER)),
             ],
         );
-        let apply = plan_apply(
-            &session(),
-            obs,
-            VIEWER,
-            time::OffsetDateTime::now_utc(),
-            None,
-        );
+        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
         assert!(apply.content_steer.is_none());
         assert_eq!(apply.follow_ups.len(), 1);
         assert_eq!(apply.follow_ups[0].comment_id, "c-1");
@@ -220,7 +208,7 @@ mod tests {
     fn a_content_edit_becomes_one_steer() {
         let obs = observation("New title", "New body", vec![]);
         let apply = plan_apply(
-            &session(),
+            &task(),
             obs,
             VIEWER,
             time::OffsetDateTime::now_utc(),
@@ -235,7 +223,7 @@ mod tests {
     fn an_unchanged_issue_emits_no_steer() {
         let obs = observation("Old title", "Old body", vec![]);
         let apply = plan_apply(
-            &session(),
+            &task(),
             obs,
             VIEWER,
             time::OffsetDateTime::now_utc(),

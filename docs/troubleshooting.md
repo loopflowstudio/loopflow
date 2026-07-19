@@ -17,7 +17,7 @@ lf home probe <wave>       # reachable? stopped? running? — with the next acti
 lf start <wave>            # idempotently start the Wave on its placed Home
 ```
 
-## Task Session stops advancing
+## Task Work stops advancing
 
 **Symptom:** A Task remains waiting, blocked, failed, or submitted without an
 obvious next action.
@@ -97,7 +97,7 @@ checkout has not moved.
 
 ## Project or Task is waiting
 
-**Symptom:** Loopflow shows a Project or Task Session in `waiting`.
+**Symptom:** Loopflow shows a Project or Task Work in `waiting`.
 
 Waiting is deliberate: no provider process is running while a child or external
 system must change the answer. Inspect the Wave's work map and the child's
@@ -111,7 +111,7 @@ lf task status INF-123 --json
 
 Typical owners are a pending decision, an active child Task, PR review, CI, or
 merge. Steer, decide, or resume the named Project or Task. A relevant child
-observation wakes its Project Session automatically; there is no runtime knob
+observation wakes its Project Work automatically; there is no runtime knob
 or PR-limit counter to clear.
 
 ## Context too large

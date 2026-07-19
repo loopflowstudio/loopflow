@@ -27,7 +27,7 @@ public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let subject: ChildActivitySubject
     public let subjectId: String
-    public let sessionId: String
+    public let workId: String
     public let kind: ChildActivityKind
     public let title: String
     public let summary: String
@@ -35,7 +35,7 @@ public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, subject, kind, title, summary
         case subjectId = "subject_id"
-        case sessionId = "session_id"
+        case workId = "work_id"
     }
 }
 

@@ -40,25 +40,25 @@ impl SqliteStore {
     // Durable Tasks: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
-    pub fn insert_task(&self, session: &Task, pr: &TaskPr) -> StoreResult<()> {
+    pub fn insert_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, session, pr)?;
+        insert_initial_task(&transaction, task, pr)?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn insert_task_with_steer(
         &self,
-        session: &Task,
+        task: &Task,
         pr: &TaskPr,
         author: &Author,
         text: &str,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, session, pr)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(session.id.clone()))?;
+        insert_initial_task(&transaction, task, pr)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
         Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
@@ -122,12 +122,12 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn update_task(&self, session: &Task) -> StoreResult<()> {
-        validate_task(session)?;
+    pub fn update_task(&self, task: &Task) -> StoreResult<()> {
+        validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, session)?;
-        let parameters = task_control_params(session);
+        validate_task_project(&transaction, task)?;
+        let parameters = task_control_params(task);
         let changed = transaction.execute(
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -197,13 +197,13 @@ impl SqliteStore {
         Ok(true)
     }
 
-    pub(crate) fn update_task_for_run(&self, session: &Task, lease: &RunLease) -> StoreResult<()> {
-        validate_task(session)?;
+    pub(crate) fn update_task_for_run(&self, task: &Task, lease: &RunLease) -> StoreResult<()> {
+        validate_task(task)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if update_task_for_run_in(&conn, session, lease)? == 0 {
+        if update_task_for_run_in(&conn, task, lease)? == 0 {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot update Task {}",
-                lease.run_id, session.id
+                lease.run_id, task.id
             )));
         }
         Ok(())
@@ -211,17 +211,17 @@ impl SqliteStore {
 
     pub(crate) fn finish_task_run(
         &self,
-        session: &Task,
+        task: &Task,
         lease: &RunLease,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
-        validate_task(session)?;
+        validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_task_for_run_in(&transaction, session, lease)? == 0 {
+        if update_task_for_run_in(&transaction, task, lease)? == 0 {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot finish Task {}",
-                lease.run_id, session.id
+                lease.run_id, task.id
             )));
         }
         end_run_for_lease(&transaction, lease, outcome)?;
@@ -229,29 +229,29 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn complete_task(&self, session: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
-        self.complete_task_with_authority(session, skipped_pr, None)
+    pub fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
+        self.complete_task_with_authority(task, skipped_pr, None)
     }
 
     pub(crate) fn complete_task_for_run(
         &self,
-        session: &Task,
+        task: &Task,
         skipped_pr: Option<&TaskPr>,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        self.complete_task_with_authority(session, skipped_pr, Some(lease))
+        self.complete_task_with_authority(task, skipped_pr, Some(lease))
     }
 
     fn complete_task_with_authority(
         &self,
-        session: &Task,
+        task: &Task,
         skipped_pr: Option<&TaskPr>,
         run_lease: Option<&RunLease>,
     ) -> StoreResult<()> {
-        validate_task(session)?;
+        validate_task(task)?;
         if let Some(pr) = skipped_pr {
             validate_task_pr(pr)?;
-            if pr.task_id != session.id || pr.phase() != PrPhase::Working {
+            if pr.task_id != task.id || pr.phase() != PrPhase::Working {
                 return Err(StoreError::InvalidData(
                     "empty completion requires an unpublished Working Task PR".to_string(),
                 ));
@@ -259,9 +259,9 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, session)?;
+        validate_task_project(&transaction, task)?;
         if let Some(lease) = run_lease {
-            require_run_owns_child(&transaction, &ChildRef::Task(session.id.clone()), lease)?;
+            require_run_owns_child(&transaction, &ChildRef::Task(task.id.clone()), lease)?;
         }
         if let Some(pr) = skipped_pr {
             if transaction.execute(
@@ -276,9 +276,9 @@ impl SqliteStore {
             }
         }
         let changed = match run_lease {
-            Some(lease) => update_task_for_run_in(&transaction, session, lease)?,
+            Some(lease) => update_task_for_run_in(&transaction, task, lease)?,
             None => {
-                let parameters = task_control_params(session);
+                let parameters = task_control_params(task);
                 transaction.execute(
                     TASK_UPDATE,
                     rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -289,7 +289,7 @@ impl SqliteStore {
             if let Some(lease) = run_lease {
                 return Err(StoreError::InvalidAuthority(format!(
                     "Run {} cannot complete Task {}",
-                    lease.run_id, session.id
+                    lease.run_id, task.id
                 )));
             }
             return Err(StoreError::NotFound);
@@ -300,48 +300,48 @@ impl SqliteStore {
 
     pub fn handoff_task_body(
         &self,
-        session_id: &TaskId,
+        task_id: &TaskId,
         request: &ChildBodyHandoffRequest,
     ) -> StoreResult<Task> {
         validate_handoff_request(request)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
-            .query_row(TASK_SELECT, params![session_id.as_str()], map_task_row)
+        let mut task = transaction
+            .query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(session.id.clone()))?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
         validate_handoff_state(
             "Task",
-            &session.directive.identifier,
+            &task.directive.identifier,
             &work_status_in(&transaction, &work)?,
-            session.abandon_intent.as_ref(),
+            task.abandon_intent.as_ref(),
         )?;
         let handoff = apply_handoff(
-            &mut session.agent,
-            &mut session.provider,
-            &mut session.provider_session_id,
+            &mut task.agent,
+            &mut task.provider,
+            &mut task.provider_session_id,
             request,
         );
-        session.updated_at = OffsetDateTime::now_utc();
-        validate_task(&session)?;
-        let parameters = task_control_params(&session);
+        task.updated_at = OffsetDateTime::now_utc();
+        validate_task(&task)?;
+        let parameters = task_control_params(&task);
         transaction.execute(
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         insert_task_event_in(
             &transaction,
-            &session,
+            &task,
             &TaskEventKind::BodyHandedOff { handoff },
         )?;
         transaction.commit()?;
-        Ok(session)
+        Ok(task)
     }
 
-    pub fn task(&self, session_id: &TaskId) -> StoreResult<Option<Task>> {
+    pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(TASK_SELECT, params![session_id.as_str()], map_task_row)
+        conn.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)
             .optional()
             .map_err(StoreError::from)
     }
@@ -351,11 +351,11 @@ impl SqliteStore {
         let query = format!("{TASK_COLUMNS} WHERE t.external_issue_id=?1 OR t.issue_identifier=?1");
         let mut statement = conn.prepare(&query)?;
         let rows = statement.query_map(params![issue], map_task_row)?;
-        let mut sessions = Vec::new();
+        let mut tasks = Vec::new();
         for row in rows {
-            sessions.push(row?);
+            tasks.push(row?);
         }
-        resolve_current_task(issue, sessions)
+        resolve_current_task(issue, tasks)
     }
 
     pub fn task_by_worktree(&self, worktree: &str) -> StoreResult<Option<Task>> {
@@ -363,11 +363,11 @@ impl SqliteStore {
         let query = format!("{TASK_COLUMNS} WHERE t.worktree=?1");
         let mut statement = conn.prepare(&query)?;
         let rows = statement.query_map(params![worktree], map_task_row)?;
-        let mut sessions = Vec::new();
+        let mut tasks = Vec::new();
         for row in rows {
-            sessions.push(row?);
+            tasks.push(row?);
         }
-        resolve_current_task(worktree, sessions)
+        resolve_current_task(worktree, tasks)
     }
 
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
@@ -380,19 +380,19 @@ impl SqliteStore {
             None => (format!("{TASK_COLUMNS} ORDER BY t.updated_at DESC"), None),
         };
         let mut statement = conn.prepare(&query)?;
-        let mut sessions = Vec::new();
+        let mut tasks = Vec::new();
         if let Some(parameter) = parameter {
             let rows = statement.query_map([parameter], map_task_row)?;
             for row in rows {
-                sessions.push(row?);
+                tasks.push(row?);
             }
         } else {
             let rows = statement.query_map([], map_task_row)?;
             for row in rows {
-                sessions.push(row?);
+                tasks.push(row?);
             }
         }
-        Ok(sessions)
+        Ok(tasks)
     }
 
     pub fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
@@ -440,12 +440,12 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn task_prs(&self, session_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
+    pub fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
             "{TASK_PR_COLUMNS} WHERE task_id=?1 ORDER BY sequence"
         ))?;
-        let rows = statement.query_map(params![session_id.as_str()], map_task_pr_row)?;
+        let rows = statement.query_map(params![task_id.as_str()], map_task_pr_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
@@ -454,13 +454,13 @@ impl SqliteStore {
         task_pr_on(&conn, pr_id)
     }
 
-    pub fn active_task_pr(&self, session_id: &TaskId) -> StoreResult<Option<TaskPr>> {
+    pub fn active_task_pr(&self, task_id: &TaskId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
             "{TASK_PR_COLUMNS}
              WHERE task_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
         );
-        conn.query_row(&query, params![session_id.as_str()], map_task_pr_row)
+        conn.query_row(&query, params![task_id.as_str()], map_task_pr_row)
             .optional()
             .map_err(StoreError::from)
     }
@@ -521,10 +521,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn complete_task_after_pr(&self, session: &Task, pr: &TaskPr) -> StoreResult<()> {
-        validate_task(session)?;
+    pub fn complete_task_after_pr(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+        validate_task(task)?;
         validate_task_pr(pr)?;
-        if pr.task_id != session.id
+        if pr.task_id != task.id
             || pr.phase() != PrPhase::Merged
             || pr
                 .publication
@@ -537,9 +537,9 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, session)?;
+        validate_task_project(&transaction, task)?;
         settle_task_pr_on(&transaction, pr)?;
-        let parameters = task_control_params(session);
+        let parameters = task_control_params(task);
         if transaction.execute(
             TASK_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -553,13 +553,13 @@ impl SqliteStore {
 
     pub(crate) fn complete_task_after_pr_for_run(
         &self,
-        session: &Task,
+        task: &Task,
         pr: &TaskPr,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        validate_task(session)?;
+        validate_task(task)?;
         validate_task_pr(pr)?;
-        if pr.task_id != session.id
+        if pr.task_id != task.id
             || pr.phase() != PrPhase::Merged
             || pr
                 .publication
@@ -572,13 +572,13 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, session)?;
-        require_run_owns_child(&transaction, &ChildRef::Task(session.id.clone()), lease)?;
+        validate_task_project(&transaction, task)?;
+        require_run_owns_child(&transaction, &ChildRef::Task(task.id.clone()), lease)?;
         settle_task_pr_on(&transaction, pr)?;
-        if update_task_for_run_in(&transaction, session, lease)? == 0 {
+        if update_task_for_run_in(&transaction, task, lease)? == 0 {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot complete Task {}",
-                lease.run_id, session.id
+                lease.run_id, task.id
             )));
         }
         transaction.commit()?;
@@ -587,14 +587,14 @@ impl SqliteStore {
 
     pub fn task_linear_observation(
         &self,
-        session_id: &TaskId,
+        task_id: &TaskId,
     ) -> StoreResult<Option<TaskLinearObservation>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT task_id, last_revision, last_title, last_description,
                     last_success_at, degraded_reason, updated_at
              FROM task_linear_observations WHERE task_id=?1",
-            params![session_id.as_str()],
+            params![task_id.as_str()],
             map_task_linear_observation_row,
         )
         .optional()
@@ -725,7 +725,7 @@ impl SqliteStore {
     /// duplicate delivery.
     pub fn apply_linear_comment(
         &self,
-        session_id: &TaskId,
+        task_id: &TaskId,
         comment_id: &str,
         text: &str,
         observed_at: OffsetDateTime,
@@ -733,10 +733,10 @@ impl SqliteStore {
         let observed_at = observed_at.unix_timestamp();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Task(session_id.clone()))?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(task_id.clone()))?;
         let created = ingest_linear_comment(
             &transaction,
-            session_id.as_str(),
+            task_id.as_str(),
             comment_id,
             &work,
             text,
@@ -749,7 +749,7 @@ impl SqliteStore {
                 "UPDATE task_linear_observations
                  SET last_success_at=?2, degraded_reason=NULL, updated_at=?2
                  WHERE task_id=?1",
-                params![session_id.as_str(), observed_at],
+                params![task_id.as_str(), observed_at],
             )?;
         }
         transaction.commit()?;
@@ -759,57 +759,51 @@ impl SqliteStore {
     /// Record that the latest observation failed, without moving the cursor. A
     /// Task with no baseline yet has no row to mark, which is fine — status
     /// then simply shows no observation.
-    pub fn mark_task_linear_degraded(&self, session_id: &TaskId, reason: &str) -> StoreResult<()> {
+    pub fn mark_task_linear_degraded(&self, task_id: &TaskId, reason: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE task_linear_observations SET degraded_reason=?2, updated_at=?3
              WHERE task_id=?1",
-            params![session_id.as_str(), reason, now_unix()],
+            params![task_id.as_str(), reason, now_unix()],
         )?;
         Ok(())
     }
 
     pub fn append_task_event(
         &self,
-        session_id: &TaskId,
+        task_id: &TaskId,
         kind: &TaskEventKind,
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session =
-            transaction.query_row(TASK_SELECT, params![session_id.as_str()], map_task_row)?;
-        let event = insert_task_event_in(&transaction, &session, kind)?;
+        let task = transaction.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+        let event = insert_task_event_in(&transaction, &task, kind)?;
         transaction.commit()?;
         Ok(event)
     }
 
     pub(crate) fn append_task_event_for_run(
         &self,
-        session_id: &TaskId,
+        task_id: &TaskId,
         lease: &RunLease,
         kind: &TaskEventKind,
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_run_owns_child(&transaction, &ChildRef::Task(session_id.clone()), lease)?;
-        let session =
-            transaction.query_row(TASK_SELECT, params![session_id.as_str()], map_task_row)?;
-        let event = insert_task_event_in(&transaction, &session, kind)?;
+        require_run_owns_child(&transaction, &ChildRef::Task(task_id.clone()), lease)?;
+        let task = transaction.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+        let event = insert_task_event_in(&transaction, &task, kind)?;
         transaction.commit()?;
         Ok(event)
     }
 
-    pub fn task_events_after(
-        &self,
-        session_id: &TaskId,
-        cursor: i64,
-    ) -> StoreResult<Vec<TaskEvent>> {
+    pub fn task_events_after(&self, task_id: &TaskId, cursor: i64) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT id, task_id, kind_json, created_at
              FROM task_events WHERE task_id = ?1 AND id > ?2 ORDER BY id",
         )?;
-        let rows = statement.query_map(params![session_id.as_str(), cursor], map_task_event_row)?;
+        let rows = statement.query_map(params![task_id.as_str(), cursor], map_task_event_row)?;
         let mut events = Vec::new();
         for row in rows {
             events.push(row?);
@@ -817,12 +811,12 @@ impl SqliteStore {
         Ok(events)
     }
 
-    pub fn task_event(&self, session_id: &TaskId, event_id: i64) -> StoreResult<Option<TaskEvent>> {
+    pub fn task_event(&self, task_id: &TaskId, event_id: i64) -> StoreResult<Option<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT id, task_id, kind_json, created_at
              FROM task_events WHERE task_id = ?1 AND id = ?2",
-            params![session_id.as_str(), event_id],
+            params![task_id.as_str(), event_id],
             map_task_event_row,
         )
         .optional()
@@ -833,11 +827,11 @@ impl SqliteStore {
     /// signal the body observation reads: a live body that has written nothing to
     /// its event log past the stall deadline is stalled, not working. `None` means
     /// no events yet (the status change is the only progress the caller can use).
-    pub fn latest_task_event_at(&self, session_id: &TaskId) -> StoreResult<Option<OffsetDateTime>> {
+    pub fn latest_task_event_at(&self, task_id: &TaskId) -> StoreResult<Option<OffsetDateTime>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let seconds: Option<i64> = conn.query_row(
             "SELECT MAX(created_at) FROM task_events WHERE task_id = ?1",
-            params![session_id.as_str()],
+            params![task_id.as_str()],
             |row| row.get(0),
         )?;
         Ok(seconds.map(crate::store::rows::unix_to_datetime))
@@ -846,17 +840,13 @@ impl SqliteStore {
     /// The newest `limit` events, newest first. Recovery reads a bounded window
     /// rather than the whole log: a long-lived Task accumulates thousands of
     /// events, and the attempt count only ever looks at the recent tail.
-    pub fn recent_task_events(
-        &self,
-        session_id: &TaskId,
-        limit: u32,
-    ) -> StoreResult<Vec<TaskEvent>> {
+    pub fn recent_task_events(&self, task_id: &TaskId, limit: u32) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT id, task_id, kind_json, created_at
              FROM task_events WHERE task_id = ?1 ORDER BY id DESC LIMIT ?2",
         )?;
-        let rows = statement.query_map(params![session_id.as_str(), limit], map_task_event_row)?;
+        let rows = statement.query_map(params![task_id.as_str(), limit], map_task_event_row)?;
         let mut events = Vec::new();
         for row in rows {
             events.push(row?);
@@ -864,12 +854,12 @@ impl SqliteStore {
         Ok(events)
     }
 
-    pub fn latest_task_event(&self, session_id: &TaskId) -> StoreResult<Option<TaskEvent>> {
+    pub fn latest_task_event(&self, task_id: &TaskId) -> StoreResult<Option<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT id, task_id, kind_json, created_at
              FROM task_events WHERE task_id = ?1 ORDER BY id DESC LIMIT 1",
-            params![session_id.as_str()],
+            params![task_id.as_str()],
             map_task_event_row,
         )
         .optional()
@@ -879,35 +869,35 @@ impl SqliteStore {
     // Projects are durable KR-pursuit children. They share the same
     // process/receipt shape as Tasks but deliberately own no worktree.
 
-    pub fn insert_project(&self, session: &Project) -> StoreResult<()> {
-        validate_project(session)?;
+    pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
+        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute(
             PROJECT_INSERT,
-            rusqlite::params_from_iter(project_params(session).iter().map(|value| value.as_ref())),
+            rusqlite::params_from_iter(project_params(project).iter().map(|value| value.as_ref())),
         )?;
-        create_project_spine(&transaction, session)?;
+        create_project_spine(&transaction, project)?;
         transaction.commit()?;
         Ok(())
     }
 
     pub fn insert_project_with_steer(
         &self,
-        session: &Project,
+        project: &Project,
         author: &Author,
         text: &str,
     ) -> StoreResult<()> {
-        validate_project(session)?;
+        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_params(session);
+        let parameters = project_params(project);
         transaction.execute(
             PROJECT_INSERT,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
-        create_project_spine(&transaction, session)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Project(session.id.clone()))?;
+        create_project_spine(&transaction, project)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
         Self::append_steer_in(&transaction, &work, author, text)?;
         transaction.commit()?;
         Ok(())
@@ -945,11 +935,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn update_project(&self, session: &Project) -> StoreResult<()> {
-        validate_project(session)?;
+    pub fn update_project(&self, project: &Project) -> StoreResult<()> {
+        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let parameters = project_control_params(session);
+        let parameters = project_control_params(project);
         let changed = transaction.execute(
             PROJECT_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
@@ -963,15 +953,15 @@ impl SqliteStore {
 
     pub(crate) fn update_project_for_run(
         &self,
-        session: &Project,
+        project: &Project,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        validate_project(session)?;
+        validate_project(project)?;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if update_project_for_run_in(&conn, session, lease)? == 0 {
+        if update_project_for_run_in(&conn, project, lease)? == 0 {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot update Project {}",
-                lease.run_id, session.id
+                lease.run_id, project.id
             )));
         }
         Ok(())
@@ -979,17 +969,17 @@ impl SqliteStore {
 
     pub(crate) fn finish_project_run(
         &self,
-        session: &Project,
+        project: &Project,
         lease: &RunLease,
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
-        validate_project(session)?;
+        validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_project_for_run_in(&transaction, session, lease)? == 0 {
+        if update_project_for_run_in(&transaction, project, lease)? == 0 {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot finish Project {}",
-                lease.run_id, session.id
+                lease.run_id, project.id
             )));
         }
         end_run_for_lease(&transaction, lease, outcome)?;
@@ -999,54 +989,54 @@ impl SqliteStore {
 
     pub fn handoff_project_body(
         &self,
-        session_id: &ProjectId,
+        project_id: &ProjectId,
         request: &ChildBodyHandoffRequest,
     ) -> StoreResult<Project> {
         validate_handoff_request(request)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let mut session = transaction
+        let mut project = transaction
             .query_row(
                 PROJECT_SELECT,
-                params![session_id.as_str()],
+                params![project_id.as_str()],
                 map_project_row,
             )
             .optional()?
             .ok_or(StoreError::NotFound)?;
-        let work = work_for_child_in(&transaction, &ChildRef::Project(session.id.clone()))?;
+        let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
         validate_handoff_state(
             "Project",
-            &session.definition.slug,
+            &project.definition.slug,
             &work_status_in(&transaction, &work)?,
-            session.abandon_intent.as_ref(),
+            project.abandon_intent.as_ref(),
         )?;
         let handoff = apply_handoff(
-            &mut session.agent,
-            &mut session.provider,
-            &mut session.provider_session_id,
+            &mut project.agent,
+            &mut project.provider,
+            &mut project.provider_session_id,
             request,
         );
-        session.updated_at = OffsetDateTime::now_utc();
-        validate_project(&session)?;
-        let parameters = project_control_params(&session);
+        project.updated_at = OffsetDateTime::now_utc();
+        validate_project(&project)?;
+        let parameters = project_control_params(&project);
         transaction.execute(
             PROJECT_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )?;
         insert_project_event_in(
             &transaction,
-            &session,
+            &project,
             &ProjectEventKind::BodyHandedOff { handoff },
         )?;
         transaction.commit()?;
-        Ok(session)
+        Ok(project)
     }
 
-    pub fn project(&self, session_id: &ProjectId) -> StoreResult<Option<Project>> {
+    pub fn project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             PROJECT_SELECT,
-            params![session_id.as_str()],
+            params![project_id.as_str()],
             map_project_row,
         )
         .optional()
@@ -1054,8 +1044,8 @@ impl SqliteStore {
     }
 
     pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
-        if let Ok(session_id) = ProjectId::parse(project) {
-            return self.project(&session_id);
+        if let Ok(project_id) = ProjectId::parse(project) {
+            return self.project(&project_id);
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
@@ -1078,60 +1068,60 @@ impl SqliteStore {
             None => format!("{PROJECT_COLUMNS} ORDER BY updated_at DESC"),
         };
         let mut statement = conn.prepare(&query)?;
-        let mut sessions = Vec::new();
+        let mut projects = Vec::new();
         if let Some(wave_id) = wave_id {
             let rows = statement.query_map(params![wave_id], map_project_row)?;
             for row in rows {
-                sessions.push(row?);
+                projects.push(row?);
             }
         } else {
             let rows = statement.query_map([], map_project_row)?;
             for row in rows {
-                sessions.push(row?);
+                projects.push(row?);
             }
         }
-        Ok(sessions)
+        Ok(projects)
     }
 
     pub fn append_project_event(
         &self,
-        session_id: &ProjectId,
+        project_id: &ProjectId,
         kind: &ProjectEventKind,
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = transaction.query_row(
+        let project = transaction.query_row(
             PROJECT_SELECT,
-            params![session_id.as_str()],
+            params![project_id.as_str()],
             map_project_row,
         )?;
-        let event = insert_project_event_in(&transaction, &session, kind)?;
+        let event = insert_project_event_in(&transaction, &project, kind)?;
         transaction.commit()?;
         Ok(event)
     }
 
     pub(crate) fn append_project_event_for_run(
         &self,
-        session_id: &ProjectId,
+        project_id: &ProjectId,
         lease: &RunLease,
         kind: &ProjectEventKind,
     ) -> StoreResult<ProjectEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_run_owns_child(&transaction, &ChildRef::Project(session_id.clone()), lease)?;
-        let session = transaction.query_row(
+        require_run_owns_child(&transaction, &ChildRef::Project(project_id.clone()), lease)?;
+        let project = transaction.query_row(
             PROJECT_SELECT,
-            params![session_id.as_str()],
+            params![project_id.as_str()],
             map_project_row,
         )?;
-        let event = insert_project_event_in(&transaction, &session, kind)?;
+        let event = insert_project_event_in(&transaction, &project, kind)?;
         transaction.commit()?;
         Ok(event)
     }
 
     pub fn project_events_after(
         &self,
-        session_id: &ProjectId,
+        project_id: &ProjectId,
         cursor: i64,
     ) -> StoreResult<Vec<ProjectEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1140,7 +1130,7 @@ impl SqliteStore {
              FROM project_events WHERE project_id=?1 AND id>?2 ORDER BY id",
         )?;
         let rows =
-            statement.query_map(params![session_id.as_str(), cursor], map_project_event_row)?;
+            statement.query_map(params![project_id.as_str(), cursor], map_project_event_row)?;
         let mut events = Vec::new();
         for row in rows {
             events.push(row?);
@@ -1152,12 +1142,12 @@ impl SqliteStore {
     /// signal for the Project body observation, mirroring [`Self::latest_task_event_at`].
     pub fn latest_project_event_at(
         &self,
-        session_id: &ProjectId,
+        project_id: &ProjectId,
     ) -> StoreResult<Option<OffsetDateTime>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let seconds: Option<i64> = conn.query_row(
             "SELECT MAX(created_at) FROM project_events WHERE project_id = ?1",
-            params![session_id.as_str()],
+            params![project_id.as_str()],
             |row| row.get(0),
         )?;
         Ok(seconds.map(crate::store::rows::unix_to_datetime))
@@ -1314,9 +1304,8 @@ impl SqliteStore {
     }
 }
 
-fn validate_task(session: &Task) -> StoreResult<()> {
-    session
-        .validate()
+fn validate_task(task: &Task) -> StoreResult<()> {
+    task.validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
@@ -1397,9 +1386,9 @@ fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-fn validate_initial_task_pr(session: &Task, pr: &TaskPr) -> StoreResult<()> {
+fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
-    if pr.task_id != session.id || pr.sequence != 1 || pr.phase() != PrPhase::Working {
+    if pr.task_id != task.id || pr.sequence != 1 || pr.phase() != PrPhase::Working {
         return Err(StoreError::InvalidData(
             "Task requires its sequence-1 Working PR".to_string(),
         ));
@@ -1409,20 +1398,20 @@ fn validate_initial_task_pr(session: &Task, pr: &TaskPr) -> StoreResult<()> {
 
 fn insert_initial_task(
     conn: &rusqlite::Transaction<'_>,
-    session: &Task,
+    task: &Task,
     pr: &TaskPr,
 ) -> StoreResult<()> {
-    validate_task(session)?;
-    validate_initial_task_pr(session, pr)?;
-    validate_task_project(conn, session)?;
-    let parameters = task_params(session);
+    validate_task(task)?;
+    validate_initial_task_pr(task, pr)?;
+    validate_task_project(conn, task)?;
+    let parameters = task_params(task);
     conn.execute(
         TASK_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
-    create_task_spine(conn, session)?;
+    create_task_spine(conn, task)?;
     insert_task_pr(conn, pr)?;
-    seed_task_linear_observation(conn, session)
+    seed_task_linear_observation(conn, task)
 }
 
 /// Seed the Linear observation cursor from the planning directive, in the Task's
@@ -1431,47 +1420,47 @@ fn insert_initial_task(
 /// first issue-edit webhook diffs against the directive title/description instead of
 /// baselining (and swallowing) it. The revision seeds empty so any real Linear
 /// `updatedAt` wins the monotonic guard.
-fn seed_task_linear_observation(conn: &Connection, session: &Task) -> StoreResult<()> {
+fn seed_task_linear_observation(conn: &Connection, task: &Task) -> StoreResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO task_linear_observations (
             task_id, last_revision, last_title, last_description,
             last_success_at, degraded_reason, updated_at
          ) VALUES (?1, '', ?2, ?3, ?4, NULL, ?4)",
         params![
-            session.id.as_str(),
-            session.directive.title,
-            session.directive.description,
+            task.id.as_str(),
+            task.directive.title,
+            task.directive.description,
             now_unix(),
         ],
     )?;
     Ok(())
 }
 
-fn validate_task_project(conn: &Connection, session: &Task) -> StoreResult<()> {
+fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     let owner = conn
         .query_row(
             "SELECT wave_id FROM projects WHERE id=?1",
-            params![session.project_id.as_str()],
+            params![task.project_id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?;
     let Some(wave_id) = owner else {
         return Err(StoreError::InvalidData(format!(
             "Task {} requires Project {}",
-            session.id, session.project_id
+            task.id, task.project_id
         )));
     };
-    if wave_id != session.wave_id.as_str() {
+    if wave_id != task.wave_id.as_str() {
         return Err(StoreError::InvalidData(format!(
             "Project {} does not belong to Task {}'s Wave {}",
-            session.project_id, session.id, session.wave_id
+            task.project_id, task.id, task.wave_id
         )));
     }
     Ok(())
 }
 
-fn validate_project(session: &Project) -> StoreResult<()> {
-    session
+fn validate_project(project: &Project) -> StoreResult<()> {
+    project
         .validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
@@ -1756,7 +1745,7 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
 
 /// Move a Task PR's `base_commit` range anchor forward. `base_commit` is part of
 /// `update_task_pr`'s optimistic identity, so healing it needs a dedicated write
-/// keyed on the row's true identity (id + session + sequence).
+/// keyed on the row's true identity (id + task + sequence).
 fn heal_task_pr_base(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
     validate_task_pr(pr)?;
     conn.execute(
@@ -2217,33 +2206,29 @@ fn recipient_columns(recipient: &ObservationRecipient) -> (&'static str, String)
 
 fn child_columns(source: &ChildRef) -> (&'static str, String) {
     match source {
-        ChildRef::Project(session_id) => ("project", session_id.as_str().to_string()),
-        ChildRef::Task(session_id) => ("task", session_id.as_str().to_string()),
+        ChildRef::Project(project_id) => ("project", project_id.as_str().to_string()),
+        ChildRef::Task(task_id) => ("task", task_id.as_str().to_string()),
     }
 }
 
 pub(super) fn insert_task_event_in(
     conn: &Connection,
-    session: &Task,
+    task: &Task,
     kind: &TaskEventKind,
 ) -> StoreResult<TaskEvent> {
     let created_at = now_unix();
     conn.execute(
         "INSERT INTO task_events (task_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
-        params![
-            session.id.as_str(),
-            serde_json::to_string(kind)?,
-            created_at
-        ],
+        params![task.id.as_str(), serde_json::to_string(kind)?, created_at],
     )?;
     let event_id = conn.last_insert_rowid();
     if kind.is_project_observable() {
         insert_observation(
             conn,
             &ObservationRecipient::Project {
-                project_id: session.project_id.clone(),
+                project_id: task.project_id.clone(),
             },
-            &ChildRef::Task(session.id.clone()),
+            &ChildRef::Task(task.id.clone()),
             event_id,
             &ChildEventPayload::Task {
                 event: kind.clone(),
@@ -2254,9 +2239,9 @@ pub(super) fn insert_task_event_in(
             insert_observation(
                 conn,
                 &ObservationRecipient::Wave {
-                    wave_id: session.wave_id.clone(),
+                    wave_id: task.wave_id.clone(),
                 },
-                &ChildRef::Task(session.id.clone()),
+                &ChildRef::Task(task.id.clone()),
                 event_id,
                 &ChildEventPayload::Task {
                     event: kind.clone(),
@@ -2267,7 +2252,7 @@ pub(super) fn insert_task_event_in(
     }
     Ok(TaskEvent {
         id: event_id,
-        task_id: session.id.clone(),
+        task_id: task.id.clone(),
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })
@@ -2275,14 +2260,14 @@ pub(super) fn insert_task_event_in(
 
 fn insert_project_event_in(
     conn: &Connection,
-    session: &Project,
+    project: &Project,
     kind: &ProjectEventKind,
 ) -> StoreResult<ProjectEvent> {
     let created_at = now_unix();
     conn.execute(
         "INSERT INTO project_events (project_id, kind_json, created_at) VALUES (?1, ?2, ?3)",
         params![
-            session.id.as_str(),
+            project.id.as_str(),
             serde_json::to_string(kind)?,
             created_at
         ],
@@ -2292,9 +2277,9 @@ fn insert_project_event_in(
         insert_observation(
             conn,
             &ObservationRecipient::Wave {
-                wave_id: session.wave_id.clone(),
+                wave_id: project.wave_id.clone(),
             },
-            &ChildRef::Project(session.id.clone()),
+            &ChildRef::Project(project.id.clone()),
             event_id,
             &ChildEventPayload::Project {
                 event: kind.clone(),
@@ -2304,7 +2289,7 @@ fn insert_project_event_in(
     }
     Ok(ProjectEvent {
         id: event_id,
-        project_id: session.id.clone(),
+        project_id: project.id.clone(),
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })

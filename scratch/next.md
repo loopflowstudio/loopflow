@@ -17,8 +17,8 @@
 
 ## Done when
 
-- [ ] Task workspace JSON names `task_id`; child activity JSON names `work_id`.
-- [ ] Launch presentation consumers name `launchId`.
-- [ ] production Project/Task code does not call stable Work or ids sessions.
-- [ ] user docs contain no Task Session, Project Session, or durable Session.
-- [ ] Rust/Swift DTO and focused behavior tests, fmt, and all-target clippy pass.
+- [x] Task workspace JSON names `task_id`; child activity JSON names `work_id`.
+- [x] Launch presentation consumers name `launchId`.
+- [x] production Project/Task code does not call stable Work or ids sessions.
+- [x] user docs contain no Task Session, Project Session, or durable Session.
+- [x] Rust/Swift DTO and focused behavior tests, fmt, and all-target clippy pass.

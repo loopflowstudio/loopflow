@@ -324,8 +324,8 @@ delete orphan receipts, and rename Work/Launch identities still called Session.
 - [x] Reviewer columns/values use reviewer and user/parent; no dual reader.
 - [x] `InteractionPolicy` and dead feedback `FlowAction` machinery are absent.
 - [x] Evidence Receipt models, command, resolver, docs, and PR helpers are absent.
-- [ ] Work/Launch wire identity uses task/work/launch rather than session.
-- [ ] Product help/docs contain no Task Session, Project Session, or durable
+- [x] Work/Launch wire identity uses task/work/launch rather than session.
+- [x] Product help/docs contain no Task Session, Project Session, or durable
       Session identity; remaining Session terms name real provider/terminal/time
       sessions or explicitly deferred `provider_session_id` fields.
 

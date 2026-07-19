@@ -2,7 +2,7 @@
 
 A wave is a named agent with a goal. You author its intent and let it
 coordinate; it remembers what it learns, works the next blocker, spins off
-durable Task Sessions when parallelism earns it, and stays steerable the whole
+durable Tasks when parallelism earns it, and stays steerable the whole
 time.
 
 Two files author a wave, both living in your repo and reviewed like code:
@@ -98,7 +98,7 @@ $EDITOR wave/shipper/MEMORY.md
 `lf memory show` is read-only convenience and does not require a running Wave.
 Edit the file directly when the active work calls for it. `update-wave` owns
 deliberate end-of-work curation: merge durable context into the existing
-structure, correct stale entries, and drop session detail. When a task ships,
+structure, correct stale entries, and drop transient Run detail. When a task ships,
 its context folds forward into memory and the remaining Linear tasks — fold,
 don't drop.
 
@@ -116,16 +116,16 @@ lf start                      # start every Wave in the current repo
 lf stop shipper               # stop only this Wave
 ```
 
-New Project and Task Work inherits its parent's placement once. Move Wave Work
+New Project or Task Work inherits its parent's placement once. Move Wave Work
 only while it has no live Run:
 
 ```bash
 lf work place wave <wave-id> <home-id>
 ```
 
-Project and Task movement stays closed while their Session runners remain the
+Project and Task movement stays closed while their Runs remain the
 executor. The shared Run supervisor will open that placement boundary without
-another Session-to-Run routing bridge.
+another Work-to-Run routing bridge.
 
 One keeper process per Home serves all placed Waves. Starting or stopping one
 Wave does not create or kill a machine-wide controller and does not disturb
@@ -191,7 +191,7 @@ lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ## Tasks
 
 Every concrete file-writing change begins with a Linear task and runs as a
-durable Task Session in its own stable sibling worktree:
+durable Task Work in its own stable sibling worktree:
 
 ```bash
 lf task start <linear-project-id> "add retry to token refresh"
@@ -200,7 +200,7 @@ lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
 ```
 
-A Task Session advances through zero or more serial PRs to `main`. Its Project
+Task Work advances through zero or more serial PRs to `main`. Its Project
 configures `first`, `loop`, and `finally` flows; Task launch resolves all three
 and pins them for the lifetime of the Task. `--first`, `--loop`, and `--finally`
 override one Task at launch. The first flow runs once, the loop repeats, and the
@@ -235,7 +235,7 @@ An approach portfolio is useful when a premature architecture choice would be
 expensive and several safe probes can run independently. Each Task should name
 its mechanism and return evidence, an artifact, an exact gap, or a
 counterexample. Keep routes independent long enough to expose their own failure
-modes; then let the Project Session synthesize and redirect them.
+modes; then let the Project Work synthesize and redirect them.
 
 Do not represent competing approaches as duplicate Projects, launch multiple
 Tasks with the same favored brief, or count activity as evidence. Block a route
@@ -292,7 +292,7 @@ Cleanup            → Remove old billing code
 ```
 
 The wave reads Projects and Tasks with `lf pm show --no-sync`, directs the
-highest-priority Project, and starts a Task Session for every independent
+highest-priority Project, and starts Task Work for every independent
 file-writing change. Each shipped PR folds into memory and closes its task.
 
 ## Next

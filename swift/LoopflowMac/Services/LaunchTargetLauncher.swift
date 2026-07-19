@@ -211,15 +211,15 @@ enum LaunchTargetLauncher {
     }
 
     /// The name of the Warp launch configuration for a launch.
-    static func warpLaunchConfigName(sessionId: String) -> String {
-        "loopflow-launch-\(sessionId)"
+    static func warpLaunchConfigName(launchId: String) -> String {
+        "loopflow-launch-\(launchId)"
     }
 
     /// Render a command-bearing Warp launch configuration that runs the *exact
     /// shared attach command* in the worktree, with the descriptor's environment
     /// preserved. Pure and testable: the embedded command is the environment
     /// prefix plus the provider-session-bearing argv the store handed back, so a
-    /// Warp launch attaches the same durable Session — with the same environment —
+    /// Warp launch attaches the same Launch — with the same environment —
     /// rather than a fresh shell. Warp launch configs carry no environment field
     /// of their own, so the environment rides an `env KEY=VALUE …` prefix on the
     /// command itself, exactly as the embedded terminal would inherit it.
@@ -256,7 +256,7 @@ enum LaunchTargetLauncher {
     private static func writeWarpLaunchConfig(attach: LaunchSurfaceRecord, home: String) -> URL? {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".warp/launch_configurations", isDirectory: true)
-        let name = warpLaunchConfigName(sessionId: attach.sessionId)
+        let name = warpLaunchConfigName(launchId: attach.launchId)
         let command = command(for: attach, home: home)
         let yaml = warpLaunchConfigYAML(
             name: name,

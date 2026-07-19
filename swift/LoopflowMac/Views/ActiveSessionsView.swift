@@ -6,7 +6,7 @@ import SwiftUI
 /// The projection (`ActiveSessionsCensus`) owns every rule — red propagation,
 /// evidence classification, and which rows are view-only. This view only renders
 /// what the census decided and, for a deliberate interactive launch, offers the
-/// one mutation: Open, which re-attaches the exact durable Session in Ghostty.
+/// one mutation: Open, which re-attaches the exact Launch in Ghostty.
 struct ActiveSessionsView: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
 
@@ -351,13 +351,13 @@ private enum RelativeAge {
     }
 }
 
-// MARK: - Open: present the exact durable Session in the remembered surface
+// MARK: - Open: present the exact Launch in the remembered surface
 
 /// Open resolves *where* to present the launch — the last successful surface for
 /// this provider on this Home, then the last overall, then embedded Ghostty — and
 /// records the choice only after a launch succeeds. Every target attaches the one
-/// durable Session by running the argv the contract hands back; this view owns no
-/// lifecycle and never creates or names the Session.
+/// Launch by running the argv the contract hands back; this view owns no
+/// lifecycle and never creates or names the provider session.
 private struct LaunchAttachSheet: View {
     let launch: LaunchSurfaceRecord
     let query: RegistryQuery
@@ -437,9 +437,9 @@ private struct LaunchAttachSheet: View {
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "feedback-\(attach.sessionId)"
+                sessionId: "feedback-\(attach.launchId)"
             )
-            .id(attach.sessionId)
+            .id(attach.launchId)
         } else if let surface, let externalNote {
             ContentUnavailableView {
                 Label("Presented in \(surface.appName)", systemImage: "arrow.up.forward.app")

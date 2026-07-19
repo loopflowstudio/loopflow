@@ -74,7 +74,7 @@ private func childActivity(_ kind: ChildActivityKind) -> ChildControlActivity {
         id: "act-\(kind.rawValue)",
         subject: .project,
         subjectId: "wave-chat",
-        sessionId: "ps_1",
+        workId: "ps_1",
         kind: kind,
         title: "Wave chat",
         summary: "…"

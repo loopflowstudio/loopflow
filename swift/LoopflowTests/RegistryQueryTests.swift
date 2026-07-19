@@ -205,18 +205,18 @@ struct RegistryQueryTests {
             #expect(cwd == "/tmp/repo")
             switch args {
             case ["task", "changes", "INF-123", "--json"]:
-                return #"{"issue_identifier":"INF-123","session_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","committed":true,"staged":false,"unstaged":true,"untracked":false}]}"#
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","committed":true,"staged":false,"unstaged":true,"untracked":false}]}"#
             case ["task", "diff", "INF-123", "src/parser.rs", "--json"]:
-                return #"{"issue_identifier":"INF-123","session_id":"ts_1","path":"src/parser.rs","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
             case ["task", "file", "INF-123", "src/parser.rs", "--json"]:
-                return #"{"issue_identifier":"INF-123","session_id":"ts_1","path":"src/parser.rs","content":"fn parse() {}\n","binary":false,"size_bytes":14,"truncated":false}"#
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","content":"fn parse() {}\n","binary":false,"size_bytes":14,"truncated":false}"#
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
             }
         }
 
         let changes = try await query.taskChanges(issue: "INF-123", cwd: "/tmp/repo")
-        #expect(changes.sessionId == "ts_1")
+        #expect(changes.taskId == "ts_1")
         #expect(changes.files[0].path == "src/parser.rs")
         #expect(changes.files[0].committed && changes.files[0].unstaged)
 
@@ -256,7 +256,7 @@ struct RegistryQueryTests {
         #expect(runs[0].suppliedContextTokens == 150)
         #expect(runs[0].model == "opus")
         // The drill foreign key: a run declares the roadmap Project/Task it owns,
-        // or nil when it was launched outside a Task Session.
+        // or nil when it was launched outside a Task Work.
         #expect(runs[0].project == "auditability")
         #expect(runs[0].task == "W2-122")
         #expect(runs[1].project == nil)

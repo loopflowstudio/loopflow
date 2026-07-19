@@ -770,7 +770,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Start or resume the current Session for an existing Linear Project
+    /// Start or resume the current Work for an existing Linear Project
     Run {
         /// Linear Project UUID or unique slug
         project_id: String,
@@ -786,7 +786,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Redirect Project work now, relaunching the Session when needed
+    /// Redirect Project Work now, relaunching its provider when needed
     Steer {
         project_id: String,
         message: String,

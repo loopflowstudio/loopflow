@@ -73,7 +73,7 @@ flow without inventing an approval disposition.
 Genuinely terminal-shaped work (a login, an opaque TUI) stays on the owning
 Launch. `lf launch present <id>` reopens its attach route, and `lf launch
 handback <id> --outcome ...` records explicit terminal evidence without
-inventing a second Session.
+inventing a second Work identity.
 
 ## The Mac app
 
@@ -86,7 +86,7 @@ second database, no machine-wide service. What the CLI reads, it renders:
   attention lenses: green (advancing), blue (waiting on you), red (unhealthy),
   black (settled).
 - **Task workspace** — changed files, per-file patches, an embedded Feedback
-  session, and local inspection tools.
+  presentation, and local inspection tools.
 - **Context Lab** — the same `lf context` evidence, with "refine in a task"
   one click away.
 - **Telemetry** — token spend, codebase growth, registry health.

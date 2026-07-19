@@ -166,7 +166,7 @@ struct ChatReferenceTests {
 
     @Test("Plain prose with no references returns nothing quickly")
     func noReferences() {
-        #expect(parseChatReferences(in: "The restarted Project Session is healthy.").isEmpty)
+        #expect(parseChatReferences(in: "The restarted Project Work is healthy.").isEmpty)
         #expect(parseChatReferences(in: "").isEmpty)
     }
 

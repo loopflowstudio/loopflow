@@ -158,3 +158,23 @@ Proof: the first-class command is absent, an authored flow rejects `receipt`,
 Task behavior 15/15 and the Wave resolution matrix 3/3 pass, and the exact
 evidence API/docs search is empty. `cargo fmt --check` and all-target Clippy
 with warnings denied pass. No tombstone command or compatibility alias exists.
+
+## Slice 6D1 — honest Work and Launch identity
+
+Accepted. Task workspace snapshots carry `task_id`; child activity carries
+`work_id`; Swift Launch presentation consumers use `launchId` for the existing
+`launch.id`. Rust/Swift DTO mirrors, fixtures, tests, and Mac consumers change
+together with no fallback key or compatibility property.
+
+Production Project and Task code now names stable records and ids Project,
+Task, or Work rather than Session. User docs likewise describe Task Work,
+Project Work, and Launches. Historical migrations retain the vocabulary of the
+schema they migrate, and explicit provider session ids plus real tmux, Ghostty,
+browser, and human sessions remain.
+
+Proof: Rust chat-turn behavior 6/6 and Wave journal 7/7 pass. Swift DTO,
+registry, local launcher, and Wave transcript coverage passes 53/53, including
+workspace JSON, child activity, and Launch presentation. Exact false-Session
+and retired wire-key searches are empty outside historical migrations and the
+explicit substrate allowlist; `cargo fmt --check` and all-target Clippy with
+warnings denied pass. Clippy caught and removed one redundant field spelling.

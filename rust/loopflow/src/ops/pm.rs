@@ -2873,7 +2873,7 @@ mod tests {
         store
             .create_project(&project)
             .await
-            .expect("create project session");
+            .expect("create Project Work");
 
         let session_id = TaskId::new();
         let session = Task {
@@ -2927,7 +2927,7 @@ mod tests {
         store
             .create_task(&session, &pr)
             .await
-            .expect("create task session");
+            .expect("create Task Work");
         session_id
     }
 

@@ -136,7 +136,7 @@ Write global flags before a built-in subcommand. Unambiguous flags also work
 after it:
 
 ```bash
-lf task run DES-123 --json                           # durable Task Session
+lf task run DES-123 --json                           # durable Task Work
 lf task status DES-123 --json                        # same identity and worktree
 lf task changes DES-123 --json                       # committed + working changes
 lf task diff DES-123 src/parser.rs --json            # one file's Task patch
@@ -254,7 +254,7 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 lf start designer                                  # serve it from its placed Home
 lf wave designer                                   # foreground development mode
 lf stop designer                                   # stop it; leave the Home keeper running
-lf project run <linear-project-id>                  # durable Project Session
+lf project run <linear-project-id>                  # durable Project Work
 lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
@@ -277,15 +277,15 @@ lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 
 `lf start <name>` asks the placed Home's shared keeper to serve the Wave.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
-development. A Project Session pursues one Linear Project's KRs without a worktree.
-Each Project has at most one current Session; terminal Sessions remain readable
+development. Project Work pursues one Linear Project's KRs without a worktree.
+Each Linear Project has at most one current Work; terminal Work remains readable
 history and the next pursuit creates a successor. Every Task requires the
-current Project Session; `task start/run` ensures it before reserving the Task.
+current Project Work; `task start/run` ensures it before reserving the Task.
 The Task starts only after its Linear issue exists and owns one stable worktree.
 Its provider process and transcript are replaceable execution state: plain
 `resume` keeps compatible history; `resume --model <agent>` preserves the same
 Work, durable Steers, worktree, and PR chain while selecting another provider.
-The Session remains resumable through serial PRs, review, and explicit
+The Task remains resumable through serial PRs, review, and explicit
 completion.
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
@@ -696,7 +696,7 @@ lf wt prune                   # force-remove them and their local branches
 ```
 
 `prune` is intentionally destructive: it preserves main, the current
-worktree, nonterminal Task Sessions, and worktrees owned by live processes —
+worktree, nonterminal Tasks, and worktrees owned by live processes —
 everything else goes, including dirty and unpushed work. Run `--dry-run`
 first when the repository contains work created outside Loopflow.
 
@@ -770,7 +770,7 @@ waits on Linear.
 
 `lf pm reteam` migrates a wave's existing issues into its own team. It
 **defaults to a dry run** and only mutates with `--apply`; it defers an issue
-only while a Task body can write to its Session. Completed issues move too:
+only while a Task body can write in its worktree. Completed issues move too:
 Linear cannot remove the shared team from a Project while any issue in that
 Project still belongs to it. Before each issue moves, Loopflow records its old
 identifier in a comment; after every issue is on the wave team, it narrows the

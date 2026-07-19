@@ -69,7 +69,7 @@ guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf task run <issue-id>                       # durable Task Session, own worktree
+lf task run <issue-id>                       # durable Task Work, own worktree
 lf task steer <issue-id> "smaller approach"  # redirect its active turn
 lf task status <issue-id> --json             # inspect durable state
 lf task wait <issue-id> --until terminal

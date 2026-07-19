@@ -540,11 +540,6 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
-    /// Read a Wave's origin MEMORY.md
-    Memory {
-        #[command(subcommand)]
-        cmd: MemoryCommand,
-    },
     /// Run a command on a Home or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
@@ -737,8 +732,8 @@ fn reject_retired_op(sub: &str) -> Result<String, String> {
     Err(format!("`lf op {sub}` was removed; {hint}"))
 }
 
-/// Wave targeting shared by `lf chat` and `lf memory show`: default is the
-/// invoking context's wave (`LF_WAVE_ID` env, else the worktree name).
+/// Wave targeting for `lf chat`: default is the invoking context's wave
+/// (`LF_WAVE_ID` env, else the worktree name).
 #[derive(Args, Debug, Clone, Default)]
 pub struct WaveTargetArgs {
     /// Target wave by name
@@ -747,15 +742,6 @@ pub struct WaveTargetArgs {
     /// Target the invoking wave's parent (escalation up the wave tree)
     #[arg(long)]
     pub parent: bool,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum MemoryCommand {
-    /// Print the Wave's origin MEMORY.md
-    Show {
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1645,7 +1631,7 @@ pub enum WtCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Remove every worktree not protected by active ownership
+    /// Remove clean terminal or inactive worktrees
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
@@ -2934,34 +2920,9 @@ mod tests {
     }
 
     #[test]
-    fn memory_exposes_only_explicit_show() {
-        let cli =
-            Cli::try_parse_from(["lf", "memory", "show", "--wave", "goals"]).expect("parse show");
-        let Some(Commands::Memory {
-            cmd: MemoryCommand::Show { target },
-        }) = cli.command
-        else {
-            panic!("expected memory show");
-        };
-        assert_eq!(target.wave.as_deref(), Some("goals"));
-
-        let mut memory = Cli::command()
-            .find_subcommand("memory")
-            .expect("memory command")
-            .clone();
-        let help = memory.render_long_help().to_string();
-        assert!(help.contains("show"), "{help}");
-        for removed in ["add", "log", "update"] {
-            assert!(
-                !help.contains(removed),
-                "removed `{removed}` remains:\n{help}"
-            );
-        }
-
+    fn memory_has_no_cli_surface() {
         assert!(Cli::try_parse_from(["lf", "memory"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "memory", "add", "fact"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "memory", "log"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "memory", "update"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "memory", "show"]).is_err());
     }
 
     #[test]

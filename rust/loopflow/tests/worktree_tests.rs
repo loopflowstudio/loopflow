@@ -1,9 +1,12 @@
+use std::collections::HashSet;
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
 
 use loopflow::engine::git::{is_clean, worktree_move, worktree_remove};
 use loopflow::engine::worktrees::{
-    create_named_worktree, list_worktrees, list_worktrees_local, sibling_worktree_name_with_main,
+    create_named_worktree, list_worktrees, list_worktrees_local, prune_worktrees,
+    sibling_worktree_name_with_main, WorktreePrunePolicy,
 };
 use loopflow_test_support::TestRepo;
 
@@ -20,6 +23,29 @@ fn git_stdout(repo: &std::path::Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn commit_worktree_at_age(path: &std::path::Path, age: Duration) {
+    fs::write(path.join("work.txt"), "work").expect("write work");
+    git_stdout(path, &["add", "work.txt"]);
+    let seconds = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs()
+        .saturating_sub(age.as_secs());
+    let date = format!("@{seconds} +0000");
+    let output = Command::new("git")
+        .args(["commit", "-m", "dated work"])
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .current_dir(path)
+        .output()
+        .expect("commit dated work");
+    assert!(
+        output.status.success(),
+        "dated commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -96,6 +122,97 @@ fn worktree_state_detects_dirty() {
     let result = create_named_worktree(repo.path(), "feature", None, false).expect("create");
     std::fs::write(result.path.join("dirty.txt"), "dirty").expect("write");
     assert!(!is_clean(&result.path).expect("is_clean"));
+}
+
+#[test]
+fn manual_prune_retains_every_uncommitted_file() {
+    let repo = TestRepo::new();
+    let path = repo.create_named_worktree("prune-dirty-old");
+    commit_worktree_at_age(&path, Duration::from_secs(8 * 24 * 60 * 60));
+    fs::create_dir_all(path.join("scratch")).expect("create scratch");
+    fs::write(path.join("scratch/notes.md"), "unsaved").expect("write scratch");
+
+    let report = prune_worktrees(
+        repo.path(),
+        repo.path(),
+        &HashSet::new(),
+        WorktreePrunePolicy::manual(),
+        false,
+    )
+    .expect("prune");
+
+    assert!(report.removed.is_empty());
+    assert_eq!(report.retained_dirty.len(), 1);
+    assert_eq!(
+        report.retained_dirty[0]
+            .canonicalize()
+            .expect("canonical retained path"),
+        path.canonicalize().expect("canonical worktree path")
+    );
+    assert!(path.join("scratch/notes.md").exists());
+}
+
+#[test]
+fn manual_prune_retains_recent_active_branch_without_a_pr() {
+    let repo = TestRepo::new();
+    let branch = "prune-recent";
+    let path = repo.create_named_worktree(branch);
+    commit_worktree_at_age(&path, Duration::ZERO);
+    git_stdout(&path, &["push", "-u", "origin", branch]);
+
+    let report = prune_worktrees(
+        repo.path(),
+        repo.path(),
+        &HashSet::new(),
+        WorktreePrunePolicy::manual(),
+        false,
+    )
+    .expect("prune");
+
+    assert!(report.removed.is_empty());
+    assert!(path.exists());
+}
+
+#[test]
+fn manual_prune_removes_stale_branch_without_an_open_pr() {
+    let repo = TestRepo::new();
+    let branch = "prune-stale";
+    let path = repo.create_named_worktree(branch);
+    commit_worktree_at_age(&path, Duration::from_secs(8 * 24 * 60 * 60));
+    git_stdout(&path, &["push", "-u", "origin", branch]);
+
+    let report = prune_worktrees(
+        repo.path(),
+        repo.path(),
+        &HashSet::new(),
+        WorktreePrunePolicy::manual(),
+        false,
+    )
+    .expect("prune");
+
+    assert_eq!(report.removed.len(), 1);
+    assert_eq!(report.removed[0].reason.as_str(), "stale");
+    assert!(!path.exists());
+}
+
+#[test]
+fn manual_prune_removes_recent_remote_gone_branch() {
+    let repo = TestRepo::new();
+    let path = repo.create_named_worktree("prune-remote-gone");
+    commit_worktree_at_age(&path, Duration::ZERO);
+
+    let report = prune_worktrees(
+        repo.path(),
+        repo.path(),
+        &HashSet::new(),
+        WorktreePrunePolicy::manual(),
+        false,
+    )
+    .expect("prune");
+
+    assert_eq!(report.removed.len(), 1);
+    assert_eq!(report.removed[0].reason.as_str(), "remote-gone");
+    assert!(!path.exists());
 }
 
 #[test]
@@ -349,7 +466,6 @@ fn branch_at_main_not_detected_as_squash_merged() {
         !wt.squash_merged,
         "branch at same commit as main should not be squash-merged"
     );
-    assert!(!wt.prunable, "fresh worktree should not be prunable");
     assert!(
         wt.fresh,
         "worktree with no commits beyond main should be fresh"
@@ -357,7 +473,7 @@ fn branch_at_main_not_detected_as_squash_merged() {
 }
 
 #[test]
-fn fresh_worktree_is_not_prunable() {
+fn fresh_worktree_is_identified() {
     let repo = TestRepo::new();
     let result = create_named_worktree(repo.path(), "newwave", None, false).expect("create");
 
@@ -368,12 +484,11 @@ fn fresh_worktree_is_not_prunable() {
         .expect("should find worktree");
 
     assert!(wt.fresh, "worktree with no commits should be fresh");
-    assert!(!wt.prunable, "fresh worktree should not be prunable");
     assert!(!wt.dirty, "clean worktree should not be dirty");
 }
 
 #[test]
-fn fresh_dirty_worktree_is_not_prunable() {
+fn fresh_dirty_worktree_is_identified() {
     let repo = TestRepo::new();
     let result = create_named_worktree(repo.path(), "wip", None, false).expect("create");
     std::fs::write(result.path.join("work.txt"), "in progress").expect("write");
@@ -386,7 +501,6 @@ fn fresh_dirty_worktree_is_not_prunable() {
 
     assert!(wt.fresh, "no commits beyond main means fresh");
     assert!(wt.dirty, "uncommitted changes means dirty");
-    assert!(!wt.prunable, "dirty fresh worktree must not be prunable");
 }
 
 #[test]
@@ -404,7 +518,6 @@ fn worktree_with_commits_is_active_not_fresh() {
         .expect("should find worktree");
 
     assert!(!wt.fresh, "worktree with commits beyond main is not fresh");
-    assert!(!wt.prunable, "active worktree should not be prunable");
     assert!(!wt.merged, "active worktree is not merged");
 }
 
@@ -443,10 +556,6 @@ fn branch_from_squash_merged_parent_stays_fresh() {
         "branch should be tree-equal to main after squash merge"
     );
     assert!(wt.fresh, "rotated branch should still be treated as fresh");
-    assert!(
-        !wt.prunable,
-        "fresh branch must not be pruned immediately after rotation"
-    );
 }
 
 // --- Inspection surface is side-effect free (W2-169, R5) ---------------------

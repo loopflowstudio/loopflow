@@ -709,14 +709,16 @@ dependent roadmap work through `lf task run CHILD --stack-on PARENT`, not
 lf wt switch bugs             # by directory name, identity leaf, or full branch
 lf wt list                    # worktrees as a tree; --format json
 lf wt ci                      # CI status for the current branch
-lf wt prune --dry-run         # show every unprotected worktree
-lf wt prune                   # force-remove them and their local branches
+lf wt prune --dry-run         # show terminal or week-stale worktrees
+lf wt prune                   # remove them and their local branches
 ```
 
-`prune` is intentionally destructive: it preserves main, the current
-worktree, nonterminal Tasks, and worktrees owned by live processes —
-everything else goes, including dirty and unpushed work. Run `--dry-run`
-first when the repository contains work created outside Loopflow.
+`prune` never removes a worktree with uncommitted files. It removes clean
+worktrees immediately when the remote branch is gone, the work landed, or the
+current-head PR closed. It also removes a clean branch after seven days without
+branch activity when no current-head PR is open. Main, the current worktree,
+nonterminal Tasks, and worktrees owned by live processes remain protected.
+Use `lf wt remove NAME --force` for an explicit destructive override.
 
 `lfd` runs a lossless sweep on startup and every 15 minutes: only clean
 landed, remotely deleted, or terminal Task worktrees are removed. Disable

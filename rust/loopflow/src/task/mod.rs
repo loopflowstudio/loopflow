@@ -1079,8 +1079,8 @@ mod tests {
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
-        let session = TaskId::new();
-        assert_eq!(TaskId::parse(session.as_str()).unwrap(), session);
+        let task = TaskId::new();
+        assert_eq!(TaskId::parse(task.as_str()).unwrap(), task);
         let pr = TaskPrId::new();
         assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
     }
@@ -1417,83 +1417,83 @@ mod tests {
 
     #[test]
     fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
-        let session = task(); // status Waiting, no abandon intent
+        let task = task(); // status Waiting, no abandon intent
 
         // Open PR, fresh failing head: the ci-fix wake is permitted where the plain
         // supervisor restart stays barred.
         let legal = open_pr("h1", Some(failing("h1", &["build"])));
-        assert!(session.supervisor_restart_bar(Some(&legal)).is_some());
-        assert!(session.ci_fix_restart_bar(Some(&legal)).is_none());
+        assert!(task.supervisor_restart_bar(Some(&legal)).is_some());
+        assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
 
         // Passing head → not legal → barred.
         let mut green_obs = failing("h1", &[]);
         green_obs.state = super::CiState::Passing;
         let green = open_pr("h1", Some(green_obs));
-        assert!(session.ci_fix_restart_bar(Some(&green)).is_some());
+        assert!(task.ci_fix_restart_bar(Some(&green)).is_some());
 
         // Stale reading (observation head != PR head) → fresh_ci None → barred.
         let stale = open_pr("h2", Some(failing("h1", &["build"])));
-        assert!(session.ci_fix_restart_bar(Some(&stale)).is_some());
+        assert!(task.ci_fix_restart_bar(Some(&stale)).is_some());
 
         // Red only on a land-time precondition → no repair exists → barred, and
         // the automated restart is the one path that could have overridden the
         // open-PR bar. A real leaf beside it still permits the wake.
         let land_only = open_pr("h1", Some(failing("h1", &["scratch-clear"])));
-        assert!(session.ci_fix_restart_bar(Some(&land_only)).is_some());
+        assert!(task.ci_fix_restart_bar(Some(&land_only)).is_some());
         let mixed = open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"])));
-        assert!(session.ci_fix_restart_bar(Some(&mixed)).is_none());
+        assert!(task.ci_fix_restart_bar(Some(&mixed)).is_none());
 
         // The bar does not deduplicate. A head that already woke a body still reads
         // as legal here — refusing the second launch is the ledger's job, and
         // asking the question twice is what let the two answers drift.
-        assert!(session.ci_fix_restart_bar(Some(&legal)).is_none());
+        assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
     }
 
     #[test]
     fn task_rejects_impossible_lifecycle_and_writeback_state() {
-        let mut session = task();
-        session.pm_writeback = PmWritebackState::Pending {
+        let mut task = task();
+        task.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
-        assert!(session.validate().is_err());
+        assert!(task.validate().is_err());
 
-        session.gate_cycle = 1;
-        assert!(session.validate().is_ok());
+        task.gate_cycle = 1;
+        assert!(task.validate().is_ok());
 
-        session.lifecycle.loop_.flow.clear();
-        assert!(session.validate().is_err());
+        task.lifecycle.loop_.flow.clear();
+        assert!(task.validate().is_err());
     }
 
     #[test]
     fn task_lifecycle_repeats_loop_and_finally_until_approval() {
-        let mut session = task();
-        session.lifecycle_phase = TaskLifecyclePhase::First;
+        let mut task = task();
+        task.lifecycle_phase = TaskLifecyclePhase::First;
 
-        assert_eq!(session.lifecycle_cycle(), 0);
-        session.enter_loop().unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Loop);
-        assert_eq!(session.lifecycle_cycle(), 1);
-        assert_eq!(session.phase_epoch, 2);
+        assert_eq!(task.lifecycle_cycle(), 0);
+        task.enter_loop().unwrap();
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Loop);
+        assert_eq!(task.lifecycle_cycle(), 1);
+        assert_eq!(task.phase_epoch, 2);
 
         let proposal = TaskGateProposal {
             done: false,
             reason: "pull request is ready for review".to_string(),
         };
-        session.phase_cursor = 2;
-        session.phase_iteration = 3;
-        session.enter_finally(proposal.clone()).unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Finally);
-        assert_eq!(session.lifecycle_cycle(), 1);
-        assert_eq!(session.gate_cycle, 1);
-        assert_eq!(session.approved_gate_proposal().unwrap(), proposal);
-        assert_eq!((session.phase_cursor, session.phase_iteration), (0, 0));
+        task.phase_cursor = 2;
+        task.phase_iteration = 3;
+        task.enter_finally(proposal.clone()).unwrap();
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Finally);
+        assert_eq!(task.lifecycle_cycle(), 1);
+        assert_eq!(task.gate_cycle, 1);
+        assert_eq!(task.approved_gate_proposal().unwrap(), proposal);
+        assert_eq!((task.phase_cursor, task.phase_iteration), (0, 0));
 
-        session.enter_loop().unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Loop);
-        assert_eq!(session.lifecycle_cycle(), 2);
-        assert_eq!(session.gate_proposal, None);
-        assert_eq!(session.phase_epoch, 4);
+        task.enter_loop().unwrap();
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Loop);
+        assert_eq!(task.lifecycle_cycle(), 2);
+        assert_eq!(task.gate_proposal, None);
+        assert_eq!(task.phase_epoch, 4);
     }
 
     #[test]

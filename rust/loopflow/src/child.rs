@@ -64,7 +64,7 @@ pub(crate) use prefixed_uuid_id;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChildDataError {
-    #[error("invalid child-session id: {0}")]
+    #[error("invalid child Work id: {0}")]
     InvalidId(String),
 }
 

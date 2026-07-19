@@ -18,7 +18,7 @@ and Swift decode the same Task rows; consumers never reconstruct the signal
 from process flags.
 
 `context_lab_snapshot.json` is shared by Rust and Swift. It pins the atomic
-session-set query, including explicit missing token coverage and immutable trace
+launch-set query, including explicit missing token coverage and immutable trace
 addresses. Revision evidence carries both Rust's effective-content hash and the
 current source-file hash used to reject a stale Task worktree without
 reimplementing prompt transformations in Swift.

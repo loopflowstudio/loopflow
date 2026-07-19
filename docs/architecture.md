@@ -7,30 +7,26 @@ title: Architecture
 
 > **Moment of transparency — July 18, 2026**
 >
-> Loopflow now runs durable input through Work, Epoch, Basis, Steer, Send, and
-> the Turn ledger. Stored Feedback/Handoff and `ChildCommand` are gone; Feedback
-> is an interactive flow interval routed by Launch attention. Work placement
-> names a stable Home authority, and one Home-local keeper serves all placed
-> Waves.
+> The durable model is coherent: Wave, Project, and Task are stable Work;
+> Epoch/Run/Wait derive lifecycle; Basis orders input; Launch and Turn own
+> execution evidence. The former `project_sessions` and `task_sessions` storage
+> is gone.
 >
-> Child-first responsiveness has shipped. Both the Wave loop
-> (`flowloop/wave.rs`) and the Project runner drain direct User input, then the
-> oldest child Feedback awaiting them, before resuming background cadence, with
-> live-send or interrupt-and-seed fallback and no loss of the durable playhead.
+> The communication model is smaller too. Steer is authored input. Chat is the
+> human Wave presentation. `MEMORY.md` is the only memory. Radio, channel
+> identity, live memory updates, ambient recent-chat prompt context, implicit PR
+> review state, and producerless evidence Receipts are gone.
 >
-> The execution bridge is now deleted on the PRD-38 branch. Project and Task
-> records contain domain facts, not lifecycle state. Epoch/Run/Wait derive one
-> `WorkStatus`; Launch owns provider/process continuity; one opaque
-> `LF_RUN_LEASE` grants the exact active Run; and `run_work(WorkRef)` is the one
-> Project/Task executor entrypoint. Migration `0.11.036_delete_sessions.sql`
-> copies surviving domain facts and drops `project_sessions` and
-> `task_sessions`. Historical migrations still mention them so old databases
-> can reach the deletion.
+> Feedback is one derived interactive interval, routed when it opens to User or
+> the immediate parent. Presentation cannot advance it; only explicit
+> `work continue` can. Task phase plans name a reviewer rather than overloading
+> headless execution policy.
 >
-> This page remains a working architecture ledger until PRD-38 lands. “Current
-> branch” names implemented code under review; “Decision” names the normative
-> contract; “Open” names research that may change mechanics without adding a
-> second source of truth.
+> Runtime hosting is not yet coherent. The Home resident starts Wave listeners,
+> but there is no Project server and no generic Work keeper that wakes Ready
+> Project or Task Work. A live Project runner can answer child Feedback; a
+> stopped Project has no resident owner for that route. That is the next design,
+> not a property the current code should pretend already exists.
 
 ## Product direction
 
@@ -53,47 +49,65 @@ Three planning nouns remain distinct:
 - **Task:** concrete implementation, investigation, document, or shipped change
   inside exactly one Project.
 
-## Current branch implementation
+## Current implementation
 
-**Current branch.** This is the system PRD-38 runs:
+This is the process topology now:
 
 ```text
-User -> lf start -> Home resident -> placed Wave listeners/residents
+App / CLI -> shared local SQLite, Linear, GitHub
+
+lf start -> Home resident -> per-Wave listener -> Wave resident
+                 /health       HTTP/SSE/journal     cadence/provider loop
+                 /start
+
+parent or CLI -> reserve Run -> __work project -> Project runner
                                       |
-                                      v
-                                  Project Work
-                                      |
-                                      v
-                                    Task Work -> worktree -> serial PRs
+                                      +-----------> Task Run
+
+parent or CLI -> reserve Run -> __work task -> Task runner -> worktree -> serial PRs
 
 Steer -> Epoch Basis -> provider boundary -> agent Turn
 Run -> Launch -> provider process / optional Turn
-interactive flow + Launch attention -> Feedback projection / Swift surface
+interactive flow + Launch attention -> Feedback projection
 ```
 
 `lf` is the machine-wide CLI and JSON interface. `lf start` routes each Wave to
 its placed Home and asks one Home-local keeper to serve it; `lf wave <name>`
-keeps the foreground development path. Each served Wave still has its own
-listener, journal, cadence, and resident body. Project and Task
-executors are local child processes sharing SQLite. They enter through
+keeps the foreground development path. Project and Task executors are bounded
+local child processes sharing SQLite. They enter through
 `lf __work <kind> <id>`, resolve the exact ambient Run lease once, and dispatch
-to typed Project or Task domain policy. There is no central service.
+to typed Project or Task domain policy.
+
+### What each server or loop does
+
+| Process | Owns now | Does not own |
+| --- | --- | --- |
+| Home resident | machine-local `/health` and `/start`; starts and tracks placed Wave listeners | Ready-Work scans, Project/Task dispatch, domain judgment |
+| Wave listener | one Wave's HTTP/SSE surface, journal, conversation runtime, and resident supervision | Wave cadence, Project/Task execution |
+| Wave resident | one Wave's provider continuity, cadence, chat/control lane, and Project judgment | generic Work hosting |
+| Project runner | one bounded Project Run; KRs, Task observations, parent-routed Task Feedback while alive | a stable endpoint or resident server |
+| Task runner | one bounded Task Run; authored flow, workspace, PR, CI, and Feedback checkpoints | a stable endpoint or child Work |
+| `lfd` | webhook ingress, liveness probes, and maintenance sweeps | Work execution or control authority |
+
+The phrase “Project server” currently names a missing capability. Project Work
+is durable and addressable in the store, but its runner exists only after a
+caller reserves a Run and launches `__work project`. Task event writes make a
+best-effort `wake_project` call, and a live Project runner polls
+`child_attention`. Opening or re-arming parent-routed Feedback is not itself a
+resident Project inbox or a generic wake signal. If that runner is stopped, no
+Home-owned loop continuously notices the useful input and starts it. Ad hoc CLI
+operation exposes this gap more often, but the gap is architectural.
 
 Current decentralized truth is deliberately split by substrate:
 
 | Substrate | Owns |
 | --- | --- |
-| local SQLite | this Home's runtime, credentials, receipts, and Work state |
+| local SQLite | this Home's runtime, credentials, operation results, and Work state |
 | append-only journals | Wave conversation and durable run narrative |
 | repository files | Wave goals and memory |
 | Linear | shared Wave/Project/Task planning truth |
 | GitHub | branches, PRs, checks, and merges |
 | SSH | reach to another Home without a central Loopflow coordinator |
-
-`lfd` is currently a small machine daemon for durable webhook ingress and
-liveness probes. It hosts no Work executors and is not a control API. The Home
-runtime may consolidate local keeping and Work wakeups, but it does not turn
-`lfd` or any other process into a company-wide authority.
 
 The normalized boundary is now visible in code:
 
@@ -103,16 +117,18 @@ The normalized boundary is now visible in code:
 - Launch owns provider route, continuation, and containment;
 - Turn owns observed boundary outcome, Basis, output, and usage;
 - Project and Task loops own only their domain policy;
-- child attention is consumed before parent background cadence;
+- child attention is consumed before parent background work when that parent is
+  running;
 - Task action surfaces carry one next legal action and reason, not a mirrored
   matrix of every blocked alternative.
 
-Remaining `session` names belong either to provider/tmux/UI substrate or to
-historical migrations. They are not a product executor identity.
+Remaining `session` names belong to provider, tmux, Ghostty, browser, or human
+substrate, or to historical migrations. They are not Work, Run, or Launch
+identity.
 
 ### Foundations already changed
 
-**Current.** Several prerequisites now match the target:
+Several prerequisites now match the target:
 
 1. Provider steering is attempted against the exact active Turn. The adapter
    returns `Sent`, `NotSteerable`, `Failed`, or `Unknown`; there is no
@@ -140,9 +156,10 @@ historical migrations. They are not a product executor identity.
 8. Stable Project/Task Work rows contain domain state only. Epoch/Run/Wait
    derive status, and completion closes an Epoch only after a successful
    current boundary and quiescent containment.
-9. Stored Feedback and Handoff aggregates are deleted. Interactive flow position,
-   live Launch, and `attention: User | Parent(WorkRef)` derive Feedback. A
-   Basis-fenced `continue_feedback` advances the flow without a disposition.
+9. Stored Feedback and Handoff aggregates are deleted. Interactive flow
+   position, live Launch, and `attention: User | Parent(WorkRef)` derive
+   Feedback. Presentation has no continuation callback; a Basis-fenced
+   `continue_feedback` is the only close.
 10. `ChildCommand` is deleted. Direct Run/Work controls and typed CI incident
     claims replace its lifecycle/source/effect/claim state.
 11. Global promotion and PM reteam now fence active writers through Run and
@@ -155,6 +172,14 @@ historical migrations. They are not a product executor identity.
     executor commands are deleted.
 14. Roadmap and Swift surfaces consume `WorkStatus` directly. The action model
     is `recommended + reason`; the exhaustive blocked-action matrix is gone.
+15. Project owns `ProjectDefinition`; Task owns `TaskDirective` plus
+    `project_id`. Task does not copy parent Project planning truth.
+16. Task phase plans use `FeedbackReviewer::{User, Parent}`. The standard route
+    is User for clarify, Parent for pursue, and User for mutate; an override
+    affects future checkpoints only.
+17. Radio, channel identity, live memory events, recent Wave chat prompt
+    context, Feedback escalation, implicit PR Review state, and the evidence
+    Receipt resolver are deleted.
 
 ## Target contract
 
@@ -174,16 +199,17 @@ The provider may change how input arrives. It may not change whether input is
 durable, whether stale execution may complete Work, or whether a dead executor
 retains write authority.
 
-Work is the long-lived logical server. It remains addressable when no executor
-or provider process exists. A generic Work runtime hosted by the owning Home
-serves every Wave, Project, and Task; the Work kind supplies domain truth,
-flow, closure checks, and allowed effects rather than another lifecycle stack.
-One Home resident may host many Work instances. An OS process is only a Run or
-Launch implementation detail and may disappear without changing Work identity.
+Work is the long-lived logical address, not a promise of one OS process per
+Work. It remains addressable when no executor or provider process exists. The
+owning Home must have exactly one mechanism that notices useful Ready input,
+reserves one Run, and starts the kind-specific executor. Whether that mechanism
+is a lightweight in-process actor per Work or a Home-wide Ready scan is the
+server-topology decision still to make. It must not create a second lifecycle
+model beside Epoch/Run/Wait.
 
 | Noun | Durable truth | Deliberately absent |
 | --- | --- | --- |
-| Work | stable, addressable Wave, Project, or Task logical server and parentage | Session identity, provider state, and required resident process |
+| Work | stable, addressable Wave, Project, or Task identity and parentage | Session identity, provider state, and required resident process |
 | Epoch | one pursuit of Work: `Open`, `Done`, or `Abandoned` | retry count and provider generation |
 | Basis | `(epoch, rev)` for every prompt-relevant durable input | separate truth/directive/response cursors |
 | Steer | ordered authored direction from User or active parent Run | replacement, lifecycle, and response variants |
@@ -194,7 +220,7 @@ Launch implementation detail and may disappear without changing Work identity.
 | Send | one delivery attempt for one Steer and exact Turn | incorporation state |
 | Home | stable local execution authority identified by `HomeId` | hostname as identity |
 
-`Exec` remains a low-level process receipt beneath Launch. It is evidence, not
+`Exec` remains a low-level process record beneath Launch. It is evidence, not
 a public lifecycle target.
 
 There is no first-class `Actor`, writable `Ack`, `Handle`, `Body`, `Session`,
@@ -610,6 +636,12 @@ attention, not another stored inbox or priority table. The same parent agent
 that is running clarify, pursue, mutate, cadence, or another flow services it.
 There is no reviewer Launch and no second parent agent.
 
+**Current gap.** This ordering exists inside a live Wave resident or Project
+runner. It does not yet guarantee that a stopped Project starts when Task
+Feedback is routed or re-armed to it. The server-topology follow-up is complete
+only when the owning Home can derive that useful input from durable state and
+wake exactly one Project Run without relying on an in-process Task callback.
+
 The projected parent seed contains the child's latest durable root Turn output
 plus current Work, flow, workspace, PR/CI, and other relevant domain facts.
 This is what lets the same protocol carry critique, questions, or brainstorming
@@ -797,7 +829,7 @@ A new Launch renders from:
 - selected external evidence and unresolved Wait;
 - flow position and domain closure state;
 - workspace, git HEAD, PR/CI/review lineage;
-- known Loopflow-mediated effects and unknown-effect receipts.
+- known Loopflow-mediated effects and unknown-effect records.
 
 Losing a token, provider, account, or transcript starts another Launch in the
 same Run when replay is safe. The renderer either produces a sufficient seed or
@@ -805,12 +837,18 @@ names an exact Wait. It never silently starts from an empty prompt.
 
 ## Workspace, PR, and CI boundaries
 
-**Current and retained.** Only Task Work owns a writable worktree. Wave and
-Project control runs operate from a clean canonical main checkout. Provider
-launch fails before execution if it receives another writable repository root.
+**Current.** Only Task Work owns a writable worktree. Wave and Project control
+Runs operate from the canonical main checkout and currently refuse to start
+when it is dirty. Provider launch fails before execution if it receives another
+writable repository root.
+
+**Target.** Wave and Project control Launches receive repository context
+read-only. A dirty canonical checkout remains visible evidence but cannot block
+parent control or child Feedback. Writable repository changes still belong
+only to Task Workspaces.
 
 Task PR rows store evidence rather than a mutable phase label: publication
-request, nested GitHub receipt, merge, abandonment, and `after_merge`. Serial
+request, nested GitHub PR record, merge, abandonment, and `after_merge`. Serial
 PRs remain inside one Task; concurrent dependency nodes are separate Tasks.
 
 **Current.** Workspace identity belongs to stable Task Work. Pursuit-specific
@@ -834,7 +872,7 @@ Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
 
 ## Migration
 
-**Current branch.** Migration `0.11.036_delete_sessions.sql` is one-way and has
+Migration `0.11.036_delete_sessions.sql` is one-way and has
 no dual-write mode. It:
 
 1. copies surviving Project and Task domain facts into stable `projects` and
@@ -855,7 +893,7 @@ the deletion.
 
 ## Implementation frontier
 
-**Current branch status.** The core reduction is implemented:
+The core reduction is implemented:
 
 - Session tables, product status enums, body generations, CRUD, authority,
   recovery, and Run mirrors are gone;
@@ -864,26 +902,46 @@ the deletion.
 - completion flows only through the successful-boundary Basis fence;
 - roadmap/Swift use `WorkStatus` and Work-shaped fields;
 - Task attention projects one next legal action plus its reason;
-- source is 134,190 physical Rust lines versus the pinned 144,210 baseline,
-  a reduction of 10,020. The full diff is net −14,678 lines at this checkpoint.
+- Project/Task planning state is `ProjectDefinition`, `TaskDirective`, and a
+  live `project_id` relation rather than copied parent snapshots;
+- Feedback presentation, continuation, and reviewer choice are separate APIs;
+- Radio, channel identity, live memory, recent-chat prompt context, implicit PR
+  Review state, policy-based reviewer routing, and evidence Receipts are gone.
 
-Separate Project and Task loops remain deliberately. Their flow, KRs,
-workspace, PR, CI, and closure behavior are domain policy; combining them would
-erase the real distinction rather than reduce lifecycle machinery.
+Separate Project and Task domain policy remains correct: KRs versus workspace,
+PR, CI, and closure are real differences. Their process supervision is not yet
+correctly shared. Both runners still implement provider control, recovery,
+playhead progression, input draining, failure settlement, and process lifetime
+in parallel, while Wave has a third listener/resident stack.
 
-The deterministic landing proof is complete: full Rust tests, clippy, Swift
-tests, migration upgrades, authority races, and completion fences pass. One
-configured start/Steer/interrupt/recovery/completion exercise remains useful
-dogfood when provider capacity permits; it is not evidence for a second model.
+### Server-topology follow-up
 
-The final architecture review found no compatibility reader or lifecycle
-mirror. It did catch and remove three normalized-boundary bugs: historical Runs
-are re-keyed from deleted Session ids to stable Work ids, every Run reservation
-holds the promotion fence, and interrupt can end a reservation before a Launch
-exists without inventing containment.
+This is the unaddressed slice. It is done when:
 
-Detailed deletion and proof evidence lives in
-`scratch/delete-session-and-make-run.md` while this branch is open.
+1. Home, Wave, Project, Task, Run, and Launch process ownership fits on one
+   screen, including which pieces are long-lived and which are replaceable;
+2. one Home-owned mechanism derives useful Ready Work from durable state and
+   reserves exactly one Run—no Task callback, app process, or CLI shell is
+   required to keep progress alive;
+3. a stopped Project answers immediate-child Feedback through the same path as
+   a live Project, while direct User review remains an explicit Task option;
+4. Wave-to-Project and Project-to-Task control are the same one-hop protocol;
+   Wave-to-human remains the human chat/Steer surface, not Feedback escalation;
+5. CLI, Mac, and unattended parent review invoke the same controls and differ
+   only in who supplies User or parent authority;
+6. process exit, app exit, listener restart, a dirty canonical checkout, and a
+   failed best-effort nudge cannot lose input or strand Ready Work; status names
+   the exact durable fact still needed;
+7. generic Run reservation, Launch supervision, provider recovery, Steer
+   delivery, interrupt, and Wait settlement have one implementation; each Work
+   kind contributes only domain prompt, flow, evidence, and closure policy;
+8. the design decides whether an open Feedback retains a Run or records a typed
+   Wait without inventing a generic Blocked state;
+9. a deterministic test starts a Task from an ad hoc CLI, stops its parent,
+   opens parent-routed Feedback, and proves the owning Home wakes one Project
+   that can Steer or continue it;
+10. the old Wave listener/resident and Project/Task launch paths that the design
+    replaces are deleted rather than kept as compatibility routes.
 
 ## Normative race and portability tests
 
@@ -902,7 +960,7 @@ Use deterministic barriers, never sleeps:
 - actionable CI incident versus a parked Feedback and active Run;
 - non-actionable CI evidence versus a parked Feedback;
 - duplicate CI observation versus crash after reserve or active-Run claim;
-- fifty SQLite writers versus receipt allocation.
+- fifty SQLite writers versus revision and operation-result allocation.
 
 Every harness runs the same durable-outcome scenarios: live accepted, live
 rejected, ambiguous response, seed-only, persistent session, and opaque TUI.
@@ -910,8 +968,9 @@ Credentialed smoke tests validate vendor drift; fake protocols remain normative.
 
 ## Open questions and active research
 
-**Open.** These may change implementation details but must not add another core
-noun or source of truth:
+These may change implementation details but must not add another core noun or
+source of truth. The server-topology follow-up above is the primary design;
+these are narrower research items:
 
 1. Capture one successful Codex `turn/steer` response against the dogfood
    app-server and verify the assumed result shape.
@@ -929,7 +988,7 @@ noun or source of truth:
 6. Exercise migration 36 against a copied long-lived dogfood database whose
    old successor history includes ambiguous terminal boundaries. Preserve
    unknown lineage; never invent an Epoch boundary.
-7. Decide whether historical Epoch appears in public diagnostic receipts. Work
+7. Decide whether historical Epoch appears in public diagnostic results. Work
    remains the control target either way.
 
 Questions about central orchestration, generic workflow engines, recursive

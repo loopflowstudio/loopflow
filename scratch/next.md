@@ -15,9 +15,9 @@
 
 ## Done when
 
-- [ ] no ActiveSessions/ActiveSession/SessionAction projection types remain.
-- [ ] openability derives from `launchId`; the action enum/array are deleted.
-- [ ] Context Lab wire and UI use LaunchSet/LaunchLane/launches and launch counts.
-- [ ] remaining current Session symbols refer to real provider or surface
+- [x] no ActiveSessions/ActiveSession/SessionAction projection types remain.
+- [x] openability derives from `launchId`; the action enum/array are deleted.
+- [x] Context Lab wire and UI use LaunchSet/LaunchLane/launches and launch counts.
+- [x] remaining current Session symbols refer to real provider or surface
       sessions, not Work, Run, Launch, or an AgentLaunch projection.
-- [ ] Context/DTO/UI Rust and Swift tests, fmt, and all-target clippy pass.
+- [x] Context/DTO/UI Rust and Swift tests, fmt, and all-target clippy pass.

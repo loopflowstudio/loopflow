@@ -1742,14 +1742,12 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {
-            let sessions = runtime.block_on(store.list_tasks(None)).map_err(|error| {
+            let tasks = runtime.block_on(store.list_tasks(None)).map_err(|error| {
                 anyhow!("cannot verify Task worktree ownership before pruning: {error}")
             })?;
-            for session in sessions {
+            for task in tasks {
                 let work = runtime
-                    .block_on(
-                        store.work_for_child(&crate::child::ChildRef::Task(session.id.clone())),
-                    )
+                    .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
                     .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
                 let status = runtime
                     .block_on(store.work_status(&work))
@@ -1758,7 +1756,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(session.worktree);
+                    protected.insert(task.worktree);
                 }
             }
         }

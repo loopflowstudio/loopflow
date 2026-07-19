@@ -4,26 +4,26 @@ import SwiftUI
 
 /// The Control destination: the deliberate, non-default surface for steering and
 /// observing the machine. Chat stays the default Wave experience; Control is
-/// reached from the Wave header. Its first view is Active Sessions; Run History
+/// reached from the Wave header. Its first view is the Work Census; Run History
 /// is named but deferred to a quiet, disabled affordance.
 struct ControlView: View {
     let onClose: () -> Void
 
     @Environment(\.palette) private var palette
-    @State private var section: ControlSection = .activeSessions
+    @State private var section: ControlSection = .workCensus
 
     enum ControlSection: String, CaseIterable {
-        case activeSessions
+        case workCensus
         case runHistory
 
         var title: String {
             switch self {
-            case .activeSessions: "Active Sessions"
+            case .workCensus: "Work Census"
             case .runHistory: "Run History"
             }
         }
 
-        var available: Bool { self == .activeSessions }
+        var available: Bool { self == .workCensus }
     }
 
     var body: some View {
@@ -31,8 +31,8 @@ struct ControlView: View {
             header
             Divider()
             switch section {
-            case .activeSessions:
-                ActiveSessionsView()
+            case .workCensus:
+                WorkCensusView()
             case .runHistory:
                 EmptyView()
             }
@@ -102,7 +102,7 @@ struct ControlView: View {
         .accessibilityLabel(tab.title)
         .accessibilityHint(tab.available ? "" : "Coming soon")
         .accessibilityIdentifier(
-            tab == .activeSessions ? "control-active-sessions-tab" : "control-run-history-tab"
+            tab == .workCensus ? "control-work-census-tab" : "control-run-history-tab"
         )
     }
 }

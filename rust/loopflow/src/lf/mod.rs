@@ -261,7 +261,7 @@ pub enum Commands {
     Wave {
         /// Wave name
         name: String,
-        /// Take over even if another live wave session is registered
+        /// Take over even if another live Wave is registered
         #[arg(long)]
         force: bool,
     },
@@ -2154,7 +2154,7 @@ mod tests {
     }
 
     #[test]
-    fn context_accepts_repeatable_session_set_filters() {
+    fn context_accepts_repeatable_launch_set_filters() {
         let cli = Cli::try_parse_from([
             "lf",
             "context",

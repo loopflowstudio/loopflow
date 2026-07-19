@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SessionOutcome: String, Codable, Sendable, CaseIterable, Hashable {
+public enum LaunchOutcome: String, Codable, Sendable, CaseIterable, Hashable {
     case running, completed, failed, interrupted
 }
 
@@ -20,7 +20,7 @@ public enum ContextAssetKind: String, Codable, Sendable, Equatable {
     case assembly
 }
 
-public struct SessionSetQuery: Codable, Hashable, Sendable {
+public struct LaunchSetQuery: Codable, Hashable, Sendable {
     public var repoPaths: [String]
     public var startedAfter: Int64
     public var startedBefore: Int64
@@ -32,7 +32,7 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
     public var providers: [String]
     public var models: [String]
     public var surfaces: [String]
-    public var outcomes: [SessionOutcome]
+    public var outcomes: [LaunchOutcome]
     public var captureStates: [CaptureState]
     public var steeredOnly: Bool
     public var currentRevisionOnly: Bool
@@ -49,7 +49,7 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
         providers: [String],
         models: [String],
         surfaces: [String],
-        outcomes: [SessionOutcome],
+        outcomes: [LaunchOutcome],
         captureStates: [CaptureState],
         steeredOnly: Bool,
         currentRevisionOnly: Bool
@@ -83,16 +83,16 @@ public struct SessionSetQuery: Codable, Hashable, Sendable {
 }
 
 public struct ContextLabSnapshot: Decodable, Sendable {
-    public let query: SessionSetQuery
+    public let query: LaunchSetQuery
     public let coverage: ContextCoverageSnapshot
-    public let totals: SessionSetTotals
+    public let totals: LaunchSetTotals
     public let aggregateRoot: ContextFlameNode
-    public let sessions: [SessionLane]
+    public let launches: [LaunchLane]
     public let sources: [InstructionSourceSummary]
     public let evidence: [SourceEvidence]
 
     enum CodingKeys: String, CodingKey {
-        case query, coverage, totals, sessions, sources, evidence
+        case query, coverage, totals, launches, sources, evidence
         case aggregateRoot = "aggregate_root"
     }
 }
@@ -107,7 +107,7 @@ public struct ContextCoverageSnapshot: Decodable, Sendable {
     public let unknownTurns: UInt64
     public let promptArtifactsAvailable: UInt64
     public let conversationsAvailable: UInt64
-    public let sourceObservableAgentSessions: UInt64
+    public let sourceObservableLaunches: UInt64
 
     enum CodingKeys: String, CodingKey {
         case completeLaunches = "complete_launches"
@@ -119,26 +119,26 @@ public struct ContextCoverageSnapshot: Decodable, Sendable {
         case unknownTurns = "unknown_turns"
         case promptArtifactsAvailable = "prompt_artifacts_available"
         case conversationsAvailable = "conversations_available"
-        case sourceObservableAgentSessions = "source_observable_agent_sessions"
+        case sourceObservableLaunches = "source_observable_launches"
     }
 }
 
-public struct SessionSetTotals: Decodable, Sendable {
+public struct LaunchSetTotals: Decodable, Sendable {
     public let runs: UInt64
-    public let agentSessions: UInt64
+    public let launches: UInt64
     public let turns: UInt64
     public let initialPromptTokens: UInt64?
-    public let initialPromptAgentSessions: UInt64
+    public let initialPromptLaunches: UInt64
     public let medianInitialPromptTokens: UInt64?
     public let p95InitialPromptTokens: UInt64?
     public let instructionTokens: UInt64?
     public let lifetimeInputTokens: UInt64?
-    public let lifetimeInputAgentSessions: UInt64
+    public let lifetimeInputLaunches: UInt64
     public let medianLifetimeInputTokens: UInt64?
     public let p95LifetimeInputTokens: UInt64?
     public let medianPeakContextPercent: Double?
     public let p95PeakContextPercent: Double?
-    public let peakContextAgentSessions: UInt64
+    public let peakContextLaunches: UInt64
     public let completedLaunches: UInt64
     public let failedLaunches: UInt64
     public let interruptedLaunches: UInt64
@@ -148,19 +148,19 @@ public struct SessionSetTotals: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case runs, turns
-        case agentSessions = "agent_sessions"
+        case launches = "launches"
         case initialPromptTokens = "initial_prompt_tokens"
-        case initialPromptAgentSessions = "initial_prompt_agent_sessions"
+        case initialPromptLaunches = "initial_prompt_launches"
         case medianInitialPromptTokens = "median_initial_prompt_tokens"
         case p95InitialPromptTokens = "p95_initial_prompt_tokens"
         case instructionTokens = "instruction_tokens"
         case lifetimeInputTokens = "lifetime_input_tokens"
-        case lifetimeInputAgentSessions = "lifetime_input_agent_sessions"
+        case lifetimeInputLaunches = "lifetime_input_launches"
         case medianLifetimeInputTokens = "median_lifetime_input_tokens"
         case p95LifetimeInputTokens = "p95_lifetime_input_tokens"
         case medianPeakContextPercent = "median_peak_context_percent"
         case p95PeakContextPercent = "p95_peak_context_percent"
-        case peakContextAgentSessions = "peak_context_agent_sessions"
+        case peakContextLaunches = "peak_context_launches"
         case completedLaunches = "completed_launches"
         case failedLaunches = "failed_launches"
         case interruptedLaunches = "interrupted_launches"
@@ -171,7 +171,7 @@ public struct SessionSetTotals: Decodable, Sendable {
 }
 
 public enum ContextFlameLevel: String, Decodable, Sendable {
-    case sessionSet = "session_set"
+    case launchSet = "launch_set"
     case kind, source, revision
 }
 
@@ -184,7 +184,7 @@ public struct ContextFlameNode: Decodable, Identifiable, Sendable {
     public let contentSha256: String?
     public let attributedTokens: UInt64
     public let runCount: UInt64
-    public let agentSessionCount: UInt64
+    public let launchCount: UInt64
     public let turnCount: UInt64
     public let children: [ContextFlameNode]
 
@@ -194,16 +194,16 @@ public struct ContextFlameNode: Decodable, Identifiable, Sendable {
         case contentSha256 = "content_sha256"
         case attributedTokens = "attributed_tokens"
         case runCount = "run_count"
-        case agentSessionCount = "agent_session_count"
+        case launchCount = "launch_count"
         case turnCount = "turn_count"
     }
 }
 
-public struct SessionLane: Decodable, Identifiable, Sendable {
+public struct LaunchLane: Decodable, Identifiable, Sendable {
     public let id: String
     public let runId: String
     public let startedAt: Int64
-    public let outcome: SessionOutcome
+    public let outcome: LaunchOutcome
     public let steeringTurns: UInt64?
     public let lifetimeInputTokens: UInt64?
     public let peakContextPercent: Double?
@@ -301,7 +301,7 @@ public enum EvidenceRole: String, Decodable, Sendable {
 public struct RepresentativeTrace: Decodable, Sendable {
     public let role: EvidenceRole
     public let address: TraceAddress
-    public let outcome: SessionOutcome
+    public let outcome: LaunchOutcome
     public let suppliedContextTokens: UInt64?
     public let selectedSourceTokens: UInt64
     public let promptArtifactAvailable: Bool
@@ -317,7 +317,7 @@ public struct RepresentativeTrace: Decodable, Sendable {
 }
 
 public struct SourceMeasurements: Codable, Sendable {
-    public let exposedSessions: UInt64
+    public let exposedRuns: UInt64
     public let exposedLaunches: UInt64
     public let exposedTurns: UInt64
     public let attributedTokens: UInt64
@@ -332,7 +332,7 @@ public struct SourceMeasurements: Codable, Sendable {
     public let providerModels: [ProviderModelExposure]
 
     enum CodingKeys: String, CodingKey {
-        case exposedSessions = "exposed_sessions"
+        case exposedRuns = "exposed_runs"
         case exposedLaunches = "exposed_launches"
         case exposedTurns = "exposed_turns"
         case attributedTokens = "attributed_tokens"
@@ -394,7 +394,7 @@ public struct SourceEvidence: Decodable, Sendable, Identifiable {
 }
 
 public struct RefinementSeed: Codable, Sendable {
-    public let query: SessionSetQuery
+    public let query: LaunchSetQuery
     public let selectedNodeId: String
     public let sourcePath: String
     public let startingContentSha256: String
@@ -402,7 +402,7 @@ public struct RefinementSeed: Codable, Sendable {
     public let evidence: [TraceAddress]
 
     public init(
-        query: SessionSetQuery,
+        query: LaunchSetQuery,
         selectedNodeId: String,
         sourcePath: String,
         startingContentSha256: String,

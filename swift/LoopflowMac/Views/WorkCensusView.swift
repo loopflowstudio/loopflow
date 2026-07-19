@@ -2,16 +2,16 @@
 import Loopflow
 import SwiftUI
 
-/// Active Sessions: a machine-wide census of every live body, grouped by Wave.
-/// The projection (`ActiveSessionsCensus`) owns every rule — red propagation,
+/// Work Census: a machine-wide census of every live body, grouped by Wave.
+/// The projection (`WorkCensus`) owns every rule — red propagation,
 /// evidence classification, and which rows are view-only. This view only renders
 /// what the census decided and, for a deliberate interactive launch, offers the
 /// one mutation: Open, which re-attaches the exact Launch in Ghostty.
-struct ActiveSessionsView: View {
+struct WorkCensusView: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     @Environment(\.palette) private var palette
-    @State private var reading = ActiveSessionsReading()
+    @State private var reading = WorkCensusReading()
     @State private var openTarget: LaunchSurfaceRecord?
 
     var body: some View {
@@ -24,7 +24,7 @@ struct ActiveSessionsView: View {
                     notice(message, color: .statusWarning)
                 }
                 if let census = reading.census {
-                    // "No active sessions" is a *healthy* empty state, so it may
+                    // "No active work" is a *healthy* empty state, so it may
                     // only show when nothing is wrong: no live bodies, no scoped
                     // read failure, and no Wave whose evidence is unavailable.
                     let anyUnavailable = census.groups.contains { $0.evidence == .unavailable }
@@ -52,12 +52,12 @@ struct ActiveSessionsView: View {
         .sheet(item: $openTarget) { launch in
             LaunchAttachSheet(launch: launch, query: query) { openTarget = nil }
         }
-        .accessibilityIdentifier("control-active-sessions")
+        .accessibilityIdentifier("control-work-census")
     }
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("No active sessions")
+            Text("No active work")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             Text("Nothing is running across the machine right now.")
@@ -98,25 +98,25 @@ struct ActiveSessionsView: View {
                 launches = []
                 notices.append("Interactive launches unavailable: \(error.localizedDescription)")
             }
-            reading = ActiveSessionsReading(
-                census: ActiveSessionsCensus(roadmap: roadmap, runs: runs, launches: launches),
+            reading = WorkCensusReading(
+                census: WorkCensus(roadmap: roadmap, runs: runs, launches: launches),
                 launches: launches,
                 notices: notices,
                 error: nil
             )
         } catch {
-            reading = ActiveSessionsReading(
+            reading = WorkCensusReading(
                 census: nil,
                 launches: [],
                 notices: [],
-                error: "Active Sessions unavailable: \(error.localizedDescription)"
+                error: "Work Census unavailable: \(error.localizedDescription)"
             )
         }
     }
 }
 
-private struct ActiveSessionsReading {
-    var census: ActiveSessionsCensus?
+private struct WorkCensusReading {
+    var census: WorkCensus?
     var launches: [LaunchSurfaceRecord] = []
     var notices: [String] = []
     var error: String?
@@ -125,13 +125,13 @@ private struct ActiveSessionsReading {
 // MARK: - One Wave's group
 
 private struct WaveGroupView: View {
-    let group: ActiveSessionWaveGroup
+    let group: WaveActivity
     let onOpen: (String) -> Void
 
     @Environment(\.palette) private var palette
 
     /// Parent index built once per group, so row indentation is an O(1) lookup.
-    private var rowsById: [String: ActiveSessionRow] {
+    private var rowsById: [String: WorkActivity] {
         Dictionary(group.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -151,7 +151,7 @@ private struct WaveGroupView: View {
                     .foregroundStyle(palette.textSecondary)
             }
             ForEach(group.rows) { row in
-                SessionRowView(
+                WorkActivityRowView(
                     row: row,
                     depth: Self.depth(of: row, in: byId),
                     onOpen: onOpen
@@ -188,7 +188,7 @@ private struct WaveGroupView: View {
     }
 
     /// Indent a row under the parent the census declared, by walking parent ids.
-    private static func depth(of row: ActiveSessionRow, in byId: [String: ActiveSessionRow]) -> Int {
+    private static func depth(of row: WorkActivity, in byId: [String: WorkActivity]) -> Int {
         var depth = 0
         var current = row.parentRowId
         while let parentId = current, let parent = byId[parentId], depth < 4 {
@@ -201,8 +201,8 @@ private struct WaveGroupView: View {
 
 // MARK: - One body row
 
-private struct SessionRowView: View {
-    let row: ActiveSessionRow
+private struct WorkActivityRowView: View {
+    let row: WorkActivity
     let depth: Int
     let onOpen: (String) -> Void
 
@@ -253,8 +253,8 @@ private struct SessionRowView: View {
 
             Spacer(minLength: Spacing.sm)
 
-            if row.isOpenable, let sessionId = row.launchId {
-                Button("Open") { onOpen(sessionId) }
+            if row.isOpenable, let launchId = row.launchId {
+                Button("Open") { onOpen(launchId) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .accessibilityLabel("Open interactive launch")
@@ -311,7 +311,7 @@ private enum TintStyle {
 }
 
 private enum EvidenceStyle {
-    static func badge(_ evidence: SessionEvidence) -> (text: String, color: Color)? {
+    static func badge(_ evidence: ActivityEvidence) -> (text: String, color: Color)? {
         switch evidence {
         case .observed: nil
         case .stale: ("stale", .statusWarning)
@@ -322,7 +322,7 @@ private enum EvidenceStyle {
         }
     }
 
-    static func groupEmptyPhrase(_ evidence: SessionEvidence) -> String {
+    static func groupEmptyPhrase(_ evidence: ActivityEvidence) -> String {
         evidence == .missing ? "No active bodies in this Wave." : "No rows to show."
     }
 }
@@ -538,7 +538,7 @@ private struct LaunchAttachSheet: View {
             recordIfEarned(target, reach: reach, userInitiated: userInitiated, launched: true)
         case .worktreeOnly:
             surface = target
-            externalNote = "Opened the worktree in \(target.appName) — this does not attach the Session."
+            externalNote = "Opened the worktree in \(target.appName) — this does not attach the provider session."
             if userInitiated { fallbackNotice = nil }
             // A worktree-only outcome never overwrites the last attach preference.
         case .failed:

@@ -107,7 +107,7 @@ struct WaveDetailPane: View {
                     .font(Typography.caption())
             }
             .buttonStyle(.borderless)
-            .help("Study the instructions seen by this Wave's agent sessions")
+            .help("Study the instructions seen by this Wave's launches")
             .accessibilityIdentifier("wave-context-lab")
 
             Button {

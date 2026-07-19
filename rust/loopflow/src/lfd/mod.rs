@@ -433,11 +433,11 @@ fn scan_wave_endpoints(repo_root: &Path) -> Vec<String> {
 
 async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
     let mut candidates = vec![state.repo_root.clone()];
-    if let Ok(sessions) = state.store.list_tasks(None).await {
+    if let Ok(tasks) = state.store.list_tasks(None).await {
         candidates.extend(
-            sessions
+            tasks
                 .into_iter()
-                .map(|session| session.worktree)
+                .map(|task| task.worktree)
                 .filter(|path| path.exists()),
         );
     }
@@ -564,13 +564,13 @@ async fn maintenance_sweep(state: &LfdState) {
     }
 
     let now = OffsetDateTime::now_utc();
-    if let Ok(sessions) = state.store.list_tasks(None).await {
+    if let Ok(tasks) = state.store.list_tasks(None).await {
         let mut active = HashSet::new();
         let mut terminal = HashSet::new();
-        for session in sessions {
+        for task in tasks {
             let Ok(work) = state
                 .store
-                .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
+                .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
                 .await
             else {
                 continue;
@@ -582,12 +582,11 @@ async fn maintenance_sweep(state: &LfdState) {
                 status,
                 crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
             ) {
-                if session.updated_at <= now - time::Duration::hours(1) && session.worktree.exists()
-                {
-                    terminal.insert(session.worktree);
+                if task.updated_at <= now - time::Duration::hours(1) && task.worktree.exists() {
+                    terminal.insert(task.worktree);
                 }
             } else {
-                active.insert(session.worktree);
+                active.insert(task.worktree);
             }
         }
         terminal.retain(|path| !active.contains(path));

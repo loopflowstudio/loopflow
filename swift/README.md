@@ -34,8 +34,8 @@ Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
 
 Select a Wave, then open **Context Lab** from its header. Compare that Wave's
-aggregate initial-prompt flame and prompt-ordered agent-session lanes, or rank
-current instruction sources by captured agent-session impressions. Select a skill or
+aggregate initial-prompt flame and prompt-ordered Launch lanes, or rank
+current instruction sources by captured Launch impressions. Select a skill or
 `LOOPFLOW.md` to read main's current file beside exact trace evidence. Choose a
 Refinement Project once per multi-Project Wave, then **Refine in task-worker**
 creates a Task and opens its running agent. The Project destination does not
@@ -75,7 +75,8 @@ and observation spans.
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
-- `LoopflowMac/Views/ContextLabView.swift` — session-set filters, flames, lanes, and evidence
+- `LoopflowMac/Views/WorkCensusView.swift` — machine-wide Work and Launch census
+- `LoopflowMac/Views/ContextLabView.swift` — launch-set filters, flames, lanes, and evidence
 - `LoopflowMac/Views/ContextLabHandoffView.swift` — explicit trace bodies and Task refinement handoff
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads

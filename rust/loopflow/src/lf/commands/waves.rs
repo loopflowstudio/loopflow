@@ -639,7 +639,7 @@ async fn wave_roadmap_projects(
         }
     };
     let projects = match store.list_projects(Some(wave.id())).await {
-        Ok(sessions) => sessions,
+        Ok(projects) => projects,
         Err(err) => {
             return Evidence::Unavailable {
                 reason: format!("failed to read Projects: {err}"),
@@ -647,7 +647,7 @@ async fn wave_roadmap_projects(
         }
     };
     let tasks = match store.list_tasks(Some(wave.id())).await {
-        Ok(sessions) => sessions,
+        Ok(tasks) => tasks,
         Err(err) => {
             return Evidence::Unavailable {
                 reason: format!("failed to read Tasks: {err}"),

@@ -1168,13 +1168,13 @@ mod tests {
         }
     }
 
-    fn make_task_pr(session: &Task) -> TaskPr {
+    fn make_task_pr(task: &Task) -> TaskPr {
         TaskPr {
             id: TaskPrId::new(),
-            task_id: session.id.clone(),
+            task_id: task.id.clone(),
             sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: format!("jack/{}", session.workspace_slug),
+            slug: task.workspace_slug.clone(),
+            branch: format!("jack/{}", task.workspace_slug),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -1185,8 +1185,8 @@ mod tests {
             linear_attachment_id: None,
             linear_comment_id: None,
             linear_link_error: None,
-            created_at: session.created_at,
-            updated_at: session.updated_at,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
         }
     }
 
@@ -2069,9 +2069,9 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
-        let mut pr = make_task_pr(&session);
-        store.create_task(&session, &pr).await.unwrap();
+        let task = make_task(&wave, &project);
+        let mut pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
@@ -2101,7 +2101,7 @@ mod tests {
         pr.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&pr).await.unwrap();
 
-        let read = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        let read = store.active_task_pr(&task.id).await.unwrap().unwrap();
         assert_eq!(read.head_sha(), Some("sha-abc"));
         let ci = read.fresh_ci().expect("reading matches the current head");
         assert_eq!(ci.state, crate::task::CiState::Failing);
@@ -2119,9 +2119,9 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
-        let mut pr = make_task_pr(&session);
-        store.create_task(&session, &pr).await.unwrap();
+        let task = make_task(&wave, &project);
+        let mut pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
 
         pr.linear_attachment_id = Some("att-1".to_string());
         pr.linear_comment_id = Some("comment-1".to_string());
@@ -2129,7 +2129,7 @@ mod tests {
         pr.updated_at = OffsetDateTime::now_utc();
         store.update_task_pr(&pr).await.unwrap();
 
-        let read = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        let read = store.active_task_pr(&task.id).await.unwrap().unwrap();
         assert_eq!(read.linear_attachment_id.as_deref(), Some("att-1"));
         assert_eq!(read.linear_comment_id.as_deref(), Some("comment-1"));
         assert_eq!(read.linear_link_error.as_deref(), Some("linear is down"));
@@ -2145,9 +2145,9 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
-        let mut first = make_task_pr(&session);
-        store.create_task(&session, &first).await.unwrap();
+        let task = make_task(&wave, &project);
+        let mut first = make_task_pr(&task);
+        store.create_task(&task, &first).await.unwrap();
 
         first.publication = Some(PrPublication {
             requested_at: first.updated_at,
@@ -2164,10 +2164,10 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let second = TaskPr {
             id: TaskPrId::new(),
-            task_id: session.id.clone(),
+            task_id: task.id.clone(),
             sequence: 2,
             slug: "released-proof".to_string(),
-            branch: format!("jack/{}-released-proof", session.workspace_slug),
+            branch: format!("jack/{}-released-proof", task.workspace_slug),
             base_commit: "main-after-101".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -2186,7 +2186,7 @@ mod tests {
 
         assert_eq!(
             store
-                .task_prs(&session.id)
+                .task_prs(&task.id)
                 .await
                 .unwrap()
                 .iter()
@@ -2195,7 +2195,7 @@ mod tests {
             vec![1, 2]
         );
         assert_eq!(
-            store.active_task_pr(&session.id).await.unwrap().unwrap().id,
+            store.active_task_pr(&task.id).await.unwrap().unwrap().id,
             second.id
         );
 
@@ -2205,7 +2205,7 @@ mod tests {
         abandoned.updated_at = abandoned_at;
         let conflicting = TaskPr {
             id: TaskPrId::new(),
-            task_id: session.id.clone(),
+            task_id: task.id.clone(),
             sequence: 3,
             slug: "conflict".to_string(),
             branch: first.branch.clone(),
@@ -2228,7 +2228,7 @@ mod tests {
             .is_err());
         assert_eq!(
             store
-                .active_task_pr(&session.id)
+                .active_task_pr(&task.id)
                 .await
                 .unwrap()
                 .unwrap()
@@ -2239,7 +2239,7 @@ mod tests {
 
     /// The settle equality includes `abandoned_at`, so a re-settle must carry
     /// the original abandonment time. GitHub-observation reconcile once
-    /// re-stamped it with `now` on every `lf task status`, and the session
+    /// re-stamped it with `now` on every `lf task status`, and the task
     /// wedged permanently on "already settled differently" (live: W2-283).
     #[tokio::test]
     async fn re_settling_an_abandoned_pr_is_idempotent_only_at_its_original_time() {
@@ -2251,9 +2251,9 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
-        let mut pr = make_task_pr(&session);
-        store.create_task(&session, &pr).await.unwrap();
+        let task = make_task(&wave, &project);
+        let mut pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
 
         let first_abandonment = OffsetDateTime::now_utc();
         pr.abandoned_at = Some(first_abandonment);
@@ -2367,7 +2367,7 @@ mod tests {
         assert_eq!(collapsed.parent_pr_id, None);
         assert_eq!(collapsed.base_commit, "main-after-200");
 
-        // The worktree lookup the rebase path relies on resolves the session.
+        // The worktree lookup the rebase path relies on resolves the task.
         let by_worktree = store
             .get_task_by_worktree(&child.worktree.display().to_string())
             .await
@@ -2386,9 +2386,9 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
-        let mut pr = make_task_pr(&session);
-        store.create_task(&session, &pr).await.unwrap();
+        let task = make_task(&wave, &project);
+        let mut pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
@@ -2398,7 +2398,7 @@ mod tests {
         });
         store.update_task_pr(&pr).await.unwrap();
 
-        let publishing = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        let publishing = store.active_task_pr(&task.id).await.unwrap().unwrap();
         assert_eq!(publishing.phase(), PrPhase::Publishing);
         assert_eq!(publishing.publication, pr.publication);
 
@@ -2409,7 +2409,7 @@ mod tests {
         });
         store.update_task_pr(&pr).await.unwrap();
 
-        let open = store.active_task_pr(&session.id).await.unwrap().unwrap();
+        let open = store.active_task_pr(&task.id).await.unwrap().unwrap();
         assert_eq!(open.phase(), PrPhase::Open);
         assert_eq!(open.publication, pr.publication);
     }
@@ -2424,13 +2424,13 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
-        let pr = make_task_pr(&session);
-        store.create_task(&session, &pr).await.unwrap();
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr).await.unwrap();
 
-        store.complete_task(&session, Some(&pr)).await.unwrap();
-        assert!(store.get_task(&session.id).await.unwrap().is_some());
-        let stored = store.task_prs(&session.id).await.unwrap();
+        store.complete_task(&task, Some(&pr)).await.unwrap();
+        assert!(store.get_task(&task.id).await.unwrap().is_some());
+        let stored = store.task_prs(&task.id).await.unwrap();
         assert!(stored.is_empty());
     }
 
@@ -2446,15 +2446,15 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let session = make_task(&wave, &project);
+        let task = make_task(&wave, &project);
         store
-            .create_task(&session, &make_task_pr(&session))
+            .create_task(&task, &make_task_pr(&task))
             .await
             .unwrap();
 
         let barrier = Arc::new(tokio::sync::Barrier::new(3));
         let launch = |store: Arc<super::Store>, barrier: Arc<tokio::sync::Barrier>| {
-            let candidate = session.clone();
+            let candidate = task.clone();
             tokio::spawn(async move {
                 barrier.wait().await;
                 store
@@ -2474,7 +2474,7 @@ mod tests {
 
         assert_eq!(leases.len(), 1);
         let work = store
-            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
             .unwrap();
         assert!(store.current_run(&work).await.unwrap().is_some());

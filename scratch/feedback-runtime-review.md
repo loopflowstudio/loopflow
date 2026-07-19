@@ -178,3 +178,61 @@ workspace JSON, child activity, and Launch presentation. Exact false-Session
 and retired wire-key searches are empty outside historical migrations and the
 explicit substrate allowlist; `cargo fmt --check` and all-target Clippy with
 warnings denied pass. Clippy caught and removed one redundant field spelling.
+
+## Slice 6D2 — honest Mac projections
+
+Accepted. The Mac runtime projection is `WorkCensus` containing
+`WaveActivity` and `WorkActivity`; its types, files, views, copy, and tests no
+longer call heterogeneous Work, Run, and Launch rows Sessions. The one-value
+`SessionAction` and every row action array are deleted. A row is openable
+exactly when it carries the existing optional `launchId`.
+
+Context Lab now mirrors its source data: `LaunchSetQuery`, `LaunchSetTotals`,
+`LaunchLane`, `launches`, `LaunchOutcome`, launch counts, and a `launch_set`
+flame root. Rust, JSON fixtures, Swift, and UI copy change together with no old
+keys, aliases, or defaults. A final broad audit also renamed false stable-Work
+locals in webhook, lfd, PM/store tests, Wave observation, pruning, and promotion
+paths; the surviving Session allowlist is provider resume state, provider
+configuration, usage-window labels, URLSession, tmux/Ghostty, and human prose.
+
+Proof: Rust Context Lab 20/20 and parser 1/1 pass; Swift Context Lab 10/10, DTO
+fixtures 7/7, and RegistryQuery 17/17 pass with the full Mac target compiled.
+The follow-up Task 15/15, store persistence 2/2, and reteam 12/12 proofs pass.
+Exact old projection/wire-key and false stable-Work Session searches are empty;
+`cargo fmt --check` and all-target Clippy with warnings denied pass.
+
+## Final architecture review
+
+Accepted with one intentionally open boundary. The implemented system now maps
+its public nouns to real things: stable Work, bounded Run, provider Launch,
+observed Turn, authored Steer, exact Wait, and an explicit flow Feedback
+checkpoint. The independent contraction does not introduce aliases, tombstone
+commands, dual readers, or a generic actor abstraction before process ownership
+is known.
+
+The architecture now distinguishes current behavior from target behavior. A
+Project runner can answer child Feedback only while it is alive; there is no
+Project server and no Home-owned Ready mechanism to wake a stopped parent. The
+current clean-canonical-checkout gate is also named as a failure mode, not a
+retained invariant. The server follow-up has deterministic done-whens for both:
+durable input must wake exactly one parent Run, and a dirty checkout must not
+strand read-only parent control.
+
+At 2 a.m. the present failure is therefore diagnosable but not yet recovered:
+a best-effort child nudge can fail and no durable owner notices the Ready
+Project. The follow-up must make status name the exact Wait or Ready fact and
+give one Home process responsibility for recovery. Implementing a speculative
+Project daemon in this slice would have created a second lifecycle beside
+Epoch/Run/Wait, so it remains out of scope by design.
+
+The useful independent safety ideas from closed PR #1052 are retained in the
+handoff: exact prepared-head auto-merge pinning, refusal to land across an open
+authored Feedback checkpoint, completion from durable merged-PR evidence, and
+guards that agree with legal actions. Its blanket managed-submit ban and
+approval state are rejected because they would restore implicit blockage.
+
+Final proof: `cargo fmt --check`, the Context Lab contract fixture, and all 37
+migration tests pass. Exact searches for the deleted review, Radio, memory,
+ambient-chat, evidence-receipt, escalation, policy, and false Session
+projection symbols are empty. The previously recorded all-target Clippy and
+focused Rust/Swift behavioral suites apply to the same source content.

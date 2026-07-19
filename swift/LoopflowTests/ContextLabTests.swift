@@ -18,8 +18,8 @@ struct ContextLabTests {
         #expect(route.query.waves == ["product"])
         #expect(route.query.startedAfter == 408_000)
         #expect(route.query.startedBefore == 3_000_000)
-        #expect(route.selectedNodeId == "session-set")
-        #expect(route.focusNodeId == "session-set")
+        #expect(route.selectedNodeId == "launch-set")
+        #expect(route.focusNodeId == "launch-set")
         #expect(route.mode == .aggregate)
         #expect(route.isWaveScoped)
 
@@ -36,7 +36,7 @@ struct ContextLabTests {
     @Test("Saved visualization modes use semantic values")
     func contextLabModesPersistIndependentlyFromLabels() {
         #expect(ContextLabMode.allCases.map(\.rawValue) == ["aggregate", "lanes", "sources"])
-        #expect(ContextLabMode.allCases.map(\.title) == ["Initial prompts", "Agent sessions", "Sources"])
+        #expect(ContextLabMode.allCases.map(\.title) == ["Initial prompts", "Launches", "Sources"])
     }
 
     @Test("Source refinement stays inside the selected canonical repo")
@@ -66,7 +66,7 @@ struct ContextLabTests {
     }
 
     @Test("Selected-source sorting uses share rather than raw token load")
-    func selectedSourceShareUsesTheSessionDenominator() {
+    func selectedSourceShareUsesTheLaunchDenominator() {
         let heavierSlice = contextSelectedSourceShare(
             selectedTokens: 600,
             contextTokens: 2_000
@@ -166,7 +166,7 @@ struct ContextLabTests {
 
     @Test("Task workspace backlinks retain the exact research selection")
     func contextBacklinkRoundTrips() throws {
-        let query = SessionSetQuery(
+        let query = LaunchSetQuery(
             repoPaths: ["/src/loopflow"],
             startedAfter: 10,
             startedBefore: 20,

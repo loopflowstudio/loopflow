@@ -2875,9 +2875,9 @@ mod tests {
             .await
             .expect("create Project Work");
 
-        let session_id = TaskId::new();
-        let session = Task {
-            id: session_id.clone(),
+        let task_id = TaskId::new();
+        let task = Task {
+            id: task_id.clone(),
             directive: TaskDirective {
                 id: LinearIssueId::new(issue_id).expect("issue id"),
                 identifier: identifier.to_string(),
@@ -2907,10 +2907,10 @@ mod tests {
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_id: session.id.clone(),
+            task_id: task.id.clone(),
             sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: format!("jack/{}", session.workspace_slug),
+            slug: task.workspace_slug.clone(),
+            branch: format!("jack/{}", task.workspace_slug),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -2925,10 +2925,10 @@ mod tests {
             updated_at: now,
         };
         store
-            .create_task(&session, &pr)
+            .create_task(&task, &pr)
             .await
             .expect("create Task Work");
-        session_id
+        task_id
     }
 
     #[test]
@@ -3403,14 +3403,14 @@ mod tests {
     #[tokio::test]
     async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
-        let session = store
-            .get_task(&session_id)
+        let task_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
+        let task = store
+            .get_task(&task_id)
             .await
-            .expect("read session")
-            .expect("session exists");
+            .expect("read task")
+            .expect("task exists");
         let work = store
-            .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
             .await
             .expect("resolve Task Work");
         store
@@ -3455,7 +3455,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_retry_reuses_pre_move_comment_then_moves_and_rebinds() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
+        let task_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
         let initial_project = || {
             reteam_project_node(
                 "project-1",
@@ -3492,10 +3492,10 @@ mod tests {
         assert!(error.to_string().contains("issue move failed"));
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
+                .expect("read task")
+                .expect("task exists")
                 .directive
                 .identifier,
             "W2-9"
@@ -3533,10 +3533,10 @@ mod tests {
         assert_eq!(result.task_updates, 1);
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
+                .expect("read task")
+                .expect("task exists")
                 .directive
                 .identifier,
             "PRD-9"
@@ -3563,7 +3563,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_already_moved_issue_only_rebinds_a_stale_task() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
+        let task_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([reteam_project_node(
                 "project-1",
@@ -3605,10 +3605,10 @@ mod tests {
         assert!(result.moves.is_empty());
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
+                .expect("read task")
+                .expect("task exists")
                 .directive
                 .identifier,
             "PRD-10"

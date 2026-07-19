@@ -3,7 +3,7 @@
 //! `lf wave <name>` ensures the Wave has a durable row, then drains typed
 //! Project and Task observations addressed to it. Listener presence and
 //! one-brain enforcement live in the Wave's endpoint file; there is no global
-//! process-session registry.
+//! process registry.
 
 use std::fmt;
 use std::path::Path;
@@ -164,13 +164,13 @@ impl StoreObserver {
         for observation in observations {
             let should_ack = match (observation.source, observation.payload) {
                 (
-                    crate::child::ChildRef::Task(session_id),
+                    crate::child::ChildRef::Task(task_id),
                     crate::project::ChildEventPayload::Task { event },
-                ) => match self.store.get_task(&session_id).await {
-                    Ok(Some(session)) => {
+                ) => match self.store.get_task(&task_id).await {
+                    Ok(Some(task)) => {
                         self.runtime.deliver_task_observation(TaskObservation {
-                            task_id: session_id,
-                            issue_identifier: session.directive.identifier,
+                            task_id,
+                            issue_identifier: task.directive.identifier,
                             event_id: observation.event_id,
                             event,
                         });
@@ -178,19 +178,19 @@ impl StoreObserver {
                     }
                     Ok(None) => false,
                     Err(error) => {
-                        tracing::debug!(%error, %session_id, "wave observer Task read failed");
+                        tracing::debug!(%error, %task_id, "wave observer Task read failed");
                         continue;
                     }
                 },
                 (
-                    crate::child::ChildRef::Project(session_id),
+                    crate::child::ChildRef::Project(project_id),
                     crate::project::ChildEventPayload::Project { event },
-                ) => match self.store.get_project(&session_id).await {
-                    Ok(Some(session)) => {
+                ) => match self.store.get_project(&project_id).await {
+                    Ok(Some(project)) => {
                         self.runtime.deliver_project_observation(
                             crate::project::ProjectObservation {
-                                project_id: session_id,
-                                project: session.definition.slug,
+                                project_id,
+                                project: project.definition.slug,
                                 event_id: observation.event_id,
                                 event,
                             },
@@ -199,7 +199,7 @@ impl StoreObserver {
                     }
                     Ok(None) => false,
                     Err(error) => {
-                        tracing::debug!(%error, %session_id, "wave observer Project read failed");
+                        tracing::debug!(%error, %project_id, "wave observer Project read failed");
                         continue;
                     }
                 },

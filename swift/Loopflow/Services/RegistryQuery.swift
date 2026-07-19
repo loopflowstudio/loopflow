@@ -208,7 +208,7 @@ public struct RegistryQuery: Sendable {
     /// One atomic Context Lab population. Rust owns every trace join, token
     /// attribution, revision identity, and representative choice; the app sends
     /// only the filter query and renders the returned snapshot.
-    public func contextLab(_ query: SessionSetQuery) async throws -> ContextLabSnapshot {
+    public func contextLab(_ query: LaunchSetQuery) async throws -> ContextLabSnapshot {
         var args = [
             "context", "--json",
             "--started-after", String(query.startedAfter),

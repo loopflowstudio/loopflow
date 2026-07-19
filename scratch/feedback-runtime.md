@@ -2,11 +2,11 @@
 
 ## Status
 
-This design finishes the independent part of the Session-to-Work migration and
-defines the smaller Feedback architecture. It deliberately stops before the
-Home/Work server topology. That follow-up must choose process ownership before
-runtime dispatch, liveness, retries, streaming, or stopped-parent wake behavior
-is moved.
+The six independent slices are implemented. They finish the Session-to-Work
+migration outside runtime hosting and establish the smaller Feedback
+architecture. The remaining work is the Home/Work server topology. That
+follow-up must choose process ownership before runtime dispatch, liveness,
+retries, streaming, or stopped-parent wake behavior is moved.
 
 The work is split into six reviewable slices:
 
@@ -134,7 +134,7 @@ a direct read-only convenience and must work while every server is stopped.
 
 ## Planning truth
 
-Session tables are gone. Project and Task should expose their domain truth
+Session tables are gone. Project and Task now expose their domain truth
 without execution-shaped wrappers:
 
 ```rust

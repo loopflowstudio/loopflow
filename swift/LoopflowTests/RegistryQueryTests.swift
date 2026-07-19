@@ -314,7 +314,7 @@ struct RegistryQueryTests {
             ])
             return fixture
         }
-        let selection = SessionSetQuery(
+        let selection = LaunchSetQuery(
             repoPaths: ["/src/loopflow"],
             startedAfter: 100,
             startedBefore: 200,

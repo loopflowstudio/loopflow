@@ -67,7 +67,7 @@
 //! - `POST /observations` drains the Wave's authoritative child-observation
 //!   outbox, journals each pending Project/Task event idempotently, and wakes
 //!   or queues the resident with typed inbox items. Loopback-only internal
-//!   door; child sessions never write the Wave journal.
+//!   door; child Work never writes the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //!

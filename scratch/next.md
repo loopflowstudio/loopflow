@@ -1,28 +1,20 @@
-# Slice 5: finish Project and Task planning truth
+# Slice 6A: make Feedback presentation safe
 
 ## Implement
 
-- Replace launch/snapshot wrappers with `ProjectDefinition` and
-  `TaskDirective`.
-- Expose `Project.definition`; expose `Task.directive` and `Task.project_id`.
-- Delete Task's copied Project name/slug/definition/KRs/snapshot timestamp.
-- Make Task SQL select only Task data plus `project_id`; prompt, status,
-  roadmap, journal, and diagnostics resolve the parent Project deliberately.
-- Update Rust/Swift/JSON/docs/tests without compatibility aliases.
-
-## Preserve
-
-- Stable Project and Task Work ids and Linear bindings.
-- Runtime `agent`, `provider`, `provider_session_id`, abandon intent, and
-  handoff until the server-topology design chooses their replacement.
-- Current schema if existing normalized columns already express this shape; do
-  not add a data migration only to rename Rust fields.
+- Make `lf work feedback` presentation-only.
+- Delete `continue_on_success`, `continue_on_exit`, the hidden feedback-exit
+  guard, exit policy/retry/lock state, and conditional continuation store API.
+- Keep `lf work continue` as the only Feedback-closing operation.
+- Delete Feedback escalation command/store transition/receipt; Task Feedback
+  chooses User or immediate Parent when it opens and never changes route.
+- Update Swift launch argv, help, docs, parser/store/behavior tests with no
+  compatibility aliases.
 
 ## Done when
 
-- [ ] `ProjectLaunchReceipt`, `TaskLaunchReceipt`, Linear snapshot wrappers,
-      `launch_context`, and `.launch.project|issue` are absent.
-- [ ] Task carries no copied Project PM metadata.
-- [ ] Project definition updates affect the next Task prompt/status without a
-      Task rewrite.
-- [ ] focused store/migration/prompt/status/roadmap tests, fmt, and clippy pass.
+- [ ] presentation cannot advance flow on any process exit or signal.
+- [ ] explicit `work continue` is the only close path.
+- [ ] escalation API/state is absent.
+- [ ] parser rejects retired flags/commands and focused Rust/Swift tests, fmt,
+      and clippy pass.

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
+use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
@@ -332,6 +333,78 @@ const MIGRATIONS: &[Migration] = &[
         name: "accounts_first",
         sql: include_str!("migrations/0.11.027_accounts_first.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 29,
+        },
+        name: "ci_incident_repaired_head",
+        sql: include_str!("migrations/0.11.029_ci_incident_repaired_head.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 30,
+        },
+        name: "one_spend_grain",
+        sql: include_str!("migrations/0.11.030_one_spend_grain.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 31,
+        },
+        name: "durable_input_spine",
+        sql: include_str!("migrations/0.11.031_durable_input_spine.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 32,
+        },
+        name: "run_launch_attention",
+        sql: include_str!("migrations/0.11.032_run_launch_attention.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 33,
+        },
+        name: "launch_attention_only",
+        sql: include_str!("migrations/0.11.033_launch_attention_only.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 34,
+        },
+        name: "typed_ci_runs",
+        sql: include_str!("migrations/0.11.034_typed_ci_runs.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 35,
+        },
+        name: "drop_child_commands",
+        sql: include_str!("migrations/0.11.035_drop_child_commands.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 36,
+        },
+        name: "delete_sessions",
+        sql: include_str!("migrations/0.11.036_delete_sessions.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -415,6 +488,31 @@ pub fn active_namespace() -> (u32, u32) {
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
     apply_sqlite_transaction(conn, |_| Ok(()))
+}
+
+/// Stage a fresh connection one migration behind the binary's known head. The
+/// store-level shared-frontier regressions use it to build a database the running
+/// binary could advance but an ordinary open must leave alone.
+#[cfg(test)]
+pub(crate) fn apply_all_but_head(conn: &rusqlite::Connection) -> StoreResult<()> {
+    apply_set(conn, &MIGRATIONS[..MIGRATIONS.len() - 1])
+}
+
+#[cfg(test)]
+pub(crate) fn prior_known_version() -> String {
+    MIGRATIONS[MIGRATIONS.len() - 2].version()
+}
+
+/// Whether the old reader — a binary whose head is the prior migration — still
+/// recognizes the store as exactly its own frontier (nothing pending). It is
+/// `false` if the store was advanced to the newer head, which is what makes the
+/// shared-frontier regression sabotage-sensitive.
+#[cfg(test)]
+pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
+    let prior = &MIGRATIONS[..MIGRATIONS.len() - 1];
+    applied_versions(conn)
+        .and_then(|applied| pending_migrations(&applied, prior).map(<[_]>::is_empty))
+        .unwrap_or(false)
 }
 
 /// Validate the schema this binary already understands without advancing it.
@@ -681,6 +779,7 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
     let applied = applied_versions(conn)?;
     for migration in pending_migrations(&applied, set)? {
         let parent_history = migration_prefix_fingerprint(&applied_versions(conn)?, set)?;
+        migration_preflight(conn, migration)?;
         conn.execute_batch(migration.sql)?;
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
@@ -688,6 +787,57 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
 
     validate_applied_checksums(conn, set)?;
     validate_schema(conn, set)
+}
+
+fn migration_preflight(conn: &rusqlite::Connection, migration: &Migration) -> StoreResult<()> {
+    if migration.name != "durable_input_spine" {
+        return Ok(());
+    }
+    let mut active = Vec::new();
+    for (kind, table) in [("Project", "project_sessions"), ("Task", "task_sessions")] {
+        let mut statement = conn.prepare(&format!(
+            "SELECT id FROM {table}
+             WHERE process_lease_state IN ('reserved', 'active', 'revoked')
+             ORDER BY id"
+        ))?;
+        let ids = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        active.extend(ids.into_iter().map(|id| format!("{kind} {id}")));
+    }
+    if !active.is_empty() {
+        return Err(StoreError::InvalidData(format!(
+            "durable input migration requires every writer to be quiescent and reaped; active: {}",
+            active.join(", ")
+        )));
+    }
+    let ambiguous_project: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM project_sessions
+             GROUP BY project_id HAVING COUNT(DISTINCT wave_id) > 1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(project) = ambiguous_project {
+        return Err(StoreError::InvalidData(format!(
+            "Project {project} appears under more than one Wave; repair parentage before durable input migration"
+        )));
+    }
+    let ambiguous_task: Option<String> = conn
+        .query_row(
+            "SELECT issue_id FROM task_sessions
+             GROUP BY issue_id HAVING COUNT(DISTINCT project_id) > 1 LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(task) = ambiguous_task {
+        return Err(StoreError::InvalidData(format!(
+            "Task {task} appears under more than one Project; repair parentage before durable input migration"
+        )));
+    }
+    Ok(())
 }
 
 fn migration_checksum(migration: &Migration) -> String {
@@ -1159,6 +1309,21 @@ pub fn latest_known_version() -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+/// The next migration this binary knows that the store has not applied, or
+/// `None` when the store is exactly at this binary's frontier.
+///
+/// Call only after [`validate_sqlite`] has confirmed the applied history is a
+/// clean recognized prefix; then `pending_migrations` cannot error and this is a
+/// pure "is the store behind me?" question. An ordinary open of the shared store
+/// refuses when this is `Some`: the running binary's code may query columns that
+/// pending migration adds, so reusing the older schema would only fail later.
+pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    let applied = applied_versions(conn)?;
+    Ok(pending_migrations(&applied, MIGRATIONS)?
+        .first()
+        .map(Migration::version))
+}
+
 pub fn latest_applied_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
     if !user_tables(conn)?
         .iter()
@@ -1213,10 +1378,10 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, product_schema, validate_set, validate_sqlite,
-        Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, pending_migrations, product_schema,
+        validate_foreign_keys, validate_set, validate_sqlite, Migration, MigrationId,
+        DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
-    use crate::task::TaskEventKind;
 
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
@@ -1370,14 +1535,16 @@ mod tests {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations");
         let mut on_disk: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
-            .map(|entry| {
-                entry
-                    .unwrap()
-                    .path()
-                    .file_stem()
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
+            .filter_map(|entry| {
+                let entry = entry.unwrap();
+                entry.file_type().unwrap().is_file().then(|| {
+                    entry
+                        .path()
+                        .file_stem()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
             })
             .collect();
         on_disk.sort();
@@ -1404,73 +1571,148 @@ mod tests {
         assert!(product_schema(&conn)
             .unwrap()
             .iter()
-            .any(|object| object.object_type == "table" && object.name == "task_sessions"));
+            .any(|object| object.object_type == "table" && object.name == "tasks"));
+        let schema = product_schema(&conn).unwrap();
+        assert!(!schema.iter().any(|object| {
+            object.object_type == "table"
+                && matches!(object.name.as_str(), "task_sessions" | "project_sessions")
+        }));
+        assert!(!columns(&conn, "tasks")
+            .iter()
+            .any(|column| { matches!(column.as_str(), "status" | "status_reason" | "status_at") }));
+        assert!(!columns(&conn, "projects")
+            .iter()
+            .any(|column| { matches!(column.as_str(), "status" | "status_reason" | "status_at") }));
+        for table in ["projects", "tasks"] {
+            let names = columns(&conn, table);
+            assert!(!names.iter().any(|name| name == "current_directive_version"));
+            assert!(!names
+                .iter()
+                .any(|name| name == "incorporated_directive_version"));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_schema
+                 WHERE type='table' AND name IN (
+                    'child_directives', 'launches', 'turns',
+                    'interaction_reviews', 'interactive_handoffs'
+                 )",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0,
+            "the durable spine has no compatibility or shadow lifecycle tables"
+        );
+        let turn_columns = columns(&conn, "agent_turns");
+        assert!(turn_columns.iter().any(|name| name == "epoch_id"));
+        assert!(turn_columns.iter().any(|name| name == "basis_rev"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('sends')
+                 WHERE \"table\"='agent_turns' AND \"from\"='turn_id' AND \"to\"='id'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1,
+            "Send evidence belongs to the sole durable Turn row"
+        );
 
         apply_sqlite(&conn).unwrap();
         assert_eq!(
             applied_versions(&conn).unwrap(),
-            vec![
-                "0.10.001_initial".to_string(),
-                "0.10.002_session_execution_context".to_string(),
-                "0.11.001_task_prs".to_string(),
-                "0.11.002_project_session_successors".to_string(),
-                "0.11.003_child_body_lease".to_string(),
-                "0.11.004_task_pr_ci_state".to_string(),
-                "0.11.005_provider_accounts".to_string(),
-                "0.11.006_context_launch_work".to_string(),
-                "0.11.007_task_pr_parent".to_string(),
-                "0.11.008_interactive_handoffs".to_string(),
-                "0.11.009_context_pressure".to_string(),
-                "0.11.010_context_input_normalization".to_string(),
-                "0.11.011_profiles".to_string(),
-                "0.11.012_provider_account_lifecycle".to_string(),
-                "0.11.013_task_review_state".to_string(),
-                "0.11.014_task_lifecycle".to_string(),
-                "0.11.015_interaction_reviews".to_string(),
-                "0.11.016_task_linear_observations".to_string(),
-                "0.11.017_migration_provenance".to_string(),
-                "0.11.018_session_body_provenance".to_string(),
-                "0.11.019_task_pr_github_observation".to_string(),
-                "0.11.020_task_pr_linear_linkage".to_string(),
-                "0.11.021_provider_deliveries".to_string(),
-                "0.11.022_task_session_successors".to_string(),
-                "0.11.023_capture_pruned_state".to_string(),
-                "0.11.024_ci_incidents".to_string(),
-                "0.11.025_usage_deltas".to_string(),
-                "0.11.026_lineage_boundary".to_string(),
-                "0.11.027_accounts_first".to_string()
-            ]
+            MIGRATIONS
+                .iter()
+                .map(Migration::version)
+                .collect::<Vec<_>>()
         );
+    }
+
+    /// Everything up to but excluding `name`. A test whose subject is one
+    /// migration names it, so appending the next migration cannot silently
+    /// re-point the test at different SQL.
+    fn prefix_before(name: &str) -> &'static [Migration] {
+        let index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == name)
+            .expect("named migration is registered");
+        &MIGRATIONS[..index]
     }
 
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
-        // Bait for the withheld tail (`0.11.026_lineage_boundary`): a parent no
-        // row records. Its survival is what proves the tail stayed withheld.
-        conn.execute_batch(
-            "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
-             VALUES ('trace_a', 'proc_orphan', 'proc_ghost', 0, 100, 'run', 'started')",
-        )
-        .unwrap();
+        let published = prefix_before("durable_input_spine");
+        apply_set(&conn, published).unwrap();
 
         validate_sqlite(&conn).unwrap();
 
         assert_eq!(
-            latest_applied_version_sqlite(&conn).unwrap().as_deref(),
-            Some("0.11.025_usage_deltas")
+            latest_applied_version_sqlite(&conn).unwrap(),
+            published.last().map(Migration::version),
+            "a validation-only open advances nothing"
         );
         assert!(capture_status_accepts(&conn, "pruned"));
+        // Bait for the withheld tail: the durable input migration creates the
+        // stable Work tables. Their absence proves validation stayed read-only.
+        assert!(
+            conn.prepare("SELECT id FROM projects LIMIT 0").is_err(),
+            "a validation-only open must not run the tail's schema change"
+        );
+    }
+
+    /// The validation primitive underneath the shared-store gate recognizes a
+    /// store one migration behind, names the exact pending head, and never
+    /// advances the frontier the old reader still recognizes.
+    #[test]
+    fn validate_recognizes_a_shorter_frontier_and_names_the_pending_head() {
+        let installed = &MIGRATIONS[..MIGRATIONS.len() - 1];
+        let candidate = MIGRATIONS;
+
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        // Bring the store to the frontier the installed binary shipped with.
+        apply_set(&conn, installed).unwrap();
+        let installed_frontier = latest_applied_version_sqlite(&conn).unwrap().unwrap();
         assert_eq!(
-            conn.query_row(
-                "SELECT parent_process_id FROM run_events WHERE process_id = 'proc_orphan'",
-                [],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .unwrap(),
-            Some("proc_ghost".to_string()),
-            "a validation-only open must not run the tail's backfill"
+            installed_frontier,
+            installed
+                .last()
+                .expect("installed set has a head")
+                .version()
+        );
+
+        // The candidate is ahead by one migration. `validate_sqlite` runs the
+        // full (candidate) set the ordinary runtime trusts and must leave the
+        // frontier untouched — no unpublished migration becomes durable — while
+        // reporting the exact pending head the store open refuses on.
+        validate_sqlite(&conn).unwrap();
+        assert_eq!(
+            super::pending_shared_migration(&conn).unwrap().as_deref(),
+            Some(latest_known_version().as_str()),
+            "the pending head the ordinary shared open refuses on"
+        );
+        assert_eq!(
+            latest_applied_version_sqlite(&conn).unwrap().unwrap(),
+            installed_frontier,
+            "validation must not advance the shared frontier"
+        );
+
+        // The installed binary — whose set ends at the store's frontier — still
+        // opens the store: it is exactly the recognized prefix, nothing pending.
+        assert!(
+            pending_migrations(&applied_versions(&conn).unwrap(), installed)
+                .unwrap()
+                .is_empty(),
+            "the installed binary must keep reading the store the candidate left alone"
+        );
+
+        // Only the promotion boundary advances the frontier to the head.
+        apply_set(&conn, candidate).unwrap();
+        assert_eq!(
+            latest_applied_version_sqlite(&conn).unwrap().unwrap(),
+            latest_known_version()
         );
     }
 
@@ -1479,7 +1721,7 @@ mod tests {
     #[test]
     fn the_lineage_boundary_migration_retires_ghost_parents_and_keeps_real_ones() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 2]).unwrap();
+        apply_set(&conn, prefix_before("lineage_boundary")).unwrap();
         conn.execute_batch(
             "INSERT INTO run_events (run_id, process_id, parent_process_id, seq, ts, node, event)
              VALUES ('trace_a', 'proc_root',   NULL,         0, 100, 'run', 'started'),
@@ -1526,7 +1768,7 @@ mod tests {
         // than delete.
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 5]).unwrap();
+        apply_set(&conn, prefix_before("capture_pruned_state")).unwrap();
         assert!(
             !capture_status_accepts(&conn, "pruned"),
             "pruned must not be a legal status before the migration"
@@ -1594,6 +1836,8 @@ mod tests {
         assert_eq!(
             indexes,
             vec![
+                "idx_agent_launches_attention",
+                "idx_agent_launches_one_control_live",
                 "idx_agent_launches_process",
                 "idx_agent_launches_project",
                 "idx_agent_launches_run",
@@ -1754,7 +1998,7 @@ mod tests {
     fn accounts_first_migration_preserves_asymmetric_routes_venues_and_session_pins() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        apply_set(&conn, prefix_before("accounts_first")).unwrap();
         conn.execute_batch(
             "INSERT INTO provider_accounts (
                 provider, account_id, home, login_email, credential_state,
@@ -1907,7 +2151,7 @@ mod tests {
     }
 
     #[test]
-    fn project_successor_migration_preserves_history_and_child_references() {
+    fn project_successor_migration_allows_one_current_successor() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_set(&conn, &MIGRATIONS[..2]).unwrap();
@@ -1925,23 +2169,11 @@ mod tests {
                  'Developer Efficiency', 'Definition', 'w1', 1,
                  'abandoned', 'legacy Session ended', 2, 1, 0,
                  'codex', 'codex', 1, 2, 1, 1
-             );
-             INSERT INTO project_events (session_id, kind_json, created_at)
-                 VALUES ('ps_old', '{\"kind\":\"completed\",\"summary\":\"history\"}', 2);",
+             );",
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
-
-        assert_eq!(
-            conn.query_row(
-                "SELECT COUNT(*) FROM project_events WHERE session_id = 'ps_old'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-            1
-        );
+        apply_set(&conn, &MIGRATIONS[..4]).unwrap();
         conn.execute_batch(
             "INSERT INTO project_sessions (
                  id, project_id, project_slug, project_name,
@@ -1953,7 +2185,7 @@ mod tests {
                  'ps_new', 'project-1', 'developer-efficiency',
                  'Developer Efficiency', 'Definition', 'w1', 3,
                  'created', 'successor', 3, 0, 0,
-                 'codex', 'codex', 3, 3, 1, 0
+                 'codex', 'codex', 3, 3, 1, 1
              );",
         )
         .unwrap();
@@ -1969,7 +2201,7 @@ mod tests {
                      'ps_parallel', 'project-1', 'developer-efficiency',
                      'Developer Efficiency', 'Definition', 'w1', 3,
                      'created', 'parallel', 3, 0, 0,
-                     'codex', 'codex', 3, 3, 1, 0
+                     'codex', 'codex', 3, 3, 1, 1
                  );"
             )
             .is_err());
@@ -2022,7 +2254,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_task_rows_become_sequence_one_prs_without_losing_events() {
+    fn existing_task_rows_collapse_into_stable_work_and_prs() {
         let conn = open();
         conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
         apply_set(&conn, &MIGRATIONS[..2]).unwrap();
@@ -2081,42 +2313,57 @@ mod tests {
 
         apply_sqlite(&conn).unwrap();
 
-        let session: (String, String) = conn
+        let task: (String, String, String) = conn
             .query_row(
-                "SELECT status, workspace_slug FROM task_sessions WHERE id='ts_legacy'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(session, ("completed".to_string(), "inf-123".to_string()));
-        let project_lease: (String, String, Option<String>) = conn
-            .query_row(
-                "SELECT process_lease_token, process_lease_state, process_outcome_json
-                 FROM project_sessions WHERE id='ps_legacy'",
+                "SELECT id, issue_identifier, workspace_slug
+                 FROM tasks WHERE external_issue_id='issue-1'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert!(project_lease.0.starts_with("cl_"));
-        assert_eq!(project_lease.1, "legacy");
-        assert_eq!(project_lease.2, None);
-        let task_lease: (String, String, String) = conn
+        assert_eq!(task.1, "INF-123");
+        assert_eq!(task.2, "inf-123");
+        let task_state: String = conn
             .query_row(
-                "SELECT process_lease_token, process_lease_state, process_outcome_json
-                 FROM task_sessions WHERE id='ts_legacy'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                "SELECT state FROM epochs WHERE task_id=?1",
+                [&task.0],
+                |row| row.get(0),
             )
             .unwrap();
-        assert!(task_lease.0.starts_with("cl_"));
-        assert_eq!(task_lease.1, "finished");
-        assert_eq!(task_lease.2, "{\"kind\":\"completed\"}");
+        assert_eq!(task_state, "done");
+        let project_id: String = conn
+            .query_row(
+                "SELECT id FROM projects WHERE external_project_id='project-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let project_launch: (String, String, String, String) = conn
+            .query_row(
+                "SELECT agent_launches.launch_state, agent_launches.containment_kind,
+                        agent_launches.containment_id, agent_launches.provider
+                 FROM agent_launches
+                 JOIN runs ON runs.id = agent_launches.product_run_id
+                 WHERE runs.source_kind = 'project' AND runs.source_id = ?1",
+                [&project_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            project_launch,
+            (
+                "live".to_string(),
+                "tmux".to_string(),
+                "project-legacy".to_string(),
+                "codex".to_string(),
+            )
+        );
         let pr: (i64, String, i64, String, i64, String, String, Option<i64>) = conn
             .query_row(
                 "SELECT sequence, branch, publication_requested_at, after_merge,
                         github_number, github_url, merge_commit, abandoned_at
-                 FROM task_prs WHERE task_session_id='ts_legacy'",
-                [],
+                 FROM task_prs WHERE task_id=?1",
+                [&task.0],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -2146,32 +2393,12 @@ mod tests {
         );
         let events: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM task_events WHERE session_id='ts_legacy'",
-                [],
+                "SELECT COUNT(*) FROM task_events WHERE task_id=?1",
+                [&task.0],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(events, 3);
-        let event_shape: (String, String, String, String) = conn
-            .query_row(
-                "SELECT
-                    kind_json,
-                    json_extract(kind_json, '$.pr_id'),
-                    (SELECT json_extract(kind_json, '$.from') FROM task_events
-                     WHERE json_extract(kind_json, '$.kind')='status_changed'),
-                    (SELECT json_extract(kind_json, '$.to') FROM task_events
-                     WHERE json_extract(kind_json, '$.kind')='status_changed')
-                 FROM task_events
-                 WHERE json_extract(kind_json, '$.kind')='pr_opened'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .unwrap();
-        let event: TaskEventKind = serde_json::from_str(&event_shape.0).unwrap();
-        assert!(matches!(event, TaskEventKind::PrOpened { sequence: 1, .. }));
-        assert!(event_shape.1.starts_with("pr_"));
-        assert_eq!(event_shape.2, "waiting");
-        assert_eq!(event_shape.3, "completed");
+        assert_eq!(events, 0);
     }
 
     #[test]
@@ -2256,7 +2483,7 @@ mod tests {
     fn a_stale_edit_of_a_shipped_migration_tells_the_user_to_recreate() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
-        conn.execute_batch("ALTER TABLE task_sessions DROP COLUMN project_prompt_context")
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN issue_description")
             .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
@@ -2297,6 +2524,82 @@ mod tests {
             latest_version_sqlite(&conn).unwrap(),
             latest_known_version()
         );
+    }
+
+    /// A durable snapshot of a real store at the 0.10 release, frozen once and
+    /// committed — deliberately *not* derived from the current MIGRATIONS
+    /// registry. A prefix of MIGRATIONS regenerates itself from the same source
+    /// it validates against, so a rewritten early migration would slip past it;
+    /// this frozen fixture diverges and fails instead.
+    const PREVIOUS_RELEASE_FIXTURE: &str = include_str!("tests/fixtures/store_0_10_release.sql");
+
+    /// A real two-generation upgrade: a database frozen at the *previous release*
+    /// (the committed fixture, independent of MIGRATIONS) takes the current
+    /// canonical tail exactly once, reaches the latest known version, and carries
+    /// its live rows and referential integrity across every rebuild in the tail.
+    #[test]
+    fn a_previous_release_database_upgrades_through_the_current_canonical_tail() {
+        let conn = open();
+        conn.execute_batch(PREVIOUS_RELEASE_FIXTURE).unwrap();
+
+        // The fixture starts at the 0.10 generation with live, self-referential
+        // data — a two-generation upgrade, not a from-scratch run.
+        assert_eq!(
+            applied_versions(&conn).unwrap(),
+            vec![
+                "0.10.001_initial".to_string(),
+                "0.10.002_session_execution_context".to_string(),
+            ]
+        );
+        assert!(MIGRATIONS.len() > 2, "need a tail beyond the fixture");
+
+        // The generated tail advances it, and applying it again is a no-op.
+        apply_set(&conn, MIGRATIONS).unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
+        validate_foreign_keys(&conn).unwrap();
+
+        // The previous release's rows — including the parent/child foreign key —
+        // survive the whole tail.
+        let waves: i64 = conn
+            .query_row("SELECT count(*) FROM waves", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(waves, 2, "seeded waves did not survive the upgrade");
+        let child_parent: String = conn
+            .query_row(
+                "SELECT parent_wave_id FROM waves WHERE id = 'wave-child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(child_parent, "wave-root", "foreign key relationship lost");
+        let tokens: i64 = conn
+            .query_row("SELECT count(*) FROM provider_tokens", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            tokens, 1,
+            "seeded provider token did not survive the upgrade"
+        );
+    }
+
+    /// Fresh initialization over the full real registry — a brand-new database
+    /// runs the entire canonical tail from empty to the latest known version.
+    #[test]
+    fn a_fresh_database_initializes_through_the_full_canonical_tail() {
+        let conn = open();
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
+        assert_eq!(
+            latest_version_sqlite(&conn).unwrap(),
+            latest_known_version()
+        );
+        validate_foreign_keys(&conn).unwrap();
     }
 
     #[test]

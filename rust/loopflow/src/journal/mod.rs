@@ -11,14 +11,15 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tracing::{debug, warn};
 
+use crate::durable::{RunLeaseToken, WorkRef, RUN_LEASE_ENV};
 use crate::engine::worktrees::main_repo_root;
-use crate::id::{ProcessId, RunId};
+use crate::id::{ExecId, TraceId};
 use crate::store::sqlite::SqliteStore;
 use crate::store::RunEventRow;
 
 const JOURNAL_ROOT: &str = ".lf/journal/runs";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
-pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
 /// Serializes tests that mutate process-global store or run identity variables.
@@ -109,14 +110,13 @@ impl Drop for TestLedgerGuard {
 
 thread_local! {
     static RUN_CONTEXT: RefCell<Option<RunContext>> = const { RefCell::new(None) };
-    static PENDING_USAGE: RefCell<PendingUsage> = const { RefCell::new(PendingUsage::new()) };
 }
 
 #[derive(Debug, Clone)]
 struct RunContext {
-    run_id: RunId,
-    process_id: ProcessId,
-    parent_process_id: Option<ProcessId>,
+    run_id: TraceId,
+    process_id: ExecId,
+    parent_process_id: Option<ExecId>,
     /// Serialized argv captured at run start so terminal rows name their work.
     command: Option<String>,
     /// File-journal directory. Written in any git checkout; None only when the
@@ -125,107 +125,9 @@ struct RunContext {
     repo: Option<String>,
     wave: Option<String>,
     seq: i64,
-    /// True when this process minted the run id (vs inheriting LF_RUN_ID);
+    /// True when this process minted the run id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the run ends.
     minted_run_id: bool,
-}
-
-/// Token/cost totals accumulated from the agent stream on this thread, plus the
-/// agent that spent them. Drained at each ledger boundary, so every row carries
-/// the spend attributable to that boundary alone — readers sum rows, never diff.
-#[derive(Debug, Clone)]
-struct PendingUsage {
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_tokens: u64,
-    cost_usd: Option<f64>,
-    duration_secs: Option<f64>,
-    provider: Option<&'static str>,
-    model: Option<String>,
-    seen: bool,
-}
-
-impl PendingUsage {
-    const fn new() -> Self {
-        Self {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cost_usd: None,
-            duration_secs: None,
-            provider: None,
-            model: None,
-            seen: false,
-        }
-    }
-
-    /// Take the spend accumulated since the previous boundary, keeping agent
-    /// attribution (and `seen`) for the boundaries that follow.
-    fn drain(&mut self) -> Self {
-        let drained = self.clone();
-        self.input_tokens = 0;
-        self.output_tokens = 0;
-        self.cache_read_tokens = 0;
-        self.cost_usd = None;
-        self.duration_secs = None;
-        drained
-    }
-}
-
-/// Accumulate token usage reported by the agent stream for the current run.
-pub fn record_usage(input: Option<u64>, output: Option<u64>, cache_read: Option<u64>) {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        usage.input_tokens += input.unwrap_or(0);
-        usage.output_tokens += output.unwrap_or(0);
-        usage.cache_read_tokens += cache_read.unwrap_or(0);
-        usage.seen = true;
-    });
-}
-
-/// Record the stream's final cost/duration report for the current run.
-///
-/// Cost accumulates until the next boundary drains it; a skill that launches
-/// several agents reports the sum, not just the last invocation.
-pub fn record_result(cost_usd: Option<f64>, duration_secs: Option<f64>) {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        if let Some(cost) = cost_usd {
-            usage.cost_usd = Some(usage.cost_usd.unwrap_or(0.0) + cost);
-        }
-        if let Some(duration) = duration_secs {
-            usage.duration_secs = Some(usage.duration_secs.unwrap_or(0.0) + duration);
-        }
-        usage.seen = true;
-    });
-}
-
-/// Name the harness the current agent launch is spending tokens through, and
-/// the model it drove. Recorded without marking usage seen — a launch that
-/// reports no tokens names an agent but should not materialize a row.
-///
-/// Set both fields together. A process may launch several agents, and an
-/// unconfigured model on the second launch must clear the first launch's model
-/// rather than producing a fictitious `codex:opus` boundary.
-pub fn record_agent(provider: Option<&'static str>, model: Option<&str>) {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        usage.provider = provider;
-        usage.model = model.map(str::to_string);
-    });
-}
-
-fn drain_usage() -> Option<PendingUsage> {
-    PENDING_USAGE.with(|cell| {
-        let mut usage = cell.borrow_mut();
-        usage.seen.then(|| usage.drain())
-    })
-}
-
-fn clear_usage() {
-    PENDING_USAGE.with(|cell| {
-        *cell.borrow_mut() = PendingUsage::new();
-    });
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -259,7 +161,7 @@ pub struct LfEventFields {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LfEvent {
-    pub run_id: RunId,
+    pub run_id: TraceId,
     #[serde(with = "time::serde::rfc3339")]
     pub ts: OffsetDateTime,
     pub node: LfNode,
@@ -367,11 +269,10 @@ fn try_emit(
         )
     {
         if context.minted_run_id {
-            std::env::remove_var(LF_RUN_ID_ENV);
+            std::env::remove_var(LF_TRACE_ID_ENV);
         }
         std::env::remove_var(LF_PROCESS_ID_ENV);
         clear_context();
-        clear_usage();
     }
 
     Ok(())
@@ -381,22 +282,6 @@ fn try_emit(
 /// run: a locked or missing store degrades to a debug log line. Local-only —
 /// the ledger never leaves the machine.
 fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Path) {
-    let is_terminal_run = matches!(event.node, LfNode::Run)
-        && matches!(
-            event.event,
-            LfEventType::Completed | LfEventType::Errored | LfEventType::Escalated
-        );
-    let is_skill_boundary = matches!(event.node, LfNode::Skill)
-        && matches!(event.event, LfEventType::Completed | LfEventType::Errored);
-    // Each boundary drains the spend accumulated since the previous one: a
-    // skill row carries that skill's spend, the terminal run row carries
-    // whatever ran outside any skill. Summing rows gives any rollup.
-    let usage = if is_terminal_run || is_skill_boundary {
-        drain_usage()
-    } else {
-        None
-    };
-
     let row = RunEventRow {
         run_id: event.run_id.as_str().to_string(),
         process_id: context.process_id.as_str().to_string(),
@@ -420,13 +305,6 @@ fn ledger_insert(context: &RunContext, event: &LfEvent, seq: i64, repo_root: &Pa
         skill: event.skill.clone(),
         step_index: event.index.map(i64::from),
         error: event.error.clone(),
-        input_tokens: usage.as_ref().map(|u| u.input_tokens as i64),
-        output_tokens: usage.as_ref().map(|u| u.output_tokens as i64),
-        cache_read_tokens: usage.as_ref().map(|u| u.cache_read_tokens as i64),
-        cost_usd: usage.as_ref().and_then(|u| u.cost_usd),
-        duration_secs: usage.as_ref().and_then(|u| u.duration_secs),
-        provider: usage.as_ref().and_then(|u| u.provider).map(str::to_string),
-        model: usage.as_ref().and_then(|u| u.model.clone()),
     };
 
     match open_ledger() {
@@ -490,27 +368,34 @@ pub fn trace_capture_context(
 }
 
 fn child_work_attribution() -> (Option<String>, Option<String>) {
+    let Some(value) = std::env::var_os(RUN_LEASE_ENV) else {
+        return (None, None);
+    };
+    let Ok(token) = RunLeaseToken::parse(&value.to_string_lossy()) else {
+        return (None, None);
+    };
     let Ok(store) = open_ledger() else {
         return (None, None);
     };
-    if let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") {
-        if let Ok(id) = crate::task::TaskSessionId::parse(&value.to_string_lossy()) {
-            if let Ok(Some(session)) = store.task_session(&id) {
-                return (
-                    Some(session.launch.project.slug),
-                    Some(session.launch.issue.identifier),
-                );
-            }
-        }
+    let Ok(lease) = store.resolve_run_lease(&token) else {
+        return (None, None);
+    };
+    match lease.work {
+        WorkRef::Project(id) => store
+            .project(&id)
+            .ok()
+            .flatten()
+            .map_or((None, None), |project| {
+                (Some(project.launch.project.slug), None)
+            }),
+        WorkRef::Task(id) => store.task(&id).ok().flatten().map_or((None, None), |task| {
+            (
+                Some(task.launch.project.slug),
+                Some(task.launch.issue.identifier),
+            )
+        }),
+        WorkRef::Wave(_) => (None, None),
     }
-    if let Some(value) = std::env::var_os("LF_PROJECT_SESSION_ID") {
-        if let Ok(id) = crate::project_session::ProjectSessionId::parse(&value.to_string_lossy()) {
-            if let Ok(Some(session)) = store.project_session(&id) {
-                return (Some(session.launch.project.slug), None);
-            }
-        }
-    }
-    (None, None)
 }
 
 #[cfg(not(test))]
@@ -577,8 +462,8 @@ fn ensure_run_context(
             // Mint and export the run id so prompt logs and child processes
             // carry the same identity as the ledger rows. The export is
             // removed when the run ends (see try_emit).
-            let run_id = RunId::default();
-            std::env::set_var(LF_RUN_ID_ENV, run_id.as_str());
+            let run_id = TraceId::default();
+            std::env::set_var(LF_TRACE_ID_ENV, run_id.as_str());
             (run_id, true)
         }
     };
@@ -594,11 +479,11 @@ fn ensure_run_context(
         .then(|| {
             std::env::var(LF_PROCESS_ID_ENV)
                 .ok()
-                .and_then(|value| ProcessId::parse(&value).ok())
+                .and_then(|value| ExecId::parse(&value).ok())
         })
         .flatten()
         .filter(parent_is_recorded);
-    let process_id = ProcessId::default();
+    let process_id = ExecId::default();
     std::env::set_var(LF_PROCESS_ID_ENV, process_id.as_str());
 
     // Write the file journal wherever we can. Fall back to ledger-only when
@@ -666,7 +551,7 @@ fn ensure_run_context(
 /// `false`. Any other read failure answers `true` — never disown a real parent
 /// over a locked store; this process's own row is about to fail the same way,
 /// so there is no ghost to prevent.
-fn parent_is_recorded(parent: &ProcessId) -> bool {
+fn parent_is_recorded(parent: &ExecId) -> bool {
     let path = match ledger_db_path() {
         Ok(path) if path.exists() => path,
         Ok(_) => return false,
@@ -704,8 +589,8 @@ fn next_seq() -> i64 {
     })
 }
 
-fn configured_run_id(repo_root: &Path) -> Option<RunId> {
-    let value = std::env::var(LF_RUN_ID_ENV).ok()?;
+fn configured_run_id(repo_root: &Path) -> Option<TraceId> {
+    let value = std::env::var(LF_TRACE_ID_ENV).ok()?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
@@ -715,7 +600,7 @@ fn configured_run_id(repo_root: &Path) -> Option<RunId> {
         Ok(run_id) => Some(run_id),
         Err(err) => {
             debug!(
-                env = LF_RUN_ID_ENV,
+                env = LF_TRACE_ID_ENV,
                 value = trimmed,
                 repo = %repo_root.display(),
                 error = %err,
@@ -833,70 +718,12 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn each_boundary_drains_only_its_own_spend() {
-        // A ledger row carries the spend since the previous boundary, so a
-        // reader sums rows: skill rows own their spend, the terminal run row
-        // owns whatever ran outside any skill.
-        super::clear_usage();
-        super::record_usage(Some(100), Some(10), Some(5));
-        super::record_result(Some(1.00), Some(2.0));
-
-        let first = super::drain_usage().expect("usage seen");
-        assert_eq!(first.input_tokens, 100);
-        assert_eq!(first.output_tokens, 10);
-        assert_eq!(first.cache_read_tokens, 5);
-        assert_eq!(first.cost_usd, Some(1.00));
-        assert_eq!(first.duration_secs, Some(2.0));
-
-        super::record_usage(Some(50), Some(5), Some(0));
-        super::record_result(Some(0.25), Some(3.0));
-
-        let second = super::drain_usage().expect("usage still seen");
-        assert_eq!(second.input_tokens, 50, "spend must not repeat");
-        assert_eq!(second.output_tokens, 5);
-        assert_eq!(second.cache_read_tokens, 0);
-        assert_eq!(second.cost_usd, Some(0.25));
-        assert_eq!(second.duration_secs, Some(3.0));
-        super::clear_usage();
-    }
-
-    #[test]
-    fn a_quiet_boundary_after_spend_reports_zero_not_a_repeat() {
-        super::clear_usage();
-        super::record_usage(Some(100), Some(10), Some(5));
-        super::drain_usage().expect("usage seen");
-
-        let quiet = super::drain_usage().expect("seen persists across boundaries");
-        assert_eq!(quiet.input_tokens, 0);
-        assert_eq!(quiet.output_tokens, 0);
-        assert_eq!(quiet.cost_usd, None);
-        super::clear_usage();
-    }
-
-    #[test]
-    fn each_agent_launch_replaces_provider_and_model_attribution() {
-        super::clear_usage();
-        super::record_agent(Some("claude"), Some("opus"));
-        super::record_usage(Some(100), Some(10), None);
-        let first = super::drain_usage().expect("first usage");
-        assert_eq!(first.provider, Some("claude"));
-        assert_eq!(first.model.as_deref(), Some("opus"));
-
-        super::record_agent(Some("codex"), None);
-        super::record_usage(Some(50), Some(5), None);
-        let second = super::drain_usage().expect("second usage");
-        assert_eq!(second.provider, Some("codex"));
-        assert_eq!(second.model, None, "the prior launch's model must not leak");
-        super::clear_usage();
-    }
-
     use super::{
         emit, events_path, read_events, runs_root, LfEvent, LfEventFields, LfEventType, LfNode,
         TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
-    use crate::id::{ProcessId, RunId, WaveId};
+    use crate::id::{ExecId, TraceId, WaveId};
     use crate::wave::Wave;
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
@@ -944,19 +771,18 @@ mod tests {
     fn with_run_id_env<T>(value: Option<&str>, run: impl FnOnce() -> T) -> T {
         let _guard = journal_test_guard();
         super::clear_context();
-        super::clear_usage();
-        let previous = std::env::var(super::LF_RUN_ID_ENV).ok();
+        let previous = std::env::var(super::LF_TRACE_ID_ENV).ok();
         let previous_process = std::env::var(super::LF_PROCESS_ID_ENV).ok();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         match value {
-            Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
-            None => std::env::remove_var(super::LF_RUN_ID_ENV),
+            Some(value) => std::env::set_var(super::LF_TRACE_ID_ENV, value),
+            None => std::env::remove_var(super::LF_TRACE_ID_ENV),
         }
         let result = run();
         super::clear_context();
         match previous {
-            Some(value) => std::env::set_var(super::LF_RUN_ID_ENV, value),
-            None => std::env::remove_var(super::LF_RUN_ID_ENV),
+            Some(value) => std::env::set_var(super::LF_TRACE_ID_ENV, value),
+            None => std::env::remove_var(super::LF_TRACE_ID_ENV),
         }
         match previous_process {
             Some(value) => std::env::set_var(super::LF_PROCESS_ID_ENV, value),
@@ -968,8 +794,7 @@ mod tests {
     fn journal_test_guard() -> TestLedgerGuard {
         let guard = TestLedgerGuard::new();
         super::clear_context();
-        super::clear_usage();
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         guard
     }
@@ -1083,7 +908,7 @@ mod tests {
             .expect("child event count env")
             .parse::<usize>()
             .expect("child event count");
-        let run_id = RunId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
+        let run_id = TraceId::parse("8985c55b-9864-4c2b-860f-b7054a71bbea").expect("run id");
 
         for index in 0..event_count {
             let event = LfEvent {
@@ -1119,7 +944,6 @@ mod tests {
             LfEventType::Started,
             started_fields(&command, repo.path(), "main"),
         );
-        super::record_usage(Some(100), Some(20), Some(5));
         emit(
             repo.path(),
             LfNode::Run,
@@ -1134,9 +958,9 @@ mod tests {
         assert_eq!(file_events.len(), 2);
         assert!(is_clean(repo.path()).expect("journal stays git-excluded"));
 
-        // And the machine-grain ledger has the run, with usage on the
-        // terminal event and a null wave. LF_HOME points this test at its own
-        // store, so every row here belongs to this invocation.
+        // And the machine-grain ledger has the run's lineage and a null wave.
+        // LF_HOME points this test at its own store, so every row here belongs
+        // to this invocation.
         let store = super::open_ledger().expect("ledger");
         let events = store.list_run_events_since(0).expect("ledger rows");
         assert_eq!(events.len(), 2);
@@ -1151,9 +975,6 @@ mod tests {
             .unwrap_or("")
             .contains("implement"));
         assert_eq!(events[1].event, "completed");
-        assert_eq!(events[1].input_tokens, Some(100));
-        assert_eq!(events[1].output_tokens, Some(20));
-        assert_eq!(events[1].cache_read_tokens, Some(5));
         assert_eq!(events[0].process_id, events[1].process_id);
         assert_eq!(events[1].command, events[0].command);
     }
@@ -1307,7 +1128,7 @@ mod tests {
         assert_eq!(child.parent_process_id, Some(parent.process_id));
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1333,8 +1154,8 @@ mod tests {
         super::clear_context();
 
         // A parent that exported its identity but never reached the ledger.
-        let ghost = ProcessId::new();
-        std::env::set_var(super::LF_RUN_ID_ENV, recorded.run_id.as_str());
+        let ghost = ExecId::new();
+        std::env::set_var(super::LF_TRACE_ID_ENV, recorded.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
 
         let context = super::ensure_run_context(repo.path(), &fields)
@@ -1358,7 +1179,7 @@ mod tests {
 
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1367,7 +1188,7 @@ mod tests {
         let repo = TestRepo::new();
         let fields = started_fields(&["lf".to_string(), "task".to_string()], repo.path(), "main");
 
-        // A detached body inherits LF_RUN_ID/LF_PROCESS_ID from a launcher that
+        // A detached body inherits LF_TRACE_ID/LF_PROCESS_ID from a launcher that
         // has already exited. The launcher's row outlives it, so the parent
         // still resolves and must survive the drop rule.
         super::emit(
@@ -1386,7 +1207,7 @@ mod tests {
 
         // The body carries what the launcher handed it, not what the launcher
         // left behind: a terminal run clears LF_PROCESS_ID from the env.
-        std::env::set_var(super::LF_RUN_ID_ENV, launcher.run_id.as_str());
+        std::env::set_var(super::LF_TRACE_ID_ENV, launcher.run_id.as_str());
         std::env::set_var(super::LF_PROCESS_ID_ENV, launcher.process_id.as_str());
         super::clear_context();
 
@@ -1399,7 +1220,7 @@ mod tests {
 
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1415,20 +1236,20 @@ mod tests {
         // A process id lingers in the environment but no run id does — the
         // `pr land` / `wt switch` / `kickoff` shape that historically stamped a
         // new trace with a parent from the old one.
-        std::env::set_var(super::LF_PROCESS_ID_ENV, ProcessId::new().as_str());
+        std::env::set_var(super::LF_PROCESS_ID_ENV, ExecId::new().as_str());
 
         let context = super::ensure_run_context(repo.path(), &fields)
             .expect("run context")
             .expect("context");
 
-        assert!(context.minted_run_id, "no LF_RUN_ID means a fresh trace");
+        assert!(context.minted_run_id, "no LF_TRACE_ID means a fresh trace");
         assert_eq!(
             context.parent_process_id, None,
             "a fresh trace has no in-trace parent to name"
         );
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_RUN_ID_ENV);
+        std::env::remove_var(super::LF_TRACE_ID_ENV);
     }
 
     #[test]
@@ -1641,7 +1462,7 @@ mod tests {
                 .and_then(|name| name.to_str())
                 .expect("run dir name");
             assert!(
-                RunId::parse(run_id).is_ok(),
+                TraceId::parse(run_id).is_ok(),
                 "expected generated UUID run id"
             );
             assert_ne!(run_id, "not-a-uuid");

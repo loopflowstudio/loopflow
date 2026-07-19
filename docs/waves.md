@@ -1,88 +1,251 @@
----
-layout: default
-title: Waves
----
-
 # Waves
 
-A wave is a durable operating context. Projects are measured bets inside a wave.
-Tasks are the concrete work that advances a project.
+A wave is a named agent with a goal. You author its intent and let it
+coordinate; it remembers what it learns, works the next blocker, spins off
+durable Task Sessions when parallelism earns it, and stays steerable the whole
+time.
 
-You author wave files under `wave/<name>/`:
+Two files author a wave, both living in your repo and reviewed like code:
 
 | File | Holds |
 |------|-------|
-| **`GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
-| **`MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
+| **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
+| **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
 
-Tasks live in Linear. Run the agent and it reads its Projects, tasks, and
-memory; selects a Project before creating or selecting the next Task; starts
-one durable Task Session; and folds the linked result back into memory.
+Waves live in **Loopflow** (macOS): open the repository, select the wave, and
+start it beside its conversation and work map. The same controls exist from
+the CLI:
 
 ```bash
-lf wave shipper             # start the Wave
-tmux ls                    # detached Wave, Project, and Task processes
-lf task attach INF-123     # audited writable task control prompt
+lf start shipper                       # idempotently start the Wave on its Home
+lf chat --steer "invoices first"       # steer the live body, else queue
+lf status shipper                      # its Project → Task hierarchy
+lf stop shipper                        # stop this Wave; sibling Waves keep running
 ```
 
-Every concrete file-writing change begins with a Linear task:
+(`lf wave shipper` runs one Wave listener in the foreground until Ctrl-C. Use
+it while developing a goal; `lf start` normally asks the Home's shared keeper
+to serve the Wave.)
+
+## The planning model
+
+Three nouns, kept distinct by kind rather than size:
+
+| Noun | What it means | What it owns |
+|------|---------------|--------------|
+| **Wave** | Durable operating context | Memory, cadence, chat, and project selection |
+| **Project** | Measured bet inside exactly one wave | Definition, KRs, and closure criteria |
+| **Task** | Concrete work that advances a project | One implementation step, investigation, doc, or shipped change |
+
+Keep the hierarchy shallow. Every project belongs to one wave; projects don't
+contain projects and don't own memory or cadence. If a project seems to need
+subprojects, split it into siblings, promote the durable context into a wave,
+or demote the pieces into tasks.
+
+```text
+Product wave
+  Loopflow API project
+    Linear tasks
+  Wave Chat project
+    Linear tasks
+```
+
+## The Goal
+
+`GOAL.md` is the loop surface: frontmatter carries machine config, the body is
+the prompt the wave runs each loop.
+
+```markdown
+## Objective
+
+Keep the runtime architecture legible. Each loop: read Linear tasks and
+memory, pick the next useful move, resolve its local blocker, spin off
+independent work only when parallelism earns it, and fold what shipped into
+memory.
+
+## Measures
+
+- **Quality**: fresh-store tests cover every live persistence path.
+- **Done means**: a landed PR of real product code, Linear task closed and PR-linked.
+
+## Process
+
+Make mechanical changes directly; write a scratch design first when the blast
+radius crosses storage, auth, or public APIs.
+```
+
+Builtin goals resolve by name, so the five Viable System Model charters ship
+as `s1`…`s5`:
+
+```bash
+lf wave s3            # the s3 (control) charter
+```
+
+Writing a goal well — the weight of each section, frontmatter fields, KR
+craft — is covered in [Authoring → Goals](authoring.md#goals).
+
+### Memory
+
+`MEMORY.md` is durable working context the wave agent writes as it goes —
+decisions, dead ends, what a downstream task should know. Workers inherit it
+read-only; only the wave agent writes it, through the server:
+
+```bash
+lf memory show -w shipper
+lf memory add "buttons: variants unified" --receipt chat_turn:turn-3
+```
+
+Never edit the file directly; it is server-owned. When a task ships, its
+context folds forward into memory and the remaining Linear tasks — fold, don't
+drop.
+
+### Home
+
+A **Home** is stable execution authority. Work stores a `HomeId`; the Home
+stores its currently observed route. Changing a hostname or SSH route does not
+change Work placement.
+
+```bash
+lf home id                    # this machine's stable HomeId
+lf ls --json                  # Wave ids and their current Homes
+lf start shipper              # start one Wave on its placed Home
+lf start                      # start every Wave in the current repo
+lf stop shipper               # stop only this Wave
+```
+
+New Project and Task Work inherits its parent's placement once. Move Wave Work
+only while it has no live Run:
+
+```bash
+lf work place wave <wave-id> <home-id>
+```
+
+Project and Task movement stays closed while their Session runners remain the
+executor. The shared Run supervisor will open that placement boundary without
+another Session-to-Run routing bridge.
+
+One keeper process per Home serves all placed Waves. Starting or stopping one
+Wave does not create or kill a machine-wide controller and does not disturb
+sibling Waves.
+
+Register a remote Home by asking that machine for its own identity, then record
+the route locally and place Work on it:
+
+```bash
+lf ssh jack@mini.local --remote-native -- lf home id --json
+lf home observe <home-id> ssh://jack@mini.local
+lf work place wave <wave-id> <home-id>
+lf start shipper
+```
+
+After bootstrap, address the authority rather than its current hostname. Every
+HomeId-addressed hop makes the target prove its identity:
+
+```bash
+lf ssh <home-id> --remote-native -- lf status shipper --json
+lf home probe shipper
+```
+
+`--remote-native` forwards no provider, GitHub, PM, or secret authority. The
+remote Home uses credentials installed there, which lets its resident outlive
+the SSH process. Foreground one-shot work can continue to use ordinary
+credential-forwarding `lf ssh`.
+
+See [Architecture → Decentralized Home](architecture.md#decentralized-home).
+
+## Projects and KRs
+
+A project is a measured bet inside a wave. Its definition and KRs live in
+Linear Project content — not in a repo file, a status table, or its own memory.
+
+```bash
+lf pm project create --wave infra --title "Technical Architecture" \
+  --definition "Loopflow's architecture is legible from the top down." \
+  --kr "Top-down architecture documentation is complete and published."
+```
+
+KRs should read as **proof under duration**: observable end states
+demonstrated on real work over a stated window, not capability checkboxes
+that pass once on a demo. [Authoring → Writing KRs](authoring.md#writing-krs)
+carries the craft and examples.
+
+## Linear
+
+Tasks live in Linear; there are no local task lists. A wave maps to an
+Initiative, each project to a Linear Project, each task to an Issue. Connect
+once — `lf pm init` links or creates the Initiative and wave-owned team and
+writes both ids into `GOAL.md` frontmatter. Don't paste ids by hand.
+
+```bash
+lf pm init --wave infra --team-key INF     # connect or rebind
+lf pm sync --wave infra                    # refresh the local SQLite snapshot
+lf pm show --wave infra --no-sync          # deterministic cache-only read
+lf pm task create --wave infra --project stability --title "Daemon data integrity"
+lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
+```
+
+## Tasks
+
+Every concrete file-writing change begins with a Linear task and runs as a
+durable Task Session in its own stable sibling worktree:
 
 ```bash
 lf task start "add retry to token refresh" --project <linear-project-id>
 lf task run INF-123
-lf task run INF-124 --stack-on INF-123
-lf task follow-up INF-123 "also audit retry callers"
+lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
 ```
 
-A Task Session runs in one stable worktree, advances through zero or more serial
-PRs to `main`, and reports linked events to its Wave. It runs kickoff once,
-repeats its selected inner flow, then gates the proposed outcome. Gate repairs
-return the same Session to another iteration; approval settles it. The Task
-inherits the Wave's `GOAL.md` and `MEMORY.md` plus its Project definition and
-KRs.
+A Task Session advances through zero or more serial PRs to `main`. It runs
+kickoff once, repeats its selected inner flow, then gates the proposed
+outcome; gate repairs return the same Session to another iteration. After a
+merge or abandonment, Loopflow rotates the worktree onto the next branch. The
+Task inherits the wave's `GOAL.md` and `MEMORY.md` plus its Project definition
+and KRs.
 
-Each Task Session gets a sibling worktree. Its active PR owns the current branch;
-after merge or abandonment, Loopflow rotates that worktree onto the next branch
-from fetched `origin/main`:
-
-A dependent Task can start before its parent PR merges. `--stack-on` forks a
-separate sibling worktree from the parent Task's active branch; PR creation and
-the later collapse onto `main` use the recorded parent id and fork commit.
+The wave stays steerable while several independent tasks run — task events
+enter its inbox as typed observations and wake it once. Steering, receipts,
+decisions, resume, and recovery are the same verbs agents use:
+[The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf task status INF-123
-lf task interrupt INF-123 --message "take the smaller approach"
-lf task receipt COMMAND_ID --until incorporated --timeout 30s --json
-lf task acknowledge INF-123 --directive 2 --summary "the smaller approach is active"
-lf task decide INF-123 DECISION_ID approve
-lf task wait INF-123
-lf pr land --next parser-proof  # merge this PR, then rotate
-lf pr land -c                   # merge this PR, then complete the Task
-lf task complete INF-124 --summary "investigation recorded"  # no PR needed
+lf pr land --next parser-proof   # merge this PR, then rotate to the next
+lf pr land -c                    # merge this PR, then complete the Task
+lf task complete INF-124 --summary "investigation recorded"   # no PR needed
 ```
 
-The Wave stays directly steerable while several independent tasks run. Task
-events enter its inbox as typed observations and wake it once. Decision answers,
-review feedback, and CI repair resume the same Task Session. Plain resume keeps
-compatible provider history; `lf task resume <id> --model <agent>` leases the
-next body generation to another provider without replacing the Session.
+Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
+PRs, but it still needs one concrete finish line.
 
-```bash
-lf task status W2-135 --json \
-  | jq '.latest_process | {generation, agent, provider, state, outcome, tmux_name, pid, process_group_id}'
-```
+## Evidence Portfolios
 
-The generation receipt exposes the current provider, lease state, terminal
-outcome, tmux/PID, and owned process group. The write-lease token stays private
-to the runner and never enters status or events.
+There are two different portfolios in the hierarchy:
 
-Waves are independent by default. Humans steer a running Wave with `lf chat`;
-agents report on its bus with `lf radio pub --channel <name> "…"`, even while the
-wave sleeps.
+- The Wave's **bet portfolio** is its set of Projects. It allocates attention
+  according to each Project's KR evidence and fit with the Wave objective.
+- A Project's optional **approach portfolio** is a set of independent Tasks
+  testing different mechanisms for one uncertain KR.
+
+An approach portfolio is useful when a premature architecture choice would be
+expensive and several safe probes can run independently. Each Task should name
+its mechanism and return evidence, an artifact, an exact gap, or a
+counterexample. Keep routes independent long enough to expose their own failure
+modes; then let the Project Session synthesize and redirect them.
+
+Do not represent competing approaches as duplicate Projects, launch multiple
+Tasks with the same favored brief, or count activity as evidence. Block a route
+whose missing dependency is as hard as the original question, and reopen it
+only when a materially new mechanism appears. The Wave judges whether the
+Project still earns attention; it does not micromanage the individual probes.
+
+See [Bet Portfolios and Approach Portfolios](https://loopflow.studio/docs/wave-authoring#bet-portfolios-and-approach-portfolios)
+for the authoring pattern and command examples.
 
 ## Crons
 
-Crons schedule supplementary flows on a wave. They live in `GOAL.md` frontmatter and are read by the wave's resident loop: when a schedule comes due while the loop is idle, it opens a system pass ("cron due: <flow> — dispatch it") and dispatches the flow with judgment. Edits to the file land without a restart.
+Crons schedule supplementary flows on a wave. They live in `GOAL.md`
+frontmatter and are read by the resident loop: when a schedule comes due while
+the loop is idle, it opens a system pass and dispatches the flow with
+judgment. Edits land without a restart.
 
 ```markdown
 <!-- wave/shipper/GOAL.md -->
@@ -91,46 +254,44 @@ crons:
   - flow: sync
     schedule: "0 0 0 1 * * *"
 ---
-
-## Objective
-
-Keep releases routine and recoverable.
-
-## Measures
-
-- **Key Results**: four weekly releases complete without manual repair.
-
-## Process
-
-Clarify the portfolio, direct the next Project or Task, and judge the evidence.
 ```
 
-Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due mid-turn fires at the next turn boundary; occurrences older than 24 hours are missed, not replayed.
+Schedules use 6/7-field cron syntax (seconds first). A schedule that comes due
+mid-turn fires at the next turn boundary; occurrences older than 24 hours are
+missed, not replayed.
 
----
+## Drafting wave content
 
-## Quick Start
-
-```bash
-lf wave <name>
-```
-
-Open the repository in Loopflow to see the Wave conversation and Project →
-Task work map.
-
-## Managing Waves
-
-```bash
-lf wave <name>           # start the Wave (Ctrl-C to stop)
-lf project attach <id>  # audited Project control prompt
-lf task attach INF-123  # audited Task control prompt
-```
-
+Draft with `lf design` or write the files by hand — see
+[Authoring → Drafting](authoring.md#drafting). Once `wave/<name>/` exists,
+the Mac app picks it up, and `lf start <name>` starts it from the CLI.
 To remove a wave, stop it, then delete `wave/<name>/`.
+
+## Worked example
+
+A `wave/billing/` directory for a billing rewrite. `GOAL.md` sets the intent —
+"replace the legacy billing system with a metered usage model" — and the
+measures the loop re-judges each iteration: usage events recorded within 5
+seconds, invoices correct for all plan types, legacy endpoints unchanged
+during migration.
+
+The backing Linear project holds the concrete Tasks:
+
+```text
+Usage events       → Event capture and storage
+Metering API       → Public metering endpoint
+Invoice generation → Monthly invoice calculation
+Migration shim     → Legacy API compatibility layer
+Cleanup            → Remove old billing code
+```
+
+The wave reads Projects and Tasks with `lf pm show --no-sync`, directs the
+highest-priority Project, and starts a Task Session for every independent
+file-writing change. Each shipped PR folds into memory and closes its task.
 
 ## Next
 
-[Wave Authoring →](wave-authoring.md) · [Get Started →](getting-started.md)
+[The Agent API →](agent-api.md) · [Conducting →](conducting.md) · [Get Started →](getting-started.md)
 
 ## Reference
 

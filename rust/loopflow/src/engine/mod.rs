@@ -6,7 +6,6 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub mod execution;
-pub mod fast_path;
 pub mod flow;
 pub mod git;
 pub mod identity;
@@ -28,12 +27,13 @@ pub mod worktrees;
 pub use agent::{
     build_agent_command, build_claude_command, build_codex_command, build_gemini_command,
     build_model_command, build_opencode_command, check_cli_available, codex_permission_args,
-    launch_agent, workspace_add_dirs, AgentCapabilities, AgentConfig, ClaudeArgs, DefaultRunner,
-    LaunchResult, ProcessConfig, Runner,
+    launch_agent, workspace_add_dirs, AgentCapabilities, AgentConfig, AgentFailure, ClaudeArgs,
+    DefaultRunner, LaunchResult, ProcessConfig, Runner,
 };
 pub use command::{run_command, CommandError};
 pub use config::{
-    load_config, load_config_or_default, parse_agent, Config, LaunchTarget, SessionConfig,
+    default_agent, load_config, load_config_or_default, parse_agent, Config, LaunchTarget,
+    SessionConfig,
 };
 pub use error::{CoreError, GitError, LoadError, StoreError};
 pub use execution::{

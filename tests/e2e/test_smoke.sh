@@ -11,11 +11,20 @@
 
   origin_dir=$(mktemp -d)
   repo_dir=$(mktemp -d)
+  lf_home=$(mktemp -d)
 
   cleanup() {
-    rm -rf "$origin_dir" "$repo_dir"
+    rm -rf "$origin_dir" "$repo_dir" "$lf_home"
   }
   trap cleanup EXIT
+
+  # Never let an agent's ambient capability or development ledger influence
+  # the subprocesses this smoke test launches.
+  export LF_HOME="$lf_home"
+  unset LF_DB_PATH LF_CONTROL_HOME LF_CONTROL_DB_PATH
+  unset LF_RUN_CONTEXT LF_RUN_LEASE LF_WAVE_ID
+  unset LF_PROJECT_SESSION_ID LF_PROJECT_GENERATION LF_PROJECT_LEASE_TOKEN
+  unset LF_TASK_SESSION_ID LF_TASK_GENERATION LF_TASK_LEASE_TOKEN
 
   git init --bare "$origin_dir" >/dev/null
   git clone "$origin_dir" "$repo_dir" >/dev/null

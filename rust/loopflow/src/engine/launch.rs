@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::engine::agent::AgentConfig;
-use crate::engine::config::{parse_agent, Config};
+use crate::engine::config::{default_agent, parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
@@ -155,7 +155,7 @@ pub fn prepare_launch_prompt(
                 .as_ref()
                 .and_then(|skill| skill.default_agent.clone())
         })
-        .unwrap_or_else(|| "claude:opus".to_string());
+        .unwrap_or_else(|| default_agent().to_string());
     validate_agent_policy(&agent)?;
 
     // Keep only system-safe sections (operate/surface/directions) in
@@ -173,6 +173,7 @@ pub fn prepare_launch_prompt(
         task_prompt,
         agent: Some(agent),
         max_turns,
+        resume_token: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
@@ -376,6 +377,40 @@ Test skill body.
     }
 
     #[test]
+    fn unmarked_builtin_skill_defaults_to_codex() {
+        let tmp = tempdir().expect("tempdir");
+        let prepared = prepare_launch_prompt(
+            &Config::default(),
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("implement".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.agent.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn marked_builtin_skill_keeps_claude_default() {
+        let tmp = tempdir().expect("tempdir");
+        let prepared = prepare_launch_prompt(
+            &Config::default(),
+            LaunchPromptInput {
+                repo_root: tmp.path().to_path_buf(),
+                skill: Some("kickoff".to_string()),
+                surface: Surface::Headless,
+                ..LaunchPromptInput::default()
+            },
+        )
+        .expect("prepare launch prompt");
+
+        assert_eq!(prepared.config.agent.as_deref(), Some("claude"));
+    }
+
+    #[test]
     fn prepare_launch_prompt_user_config_overrides_default_agent() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
@@ -542,8 +577,8 @@ Test skill body.
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
+                    feedback: false,
                     content: Some("Skill body".to_string()),
-                    fast_path: None,
                 }),
                 surface: Surface::Headless,
                 ..LaunchPromptInput::default()

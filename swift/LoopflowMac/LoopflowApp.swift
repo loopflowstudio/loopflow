@@ -32,6 +32,7 @@ struct LoopflowApp: App {
     @Environment(\.colorScheme) private var systemScheme
     @State private var snapshotError: String?
     @State private var showSnapshotError = false
+    @State private var didOpenCaptureView = false
     @AppStorage("appearanceMode") private var appearanceMode = AppearanceMode.system.rawValue
 
     init() {
@@ -45,7 +46,13 @@ struct LoopflowApp: App {
     }
 
     var body: some Scene {
-        let theme = AppearanceMode.resolvedTheme(rawValue: appearanceMode, systemScheme: systemScheme)
+        let resolvedAppearance = AppTestMode.forcesLightAppearance
+            ? AppearanceMode.light.rawValue
+            : appearanceMode
+        let theme = AppearanceMode.resolvedTheme(
+            rawValue: resolvedAppearance,
+            systemScheme: systemScheme
+        )
         let launchRepoURL = LaunchArguments.repoURL()
 
         WindowGroup {
@@ -59,6 +66,9 @@ struct LoopflowApp: App {
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
+            .task {
+                openCaptureViewIfNeeded(repoURL: launchRepoURL)
+            }
         }
         .windowStyle(.automatic)
         .defaultSize(width: 1080, height: 760)
@@ -172,6 +182,24 @@ struct LoopflowApp: App {
     }
 
     @MainActor
+    private func openCaptureViewIfNeeded(repoURL: URL?) {
+        guard !didOpenCaptureView, let target = AppTestMode.captureTarget else { return }
+        didOpenCaptureView = true
+        switch target {
+        case .primary:
+            break
+        case .contextLab:
+            guard let repoURL, let wave = AppTestMode.selectBranch else { return }
+            openWindow(
+                id: "context-lab",
+                value: ContextLabRoute.wave(repoPath: repoURL.path, wave: wave)
+            )
+        case .window(let id):
+            openWindow(id: id)
+        }
+    }
+
+    @MainActor
     private func snapshotCurrentWindow() {
         let snapshotService = SnapshotService()
 
@@ -217,13 +245,14 @@ struct LoopflowApp: App {
 }
 
 private extension View {
-    /// Pin the window to `LOOPFLOW_UI_TEST_WIDTH` when a screenshot/UI-test run
-    /// asks for a specific size; otherwise render unchanged. This is how the
-    /// narrow and wide legs of the selectable-without-clipping proof get a
-    /// deterministic width instead of the host's default.
+    /// Pin the window to `LOOPFLOW_UI_TEST_WIDTH` when a UI-test run renders
+    /// without a snapshot path — the narrow and wide legs of the
+    /// selectable-without-clipping proof. Snapshot runs skip this pin:
+    /// `uiTestSnapshot()` sizes the real window at capture time, width and
+    /// height together.
     @ViewBuilder
     func uiTestWindowWidth() -> some View {
-        if let width = AppTestMode.windowWidth {
+        if let width = AppTestMode.viewPinnedWidth {
             frame(width: width)
         } else {
             self
@@ -239,14 +268,38 @@ private extension View {
     @ViewBuilder
     func uiTestSnapshot() -> some View {
         if AppTestMode.current() != nil,
+           let target = AppTestMode.captureTarget,
            let path = ProcessInfo.processInfo.environment["LOOPFLOW_UI_TEST_SNAPSHOT_PATH"] {
             let delay = AppTestMode.snapshotDelay
             task {
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                // A background-launched app has no key window, so snapshot the
-                // first realized window directly rather than `keyWindow`.
-                if let window = NSApp.windows.first(where: { $0.contentView != nil }) {
-                    _ = try? SnapshotService().snapshotWindow(window, to: path)
+                var captureWindow: NSWindow?
+                for _ in 0 ..< 50 {
+                    captureWindow = NSApp.windows.first { window in
+                        window.isVisible && window.contentView != nil && target.matches(window)
+                    }
+                    if captureWindow != nil { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+
+                if let window = captureWindow {
+                    if let width = AppTestMode.windowWidth {
+                        let height = AppTestMode.windowHeight
+                            ?? window.contentView?.frame.height
+                            ?? window.frame.height
+                        window.setContentSize(NSSize(width: width, height: height))
+                    }
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    if window.isVisible {
+                        do {
+                            _ = try SnapshotService().snapshotWindow(window, to: path)
+                        } catch {
+                            fputs("website capture failed: \(error)\n", stderr)
+                        }
+                    } else {
+                        fputs("website capture failed: target window closed before capture\n", stderr)
+                    }
+                } else {
+                    fputs("website capture failed: target window did not open\n", stderr)
                 }
                 NSApp.terminate(nil)
             }

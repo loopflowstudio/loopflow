@@ -64,6 +64,39 @@ pub async fn ensure_wave_row(
     Ok(wave)
 }
 
+/// Ensure a Wave row with the identity chosen by its authoritative origin.
+/// A remote Home may observe a different repo path, but never mint a second id
+/// for the same named Work.
+pub async fn ensure_wave_row_with_id(
+    store: &SharedStore,
+    main_repo: &Path,
+    name: &str,
+    wave_id: &WaveId,
+) -> StoreResult<Wave> {
+    if let Some(existing) = store.get_wave_by_name(name).await? {
+        if existing.id() != wave_id {
+            return Err(crate::store::StoreError::InvalidData(format!(
+                "Wave '{name}' is {} on this Home, not authoritative id {wave_id}",
+                existing.id()
+            )));
+        }
+        return Ok(existing);
+    }
+    if let Some(existing) = store.get_wave(wave_id).await? {
+        return Err(crate::store::StoreError::InvalidData(format!(
+            "Wave id {wave_id} belongs to '{}', not '{name}'",
+            existing.name()
+        )));
+    }
+    let wave = Wave::new(
+        wave_id.clone(),
+        name.to_string(),
+        main_repo.display().to_string(),
+    );
+    store.create_wave(&wave).await?;
+    Ok(wave)
+}
+
 /// Whether a process with `pid` is running on this host (`kill -0` probe).
 /// Shared with the supervisor's attached-resident probe.
 pub(crate) async fn process_alive(pid: u32) -> bool {
@@ -118,7 +151,7 @@ impl StoreObserver {
     }
 
     async fn poll_child_observations(&self) {
-        let recipient = crate::child_session::ObservationRecipient::Wave {
+        let recipient = crate::child::ObservationRecipient::Wave {
             wave_id: self.wave_id.clone(),
         };
         let observations = match self.store.pending_observations(&recipient).await {
@@ -131,16 +164,14 @@ impl StoreObserver {
         for observation in observations {
             let should_ack = match (observation.source, observation.payload) {
                 (
-                    crate::child_session::ChildRef::Task(session_id),
-                    crate::project_session::ChildEventPayload::Task { event },
-                ) => match self.store.get_task_session(&session_id).await {
+                    crate::child::ChildRef::Task(session_id),
+                    crate::project::ChildEventPayload::Task { event },
+                ) => match self.store.get_task(&session_id).await {
                     Ok(Some(session)) => {
-                        let control_source = self.task_control_source(&session_id, &event).await;
                         self.runtime.deliver_task_observation(TaskObservation {
-                            session_id,
+                            task_id: session_id,
                             issue_identifier: session.launch.issue.identifier,
                             event_id: observation.event_id,
-                            control_source,
                             event,
                         });
                         true
@@ -152,17 +183,15 @@ impl StoreObserver {
                     }
                 },
                 (
-                    crate::child_session::ChildRef::Project(session_id),
-                    crate::project_session::ChildEventPayload::Project { event },
-                ) => match self.store.get_project_session(&session_id).await {
+                    crate::child::ChildRef::Project(session_id),
+                    crate::project::ChildEventPayload::Project { event },
+                ) => match self.store.get_project(&session_id).await {
                     Ok(Some(session)) => {
-                        let control_source = self.project_control_source(&session_id, &event).await;
                         self.runtime.deliver_project_observation(
-                            crate::project_session::ProjectObservation {
-                                session_id,
+                            crate::project::ProjectObservation {
+                                project_id: session_id,
                                 project: session.launch.project.slug,
                                 event_id: observation.event_id,
-                                control_source,
                                 event,
                             },
                         );
@@ -185,61 +214,6 @@ impl StoreObserver {
             if should_ack {
                 let _ = self.store.mark_observation_delivered(observation.id).await;
             }
-        }
-    }
-
-    async fn task_control_source(
-        &self,
-        session_id: &crate::task::TaskSessionId,
-        event: &crate::task::TaskEventKind,
-    ) -> Option<crate::child_session::ChildCommandSource> {
-        match event {
-            crate::task::TaskEventKind::CommandChanged { command_id, .. } => self
-                .store
-                .get_child_command(command_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|command| command.source),
-            crate::task::TaskEventKind::DirectiveChanged { directive_id, .. }
-            | crate::task::TaskEventKind::DirectiveIncorporated { directive_id, .. } => self
-                .store
-                .child_directives(&crate::child_session::ChildRef::Task(session_id.clone()))
-                .await
-                .ok()?
-                .into_iter()
-                .find(|directive| &directive.id == directive_id)
-                .map(|directive| directive.source),
-            _ => None,
-        }
-    }
-
-    async fn project_control_source(
-        &self,
-        session_id: &crate::project_session::ProjectSessionId,
-        event: &crate::project_session::ProjectEventKind,
-    ) -> Option<crate::child_session::ChildCommandSource> {
-        match event {
-            crate::project_session::ProjectEventKind::CommandChanged { command_id, .. } => self
-                .store
-                .get_child_command(command_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|command| command.source),
-            crate::project_session::ProjectEventKind::DirectiveChanged { directive_id, .. }
-            | crate::project_session::ProjectEventKind::DirectiveIncorporated {
-                directive_id,
-                ..
-            } => self
-                .store
-                .child_directives(&crate::child_session::ChildRef::Project(session_id.clone()))
-                .await
-                .ok()?
-                .into_iter()
-                .find(|directive| &directive.id == directive_id)
-                .map(|directive| directive.source),
-            _ => None,
         }
     }
 }

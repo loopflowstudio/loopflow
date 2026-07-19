@@ -2705,6 +2705,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 0,
             conversation_bytes: 0,
+            control: None,
         }
     }
 
@@ -2746,6 +2747,8 @@ mod tests {
             context_persist_ms: 1,
             first_event_seq: None,
             last_event_seq: None,
+            root_output: None,
+            basis: None,
         }
     }
 

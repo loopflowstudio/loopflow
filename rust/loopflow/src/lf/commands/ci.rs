@@ -45,11 +45,13 @@ pub struct CiIncidentDto {
     pub wave: String,
     pub task: String,
     pub task_status: String,
-    pub task_status_reason: String,
     pub pr_number: u32,
     pub attempt: usize,
     pub fixes_for_pr: usize,
     pub failed_head_sha: String,
+    /// The head a ci-fix body shipped for this incident, once one advanced the
+    /// head past `failed_head_sha`. `None` while the incident is unrepaired.
+    pub repaired_head_sha: Option<String>,
     pub failure_set: Vec<String>,
     pub provider_completed_at: Option<String>,
     pub observed_at: String,
@@ -58,7 +60,7 @@ pub struct CiIncidentDto {
     /// is linked — an incident holding `responded_at` without one means a body was
     /// woken by something outside the ledger, which is the bypass this path
     /// exists to prevent.
-    pub trigger_command_id: Option<String>,
+    pub claimed_run_id: Option<String>,
     pub responded_at: Option<String>,
     pub green_at: Option<String>,
     pub merged_at: Option<String>,
@@ -190,12 +192,12 @@ fn incident_dto(
         repo: incident.repo,
         wave: row.wave,
         task: row.task,
-        task_status: row.task_status.as_str().to_string(),
-        task_status_reason: row.task_status_reason,
+        task_status: row.task_status,
         pr_number: incident.pr_number,
         attempt,
         fixes_for_pr,
         failed_head_sha: incident.failed_head_sha,
+        repaired_head_sha: incident.repaired_head_sha,
         failure_set: incident.failure_set,
         provider_completed_at: incident
             .provider_completed_at
@@ -203,8 +205,8 @@ fn incident_dto(
             .transpose()?,
         observed_at: format_time(observed_at)?,
         observer: observer.to_string(),
-        trigger_command_id: incident
-            .trigger_command_id
+        claimed_run_id: incident
+            .claimed_run_id
             .as_ref()
             .map(|id| id.as_str().to_string()),
         responded_at: incident.responded_at.map(format_time).transpose()?,
@@ -253,7 +255,7 @@ fn summarize(incidents: &[CiIncidentDto]) -> CiSummaryDto {
             .iter()
             .filter(|incident| {
                 matches!(incident.outcome.as_str(), "green" | "merged")
-                    && incident.trigger_command_id.is_some()
+                    && incident.claimed_run_id.is_some()
                     && incident.responded_at.is_some()
                     && !incident.human_assisted
             })
@@ -370,16 +372,16 @@ mod tests {
             wave: "infrastructure".to_string(),
             task: "W2-293".to_string(),
             task_status: "running".to_string(),
-            task_status_reason: String::new(),
             pr_number: 1034,
             attempt: 1,
             fixes_for_pr: 1,
             failed_head_sha: "0123456789ab".to_string(),
+            repaired_head_sha: None,
             failure_set: vec!["rust-test".to_string()],
             provider_completed_at: None,
             observed_at: "2026-07-16T00:00:00Z".to_string(),
             observer: "poll".to_string(),
-            trigger_command_id: trigger.map(str::to_string),
+            claimed_run_id: trigger.map(str::to_string),
             responded_at: responded.map(str::to_string),
             green_at: Some("2026-07-16T00:10:00Z".to_string()),
             merged_at: None,
@@ -395,9 +397,33 @@ mod tests {
         }
     }
 
+    /// `repaired_head_sha` is the operator-facing half of the settlement-race fix
+    /// (W2-320): `lf ci --json` must carry the head a ci-fix body shipped, beside
+    /// the head it failed on, or the attribution is invisible.
+    #[test]
+    fn repaired_head_is_exposed_on_the_json_surface() {
+        let mut dto = green_incident(Some("cc_1"), Some("2026-07-16T00:05:00Z"));
+        dto.repaired_head_sha = Some("02527e29".to_string());
+        let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
+        assert_eq!(
+            json.get("repaired_head_sha")
+                .and_then(|value| value.as_str()),
+            Some("02527e29"),
+            "lf ci --json carries the repaired head beside failed_head_sha"
+        );
+
+        dto.repaired_head_sha = None;
+        let json = serde_json::to_value(&dto).expect("serialize CiIncidentDto");
+        assert!(
+            json.get("repaired_head_sha")
+                .is_some_and(serde_json::Value::is_null),
+            "an unrepaired incident renders repaired_head_sha: null, never a missing key"
+        );
+    }
+
     /// The first row is PR #1034: a normal Task body pushed the fix, so no `ci-fix`
     /// wake owned the repair. The second is a green answered by something outside
-    /// the ledger, and it is what pins the `trigger_command_id` clause — #1034 alone
+    /// the ledger, and it is what pins the `claimed_run_id` clause — #1034 alone
     /// is excluded by the `responded_at` clause too, so it would pass without it.
     #[test]
     fn an_untriggered_green_is_not_autonomous() {

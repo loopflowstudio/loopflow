@@ -265,16 +265,8 @@ impl Renderer {
 
 fn child_activity_line(activity: &ChildControlActivity) -> Option<String> {
     match activity.kind {
-        ChildActivityKind::StateChanged
-        | ChildActivityKind::ControlApplied
-        | ChildActivityKind::Directed
-        | ChildActivityKind::Incorporated => return None,
-        ChildActivityKind::ControlUncertain
-        | ChildActivityKind::DecisionRequired
-        | ChildActivityKind::DecisionResolved
-        | ChildActivityKind::PrOpened
-        | ChildActivityKind::Completed
-        | ChildActivityKind::Failed => {}
+        ChildActivityKind::StateChanged => return None,
+        ChildActivityKind::PrOpened | ChildActivityKind::Completed | ChildActivityKind::Failed => {}
     }
     let subject = match activity.subject {
         ChildActivitySubject::Project => "project",

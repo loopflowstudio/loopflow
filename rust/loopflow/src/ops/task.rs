@@ -4,12 +4,10 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::child_session::{
-    body_progress_age, count_recovery_attempts, observe, plan_body_recovery,
-    plan_stranded_recovery, task_write_lease_from_env, BodyEvidence, BodyRecoveryPlan,
-    ChildBodyOutcome, ChildCommandEffect, ChildCommandId, ChildCommandKind, ChildCommandSource,
-    ChildCommandState, ChildDecisionId, ChildDirective, ChildLeaseState, ChildProcessGeneration,
-    ChildRef, ChildWriteLease, StrandedPlan, DEFAULT_STALL_AFTER, MAX_RECOVERY_ATTEMPTS,
+use crate::child::ChildRef;
+use crate::durable::{
+    AttentionRoute, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx,
+    Feedback, Launch, RunLease, RunState, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -18,38 +16,27 @@ use crate::engine::git::{
     rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::process::{
-    start_lf_session_with_env, tmux_installed, tmux_live_sessions, tmux_session_exists,
-    tmux_session_slug,
-};
+use crate::engine::process::{tmux_session_exists, tmux_session_slug};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, ConcreteStep, InteractionPolicy};
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId, InteractionReviewStatus,
-    InteractionReviewer,
-};
-use crate::ops::error::{OpsError, OpsResult};
-use crate::session_context::{
+use crate::engine::{expand_flow, load_flow, ConcreteStep};
+use crate::launch_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
 };
+use crate::ops::error::{OpsError, OpsResult};
 use crate::store::{
-    open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, StoreError,
+    open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
+    StoreError,
 };
-use crate::task::actions::{
-    derive_task_actions, ReviewGateState, TaskActionEvidence, TaskActionModel,
-};
+use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, TaskEventKind, TaskLifecyclePhase, TaskPr, TaskPrId, TaskSession,
-    TaskSessionId, TaskSessionStatus, TaskSessionSuccession,
+    PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
 use crate::wave::Wave;
 use sha2::{Digest, Sha256};
-
-use super::ChildReceiptUntil;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskWaitUntil {
@@ -69,84 +56,23 @@ pub struct TaskLaunchOptions {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct TaskControlResult {
     pub issue_id: String,
-    pub session_id: String,
-    pub command_id: String,
-    pub directive_version: Option<u32>,
-    pub state: ChildCommandState,
-    pub effect: Option<ChildCommandEffect>,
-    pub incorporated: bool,
-    pub generation: Option<u32>,
-    pub accepted_at: Option<time::OffsetDateTime>,
-    pub incorporated_at: Option<time::OffsetDateTime>,
-    pub error: Option<String>,
+    pub task_id: String,
+    pub receipt: super::child::WorkControlReceipt,
     pub observation: Observation,
 }
 
-fn task_control_result(
-    issue_id: String,
-    observation: Observation,
-    result: super::child::ChildControlResult,
-) -> TaskControlResult {
-    TaskControlResult {
-        issue_id,
-        session_id: result.session_id,
-        command_id: result.command_id,
-        directive_version: result.directive_version,
-        state: result.state,
-        effect: result.effect,
-        incorporated: result.incorporated,
-        generation: result.generation,
-        accepted_at: result.accepted_at,
-        incorporated_at: result.incorporated_at,
-        error: result.error,
-        observation,
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskReceiptRead {
-    pub receipt: TaskControlResult,
-    pub timed_out: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TaskDecisionResult {
-    pub issue_id: String,
-    pub session_id: String,
-    pub decision_id: String,
-    pub resolved: bool,
-    pub choice: Option<String>,
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TaskSessionSnapshot {
+pub struct TaskSnapshot {
     pub issue_id: String,
     pub issue_identifier: String,
-    pub session_id: String,
-    pub project_id: String,
+    pub task_id: String,
+    pub external_project_id: String,
     pub project: String,
     pub pm_snapshot_synced_at: i64,
     pub pm_writeback: crate::task::PmWritebackState,
     pub wave: String,
-    pub project_session_id: String,
-    /// The live Project Session this Task routes to: the historical owner when
-    /// it is still live, or its non-terminal successor. `None` when the recorded
-    /// Project Session is terminal and no live successor exists (broken chain).
-    pub routing_project_session_id: Option<String>,
-    /// True when routing followed the chain to a successor — i.e. the Task's
-    /// historical `project_session_id` is a terminal predecessor and a live
-    /// successor now owns its observations, reviews, and reconciliation.
-    pub project_route_succeeded: bool,
-    /// Terminal attempt this Session recovered from, when any.
-    pub predecessor_session_id: Option<String>,
-    /// Live successor that recovered this terminal attempt, when any.
-    pub successor_session_id: Option<String>,
-    pub current_directive_version: u32,
-    pub incorporated_directive_version: u32,
-    pub status: TaskSessionStatus,
-    pub status_reason: String,
-    pub status_at: time::OffsetDateTime,
+    pub project_id: String,
+    pub status: WorkStatus,
     pub worktree: String,
     pub workspace_slug: String,
     pub lifecycle: crate::task::TaskLifecyclePlan,
@@ -162,7 +88,7 @@ pub struct TaskSessionSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub latest_process: Option<ChildProcessGeneration>,
+    pub launch: Option<Launch>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -215,13 +141,13 @@ pub struct TaskFileSnapshot {
 #[derive(Debug, Clone, Copy)]
 struct TaskWorkspace<'a> {
     issue_identifier: &'a str,
-    session_id: &'a crate::task::TaskSessionId,
+    session_id: &'a crate::task::TaskId,
     worktree: &'a Path,
     base_commit: &'a str,
 }
 
 impl<'a> TaskWorkspace<'a> {
-    fn new(session: &'a TaskSession, pr: &'a TaskPr) -> Self {
+    fn new(session: &'a Task, pr: &'a TaskPr) -> Self {
         Self {
             issue_identifier: &session.launch.issue.identifier,
             session_id: &session.id,
@@ -231,7 +157,7 @@ impl<'a> TaskWorkspace<'a> {
     }
 }
 
-fn active_pr(session: &TaskSession) -> OpsResult<TaskPr> {
+fn active_pr(session: &Task) -> OpsResult<TaskPr> {
     let session_id = session.id.clone();
     block_on_task(async move {
         task_store()
@@ -239,7 +165,7 @@ fn active_pr(session: &TaskSession) -> OpsResult<TaskPr> {
             .active_task_pr(&session_id)
             .await
             .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-            .ok_or_else(|| task_error("Task Session has no active PR"))
+            .ok_or_else(|| task_error("Task has no active PR"))
     })
 }
 
@@ -296,10 +222,10 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
             .map_err(|error| task_error(error.to_string()))?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
         let mut parent_session = store
-            .get_task_session(&parent.task_session_id)
+            .get_task(&parent.task_id)
             .await
             .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error("stack parent Task Session is missing"))?;
+            .ok_or_else(|| task_error("stack parent Task is missing"))?;
         // Reuse the parent's persisted PR number and observation cache. Stack
         // resolution used to enumerate every PR on the branch independently,
         // bypassing both the Task cache and outage-tolerant reconcile.
@@ -373,7 +299,7 @@ pub fn record_stack_rebase(
     })
 }
 
-async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wave> {
+async fn owning_wave(store: &SharedStore, session: &Task) -> OpsResult<Wave> {
     store
         .get_wave(&session.wave_id)
         .await
@@ -381,76 +307,37 @@ async fn owning_wave(store: &SharedStore, session: &TaskSession) -> OpsResult<Wa
         .ok_or_else(|| task_error(format!("owning Wave {} is not registered", session.wave_id)))
 }
 
-async fn command_source(
-    store: &SharedStore,
-    session: &TaskSession,
-) -> OpsResult<ChildCommandSource> {
-    match std::env::var("LF_PROJECT_SESSION_ID") {
-        Ok(value) => {
-            let project_id =
-                crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
-                    task_error(format!("invalid ambient Project Session id: {error}"))
-                })?;
-            return if session.project_session_id == project_id {
-                Ok(ChildCommandSource::Project(project_id))
-            } else {
-                Err(task_error(format!(
-                    "Project Session {project_id} cannot control Task {}; its Project Session is {}",
-                    session.launch.issue.identifier, session.project_session_id
-                )))
-            };
-        }
-        Err(std::env::VarError::NotPresent) => {}
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(task_error("ambient Project Session id is not valid UTF-8"))
-        }
-    }
-    super::util::resolve_child_command_source(
-        store,
-        &session.wave_id,
-        &format!("Task {}", session.launch.issue.identifier),
-    )
-    .await
+async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
+    let work = store
+        .work_for_child(&ChildRef::Task(task.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    store
+        .work_status(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))
 }
 
-fn _defer_task_interactions(session: &mut TaskSession) -> OpsResult<bool> {
+fn _defer_task_interactions(session: &mut Task) -> OpsResult<bool> {
     if session.lifecycle.all_interactions_deferred() {
         return Ok(false);
-    }
-    if session.status.is_terminal() {
-        return Err(task_error(format!(
-            "Task {} is {}; terminal Tasks cannot change interaction policy",
-            session.launch.issue.identifier,
-            session.status.as_str()
-        )));
-    }
-    if session.status.is_process_active() {
-        return Err(task_error(format!(
-            "Task {} has an active body; interrupt or wait for it before marking the Task headless",
-            session.launch.issue.identifier
-        )));
     }
     session.lifecycle.defer_all_interactions();
     session.updated_at = time::OffsetDateTime::now_utc();
     Ok(true)
 }
 
-fn _refuse_current_human_review(
-    session: &TaskSession,
-    review: Option<&InteractionReview>,
-) -> OpsResult<()> {
-    if let Some(review) = review.filter(|review| {
-        review.reviewer == InteractionReviewer::Human && !review.status.is_terminal()
-    }) {
+fn _refuse_current_user_feedback(session: &Task, feedback: Option<&Feedback>) -> OpsResult<()> {
+    if feedback.is_some_and(|feedback| feedback.attention == AttentionRoute::User) {
         return Err(task_error(format!(
-            "Task {} is awaiting human interaction review {}; no interaction policy was changed",
-            session.launch.issue.identifier, review.id
+            "Task {} routes current Feedback to the User; continue it before changing interaction policy",
+            session.launch.issue.identifier
         )));
     }
     Ok(())
 }
 
-pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<TaskSession> {
+pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<Task> {
     let TaskLaunchOptions {
         name,
         flow,
@@ -471,16 +358,17 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     let (existing, terminal_predecessor_id) = block_on_task(async {
         let store = task_store().await?;
         let mut existing = store
-            .get_task_session_by_issue(issue)
+            .get_task_by_issue(issue)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
         if let Some(session) = &mut existing {
-            if session.status.is_terminal() {
-                // A terminal Task Session leaves its direction to a successor
+            let status = task_work_status(&store, session).await?;
+            if matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
+                // A terminal Task leaves its direction to a successor
                 // created below; do not return its status here. The placement
                 // path re-resolves the issue, derives a distinct worktree slug
                 // from this predecessor's id, and carries the cursor and comment
-                // ledger onto the new Session.
+                // ledger onto the reopened Task Work.
                 let predecessor_id = session.id.clone();
                 return Ok((None, Some(predecessor_id)));
             }
@@ -520,10 +408,10 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     .map_err(|error| task_error(error.to_string()))?
                     .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
                 let parent_session = store
-                    .get_task_session(&parent.task_session_id)
+                    .get_task(&parent.task_id)
                     .await
                     .map_err(|error| task_error(error.to_string()))?
-                    .ok_or_else(|| task_error("stack parent Task Session is missing"))?;
+                    .ok_or_else(|| task_error("stack parent Task is missing"))?;
                 if requested != parent_session.launch.issue.identifier
                     && requested != parent_session.launch.issue.id.as_str()
                 {
@@ -533,38 +421,32 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     )));
                 }
             }
-            if let Some(requested) = directive.as_deref() {
-                let current = store
-                    .child_directives(&ChildRef::Task(session.id.clone()))
+            if directive.is_some() {
+                return Err(task_error(format!(
+                    "Task {} already exists; use `lf task steer {} <new-direction>`",
+                    session.launch.issue.identifier, session.launch.issue.identifier,
+                )));
+            }
+            if headless && !session.lifecycle.all_interactions_deferred() {
+                let work = store
+                    .work_for_child(&ChildRef::Task(session.id.clone()))
                     .await
-                    .map_err(|error| task_error(error.to_string()))?
-                    .into_iter()
-                    .find(|value| value.version == session.current_directive_version)
-                    .ok_or_else(|| task_error("Task Session has no current directive"))?;
-                if current.text != requested {
+                    .map_err(|error| task_error(error.to_string()))?;
+                let feedback = store
+                    .feedback(&work)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+                _refuse_current_user_feedback(session, feedback.as_ref())?;
+                if matches!(status, WorkStatus::Running { .. }) {
                     return Err(task_error(format!(
-                        "Task {} already exists with directive v{}; use `lf task steer {} <new-direction>` to replace it",
-                        session.launch.issue.identifier,
-                        current.version,
-                        session.launch.issue.identifier,
+                        "Task {} has an active Run; interrupt it before marking the Task headless",
+                        session.launch.issue.identifier
                     )));
                 }
             }
-            if headless && !session.lifecycle.all_interactions_deferred() {
-                let review = store
-                    .interaction_review_at(
-                        &session.id,
-                        session.phase_epoch,
-                        session.phase_iteration,
-                        session.phase_cursor,
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                _refuse_current_human_review(session, review.as_ref())?;
-            }
             if headless && _defer_task_interactions(session)? {
                 store
-                    .update_task_session(session)
+                    .update_task(session)
                     .await
                     .map_err(|error| task_error(error.to_string()))?;
             }
@@ -594,7 +476,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     if plan.strategy != PlacementStrategy::Create {
         return Err(task_error(format!(
-            "task worktree or branch already exists without a Task Session: {} ({})",
+            "task worktree or branch already exists without a Task: {} ({})",
             plan.worktree_path.display(),
             plan.branch
         )));
@@ -607,12 +489,12 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             block_on_task(async {
                 let store = task_store().await?;
                 let parent_session = store
-                    .get_task_session_by_issue(parent_issue)
+                    .get_task_by_issue(parent_issue)
                     .await
                     .map_err(|error| task_error(format!("failed to read parent Task: {error}")))?
                     .ok_or_else(|| {
                         task_error(format!(
-                            "stack parent {parent_issue:?} has no Task Session; run it first"
+                            "stack parent {parent_issue:?} has no Task; run it first"
                         ))
                     })?;
                 if parent_session.launch.issue.id.as_str() == resolved.item.id {
@@ -658,17 +540,17 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         }
     };
     plan.base_ref = base_ref.clone();
-    let project_session = crate::ops::project::ensure_project_session_for_task(
+    let project = crate::ops::project::ensure_project_for_task(
         &main_repo,
         crate::ops::task_pm::ResolvedProject {
             snapshot: resolved.snapshot.clone(),
             project: resolved.project.clone(),
         },
     )?;
-    let project_session_id = task_project_session_id(&project_session)?;
-    let wave_id = project_session.wave_id.clone();
+    let project_id = project.id.clone();
+    let wave_id = project.wave_id.clone();
     let config = load_config_or_default(Some(&main_repo));
-    let agent = config.agent.as_deref().unwrap_or("claude:opus");
+    let agent = config.agent();
     let (provider, _) = parse_agent(agent);
     let agent = agent.to_string();
     let directive = directive.unwrap_or_else(|| {
@@ -681,21 +563,42 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     block_on_task(async move {
         let store = task_store().await?;
         // Re-resolve after worktree planning: a concurrent run may have created
-        // a Session in the gap. A non-terminal Session wins — return it. A
+        // the Task in the gap. Non-terminal Work wins — return it. A
         // terminal one is the predecessor whose direction the successor carries;
-        // None means this is the first Session for the issue.
+        // None means this is the first Task for the issue.
         let predecessor = match store
-            .get_task_session_by_issue(&resolved.item.id)
+            .get_task_by_issue(&resolved.item.id)
             .await
             .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
         {
-            Some(existing) if !existing.status.is_terminal() => return Ok(existing),
+            Some(existing)
+                if !matches!(
+                    task_work_status(&store, &existing).await?,
+                    WorkStatus::Done | WorkStatus::Abandoned
+                ) =>
+            {
+                return Ok(existing)
+            }
             Some(terminal) => Some(terminal),
             None => None,
         };
         let now = time::OffsetDateTime::now_utc();
-        let mut session = TaskSession {
-            id: crate::task::TaskSessionId::new(),
+        let task_id = predecessor
+            .as_ref()
+            .map(|task| task.id.clone())
+            .unwrap_or_else(crate::task::TaskId::new);
+        let sequence = if let Some(predecessor) = &predecessor {
+            store
+                .task_prs(&predecessor.id)
+                .await
+                .map_err(|error| task_error(format!("failed to read Task PR history: {error}")))?
+                .last()
+                .map_or(1, |pr| pr.sequence + 1)
+        } else {
+            1
+        };
+        let mut session = Task {
+            id: task_id,
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new(resolved.item.id.clone())
@@ -714,13 +617,8 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
             wave_id,
-            project_session_id,
-            current_directive_version: 1,
-            incorporated_directive_version: 0,
+            project_id,
             pm_writeback: PmWritebackState::Current,
-            status: TaskSessionStatus::Created,
-            status_reason: "Linear task reserved before placement".to_string(),
-            status_at: now,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
             lifecycle: if headless {
@@ -737,16 +635,15 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             agent,
             provider,
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
-            created_at: now,
+            created_at: predecessor.as_ref().map_or(now, |task| task.created_at),
             updated_at: now,
             observation: crate::task::Observation::NotRequired,
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
-            sequence: 1,
+            task_id: session.id.clone(),
+            sequence,
             slug: workspace_slug,
             branch: plan.branch.clone(),
             base_commit,
@@ -763,34 +660,34 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             updated_at: now,
         };
 
-        let initial = ChildDirective::initial(
-            ChildRef::Task(session.id.clone()),
-            directive,
-            command_source(&store, &session).await?,
-        );
-        let succession = if let Some(predecessor) = &predecessor {
+        if predecessor.is_some() {
             store
-                .reserve_task_session_successor(predecessor, &session, &pr, &initial)
+                .reopen_task(
+                    &session,
+                    Some(&pr),
+                    crate::durable::Author::User,
+                    &directive,
+                )
                 .await
-                .map_err(|error| task_error(format!("failed to reserve task successor: {error}")))?
+                .map_err(|error| task_error(format!("failed to reopen Task: {error}")))?;
         } else {
             match store
-                .reserve_task_session_with_directive(&session, &pr, &initial)
+                .create_task_with_steer(&session, &pr, crate::durable::Author::User, &directive)
                 .await
             {
-                Ok(()) => TaskSessionSuccession {
-                    session: session.clone(),
-                    created: true,
-                },
+                Ok(()) => {}
                 Err(StoreError::Sqlite(_)) => {
                     if let Some(existing) = store
-                        .get_task_session_by_issue(&resolved.item.id)
+                        .get_task_by_issue(&resolved.item.id)
                         .await
                         .map_err(|error| {
                             task_error(format!("failed to recover task reservation: {error}"))
                         })?
                     {
-                        if !existing.status.is_terminal() {
+                        if !matches!(
+                            task_work_status(&store, &existing).await?,
+                            WorkStatus::Done | WorkStatus::Abandoned
+                        ) {
                             return Ok(existing);
                         }
                     }
@@ -800,11 +697,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 }
                 Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
             }
-        };
-        if !succession.created {
-            // A concurrent or retried run already created the non-terminal
-            // successor; its status is the answer.
-            return Ok(succession.session);
         }
 
         store
@@ -815,18 +707,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     sequence: pr.sequence,
                     branch: pr.branch,
                     base_commit: pr.base_commit,
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::DirectiveChanged {
-                    directive_id: initial.id,
-                    version: initial.version,
-                    directive_kind: initial.kind,
                 },
             )
             .await
@@ -845,33 +725,9 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             )));
         }
 
-        launch_task_process(&store, &mut session).await?;
+        launch_task_process(&store, &mut session, None).await?;
         wait_until_running(&store, &session.id).await
     })
-}
-
-fn task_project_session_id(
-    project: &crate::project_session::ProjectSession,
-) -> OpsResult<crate::project_session::ProjectSessionId> {
-    match std::env::var("LF_PROJECT_SESSION_ID") {
-        Ok(value) => {
-            let session_id =
-                crate::project_session::ProjectSessionId::parse(&value).map_err(|error| {
-                    task_error(format!("invalid ambient Project Session id: {error}"))
-                })?;
-            if session_id != project.id {
-                return Err(task_error(format!(
-                    "Project Session {session_id} cannot supervise a Task under Project Session {}",
-                    project.id
-                )));
-            }
-            Ok(session_id)
-        }
-        Err(std::env::VarError::NotPresent) => Ok(project.id.clone()),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            Err(task_error("ambient Project Session id is not valid UTF-8"))
-        }
-    }
 }
 
 pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
@@ -891,7 +747,7 @@ pub fn task_start(
     title: String,
     project_id: &str,
     options: TaskLaunchOptions,
-) -> OpsResult<TaskSession> {
+) -> OpsResult<Task> {
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
     let project =
@@ -974,10 +830,7 @@ fn derive_workspace_slug_with_cap(title: &str, max_words: usize) -> OpsResult<Wo
 /// derived from the predecessor's id so the successor places a fresh worktree
 /// without colliding. The base is capped at four words so the suffix word keeps
 /// the segment within the 2-5 word limit.
-fn succession_workspace_slug(
-    title: &str,
-    predecessor_id: &TaskSessionId,
-) -> OpsResult<WorktreeSegment> {
+fn succession_workspace_slug(title: &str, predecessor_id: &TaskId) -> OpsResult<WorktreeSegment> {
     let base = derive_workspace_slug_with_cap(title, 4)?;
     let id = predecessor_id.as_str();
     let tail = &id[id.len().saturating_sub(8)..];
@@ -1001,10 +854,10 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
 async fn update_task_pr_with_authority(
     store: &SharedStore,
     pr: &TaskPr,
-    lease: Option<&ChildWriteLease>,
+    lease: Option<&RunLease>,
 ) -> Result<(), StoreError> {
     match lease {
-        Some(lease) => store.update_task_pr_for_lease(pr, lease).await,
+        Some(lease) => store.update_task_pr_for_run(pr, lease).await,
         None => store.update_task_pr(pr).await,
     }
 }
@@ -1013,24 +866,24 @@ async fn settle_task_pr_with_authority(
     store: &SharedStore,
     settled: &TaskPr,
     next: Option<&TaskPr>,
-    lease: Option<&ChildWriteLease>,
+    lease: Option<&RunLease>,
 ) -> Result<(), StoreError> {
     match lease {
-        Some(lease) => store.settle_task_pr_for_lease(settled, next, lease).await,
+        Some(lease) => store.settle_task_pr_for_run(settled, next, lease).await,
         None => store.settle_task_pr(settled, next).await,
     }
 }
 
 async fn append_task_event_with_authority(
     store: &SharedStore,
-    session_id: &crate::task::TaskSessionId,
+    session_id: &crate::task::TaskId,
     event: &TaskEventKind,
-    lease: Option<&ChildWriteLease>,
+    lease: Option<&RunLease>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => {
             store
-                .append_task_event_for_lease(session_id, lease, event)
+                .append_task_event_for_run(session_id, lease, event)
                 .await?;
         }
         None => {
@@ -1040,106 +893,105 @@ async fn append_task_event_with_authority(
     Ok(())
 }
 
-async fn update_task_session_with_authority(
+async fn update_task_with_authority(
     store: &SharedStore,
-    session: &TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &Task,
+    lease: Option<&RunLease>,
 ) -> Result<(), StoreError> {
     match lease {
-        Some(lease) => store.update_task_session_for_lease(session, lease).await,
-        None => store.update_task_session(session).await,
+        Some(lease) => store.update_task_for_run(session, lease).await,
+        None => store.update_task(session).await,
     }
 }
 
-async fn complete_task_session_after_pr_with_authority(
+async fn complete_task_after_pr_with_authority(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     pr: &TaskPr,
-    lease: Option<&ChildWriteLease>,
+    lease: Option<&RunLease>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => {
             store
-                .complete_task_session_after_pr_for_lease(session, pr, lease)
+                .complete_task_after_pr_for_run(session, pr, lease)
                 .await
         }
-        None => store.complete_task_session_after_pr(session, pr).await,
+        None => store.complete_task_after_pr(session, pr).await,
     }
 }
 
-async fn complete_task_session_with_authority(
+async fn complete_task_with_authority(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     skipped_pr: Option<&TaskPr>,
-    lease: Option<&ChildWriteLease>,
+    lease: Option<&RunLease>,
 ) -> Result<(), StoreError> {
     match lease {
         Some(lease) => {
             store
-                .complete_task_session_for_lease(session, skipped_pr, lease)
+                .complete_task_for_run(session, skipped_pr, lease)
                 .await
         }
-        None => store.complete_task_session(session, skipped_pr).await,
+        None => store.complete_task(session, skipped_pr).await,
     }
 }
 
-fn ambient_task_write_lease(session: &TaskSession) -> OpsResult<Option<ChildWriteLease>> {
-    let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") else {
+async fn ambient_task_run_lease(
+    store: &SharedStore,
+    session: &Task,
+) -> OpsResult<Option<RunLease>> {
+    let Some(lease) = crate::ops::ambient_run_lease(store).await? else {
         return Ok(None);
     };
-    let value = value
-        .into_string()
-        .map_err(|_| task_error("ambient Task Session id is not valid UTF-8"))?;
-    let id = crate::task::TaskSessionId::parse(&value)
-        .map_err(|error| task_error(format!("invalid ambient Task Session id: {error}")))?;
-    if id != session.id {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
+    if lease.work != work {
         return Err(task_error(format!(
-            "ambient Task Session {id} cannot mutate {}",
-            session.id
+            "ambient Run {} cannot mutate Task {}",
+            lease.run_id, session.id
         )));
     }
-    task_write_lease_from_env()
-        .map(Some)
-        .map_err(|error| task_error(format!("ambient Task Session has no authority: {error}")))
+    Ok(Some(lease))
 }
 
 async fn task_for_worktree(
     store: &SharedStore,
     repo: &Path,
-) -> OpsResult<Option<(TaskSession, Option<ChildWriteLease>)>> {
+) -> OpsResult<Option<(Task, Option<RunLease>)>> {
     let checkout = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
-    if let Some(value) = std::env::var_os("LF_TASK_SESSION_ID") {
-        let value = value
-            .into_string()
-            .map_err(|_| task_error("ambient Task Session id is not valid UTF-8"))?;
-        let id = crate::task::TaskSessionId::parse(&value)
-            .map_err(|error| task_error(format!("invalid ambient Task Session id: {error}")))?;
+    if let Some(lease) = crate::ops::ambient_run_lease(store).await? {
+        let WorkRef::Task(id) = &lease.work else {
+            return Err(task_error(format!(
+                "ambient Run {} owns {}, not Task Work",
+                lease.run_id,
+                lease.work.kind()
+            )));
+        };
         let session = store
-            .get_task_session(&id)
+            .get_task(id)
             .await
-            .map_err(|error| task_error(format!("failed to read ambient Task Session: {error}")))?
-            .ok_or_else(|| task_error(format!("ambient Task Session {id} is not registered")))?;
+            .map_err(|error| task_error(format!("failed to read ambient Task: {error}")))?
+            .ok_or_else(|| task_error(format!("ambient Task {id} is not registered")))?;
         let worktree = session
             .worktree
             .canonicalize()
             .unwrap_or_else(|_| session.worktree.clone());
         if checkout != worktree {
             return Err(task_error(format!(
-                "ambient Task Session {id} owns {}, not {}",
+                "ambient Task {id} owns {}, not {}",
                 session.worktree.display(),
                 repo.display()
             )));
         }
-        let lease = task_write_lease_from_env().map_err(|error| {
-            task_error(format!("ambient Task Session has no authority: {error}"))
-        })?;
         return Ok(Some((session, Some(lease))));
     }
 
     let worktree_keys: BTreeSet<String> = store
-        .list_task_sessions(None)
+        .list_tasks(None)
         .await
-        .map_err(|error| task_error(format!("failed to inspect Task Sessions: {error}")))?
+        .map_err(|error| task_error(format!("failed to inspect Tasks: {error}")))?
         .into_iter()
         .filter(|session| {
             session
@@ -1153,7 +1005,7 @@ async fn task_for_worktree(
     let mut current = Vec::new();
     for worktree in worktree_keys {
         if let Some(session) = store
-            .get_task_session_by_worktree(&worktree)
+            .get_task_by_worktree(&worktree)
             .await
             .map_err(|error| task_error(format!("failed to resolve Task worktree: {error}")))?
         {
@@ -1162,7 +1014,7 @@ async fn task_for_worktree(
     }
     if current.len() > 1 {
         return Err(task_error(format!(
-            "multiple Task Sessions claim worktree {}",
+            "multiple Tasks claim worktree {}",
             repo.display()
         )));
     }
@@ -1185,13 +1037,13 @@ enum TaskAuthority {
     /// This worktree is not a Task worktree. Task-specific bookkeeping is an
     /// explicit no-op; the ordinary PR flow continues unchanged.
     NotATaskWorktree,
-    /// Proven authority: the registry is healthy and a Task Session owns this
+    /// Proven authority: the registry is healthy and a Task owns this
     /// worktree. `lease` is present only when an ambient Task body proved it.
     /// Boxed so the `NotATaskWorktree` no-op variant stays small.
     Authority {
         store: SharedStore,
-        session: Box<TaskSession>,
-        lease: Option<ChildWriteLease>,
+        session: Box<Task>,
+        lease: Option<RunLease>,
     },
 }
 
@@ -1224,7 +1076,7 @@ fn registry_authority_error(err: RegistryUnavailable) -> OpsError {
 ///   (no registry means no tasks exist, so this is provably an ordinary PR).
 /// - Registry missing with an ambient Task id, or present but unopenable → refuse.
 async fn resolve_task_authority(repo: &Path) -> OpsResult<TaskAuthority> {
-    let ambient = std::env::var_os("LF_TASK_SESSION_ID").is_some();
+    let ambient = std::env::var_os(crate::durable::RUN_CONTEXT_ENV).is_some();
     let store = match open_registry_for_authority().await {
         Ok(store) => Arc::new(store),
         Err(RegistryUnavailable::MissingFile { .. }) if !ambient => {
@@ -1290,7 +1142,7 @@ pub(crate) fn request_task_pr_publication(
         });
         pr.updated_at = now;
         match lease.as_ref() {
-            Some(lease) => store.update_task_pr_for_lease(&pr, lease).await,
+            Some(lease) => store.update_task_pr_for_run(&pr, lease).await,
             None => store.update_task_pr(&pr).await,
         }
         .map_err(|error| task_error(format!("failed to request PR publication: {error}")))?;
@@ -1383,6 +1235,82 @@ pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     })
 }
 
+/// Publication proof: require ancestry parity without changing the recorded
+/// fork. Only an explicit integration boundary may advance Task stack/base
+/// metadata.
+pub(crate) fn verify_task_pr_range_without_healing(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            StaleBaseAction::Refuse,
+            None,
+        )
+        .await
+    })
+}
+
+/// Prove the post-rebase Task range against the operation's immutable target
+/// without advancing durable metadata before a requested push is verified.
+pub(crate) fn validate_task_pr_range_for_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+) -> OpsResult<()> {
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Accept)
+}
+
+/// Record the immutable base only after every requested Git postcondition,
+/// including remote-head equality, has passed.
+pub(crate) fn record_task_pr_range_after_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+) -> OpsResult<()> {
+    verify_task_pr_range_for_integration(repo, target_ref, target_sha, StaleBaseAction::Heal)
+}
+
+fn verify_task_pr_range_for_integration(
+    repo: &Path,
+    target_ref: &str,
+    target_sha: &str,
+    stale_base: StaleBaseAction,
+) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    let target_ref = target_ref.to_string();
+    let target_sha = target_sha.to_string();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        verify_task_pr_range_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            stale_base,
+            Some((target_ref, target_sha)),
+        )
+        .await
+    })
+}
+
 /// Prove the active Task PR's range is **authoritative and non-empty** before
 /// any `gh pr create/edit/ready/merge` side effect. Runs the ancestry parity
 /// proof (healing a stale base), then refuses when the tree at HEAD matches the
@@ -1403,6 +1331,30 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
             return Ok(());
         };
         require_task_pr_range_nonempty_with_authority(&store, &session, lease.as_ref(), &repo).await
+    })
+}
+
+/// Publication's post-commit proof: require a non-empty authoritative range
+/// while leaving integration metadata untouched.
+pub(crate) fn require_task_pr_range_nonempty_without_healing(repo: &Path) -> OpsResult<()> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority {
+            store,
+            session,
+            lease,
+        } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(());
+        };
+        require_task_pr_range_nonempty_with_authority_mode(
+            &store,
+            &session,
+            lease.as_ref(),
+            &repo,
+            StaleBaseAction::Refuse,
+        )
+        .await
     })
 }
 
@@ -1451,9 +1403,35 @@ async fn resolve_verifier_upstream(
 /// exercised in tests without a live LF_HOME (mirrors `ensure_working_pr`).
 async fn verify_task_pr_range_with_authority(
     store: &SharedStore,
-    session: &TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &Task,
+    lease: Option<&RunLease>,
     repo: &Path,
+) -> OpsResult<()> {
+    verify_task_pr_range_with_authority_mode(
+        store,
+        session,
+        lease,
+        repo,
+        StaleBaseAction::Heal,
+        None,
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleBaseAction {
+    Accept,
+    Refuse,
+    Heal,
+}
+
+async fn verify_task_pr_range_with_authority_mode(
+    store: &SharedStore,
+    session: &Task,
+    lease: Option<&RunLease>,
+    repo: &Path,
+    stale_base: StaleBaseAction,
+    upstream_override: Option<(String, String)>,
 ) -> OpsResult<()> {
     let mut pr = store
         .active_task_pr(&session.id)
@@ -1474,8 +1452,13 @@ async fn verify_task_pr_range_with_authority(
         )));
     }
 
-    let default_branch = get_default_branch(repo)?;
-    let (base_ref, upstream) = resolve_verifier_upstream(store, &pr, repo, &default_branch).await?;
+    let (base_ref, upstream) = match upstream_override {
+        Some(target) => target,
+        None => {
+            let default_branch = get_default_branch(repo)?;
+            resolve_verifier_upstream(store, &pr, repo, &default_branch).await?
+        }
+    };
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
     let base = pr.base_commit.clone();
@@ -1515,10 +1498,21 @@ async fn verify_task_pr_range_with_authority(
         // B < M: the upstream advanced past a stale or squash-merged base.
         // Heal the recorded base to the true fork point so lf task changes and
         // the durable evidence report the minimal M..HEAD range.
+        match stale_base {
+            StaleBaseAction::Accept => return Ok(()),
+            StaleBaseAction::Refuse => {
+                return Err(task_error(format!(
+                    "Task {identifier} PR base {} is stale behind the branch fork {}. Publication does not update integration metadata; run `lf rebase` before publishing.",
+                    short(&base),
+                    short(&merge_base),
+                )));
+            }
+            StaleBaseAction::Heal => {}
+        }
         pr.base_commit = merge_base.clone();
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease {
-            Some(lease) => store.heal_task_pr_base_for_lease(&pr, lease).await,
+            Some(lease) => store.heal_task_pr_base_for_run(&pr, lease).await,
             None => store.heal_task_pr_base(&pr).await,
         }
         .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
@@ -1556,11 +1550,28 @@ async fn verify_task_pr_range_with_authority(
 /// authoritative even when the upstream has advanced.
 async fn require_task_pr_range_nonempty_with_authority(
     store: &SharedStore,
-    session: &TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &Task,
+    lease: Option<&RunLease>,
     repo: &Path,
 ) -> OpsResult<()> {
-    verify_task_pr_range_with_authority(store, session, lease, repo).await?;
+    require_task_pr_range_nonempty_with_authority_mode(
+        store,
+        session,
+        lease,
+        repo,
+        StaleBaseAction::Heal,
+    )
+    .await
+}
+
+async fn require_task_pr_range_nonempty_with_authority_mode(
+    store: &SharedStore,
+    session: &Task,
+    lease: Option<&RunLease>,
+    repo: &Path,
+    stale_base: StaleBaseAction,
+) -> OpsResult<()> {
+    verify_task_pr_range_with_authority_mode(store, session, lease, repo, stale_base, None).await?;
     let pr = store
         .active_task_pr(&session.id)
         .await
@@ -1660,7 +1671,7 @@ pub(crate) fn attach_task_github_pr(
         link_pr_to_linear(&store, &session, &mut pr).await;
         pr.updated_at = time::OffsetDateTime::now_utc();
         match lease.as_ref() {
-            Some(lease) => store.update_task_pr_for_lease(&pr, lease).await,
+            Some(lease) => store.update_task_pr_for_run(&pr, lease).await,
             None => store.update_task_pr(&pr).await,
         }
         .map_err(|error| task_error(format!("failed to attach GitHub PR: {error}")))?;
@@ -1674,7 +1685,7 @@ pub(crate) fn attach_task_github_pr(
             match lease.as_ref() {
                 Some(lease) => {
                     store
-                        .append_task_event_for_lease(&session.id, lease, &event)
+                        .append_task_event_for_run(&session.id, lease, &event)
                         .await
                 }
                 None => store.append_task_event(&session.id, &event).await,
@@ -1699,7 +1710,6 @@ pub(crate) fn abandon_task_pr(
         else {
             return Ok(false);
         };
-        let mut session = session;
         let mut pr = store
             .active_task_pr(&session.id)
             .await
@@ -1724,7 +1734,7 @@ pub(crate) fn abandon_task_pr(
         }
         if let Some(lease) = lease.as_ref() {
             store
-                .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+                .validate_run_lease(lease)
                 .await
                 .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
         }
@@ -1753,62 +1763,23 @@ pub(crate) fn abandon_task_pr(
         pr.abandoned_at = Some(now);
         pr.updated_at = now;
         match lease.as_ref() {
-            Some(lease) => store.settle_task_pr_for_lease(&pr, None, lease).await,
+            Some(lease) => store.settle_task_pr_for_run(&pr, None, lease).await,
             None => store.settle_task_pr(&pr, None).await,
         }
         .map_err(|error| task_error(format!("failed to settle Task PR: {error}")))?;
-        if !session.status.is_process_active() {
-            let from = session.status;
-            session.set_status(
-                TaskSessionStatus::Waiting,
-                format!("PR branch {branch:?} was abandoned; another PR may follow"),
-            );
-            store
-                .update_task_session(&session)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-            if from != session.status {
-                store
-                    .append_task_event(
-                        &session.id,
-                        &TaskEventKind::StatusChanged {
-                            from,
-                            to: session.status,
-                            reason: session.status_reason.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-            }
-        }
         Ok(true)
     })
 }
 
-/// Record a Task Session's transition into `Failed`: set the status, persist it,
-/// and append the paired `StatusChanged` + `Failed` events. Callers keep their
-/// own return value; this only writes the durable failure record.
+/// Record a Task failure without inventing a second Work lifecycle.
 async fn record_task_failure(
     store: &SharedStore,
-    session: &mut TaskSession,
-    reason: impl Into<String>,
+    session: &mut Task,
+    _reason: impl Into<String>,
     error: String,
 ) -> OpsResult<()> {
-    let from = session.status;
-    session.set_status(TaskSessionStatus::Failed, reason);
     store
-        .update_task_session(session)
-        .await
-        .map_err(|store_error| task_error(store_error.to_string()))?;
-    store
-        .append_task_event(
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Failed,
-                reason: session.status_reason.clone(),
-            },
-        )
+        .update_task(session)
         .await
         .map_err(|store_error| task_error(store_error.to_string()))?;
     store
@@ -1824,203 +1795,118 @@ async fn record_task_failure(
     Ok(())
 }
 
-/// Atomically start a fresh process generation for an inactive Session.
+/// Start a fresh Run for inactive Task Work.
 pub(crate) async fn relaunch_inactive_process(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
 ) -> OpsResult<()> {
     let Some(_) = ensure_working_pr(store, session).await? else {
         return Err(task_error(format!(
-            "Task {} is {}; terminal Task Sessions cannot start a process",
-            session.launch.issue.identifier,
-            session.status.as_str()
+            "Task {} is terminal and cannot start a Run",
+            session.launch.issue.identifier
         )));
     };
-    launch_task_process(store, session).await
+    launch_task_process(store, session, None).await
 }
 
-/// Clear a `revoked` lease whose body is provably gone, in place.
-///
-/// A no-op for every other lease state, and for a body that is present or whose
-/// absence cannot be proven — there the lease keeps doing its actual job.
-async fn release_dead_revoked_task_lease(
+async fn relaunch_for_ci_incident(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
+    incident_id: String,
 ) -> OpsResult<()> {
-    let Some(revoked) = session
-        .latest_process
-        .as_ref()
-        .filter(|process| process.state == ChildLeaseState::Revoked)
-        .cloned()
-    else {
-        return Ok(());
+    let Some(_) = ensure_working_pr(store, session).await? else {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot repair CI",
+            session.launch.issue.identifier
+        )));
     };
-    if let Some(finished) = super::child::release_dead_revoked_child_body(
+    launch_task_process(
         store,
-        &ChildRef::Task(session.id.clone()),
-        &revoked,
+        session,
+        Some(crate::durable::RunTrigger::CiIncident { incident_id }),
     )
-    .await?
-    {
-        session.latest_process = Some(finished);
-    }
-    Ok(())
+    .await
 }
 
-async fn launch_task_process(store: &SharedStore, session: &mut TaskSession) -> OpsResult<()> {
-    // Resolve the current Home lf before reserving anything, ignoring any
-    // LF_CONTROL_* pin a legacy body carries: we always launch through the
-    // current binary, store, and home. A missing or incompatible lf fails
-    // without burning a generation reservation.
-    let execution = crate::engine::process::current_home_execution_context()
-        .map_err(|error| task_error(format!("cannot resolve current lf binary: {error}")))?;
-    let tmux_name = format!(
-        "lf-task-{}-{}",
-        tmux_session_slug(&session.launch.issue.identifier),
-        &session.id.as_str()[3..11]
-    );
-    // A lease stuck at `revoked` bars every future generation — the reserve CAS
-    // accepts only NULL or `finished` — and nothing else in the system ever
-    // revisits it. Release it here when the body is provably gone, so a resume
-    // is not permanently refused by a corpse. A body still present, or one we
-    // cannot prove gone, keeps its lease and fails the reservation below with
-    // the real cause.
-    release_dead_revoked_task_lease(store, session).await?;
-    let from = session.status;
-    let mut launch = session.clone();
-    // The reserved generation records no provenance: nothing has run yet. The
-    // child stamps its own binary's provenance when it boots (mark_booted), so
-    // the audit row describes what ran, never merely what launched it.
-    let generation = launch.begin_generation(tmux_name.clone());
-    let Some(lease) = store
-        .reserve_task_process(&launch, from)
+async fn launch_task_process(
+    store: &SharedStore,
+    session: &mut Task,
+    trigger: Option<crate::durable::RunTrigger>,
+) -> OpsResult<()> {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
         .await
-        .map_err(|error| task_error(format!("failed to reserve task process: {error}")))?
-    else {
-        let current = store
-            .get_task_session(&session.id)
-            .await
-            .map_err(|error| task_error(format!("failed to reread task process: {error}")))?
-            .ok_or_else(|| task_error("Task Session disappeared during process reservation"))?;
-        if current.status.is_process_active() {
-            *session = current;
-            return Ok(());
-        }
-        if current.status.is_terminal() {
-            return Err(task_error(format!(
-                "task {} became {}; terminal Task Sessions cannot start a process",
-                current.launch.issue.identifier,
-                current.status.as_str()
-            )));
-        }
-        // The reserve CAS pins the lease state as well as the status. Without
-        // this arm a lease miss is reported as "changed from waiting to
-        // waiting; retry the command" — which names the wrong thing and tells a
-        // machine to retry a command that cannot ever pass.
-        if let Some(process) = current.latest_process.as_ref() {
-            if process.state != ChildLeaseState::Finished {
-                return Err(task_error(format!(
-                    "task {} holds a `{}` lease on body generation {}; a new generation \
-                     cannot be reserved until that lease is released",
-                    current.launch.issue.identifier,
-                    process.state.as_str(),
-                    process.generation
-                )));
-            }
-        }
-        return Err(task_error(format!(
-            "task {} changed from {} to {} during process reservation; retry the command",
-            current.launch.issue.identifier,
-            from.as_str(),
-            current.status.as_str()
-        )));
-    };
-    *session = launch;
-
-    // argv[0] and the store come from the Session, never from this process:
-    // whoever queued the command does not get to choose the child's binary or
-    // its database.
-    let argv = vec![
-        execution.lf_bin.to_string_lossy().to_string(),
-        "__task".to_string(),
-        session.id.to_string(),
-        "--generation".to_string(),
-        generation.to_string(),
-    ];
-    let generation_text = generation.to_string();
-    let control_bin = execution.lf_bin.to_string_lossy().to_string();
-    let db_path = execution.db_path.to_string_lossy().to_string();
-    let lf_home = execution.lf_home.to_string_lossy().to_string();
-    // Inherit the Wave's execution home so this Task's routed shipping commands
-    // (`lf commit`, `lf pr open`) target the same host as its Wave.
-    let wave_home = match owning_wave(store, session).await {
-        Ok(wave) => crate::engine::wave_config::read_wave_home(Path::new(wave.repo()), wave.name())
-            .to_string(),
-        Err(_) => crate::engine::wave_config::default_local_home(&session.worktree).to_string(),
-    };
-    let environment = [
-        (
-            crate::engine::wave_context::WAVE_ID_ENV,
-            session.wave_id.as_str(),
-        ),
-        ("LF_TASK_SESSION_ID", session.id.as_str()),
-        ("LF_TASK_GENERATION", generation_text.as_str()),
-        (
-            crate::child_session::TASK_LEASE_TOKEN_ENV,
-            lease.token.as_str(),
-        ),
-        (crate::store::CONTROL_BIN_ENV, control_bin.as_str()),
-        (crate::store::CONTROL_DB_PATH_ENV, db_path.as_str()),
-        (crate::store::CONTROL_HOME_ENV, lf_home.as_str()),
-        (crate::engine::wave_home::WAVE_HOME_ENV, wave_home.as_str()),
-    ];
-    if let Err(error) =
-        start_lf_session_with_env(&tmux_name, &session.worktree, &argv, &environment).await
+        .map_err(|error| task_error(error.to_string()))?;
+    if store
+        .current_run(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .is_some()
     {
-        session.latest_process = Some(
-            super::child::revoke_and_reap_child_body(
-                store,
-                &ChildRef::Task(session.id.clone()),
-                crate::child_session::ChildBodyOutcome::Lost {
-                    reason: format!("task process launch failed: {error}"),
-                },
-            )
-            .await?,
-        );
-        record_task_failure(
-            store,
-            session,
-            format!("task process launch failed: {error}"),
-            error.to_string(),
-        )
-        .await?;
-        return Err(task_error(format!(
-            "failed to launch task process: {error}"
-        )));
+        return Ok(());
     }
-    Ok(())
+    let trigger = match trigger {
+        Some(trigger) => trigger,
+        None => crate::durable::RunTrigger::Input {
+            basis: store
+                .current_epoch(&work)
+                .await
+                .map_err(|error| task_error(error.to_string()))?
+                .current_basis,
+        },
+    };
+    let (run, lease) = store
+        .reserve_run(&work, trigger)
+        .await
+        .map_err(|error| task_error(format!("failed to reserve Task Run: {error}")))?;
+    let tmux_name = format!(
+        "lf-task-{}-{}-{}",
+        tmux_session_slug(&session.launch.issue.identifier),
+        &session.id.as_str()[3..11],
+        &run.id.as_str()[4..12]
+    );
+    store
+        .update_task_for_run(session, &lease)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    crate::ops::launch_in_run(
+        store,
+        &lease,
+        crate::ops::RunLaunch {
+            work: WorkRef::Task(session.id.clone()),
+            wave_id: session.wave_id.clone(),
+            cwd: session.worktree.clone(),
+            tmux_name,
+            agent: session.agent.clone(),
+            account_id: None,
+            resume_token: session.provider_session_id.clone(),
+        },
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| task_error(error.to_string()))
 }
 
 async fn wait_until_running(
     store: &SharedStore,
-    session_id: &crate::task::TaskSessionId,
-) -> OpsResult<TaskSession> {
+    session_id: &crate::task::TaskId,
+) -> OpsResult<Task> {
     let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
     loop {
         let session = store
-            .get_task_session(session_id)
+            .get_task(session_id)
             .await
             .map_err(|error| task_error(format!("failed to observe task startup: {error}")))?
             .ok_or_else(|| task_error("task session disappeared during startup"))?;
-        if session.status != TaskSessionStatus::Starting {
-            return if session.status == TaskSessionStatus::Running {
-                Ok(session)
-            } else {
-                Err(task_error(format!(
-                    "task {} did not start: {}",
-                    session.launch.issue.identifier, session.status_reason
+        match task_work_status(store, &session).await? {
+            WorkStatus::Running { .. } => return Ok(session),
+            WorkStatus::Done | WorkStatus::Abandoned => {
+                return Err(task_error(format!(
+                    "task {} ended during startup",
+                    session.launch.issue.identifier
                 )))
-            };
+            }
+            WorkStatus::Ready | WorkStatus::Waiting { .. } => {}
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(task_error(format!(
@@ -2034,129 +1920,93 @@ async fn wait_until_running(
 
 pub(crate) async fn reconcile_process_liveness(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
 ) -> OpsResult<()> {
-    if session
-        .latest_process
-        .as_ref()
-        .is_some_and(super::child::child_body_reservation_is_fresh)
-    {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    let Some(run) = store
+        .current_run(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+    else {
         return Ok(());
-    }
-    let alive = match session.latest_process.as_ref() {
-        Some(process) => tmux_session_exists(&process.tmux_name)
-            .await
-            .map_err(|error| task_error(error.to_string()))?,
-        None => false,
     };
-    if alive {
-        return Ok(());
+    let launch = store
+        .current_launch_for_run(&run.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    if run.state == RunState::Reserved && launch.is_none() {
+        let still_starting =
+            run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
+        if still_starting {
+            return Ok(());
+        }
     }
-    // A dead lease is reaped regardless of Session status. A Waiting or Failed
-    // Session can still carry a stale Legacy/Reserved/Active lease from a body
-    // that vanished without recording a terminal outcome; an explicit resume
-    // must revoke it here, or the fresh process can never reserve the slot.
-    let lost_reason = "task process disappeared before recording a terminal outcome";
-    if session.latest_process.as_ref().is_some_and(|process| {
-        matches!(
-            process.state,
-            crate::child_session::ChildLeaseState::Legacy
-                | crate::child_session::ChildLeaseState::Reserved
-                | crate::child_session::ChildLeaseState::Active
+    if let Some(launch) = &launch {
+        let alive = match &launch.containment {
+            Containment::Tmux { name } => tmux_session_exists(name)
+                .await
+                .map_err(|error| task_error(error.to_string()))?,
+            Containment::ProcessGroup { .. } => true,
+        };
+        if alive {
+            return Ok(());
+        }
+        if launch.state == crate::durable::LaunchState::Starting
+            && launch.started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
+        {
+            return Ok(());
+        }
+    }
+    store
+        .recover_run(
+            &run.id,
+            launch.as_ref().map(|launch| &launch.id),
+            ContainmentObservation::Absent,
         )
-    }) {
-        let outcome = super::child::lost_child_body_outcome(
-            session
-                .latest_process
-                .as_ref()
-                .expect("matched child process must still be present"),
-            lost_reason,
-        );
-        session.latest_process = Some(
-            super::child::revoke_and_reap_child_body(
-                store,
-                &ChildRef::Task(session.id.clone()),
-                outcome,
-            )
-            .await?,
-        );
-    }
-    // Only a Session whose status still claims a live process needs a terminal
-    // transition here. One already Waiting or Failed keeps its status; the
-    // resume that follows relaunches it against the now-reaped lease.
-    if !session.status.is_process_active() {
-        return Ok(());
-    }
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    mark_task_body_lost(store, session).await
+}
+
+async fn mark_task_body_lost(store: &SharedStore, session: &mut Task) -> OpsResult<()> {
     let active = store
         .active_task_pr(&session.id)
         .await
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
     if active.as_ref().is_none_or(|pr| pr.phase() == PrPhase::Open) {
-        // W2-144 gen 7: before settling a dead-process open-PR Task to Waiting,
-        // consume a queued manual Resume. The command was queued (by
-        // `lf task resume` or a queued steer) but never claimed because the
-        // process died first. Relaunching lets the new generation drain and
-        // honor it — one relaunch path, shared with the ci-fix wake.
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
-            .await
-            .map_err(|error| task_error(format!("failed to read command queue: {error}")))?;
-        let has_pending_resume = commands.iter().any(|cmd| {
-            matches!(cmd.kind, ChildCommandKind::Resume { .. }) && !cmd.state.is_terminal()
-        });
-        if has_pending_resume {
-            return relaunch_inactive_process(store, session).await;
-        }
-        let from = session.status;
-        session.set_status(
-            TaskSessionStatus::Waiting,
-            match active {
-                Some(pr) => format!("PR {} is open; waiting for review", pr.sequence),
-                None => "the previous PR settled; another PR may follow".to_string(),
-            },
-        );
-        store
-            .update_task_session(session)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::StatusChanged {
-                    from,
-                    to: session.status,
-                    reason: session.status_reason.clone(),
-                },
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
         return Ok(());
     }
     // Do not write a human instruction into a durable field and stop. This line
     // was the strand: it told a person to type `lf task resume` and nothing ever
-    // read it, so 13 Sessions sat frozen until someone swept them by hand. State
-    // the fact; the supervision tick's `recover_stranded_task_body` re-dispatches
-    // it, and only announces a verdict a resume cannot fix.
-    let reason = "task process is missing; Loopflow will recover this Task Session";
-    record_task_failure(store, session, reason, reason.to_string()).await
+    // read it, so 13 Tasks sat frozen until someone swept them by hand. The
+    // Run slot is now released above; redispatch this same durable Work after
+    // the ordinary adoption safety check.
+    let reason = "task process is missing; Loopflow will recover this Task";
+    record_task_failure(store, session, reason, reason.to_string()).await?;
+    if let Err(error) = task_recovery_adoption(store, session).await {
+        tracing::info!(
+            task = %session.launch.issue.identifier,
+            "not recovering missing Task body: {error}"
+        );
+        return Ok(());
+    }
+    relaunch_inactive_process(store, session).await
 }
 
 /// Let one live Project body supervise the progress leases of its Task bodies.
 ///
-/// This is deliberately parent-driven: Project and Task Sessions do not grow a
+/// This is deliberately parent-driven: Project and Tasks do not grow a
 /// second watchdog process. A live Project runner calls this on its existing
 /// control tick and recovers only children whose durable progress deadline has
 /// passed on a machine that can still observe their tmux body.
-/// How far back the recovery attempt count reads. Comfortably past the lease and
-/// status churn a few consecutive recoveries write, and far short of a long
-/// Task's full event log.
-const RECOVERY_ATTEMPT_WINDOW: u32 = 64;
-
 pub(crate) async fn reconcile_project_tasks(
     store: &SharedStore,
-    project: &crate::project_session::ProjectSession,
-) -> OpsResult<Vec<TaskSession>> {
-    let project_tasks = |tasks: Vec<TaskSession>| {
+    project: &crate::project::Project,
+) -> OpsResult<Vec<Task>> {
+    let project_tasks = |tasks: Vec<Task>| {
         tasks
             .into_iter()
             .filter(|task| task.launch.project.id == project.launch.project.id)
@@ -2164,12 +2014,15 @@ pub(crate) async fn reconcile_project_tasks(
     };
     let mut tasks = project_tasks(
         store
-            .list_task_sessions(Some(&project.wave_id))
+            .list_tasks(Some(&project.wave_id))
             .await
             .map_err(|error| task_error(format!("failed to list supervised Tasks: {error}")))?,
     );
     for task in &mut tasks {
-        if task.status.is_terminal() {
+        if matches!(
+            task_work_status(store, task).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
             continue;
         }
         if let Err(error) = task_recovery_adoption(store, task).await {
@@ -2184,7 +2037,10 @@ pub(crate) async fn reconcile_project_tasks(
         refuse_dirty_between_prs(store, task).await?;
         reconcile_process_liveness(store, task).await?;
         reconcile_task_completion(store, task, None).await?;
-        if task.status.is_terminal() {
+        if matches!(
+            task_work_status(store, task).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
             continue;
         }
         let no_active_pr = if observed.is_none() {
@@ -2206,7 +2062,10 @@ pub(crate) async fn reconcile_project_tasks(
         });
         if settled && !completing {
             ensure_working_pr(store, task).await?;
-            if !task.status.is_process_active() {
+            if !matches!(
+                task_work_status(store, task).await?,
+                WorkStatus::Running { .. }
+            ) {
                 relaunch_inactive_process(store, task).await?;
             }
         } else {
@@ -2218,17 +2077,20 @@ pub(crate) async fn reconcile_project_tasks(
                 && task.phase_cursor == 0
                 && task.phase_iteration == 0
             {
-                if !task.status.is_process_active() {
+                if !matches!(
+                    task_work_status(store, task).await?,
+                    WorkStatus::Running { .. }
+                ) {
                     relaunch_inactive_process(store, task).await?;
                 }
             } else {
-                queue_ci_fix_command(store, task, pr).await?;
+                route_ci_incident(store, task, pr).await?;
             }
         }
     }
 
     let refreshed = store
-        .list_task_sessions(Some(&project.wave_id))
+        .list_tasks(Some(&project.wave_id))
         .await
         .map_err(|error| task_error(format!("failed to reread supervised Tasks: {error}")))?;
     Ok(project_tasks(refreshed))
@@ -2236,395 +2098,25 @@ pub(crate) async fn reconcile_project_tasks(
 
 pub(crate) async fn supervise_project_task_bodies(
     store: &SharedStore,
-    project: &crate::project_session::ProjectSession,
+    project: &crate::project::Project,
 ) -> OpsResult<usize> {
-    let tasks = reconcile_project_tasks(store, project).await?;
-    if !tmux_installed() {
-        return Ok(0);
-    }
-    let live_sessions = tmux_live_sessions()
-        .await
-        .map_err(|error| task_error(format!("failed to observe Task bodies: {error}")))?;
-    let now = time::OffsetDateTime::now_utc();
-    let mut recovered = 0;
-    let mine = tasks
-        .into_iter()
-        .filter(|task| task.project_session_id == project.id)
-        .collect::<Vec<_>>();
-    // A strand is a body this machine can see is gone. It is deliberately a
-    // separate cohort from the stall sweep below, which only ever looks at
-    // bodies that are alive: the two conditions are disjoint, and folding them
-    // together would make one predicate answer two different questions.
-    for mut task in mine
-        .iter()
-        .filter(|task| {
-            task.latest_process.as_ref().is_some_and(|process| {
-                !live_sessions.contains(&process.tmux_name)
-                    // A reservation inside its startup grace is a relaunch in
-                    // flight, not a strand.
-                    && !super::child::child_body_reservation_is_fresh(process)
-            })
-        })
-        .cloned()
-    {
-        match recover_stranded_task_body(store, &mut task).await {
-            Ok(true) => recovered += 1,
-            Ok(false) => {}
-            Err(error) => {
-                tracing::warn!(
-                    project_session = %project.id,
-                    task = %task.launch.issue.identifier,
-                    error = %error,
-                    "stranded Task recovery failed"
-                );
-            }
-        }
-    }
-    for task in mine.into_iter().filter(|task| {
-        task.status.is_process_active()
-            && task.latest_process.as_ref().is_some_and(|process| {
-                process.state == ChildLeaseState::Active
-                    && live_sessions.contains(&process.tmux_name)
-            })
-    }) {
-        let latest_event = store
-            .latest_task_event(&task.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task progress: {error}")))?;
-        let observation = observe(
-            &BodyEvidence {
-                intent: task.status.body_intent(),
-                observable: true,
-                process_alive: true,
-                progress_age: body_progress_age(
-                    latest_event.as_ref().map(|event| event.created_at),
-                    task.status_at,
-                    now,
-                ),
-                step: Some(task.lifecycle_phase.as_str().to_string()),
-                reason: task.status_reason.clone(),
-            },
-            DEFAULT_STALL_AFTER,
-        );
-        match recover_stalled_task_body(
-            store,
-            task,
-            &observation,
-            latest_event.as_ref().map(|event| event.id),
-        )
-        .await
-        {
-            Ok(true) => recovered += 1,
-            Ok(false) => {}
-            Err(error) => {
-                tracing::warn!(
-                    project_session = %project.id,
-                    error = %error,
-                    "Task body recovery failed"
-                );
-            }
-        }
-    }
-    Ok(recovered)
+    // Project supervision reconciles each child's durable Run. Live
+    // containment is never killed merely for being quiet; a missing Launch is
+    // recovered by exact Run/Launch identity in reconcile_process_liveness.
+    reconcile_project_tasks(store, project).await?;
+    Ok(0)
 }
-
-/// Re-dispatch one Session whose body is gone while its status still claims one.
-///
-/// This is the strand path: the body died, and nothing but a resume was ever
-/// going to bring it back. Before this existed, `reconcile_process_liveness`
-/// wrote *"resume the same Task Session with `lf task resume`"* into a durable
-/// field and stopped — a human instruction with no reader.
-///
-/// Returns whether a generation was launched.
-async fn recover_stranded_task_body(
-    store: &SharedStore,
-    task: &mut TaskSession,
-) -> OpsResult<bool> {
-    // A bounded tail is enough: the count only ever walks back over the lease
-    // and status churn a recovery itself writes.
-    let events = store
-        .recent_task_events(&task.id, RECOVERY_ATTEMPT_WINDOW)
-        .await
-        .map_err(|error| task_error(format!("failed to read Task recovery history: {error}")))?;
-    let attempts = count_recovery_attempts(&events);
-    // A lease stuck at `revoked` is not a strand recovery can plan around — the
-    // reserve CAS can never accept it, so redispatch would burn the whole
-    // attempt budget on a CAS that cannot pass. Release it first when the body
-    // is provably gone: the verdict table then reads the finished lease and its
-    // own outcome, and reaches `Redispatch` with no new plan variant. A lease
-    // that cannot be released still surfaces its true cause below.
-    release_dead_revoked_task_lease(store, task).await?;
-    let plan = plan_stranded_recovery(
-        task.status.body_intent(),
-        true,
-        false,
-        task.latest_process.as_ref(),
-        attempts,
-    );
-    let (attempt, reason) = match plan {
-        StrandedPlan::LeaveAlone => return Ok(false),
-        StrandedPlan::Surface { reason } => {
-            // Say it once. A Session already parked on this verdict must not
-            // re-announce it every 5s tick.
-            if task.status == TaskSessionStatus::Failed && task.status_reason == reason {
-                return Ok(false);
-            }
-            record_task_failure(store, task, reason.clone(), reason).await?;
-            return Ok(false);
-        }
-        StrandedPlan::Redispatch { attempt } => {
-            let generation = task
-                .latest_process
-                .as_ref()
-                .map_or(0, |process| process.generation);
-            (
-                attempt,
-                format!(
-                    "body generation {generation} died without recording an outcome; \
-                     recovering the same Task Session (attempt {attempt}/{MAX_RECOVERY_ATTEMPTS})"
-                ),
-            )
-        }
-    };
-    // A successor commits into the worktree, so it must clear the same adoption
-    // preconditions as an explicit resume. `task_recovery_adoption` owns that
-    // refusal; do not second-guess it here.
-    if let Err(error) = task_recovery_adoption(store, task).await {
-        tracing::info!(
-            task = %task.launch.issue.identifier,
-            "not recovering stranded Task: {error}"
-        );
-        return Ok(false);
-    }
-    // Reap the dead lease before reserving the successor: `reserve_task_process`
-    // CASes on a `finished` lease, so a strand still holding `active` can never
-    // launch until this runs.
-    if let Some(process) = task.latest_process.as_ref() {
-        if matches!(
-            process.state,
-            ChildLeaseState::Legacy | ChildLeaseState::Reserved | ChildLeaseState::Active
-        ) {
-            let outcome = super::child::lost_child_body_outcome(process, &reason);
-            task.latest_process = Some(
-                super::child::revoke_and_reap_child_body(
-                    store,
-                    &ChildRef::Task(task.id.clone()),
-                    outcome,
-                )
-                .await?,
-            );
-        }
-    }
-    let generation = task
-        .latest_process
-        .as_ref()
-        .map_or(0, |process| process.generation);
-    // Record the attempt before launching. A launch that fails still reaps as
-    // `Lost` and fails the Session, so counting only successful launches would
-    // let an unlaunchable Session retry forever.
-    store
-        .append_task_event(
-            &task.id,
-            &TaskEventKind::BodyRecoveryAttempted {
-                generation,
-                attempt,
-                reason: reason.clone(),
-            },
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    super::child::redispatch_task_body(store, task).await?;
-    tracing::info!(
-        task = %task.launch.issue.identifier,
-        attempt,
-        "recovered a stranded Task body"
-    );
-    Ok(true)
-}
-
-async fn recover_stalled_task_body(
-    store: &SharedStore,
-    task: TaskSession,
-    observation: &crate::child_session::BodyObservation,
-    latest_event_id: Option<i64>,
-) -> OpsResult<bool> {
-    let commands = store
-        .list_child_commands(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(format!("failed to inspect Task commands: {error}")))?;
-    let generation = task
-        .latest_process
-        .as_ref()
-        .map(|process| process.generation)
-        .ok_or_else(|| task_error("stalled Task has no process generation"))?;
-    let plan = plan_body_recovery(observation, &commands, generation);
-    if plan == BodyRecoveryPlan::LeaveAlone {
-        return Ok(false);
-    }
-    let active_pr = store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(|error| task_error(format!("failed to inspect Task PR: {error}")))?;
-    if let Some(reason) = task.supervisor_restart_bar(active_pr.as_ref()) {
-        tracing::info!(task = %task.launch.issue.identifier, "not recovering Task body: {reason}");
-        return Ok(false);
-    }
-    let progress_age = observation.progress_age_secs.unwrap_or_default();
-    let uncertain = match &plan {
-        BodyRecoveryPlan::NeedsInput { commands } => Some(commands.clone()),
-        BodyRecoveryPlan::Restart => None,
-        BodyRecoveryPlan::LeaveAlone => unreachable!("leave-alone plan returned above"),
-    };
-    // A restart commits a successor body into the worktree, so it must clear the
-    // same adoption preconditions as an explicit resume — refuse before the lease
-    // is reaped rather than after rotation rejects the branch. An uncertain plan
-    // launches nothing, so it still records the loss honestly; the explicit
-    // resume that follows is where the refusal belongs.
-    if uncertain.is_none() {
-        if let Err(error) = task_recovery_adoption(store, &task).await {
-            tracing::info!(
-                task = %task.launch.issue.identifier,
-                "not recovering Task body: {error}"
-            );
-            return Ok(false);
-        }
-    }
-    let reason = uncertain.as_ref().map_or_else(
-        || {
-            format!(
-                "body generation {generation} stalled after {progress_age}s without durable progress; recovering the same Task Session"
-            )
-        },
-        |commands| {
-            let commands = commands
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "body generation {generation} stalled after {progress_age}s during provider delivery ({commands}); delivery outcome is uncertain, inspect the transcript and resume explicitly"
-            )
-        },
-    );
-    let outcome = if uncertain.is_some() {
-        ChildBodyOutcome::Lost {
-            reason: reason.clone(),
-        }
-    } else {
-        ChildBodyOutcome::Superseded {
-            reason: reason.clone(),
-        }
-    };
-    let Some(revoked) = store
-        .revoke_task_process_if_unchanged(
-            &task.id,
-            generation,
-            task.status_at,
-            latest_event_id,
-            &outcome,
-        )
-        .await
-        .map_err(|error| task_error(format!("failed to claim stalled Task body: {error}")))?
-    else {
-        return Ok(false);
-    };
-    if let Err(error) =
-        super::child::reap_revoked_child_body(store, &ChildRef::Task(task.id.clone()), revoked)
-            .await
-    {
-        let mut current = store
-            .get_task_session(&task.id)
-            .await
-            .map_err(|store_error| task_error(store_error.to_string()))?
-            .ok_or_else(|| task_error("Task Session disappeared during recovery"))?;
-        // Reaching here means the reap failed *and* the body could not be proven
-        // gone, since a provable absence would have released the lease. Say that,
-        // rather than instructing a human who is not reading this field: the
-        // lease releases itself on the next reservation once the body is
-        // verifiably absent.
-        let failure = format!(
-            "body generation {generation} lease was revoked after a stall but its body could not \
-             be reaped or proven gone: {error}; the lease stays blocked and releases itself once \
-             the body is verifiably absent"
-        );
-        record_task_failure(store, &mut current, failure.clone(), failure).await?;
-        return Err(error);
-    }
-
-    let mut current = store
-        .get_task_session(&task.id)
-        .await
-        .map_err(|error| task_error(error.to_string()))?
-        .ok_or_else(|| task_error("Task Session disappeared during recovery"))?;
-    if uncertain.is_some() {
-        let successor_generation = generation
-            .checked_add(1)
-            .ok_or_else(|| task_error("Task process generation overflow"))?;
-        let changed = store
-            .mark_stale_child_deliveries_uncertain(
-                &ChildRef::Task(task.id.clone()),
-                successor_generation,
-            )
-            .await
-            .map_err(|error| {
-                task_error(format!("failed to preserve uncertain delivery: {error}"))
-            })?;
-        for command in changed {
-            store
-                .append_task_event(
-                    &task.id,
-                    &TaskEventKind::CommandChanged {
-                        command_id: command.id,
-                        state: ChildCommandState::Uncertain,
-                        effect: command.effect,
-                        error: command.error,
-                    },
-                )
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-        }
-    }
-    let from = current.status;
-    current.set_status(TaskSessionStatus::Waiting, reason);
-    store
-        .update_task_session(&current)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    store
-        .append_task_event(
-            &current.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Waiting,
-                reason: current.status_reason.clone(),
-            },
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    if uncertain.is_none() {
-        if let Err(error) = relaunch_inactive_process(store, &mut current).await {
-            let mut persisted = store
-                .get_task_session(&task.id)
-                .await
-                .map_err(|store_error| task_error(store_error.to_string()))?
-                .ok_or_else(|| task_error("Task Session disappeared during relaunch"))?;
-            if persisted.status == TaskSessionStatus::Waiting {
-                let failure = format!(
-                    "body generation {generation} was reaped after a stall but its successor could not start: {error}"
-                );
-                record_task_failure(store, &mut persisted, failure.clone(), failure).await?;
-            }
-            return Err(error);
-        }
-    }
-    Ok(true)
-}
-
 pub(crate) async fn reconcile_task_pr(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, None).await
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        None,
+        crate::ops::pr::PrReadFreshness::Cached,
+    )
+    .await
 }
 
 /// Status for a Task whose PR is open, decided after a body turn completed.
@@ -2639,18 +2131,43 @@ pub(crate) async fn reconcile_task_pr(
 /// did not happen: block rather than report false progress. `github_degraded`
 /// carries `Observation::Degraded`'s reason and dominates — a turn that ran
 /// blind to GitHub cannot be said to have repaired anything.
+/// What an open PR makes the Task wait for.
+///
+/// This is the durable vocabulary for the triage policy below. It deliberately
+/// does not name a lifecycle status: every arm is a Wait, and the arms differ by
+/// the fact that would end the wait, which is what `WaitOn` records. Keeping
+/// them distinct matters because "we cannot see CI" and "CI is red and nobody
+/// fixed it" need different operator responses even though the old enum
+/// flattened both to `Blocked`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OpenPrDisposition {
+    /// GitHub observation is degraded, so the PR's real state is unknown.
+    /// Resolved by the capability recovering, not by anyone authoring anything.
+    ObservationDegraded,
+    /// CI is failing and the body did not move the head. Only new authored
+    /// direction or a human review can move this.
+    NeedsDirection,
+    /// The PR is open and healthy; the Task waits on external review or merge.
+    AwaitingReview,
+}
+
+/// Triage an open PR into the exact thing it is waiting for.
+///
+/// Pure policy: evidence in, disposition plus its operator-facing reason out.
+/// Degraded observation dominates a healthy CI reading, because a reading we
+/// could not take is not a passing reading.
 pub(crate) fn decide_open_pr_status(
     pr: &TaskPr,
     github_degraded: Option<&str>,
     head_advanced: bool,
-) -> (TaskSessionStatus, String) {
+) -> (OpenPrDisposition, String) {
     let number = pr
         .github()
         .expect("open Task PR requires a GitHub receipt")
         .number;
     if let Some(reason) = github_degraded {
         return (
-            TaskSessionStatus::Blocked,
+            OpenPrDisposition::ObservationDegraded,
             format!(
                 "ci-fix blocked by github-observation: {reason}. Resume when GitHub recovers; pull request #{number} stays attached."
             ),
@@ -2662,14 +2179,14 @@ pub(crate) fn decide_open_pr_status(
         .is_some_and(|observation| observation.state == CiState::Failing);
     if failing && !head_advanced {
         return (
-            TaskSessionStatus::Blocked,
+            OpenPrDisposition::NeedsDirection,
             format!(
                 "CI failing on pull request #{number}; the Task body did not repair the head. Needs a new directive or human review; pull request #{number} stays attached."
             ),
         );
     }
     (
-        TaskSessionStatus::Waiting,
+        OpenPrDisposition::AwaitingReview,
         format!("pull request #{number} is open for review"),
     )
 }
@@ -2687,58 +2204,71 @@ pub(crate) fn current_ci_incident(pr: &TaskPr) -> Option<CiIncident> {
     ci_incident(pr, observation)
 }
 
-/// Enqueue one durable `ci-fix` wake for this PR's current failed head.
+/// Route current actionable CI into the Task's one control lane.
 ///
-/// Replaces the old direct `wake_task_ci_fix` launch. A no-op unless the current
-/// head is failing a required check — that is the legality question, and it is
-/// the only one asked here. Whether this exact failure already woke a body is the
-/// ledger's question, answered by `ensure_child_ci_fix_command` on the incident
-/// identity; a repeat observation lands on the existing command and mints
-/// nothing. `queue_command` owns the trigger link and the launch from there, in
-/// that order — the wake is attributable before anything can service it.
-pub(crate) async fn queue_ci_fix_command(
+/// An active Run observes the incident on its next boundary. An idle Task
+/// reserves exactly one Run whose typed trigger names the incident.
+pub(crate) async fn route_ci_incident(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     pr: &TaskPr,
 ) -> OpsResult<()> {
-    let Some(kind) = ci_fix_wake_kind(pr) else {
+    let Some(incident) = current_ci_incident(pr) else {
         return Ok(());
     };
-    super::child::queue_command(
-        store,
-        super::child::ChildSession::Task(Box::new(session.clone())),
-        ChildCommandSource::System,
-        kind,
-    )
-    .await?;
+    if !matches!(
+        task_work_status(store, session).await?,
+        WorkStatus::Running { .. }
+    ) {
+        let mut session = session.clone();
+        relaunch_for_ci_incident(store, &mut session, incident.identity.clone()).await?;
+    }
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    let run = store
+        .current_run(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .ok_or_else(|| task_error("actionable CI has no active Run"))?;
+    store
+        .claim_ci_incident(&incident.identity, &run.id, time::OffsetDateTime::now_utc())
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
     Ok(())
 }
 
-/// The wake this PR's current reading warrants, as a command payload.
-///
-/// The one place a `CiFix` payload is built. `arm_ci_fix_wake` matches a claimed
-/// command against `current_ci_incident`, so the identity minted here and the
-/// identity matched there must come from the same derivation — two that drift
-/// would match nothing and every wake would be superseded as stale.
-pub(crate) fn ci_fix_wake_kind(pr: &TaskPr) -> Option<ChildCommandKind> {
-    let incident = current_ci_incident(pr)?;
-    let observation = pr.fresh_ci()?;
-    Some(ChildCommandKind::CiFix {
-        incident_identity: incident.identity,
-        pr_number: incident.pr_number,
-        head_sha: incident.failed_head_sha,
-        // Names come from the incident; the log URLs only exist here, on the
-        // observation the incident was minted from.
-        failing_checks: observation.failing_checks.clone(),
-    })
+pub(crate) async fn reconcile_task_pr_for_run(
+    store: &SharedStore,
+    session: &mut Task,
+    lease: &RunLease,
+) -> OpsResult<Option<TaskPr>> {
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        Some(lease),
+        crate::ops::pr::PrReadFreshness::Cached,
+    )
+    .await
 }
 
-pub(crate) async fn reconcile_task_pr_for_lease(
+/// Reconcile the PR reading GitHub live, bypassing both the store observation
+/// cache and `gh`'s HTTP cache. The ci-fix settlement path uses this so it judges
+/// head advancement against the authoritative remote head the repair body just
+/// pushed — never a warm pre-turn observation.
+pub(crate) async fn reconcile_task_pr_fresh_for_run(
     store: &SharedStore,
-    session: &mut TaskSession,
-    lease: &ChildWriteLease,
+    session: &mut Task,
+    lease: &RunLease,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, Some(lease)).await
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        Some(lease),
+        crate::ops::pr::PrReadFreshness::Fresh,
+    )
+    .await
 }
 
 /// Read the open PR's required checks and classify them for `head_sha`. Returns
@@ -2797,16 +2327,17 @@ fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
             observation.head_sha,
             hex::encode(digest.finalize())
         ),
-        task_session_id: pr.task_session_id.clone(),
+        task_id: pr.task_id.clone(),
         pr_id: pr.id.clone(),
         repo: identity.repo,
         pr_number: identity.number,
         failed_head_sha: observation.head_sha.clone(),
+        repaired_head_sha: None,
         failure_set,
         provider_completed_at: None,
         poll_observed_at: Some(observation.observed_at),
         webhook_received_at: None,
-        trigger_command_id: None,
+        claimed_run_id: None,
         responded_at: None,
         green_at: None,
         merged_at: None,
@@ -2852,10 +2383,7 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
 /// `abandoned_at` on a published PR caches GitHub's closed state rather than
 /// deciding it — `lf pr abandon` runs `gh pr close` before stamping it — so a
 /// reopen must be able to clear it. A merge is terminal: GitHub cannot unmerge.
-async fn reconcile_subject(
-    store: &SharedStore,
-    session: &TaskSession,
-) -> OpsResult<Option<TaskPr>> {
+async fn reconcile_subject(store: &SharedStore, session: &Task) -> OpsResult<Option<TaskPr>> {
     if let Some(active) = store
         .active_task_pr(&session.id)
         .await
@@ -2875,8 +2403,9 @@ async fn reconcile_subject(
 
 async fn reconcile_task_pr_with_authority(
     store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &mut Task,
+    lease: Option<&RunLease>,
+    freshness: crate::ops::pr::PrReadFreshness,
 ) -> OpsResult<Option<TaskPr>> {
     let Some(mut pr) = reconcile_subject(store, session).await? else {
         return Ok(None);
@@ -2892,57 +2421,66 @@ async fn reconcile_task_pr_with_authority(
         return Ok(Some(pr));
     };
     let now = time::OffsetDateTime::now_utc();
-    if let Some(observation) = cached_github_observation(&pr, now) {
-        session.observation = observation;
-        return Ok(Some(pr));
+    // A `Fresh` read (ci-fix settlement) must never be served from the store's
+    // observation cache: the repair body may have pushed a new head seconds ago,
+    // and the warm cache still names the pre-turn head.
+    if matches!(freshness, crate::ops::pr::PrReadFreshness::Cached) {
+        if let Some(observation) = cached_github_observation(&pr, now) {
+            session.observation = observation;
+            return Ok(Some(pr));
+        }
     }
     let previous = pr.clone();
-    let github_pr =
-        match crate::ops::pr::observe_pr_by_number(&session.worktree, number, &pr.branch) {
-            crate::ops::pr::PrObservation::Fresh(info) => {
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Fresh,
-                });
-                session.observation = Observation::Fresh { observed_at: now };
-                info
-            }
-            crate::ops::pr::PrObservation::NotFound => {
-                // The PR ref was deleted remotely; a merge (if any) is already
-                // persisted. Cache the successful absence briefly and keep the
-                // settled/working state.
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Fresh,
-                });
-                pr.updated_at = now;
-                update_task_pr_with_authority(store, &pr, lease)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                session.observation = Observation::Fresh { observed_at: now };
-                return Ok(Some(pr));
-            }
-            crate::ops::pr::PrObservation::Degraded { reason } => {
-                let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
-                pr.github_observation = Some(GithubObservation {
-                    checked_at: now,
-                    result: GithubObservationResult::Degraded {
-                        reason: reason.clone(),
-                    },
-                });
-                // `updated_at` remains the time of the cached PR data, not the
-                // failed attempt. Only the observation metadata changes.
-                update_task_pr_with_authority(store, &pr, lease)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                session.observation = Observation::Degraded {
-                    reason,
-                    cached_as_of: pr.updated_at,
-                    retry_at,
-                };
-                return Ok(Some(pr));
-            }
-        };
+    let github_pr = match crate::ops::pr::observe_pr_by_number(
+        &session.worktree,
+        number,
+        &pr.branch,
+        freshness,
+    ) {
+        crate::ops::pr::PrObservation::Fresh(info) => {
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Fresh,
+            });
+            session.observation = Observation::Fresh { observed_at: now };
+            info
+        }
+        crate::ops::pr::PrObservation::NotFound => {
+            // The PR ref was deleted remotely; a merge (if any) is already
+            // persisted. Cache the successful absence briefly and keep the
+            // settled/working state.
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Fresh,
+            });
+            pr.updated_at = now;
+            update_task_pr_with_authority(store, &pr, lease)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            session.observation = Observation::Fresh { observed_at: now };
+            return Ok(Some(pr));
+        }
+        crate::ops::pr::PrObservation::Degraded { reason } => {
+            let retry_at = now + PR_OBSERVATION_DEGRADED_BACKOFF;
+            pr.github_observation = Some(GithubObservation {
+                checked_at: now,
+                result: GithubObservationResult::Degraded {
+                    reason: reason.clone(),
+                },
+            });
+            // `updated_at` remains the time of the cached PR data, not the
+            // failed attempt. Only the observation metadata changes.
+            update_task_pr_with_authority(store, &pr, lease)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            session.observation = Observation::Degraded {
+                reason,
+                cached_as_of: pr.updated_at,
+                retry_at,
+            };
+            return Ok(Some(pr));
+        }
+    };
     let number = u32::try_from(github_pr.number).map_err(|_| {
         task_error(format!(
             "pull request #{} exceeds supported range",
@@ -2952,8 +2490,7 @@ async fn reconcile_task_pr_with_authority(
     let url = github_pr.url.clone();
     let previous_phase = previous.phase();
     let previous_github = previous.github().cloned();
-    let previous_session_status = session.status;
-    let previous_status_reason = session.status_reason.clone();
+    let previous_gate_proposal = session.gate_proposal.clone();
     let previous_pm_writeback = session.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
@@ -2991,7 +2528,6 @@ async fn reconcile_task_pr_with_authority(
                 .publication
                 .as_ref()
                 .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-                && !has_pending_directive(session)
                 && matches!(
                     committed_follow_up_range(&session.worktree, &pr)?,
                     CommittedFollowUp::ProvenEmpty
@@ -3002,40 +2538,36 @@ async fn reconcile_task_pr_with_authority(
                 // approved. The PR is settling in flight, so only the review
                 // half of the gate applies here. Do not weaken the review gate
                 // or infer merge from a green head.
-                let gate = review_gate(store, session).await?;
+                let gate = feedback_gate(store, session).await?;
                 if gate.satisfied {
-                    session.set_status(
-                        TaskSessionStatus::Completed,
-                        format!(
+                    let proposal = crate::task::TaskGateProposal {
+                        done: true,
+                        reason: format!(
                             "pull request #{} merged and completed the Task",
                             github_pr.number
                         ),
-                    );
+                    };
+                    match session.lifecycle_phase {
+                        crate::task::TaskLifecyclePhase::Kickoff => {
+                            session
+                                .enter_iterate()
+                                .map_err(|error| task_error(error.to_string()))?;
+                            session
+                                .enter_gate(proposal)
+                                .map_err(|error| task_error(error.to_string()))?;
+                        }
+                        crate::task::TaskLifecyclePhase::Iterate => {
+                            session
+                                .enter_gate(proposal)
+                                .map_err(|error| task_error(error.to_string()))?;
+                        }
+                        crate::task::TaskLifecyclePhase::Gate => {
+                            session.gate_proposal = Some(proposal);
+                            session.updated_at = now;
+                        }
+                    }
                     reconcile_pm_writeback(store, session, Some(&url)).await;
-                } else if !session.status.is_process_active() {
-                    session.set_status(
-                        TaskSessionStatus::Waiting,
-                        format!(
-                            "pull request #{} merged; awaiting gate before completion: {}",
-                            github_pr.number,
-                            gate.reason()
-                        ),
-                    );
                 }
-            } else if !session.status.is_process_active() {
-                let reason = if has_pending_directive(session) {
-                    format!(
-                        "pull request #{} merged, but directive v{} is not yet incorporated; \
-                         acknowledge it or re-steer before completing",
-                        github_pr.number, session.current_directive_version
-                    )
-                } else {
-                    format!(
-                        "pull request #{} merged; another PR may follow",
-                        github_pr.number
-                    )
-                };
-                session.set_status(TaskSessionStatus::Waiting, reason);
             }
             Some(TaskEventKind::PrMerged {
                 pr_id: pr.id.clone(),
@@ -3053,24 +2585,12 @@ async fn reconcile_task_pr_with_authority(
             // fact; observation only confirms it.
             pr.abandoned_at = pr.abandoned_at.or(Some(now));
             pr.ci_observation = None;
-            if !session.status.is_process_active() {
-                session.set_status(
-                    TaskSessionStatus::Waiting,
-                    format!("pull request #{} closed without merge", github_pr.number),
-                );
-            }
             None
         }
         _ => {
             // GitHub has it open, so any `abandoned_at` here is a stale claim that
             // it was closed. Clearing it returns the same row to `Open`.
             pr.abandoned_at = None;
-            if !session.status.is_process_active() {
-                session.set_status(
-                    TaskSessionStatus::Waiting,
-                    format!("pull request #{} is open for review", github_pr.number),
-                );
-            }
             if let Some(ci_observation) = observe_required_checks(
                 &session.worktree,
                 &pr.branch,
@@ -3094,21 +2614,9 @@ async fn reconcile_task_pr_with_authority(
     };
 
     let pr_changed = pr != previous;
-    let completes_task = pr.phase() == PrPhase::Merged
-        && session.status == TaskSessionStatus::Completed
-        && pr
-            .publication
-            .as_ref()
-            .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask);
-    let mut session_saved_with_pr = false;
     if pr_changed {
         pr.updated_at = now;
-        if completes_task {
-            complete_task_session_after_pr_with_authority(store, session, &pr, lease)
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-            session_saved_with_pr = true;
-        } else if pr.is_settled() {
+        if pr.is_settled() {
             settle_task_pr_with_authority(store, &pr, None, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
@@ -3136,28 +2644,12 @@ async fn reconcile_task_pr_with_authority(
             .await
             .map_err(|error| task_error(error.to_string()))?;
     }
-    if !session_saved_with_pr
-        && (session.status != previous_session_status
-            || session.status_reason != previous_status_reason
-            || session.pm_writeback != previous_pm_writeback)
+    if session.gate_proposal != previous_gate_proposal
+        || session.pm_writeback != previous_pm_writeback
     {
-        update_task_session_with_authority(store, session, lease)
+        update_task_with_authority(store, session, lease)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-    }
-    if session.status != previous_session_status {
-        append_task_event_with_authority(
-            store,
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from: previous_session_status,
-                to: session.status,
-                reason: session.status_reason.clone(),
-            },
-            lease,
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
     }
     if pr_changed {
         if let Some(event) = pr_event {
@@ -3172,20 +2664,6 @@ async fn reconcile_task_pr_with_authority(
                     .map_err(|error| task_error(error.to_string()))?;
             }
         }
-    }
-    if previous_session_status != TaskSessionStatus::Completed
-        && session.status == TaskSessionStatus::Completed
-    {
-        append_task_event_with_authority(
-            store,
-            &session.id,
-            &TaskEventKind::Completed {
-                summary: "pull request merge completed the Task".to_string(),
-            },
-            lease,
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
     }
     Ok(Some(pr))
 }
@@ -3210,7 +2688,7 @@ fn next_pr_slug(settled: &TaskPr, slug_override: Option<&str>) -> String {
 /// a partial rotation (worktree already on the next branch) is adopted, not
 /// refused as an unrelated branch.
 fn deterministic_next_branch(
-    session: &TaskSession,
+    session: &Task,
     settled: &TaskPr,
     slug_override: Option<&str>,
 ) -> OpsResult<String> {
@@ -3246,7 +2724,7 @@ pub(crate) enum TaskRecoveryAdoption {
 /// predecessor, successor link, PR sequence, leases, and worktree untouched.
 pub(crate) async fn task_recovery_adoption(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &session.worktree;
     let identifier = &session.launch.issue.identifier;
@@ -3305,7 +2783,7 @@ pub(crate) async fn task_recovery_adoption(
     let settled = prs
         .last()
         .cloned()
-        .ok_or_else(|| task_error("Task Session has no PR history"))?;
+        .ok_or_else(|| task_error("Task has no PR history"))?;
     if !settled.is_settled() {
         return Err(task_error(format!(
             "Task PR {} is neither active nor settled",
@@ -3340,10 +2818,7 @@ pub(crate) async fn task_recovery_adoption(
 /// Refuse a dirty between-PR worktree after PR reconciliation. The runner's
 /// strict rotation cannot carry a dirty tree, so catching this before the lease
 /// is reaped or a successor body is launched keeps ownership put. Read-only.
-pub(crate) async fn refuse_dirty_between_prs(
-    store: &SharedStore,
-    session: &TaskSession,
-) -> OpsResult<()> {
+pub(crate) async fn refuse_dirty_between_prs(store: &SharedStore, session: &Task) -> OpsResult<()> {
     if store
         .active_task_pr(&session.id)
         .await
@@ -3367,15 +2842,15 @@ pub(crate) async fn refuse_dirty_between_prs(
 
 pub(crate) async fn ensure_working_pr(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
 ) -> OpsResult<Option<TaskPr>> {
     ensure_working_pr_with_authority(store, session, None, RotateOptions::runner()).await
 }
 
-pub(crate) async fn ensure_working_pr_for_lease(
+pub(crate) async fn ensure_working_pr_for_run(
     store: &SharedStore,
-    session: &mut TaskSession,
-    lease: &ChildWriteLease,
+    session: &mut Task,
+    lease: &RunLease,
 ) -> OpsResult<Option<TaskPr>> {
     ensure_working_pr_with_authority(store, session, Some(lease), RotateOptions::runner()).await
 }
@@ -3490,9 +2965,9 @@ fn fork_point(worktree: &Path, base_ref: &str, branch: &str) -> OpsResult<String
 /// mint. Those stay `Unprovable`, which is the fail-closed answer.
 async fn heal_incoherent_base(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
     pr: TaskPr,
-    lease: Option<&ChildWriteLease>,
+    lease: Option<&RunLease>,
 ) -> OpsResult<TaskPr> {
     if pr.phase() != PrPhase::Working || !session.worktree.exists() {
         return Ok(pr);
@@ -3541,18 +3016,11 @@ async fn heal_incoherent_base(
     healed.base_commit = fork;
     healed.updated_at = time::OffsetDateTime::now_utc();
     match lease {
-        Some(lease) => store.heal_task_pr_base_for_lease(&healed, lease).await,
+        Some(lease) => store.heal_task_pr_base_for_run(&healed, lease).await,
         None => store.heal_task_pr_base(&healed).await,
     }
     .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
     Ok(healed)
-}
-
-/// A directive was accepted (its version advanced) but the body has not yet
-/// acknowledged it. Completion — manual or an armed auto-merge — must not fire
-/// while this holds, or the accepted direction is silently erased.
-pub(crate) fn has_pending_directive(session: &TaskSession) -> bool {
-    session.current_directive_version > session.incorporated_directive_version
 }
 
 pub(crate) fn no_active_pr_resume_refusal(
@@ -3597,12 +3065,21 @@ fn roll_back_failed_rotation(
 
 async fn ensure_working_pr_with_authority(
     store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &mut Task,
+    lease: Option<&RunLease>,
     rotate: RotateOptions,
 ) -> OpsResult<Option<TaskPr>> {
-    reconcile_task_pr_with_authority(store, session, lease).await?;
-    if session.status.is_terminal() {
+    reconcile_task_pr_with_authority(
+        store,
+        session,
+        lease,
+        crate::ops::pr::PrReadFreshness::Cached,
+    )
+    .await?;
+    if matches!(
+        task_work_status(store, session).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
         return Ok(None);
     }
     if let Some(active) = store
@@ -3622,7 +3099,7 @@ async fn ensure_working_pr_with_authority(
     let settled = prs
         .last()
         .cloned()
-        .ok_or_else(|| task_error("Task Session has no PR history"))?;
+        .ok_or_else(|| task_error("Task has no PR history"))?;
     if !settled.is_settled() {
         return Err(task_error(format!(
             "Task PR {} is neither active nor settled",
@@ -3645,7 +3122,7 @@ async fn ensure_working_pr_with_authority(
     let committed_carry = committed_follow_up_range(&session.worktree, &settled)?;
     // A settled completing PR normally never rotates: completion is pending on
     // the review gate, not on a follow-up PR. `reconcile_task_completion`
-    // advances the Session to `Completed` once the gate closes. Two things
+    // commits Work completion once the gate closes. Two things
     // independently authorize one more serial PR: follow-up committed past the
     // merged tip, which the completion gate refuses to settle over, and a
     // pending directive, which the successor exists to incorporate.
@@ -3653,14 +3130,13 @@ async fn ensure_working_pr_with_authority(
         .publication
         .as_ref()
         .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-        && !has_pending_directive(session)
         && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
         return Ok(None);
     }
     if let Some(lease) = lease {
         store
-            .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+            .validate_run_lease(lease)
             .await
             .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
     }
@@ -3779,7 +3255,7 @@ async fn ensure_working_pr_with_authority(
     let now = time::OffsetDateTime::now_utc();
     let next = TaskPr {
         id: TaskPrId::new(),
-        task_session_id: session.id.clone(),
+        task_id: session.id.clone(),
         sequence,
         slug,
         branch,
@@ -3848,9 +3324,15 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
         let store = task_store().await?;
         let (mut session, lease) = task_for_worktree(&store, &repo)
             .await?
-            .ok_or_else(|| task_error("no Task Session owns this worktree"))?;
+            .ok_or_else(|| task_error("no Task owns this worktree"))?;
         // Observe an out-of-band merge before deciding whether to rotate.
-        reconcile_task_pr_with_authority(&store, &mut session, lease.as_ref()).await?;
+        reconcile_task_pr_with_authority(
+            &store,
+            &mut session,
+            lease.as_ref(),
+            crate::ops::pr::PrReadFreshness::Cached,
+        )
+        .await?;
         if let Some(active) = store
             .active_task_pr(&session.id)
             .await
@@ -3864,11 +3346,13 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
                 "current PR {which} is not merged yet; land it or wait for the merge before `lf pr next`"
             )));
         }
-        if session.status.is_terminal() {
+        if matches!(
+            task_work_status(&store, &session).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
             return Err(task_error(format!(
-                "Task {} is already {}; nothing to rotate",
-                session.launch.issue.identifier,
-                session.status.as_str()
+                "Task {} is terminal; nothing to rotate",
+                session.launch.issue.identifier
             )));
         }
         let rotate = RotateOptions {
@@ -3881,14 +3365,14 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
     })
 }
 
-pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
+pub fn task_status(issue: &str) -> OpsResult<Task> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut session = store
-            .get_task_session_by_issue(issue)
+            .get_task_by_issue(issue)
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
         reconcile_task_completion(&store, &mut session, None).await?;
@@ -3896,7 +3380,7 @@ pub fn task_status(issue: &str) -> OpsResult<TaskSession> {
     })
 }
 
-pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
+pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
     let summary = summary.trim().to_string();
     if summary.is_empty() {
         return Err(task_error("completion summary cannot be empty"));
@@ -3904,26 +3388,35 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut session = store
-            .get_task_session_by_issue(issue)
+            .get_task_by_issue(issue)
             .await
-            .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+            .map_err(|error| task_error(format!("failed to read Task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut session).await?;
-        let lease = ambient_task_write_lease(&session)?;
+        let lease = ambient_task_run_lease(&store, &session).await?;
         if let Some(lease) = lease.as_ref() {
             store
-                .validate_child_write_lease(&ChildRef::Task(session.id.clone()), lease)
+                .validate_run_lease(lease)
                 .await
                 .map_err(|error| task_error(format!("Task body lost write authority: {error}")))?;
         }
-        if session.status == TaskSessionStatus::Completed {
-            return Ok(session);
-        }
-        if session.status == TaskSessionStatus::Abandoned {
-            return Err(task_error(format!(
-                "Task {} is abandoned and cannot be completed",
-                session.launch.issue.identifier
-            )));
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        match store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+        {
+            WorkStatus::Done => return Ok(session),
+            WorkStatus::Abandoned => {
+                return Err(task_error(format!(
+                    "Task {} is abandoned and cannot be completed",
+                    session.launch.issue.identifier
+                )))
+            }
+            WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {}
         }
         if !is_clean(&session.worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
@@ -3942,44 +3435,79 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<TaskSession> {
             // active, so the Task keeps its PR and no rotation is provoked.
             return Err(task_error(refusal));
         }
-        let from = session.status;
-        session.set_status(TaskSessionStatus::Completed, summary.clone());
-        reconcile_pm_writeback(&store, &mut session, None).await;
+        propose_task_done(&mut session, summary.clone())?;
         // Every other condition is now proven, so the rotation's empty artifact
         // is dropped as part of completing — one transaction that deletes the row
         // and writes the terminal status together. There is no instant at which
         // the successor is gone and the Task is not yet terminal, which is the
         // only state `ensure_working_pr_with_authority` would rotate from.
-        complete_task_session_with_authority(
+        complete_task_with_authority(
             &store,
             &session,
             gate.discardable_successor.as_ref(),
             lease.as_ref(),
         )
         .await
-        .map_err(|error| task_error(format!("failed to complete Task Session: {error}")))?;
-        append_task_event_with_authority(
-            &store,
-            &session.id,
-            &TaskEventKind::StatusChanged {
-                from,
-                to: TaskSessionStatus::Completed,
-                reason: session.status_reason.clone(),
-            },
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-        append_task_event_with_authority(
-            &store,
-            &session.id,
-            &TaskEventKind::Completed { summary },
-            lease.as_ref(),
-        )
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
+        .map_err(|error| task_error(format!("failed to complete Task: {error}")))?;
+        if lease.is_none() {
+            let (_run, completion_lease) = store
+                .reserve_run(&work, crate::durable::RunTrigger::User)
+                .await
+                .map_err(|error| {
+                    task_error(format!("failed to reserve completion Run: {error}"))
+                })?;
+            let basis = store
+                .current_epoch(&work)
+                .await
+                .map_err(|error| task_error(error.to_string()))?
+                .current_basis;
+            store
+                .done(&completion_lease, &basis)
+                .await
+                .map_err(|error| task_error(format!("failed to complete Work: {error}")))?;
+            reconcile_pm_writeback(&store, &mut session, None).await;
+            store
+                .update_task(&session)
+                .await
+                .map_err(|error| task_error(error.to_string()))?;
+            append_task_event_with_authority(
+                &store,
+                &session.id,
+                &TaskEventKind::Completed { summary },
+                None,
+            )
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        }
         Ok(session)
     })
+}
+
+fn propose_task_done(session: &mut Task, summary: String) -> OpsResult<()> {
+    let proposal = crate::task::TaskGateProposal {
+        done: true,
+        reason: summary,
+    };
+    match session.lifecycle_phase {
+        crate::task::TaskLifecyclePhase::Kickoff => {
+            session
+                .enter_iterate()
+                .map_err(|error| task_error(error.to_string()))?;
+            session
+                .enter_gate(proposal)
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        crate::task::TaskLifecyclePhase::Iterate => {
+            session
+                .enter_gate(proposal)
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        crate::task::TaskLifecyclePhase::Gate => {
+            session.gate_proposal = Some(proposal);
+            session.updated_at = time::OffsetDateTime::now_utc();
+        }
+    }
+    Ok(())
 }
 
 /// The concise publication-state label carried by a PR's Linear linkage. Derived
@@ -4007,7 +3535,7 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
 /// record the outcome on the PR. Best-effort: a degraded writeback lands in
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.
-async fn link_pr_to_linear(store: &SharedStore, session: &TaskSession, pr: &mut TaskPr) {
+async fn link_pr_to_linear(store: &SharedStore, session: &Task, pr: &mut TaskPr) {
     let Some(github) = pr.github().cloned() else {
         return;
     };
@@ -4064,7 +3592,7 @@ fn writeback_state_for(operation: PmWritebackOperation, result: OpsResult<()>) -
 
 pub(crate) async fn reconcile_pm_writeback(
     store: &SharedStore,
-    session: &mut TaskSession,
+    session: &mut Task,
     pr_url: Option<&str>,
 ) {
     let Ok(wave) = owning_wave(store, session).await else {
@@ -4085,7 +3613,7 @@ pub(crate) async fn reconcile_pm_writeback(
     );
 }
 
-async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
+async fn retry_pm_writeback(store: &SharedStore, session: &mut Task) {
     let Ok(prs) = store.task_prs(&session.id).await else {
         return;
     };
@@ -4105,25 +3633,13 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
             PmWritebackState::Pending { operation, .. } => *operation,
             PmWritebackState::Current => PmWritebackOperation::CompleteTask,
         };
-        let result = match operation {
-            PmWritebackOperation::CompleteTask => {
-                crate::ops::task_pm::retry_complete_task(
-                    &session.worktree,
-                    wave.name(),
-                    session.launch.issue.id.as_str(),
-                    pr_url,
-                )
-                .await
-            }
-            PmWritebackOperation::ReopenTask => {
-                crate::ops::task_pm::retry_reopen_task(
-                    &session.worktree,
-                    wave.name(),
-                    session.launch.issue.id.as_str(),
-                )
-                .await
-            }
-        };
+        let result = crate::ops::task_pm::retry_complete_task(
+            &session.worktree,
+            wave.name(),
+            session.launch.issue.id.as_str(),
+            pr_url,
+        )
+        .await;
         writeback_state_for(operation, result)
     };
     session.updated_at = time::OffsetDateTime::now_utc();
@@ -4132,10 +3648,10 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut TaskSession) {
 // ---------------------------------------------------------------------------
 // Completion gate: the single source of truth for "may this Task be completed
 // in the PM yet?" A Task is completable only when every active PR is settled
-// (merged or explicitly abandoned) AND every required interaction review has an
-// explicit Approved outcome. Every path that sets a Task to `Completed` and
+// (merged or explicitly abandoned) AND no Feedback boundary remains open.
+// Every path that sets a Task to `Completed` and
 // fires the `CompleteTask` PM writeback consults this gate, so the PM row, the
-// durable Session, the PR state, and the review state converge monotonically.
+// durable Task, PR state, and Work flow converge monotonically.
 // ---------------------------------------------------------------------------
 
 /// The outcome of evaluating the completion gate.
@@ -4187,91 +3703,39 @@ impl CompletionGate {
     }
 }
 
-/// The required interaction reviews that still speak for this Task attempt.
-/// Current-epoch reviews hold their live waitpoint, and only the newest Gate
-/// epoch holds the standing settlement verdict. Superseded reviews remain audit
-/// history without becoming permanent completion blockers.
-async fn required_reviews_for_task(
-    store: &SharedStore,
-    session: &TaskSession,
-) -> OpsResult<Vec<InteractionReview>> {
-    let reviews = store
-        .list_interaction_reviews(Some(&session.wave_id))
+/// Open Feedback blocks terminal completion. Continuing it
+/// advances the playhead; no historical disposition participates in closure.
+async fn feedback_gate(store: &SharedStore, session: &Task) -> OpsResult<CompletionGate> {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
         .await
-        .map_err(|error| task_error(format!("failed to read interaction reviews: {error}")))?;
-    let newest_gate_epoch = reviews
-        .iter()
-        .filter(|review| {
-            review.task_session_id == session.id
-                && review.policy == InteractionPolicy::Require
-                && review.phase == TaskLifecyclePhase::Gate
-        })
-        .map(|review| review.phase_epoch)
-        .max();
-    Ok(reviews
-        .into_iter()
-        .filter(|review| {
-            review.task_session_id == session.id
-                && review.policy == InteractionPolicy::Require
-                && (review.phase_epoch == session.phase_epoch
-                    || (review.phase == TaskLifecyclePhase::Gate
-                        && Some(review.phase_epoch) == newest_gate_epoch))
-        })
-        .collect())
-}
-
-/// The review half of the completion gate: every required interaction review
-/// must be completed with an `Approved` disposition. Used on the merge path,
-/// where the PR being reconciled is settling in flight and must not be re-read
-/// from the store as an active PR.
-async fn review_gate(store: &SharedStore, session: &TaskSession) -> OpsResult<CompletionGate> {
-    let mut blockers = Vec::new();
-    for review in required_reviews_for_task(store, session).await? {
-        let approved = review.status == InteractionReviewStatus::Completed
-            && review
-                .disposition
-                .is_some_and(|disposition| disposition == InteractionReviewDisposition::Approved);
-        if !approved {
-            let kind = review.reviewer.kind();
-            let state = if review.status == InteractionReviewStatus::Completed {
-                "completed without approval"
-            } else {
-                "awaiting review"
-            };
-            blockers.push(format!("required {kind} review {} is {state}", review.id));
-        }
-    }
-    Ok(if blockers.is_empty() {
+        .map_err(|error| task_error(error.to_string()))?;
+    let feedback = store
+        .feedback(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    Ok(if feedback.is_none() {
         CompletionGate {
             satisfied: true,
             blockers: Vec::new(),
             discardable_successor: None,
         }
     } else {
-        CompletionGate::unsatisfied(blockers)
+        CompletionGate::unsatisfied(vec!["current Feedback has not continued".to_string()])
     })
 }
 
-/// Evaluate the completion gate against the Session's durable PR and review
+/// Evaluate the completion gate against the Task's durable PR and Feedback
 /// state. Pure over store state: running it twice changes nothing. Use this from
 /// paths where the PR state is already persisted (`task_complete`, the
 /// reconcile advance, the repair). The merge-reconcile path uses
-/// [`review_gate`] instead, since the PR it is settling is not yet on disk.
+/// [`feedback_gate`] first, since the PR it is settling is not yet on disk.
 pub(crate) async fn task_completion_gate(
     store: &SharedStore,
-    session: &TaskSession,
+    session: &Task,
 ) -> OpsResult<CompletionGate> {
-    let mut gate = review_gate(store, session).await?;
-
-    // An accepted but unincorporated directive blocks completion: an auto-merge
-    // armed by `lf pr land` must not silently erase direction accepted after it
-    // was armed.
-    if has_pending_directive(session) {
-        gate.blockers.push(format!(
-            "directive v{} is not yet incorporated; acknowledge it or re-steer before completing",
-            session.current_directive_version
-        ));
-    }
+    let mut gate = feedback_gate(store, session).await?;
+    let work_done = task_work_status(store, session).await? == WorkStatus::Done;
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -4304,8 +3768,7 @@ pub(crate) async fn task_completion_gate(
                 // Missing later evidence blocks entry into completion, but it
                 // cannot reverse a terminal fact. Repair still reopens on a
                 // proven range or any other concrete gate blocker.
-                CommittedFollowUp::Unprovable { .. }
-                    if session.status == TaskSessionStatus::Completed => {}
+                CommittedFollowUp::Unprovable { .. } if work_done => {}
                 CommittedFollowUp::Unprovable { reason } => gate.blockers.push(format!(
                     "cannot prove merged pull request #{number} has no committed follow-up: {reason}"
                 )),
@@ -4356,12 +3819,9 @@ pub(crate) async fn task_completion_gate(
     Ok(gate)
 }
 
-/// True when the Session has a settled merged PR whose `after_merge` is
+/// True when the Task has a settled merged PR whose `after_merge` is
 /// `CompleteTask` — i.e. completion is pending on the gate, not on a future PR.
-async fn merged_completing_pr(
-    store: &SharedStore,
-    session: &TaskSession,
-) -> OpsResult<Option<TaskPr>> {
+async fn merged_completing_pr(store: &SharedStore, session: &Task) -> OpsResult<Option<TaskPr>> {
     let prs = store
         .task_prs(&session.id)
         .await
@@ -4375,16 +3835,22 @@ async fn merged_completing_pr(
     }))
 }
 
-/// Complete a Task Session after its gate closed, persisting the merged
-/// `CompleteTask` PR and firing the `CompleteTask` PM writeback. Used by the
-/// reconcile advance path (no lease) once a required review approves after a
-/// merge. Idempotent: a Session already `Completed` is left untouched.
 async fn advance_completion_after_gate(
     store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &mut Task,
+    lease: Option<&RunLease>,
 ) -> OpsResult<bool> {
-    if session.status.is_terminal() || session.status.is_process_active() {
+    let work = store
+        .work_for_child(&ChildRef::Task(session.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    if matches!(
+        store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
         return Ok(false);
     }
     let Some(pr) = merged_completing_pr(store, session).await? else {
@@ -4394,7 +3860,7 @@ async fn advance_completion_after_gate(
     if !gate.satisfied {
         return Ok(false);
     }
-    // This path completes through `complete_task_session_after_pr`, which settles
+    // This path completes through `complete_task_after_pr`, which settles
     // the merged PR and has no `skipped_pr`, so it cannot drop a successor in the
     // same transaction. Rather than complete and leave the row active — a
     // completed Task still holding an active PR — decline and let `lf task
@@ -4403,154 +3869,97 @@ async fn advance_completion_after_gate(
     if gate.discardable_successor.is_some() {
         return Ok(false);
     }
-    let from = session.status;
     let url = pr.github().map(|github| github.url.clone());
-    session.set_status(
-        TaskSessionStatus::Completed,
-        format!(
-            "pull request #{} merged and completed the Task",
-            pr.github().map(|github| github.number).unwrap_or_default()
-        ),
+    let summary = format!(
+        "pull request #{} merged and completed the Task",
+        pr.github().map(|github| github.number).unwrap_or_default()
     );
-    reconcile_pm_writeback(store, session, url.as_deref()).await;
-    complete_task_session_after_pr_with_authority(store, session, &pr, lease)
+    propose_task_done(session, summary.clone())?;
+    complete_task_after_pr_with_authority(store, session, &pr, lease)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    append_task_event_with_authority(
-        store,
-        &session.id,
-        &TaskEventKind::StatusChanged {
-            from,
-            to: TaskSessionStatus::Completed,
-            reason: session.status_reason.clone(),
-        },
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(error.to_string()))?;
-    Ok(true)
-}
-
-/// Repair a prematurely completed Task: the PM row says `done` but a PR is still
-/// unsettled or a required review is still open. Revert the Session to `Waiting`
-/// with an actionable reason and queue a `ReopenTask` PM writeback so Linear
-/// reopens and the PM row reconverges. No Session, PR, directive, or review row
-/// is deleted. Idempotent: a Session already repaired (writeback Pending
-/// ReopenTask) is not repaired twice.
-async fn repair_premature_completion(
-    store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
-) -> OpsResult<bool> {
-    if session.status != TaskSessionStatus::Completed {
-        return Ok(false);
-    }
-    // A writeback already in flight (either direction) owns the PM state; do not
-    // stack a second repair on top of a pending completion or reopen.
-    if matches!(session.pm_writeback, PmWritebackState::Pending { .. }) {
-        return Ok(false);
-    }
-    let gate = task_completion_gate(store, session).await?;
-    if gate.satisfied {
-        return Ok(false);
-    }
-    let from = session.status;
-    session.set_status(
-        TaskSessionStatus::Waiting,
-        format!("reopened: completion outran its gates ({})", gate.reason()),
-    );
-    session.pm_writeback = PmWritebackState::Pending {
-        operation: PmWritebackOperation::ReopenTask,
-        error: "premature completion pending reopen".to_string(),
-    };
-    if let Some(lease) = lease {
+    if lease.is_none() {
+        let (_run, completion_lease) = store
+            .reserve_run(&work, crate::durable::RunTrigger::User)
+            .await
+            .map_err(|error| task_error(format!("failed to reserve completion Run: {error}")))?;
+        let basis = store
+            .current_epoch(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .current_basis;
         store
-            .update_task_session_for_lease(session, lease)
+            .done(&completion_lease, &basis)
+            .await
+            .map_err(|error| task_error(format!("failed to complete Work: {error}")))?;
+        reconcile_pm_writeback(store, session, url.as_deref()).await;
+        store
+            .update_task(session)
             .await
             .map_err(|error| task_error(error.to_string()))?;
-    } else {
         store
-            .update_task_session(session)
+            .append_task_event(&session.id, &TaskEventKind::Completed { summary })
             .await
             .map_err(|error| task_error(error.to_string()))?;
     }
-    append_task_event_with_authority(
-        store,
-        &session.id,
-        &TaskEventKind::StatusChanged {
-            from,
-            to: TaskSessionStatus::Waiting,
-            reason: session.status_reason.clone(),
-        },
-        lease,
-    )
-    .await
-    .map_err(|error| task_error(error.to_string()))?;
     Ok(true)
 }
 
-/// Reconcile completion toward the gate: retry any in-flight PM writeback,
-/// repair a premature completion, or advance completion once the gate closes.
-/// Shared by every read-side reconcile (`task_status`, Project Session task
-/// reconcile) so out-of-band merge, delayed review, writeback retry, restart,
-/// and duplicate observation all funnel through one idempotent path.
 pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
-    session: &mut TaskSession,
-    lease: Option<&ChildWriteLease>,
+    session: &mut Task,
+    lease: Option<&RunLease>,
 ) -> OpsResult<()> {
-    if session.status == TaskSessionStatus::Completed
+    let status = task_work_status(store, session).await?;
+    if status == WorkStatus::Done
         && matches!(session.pm_writeback, PmWritebackState::Pending { .. })
     {
         retry_pm_writeback(store, session).await;
         if let Some(lease) = lease {
             store
-                .update_task_session_for_lease(session, lease)
+                .update_task_for_run(session, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         } else {
             store
-                .update_task_session(session)
+                .update_task(session)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
         }
         return Ok(());
     }
-    if repair_premature_completion(store, session, lease).await? {
-        return Ok(());
+    if !matches!(status, WorkStatus::Done | WorkStatus::Abandoned) {
+        advance_completion_after_gate(store, session, lease).await?;
     }
-    advance_completion_after_gate(store, session, lease).await?;
     Ok(())
 }
 
-fn review_gate_from(review: &InteractionReview) -> ReviewGateState {
-    match review.status {
-        InteractionReviewStatus::Requested => ReviewGateState::Requested,
-        InteractionReviewStatus::Active => ReviewGateState::Active,
-        InteractionReviewStatus::Completed => match review.disposition {
-            Some(InteractionReviewDisposition::Approved) => ReviewGateState::Approved,
-            Some(InteractionReviewDisposition::ChangesRequested) => {
-                ReviewGateState::ChangesRequested
-            }
-            None => ReviewGateState::Approved,
-        },
-    }
-}
-
-pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
+pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
     let session = session.clone();
     block_on_task(async move {
         let store = task_store().await?;
         let wave = owning_wave(&store, &session).await?;
-        let process_alive = if session.status.is_process_active() {
-            match session.latest_process.as_ref() {
-                Some(process) => tmux_session_exists(&process.tmux_name)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?,
-                None => false,
-            }
-        } else {
-            false
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
+        let launch = match store
+            .current_run(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+        {
+            Some(run) => store
+                .current_launch_for_run(&run.id)
+                .await
+                .map_err(|error| task_error(error.to_string()))?,
+            None => None,
+        };
+        let process_alive = match launch.as_ref().map(|launch| &launch.containment) {
+            Some(Containment::Tmux { name }) => tmux_session_exists(name)
+                .await
+                .map_err(|error| task_error(error.to_string()))?,
+            Some(Containment::ProcessGroup { .. }) => true,
+            None => false,
         };
         let latest_event = store
             .task_events_after(&session.id, 0)
@@ -4573,22 +3982,16 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
                 .map(|pr| pr.phase()),
             None => None,
         };
-        let review_gate = store
-            .interaction_review_at(
-                &session.id,
-                session.phase_epoch,
-                session.phase_iteration,
-                session.phase_cursor,
-            )
-            .await
-            .map_err(|error| task_error(format!("failed to read review gate: {error}")))?
-            .map(|r| review_gate_from(&r));
         let completion_gate = task_completion_gate(&store, &session).await?;
         let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
         let resume_refusal =
             no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest);
+        let work_status = store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
         let action_evidence = TaskActionEvidence {
-            status: session.status,
+            status: work_status.clone(),
             latest_pr_phase: latest.map(|pr| pr.phase()),
             latest_pr_after_merge: latest
                 .and_then(|pr| pr.publication.as_ref())
@@ -4598,53 +4001,30 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
                 .and_then(|p| p.next_slug.as_deref()),
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
-            pending_directive: has_pending_directive(&session),
+            pending_directive: false,
             ci: active.and_then(|pr| pr.fresh_ci()),
-            process_alive: if session.status.is_process_active() {
+            process_alive: if matches!(work_status, WorkStatus::Running { .. }) {
                 Some(process_alive)
             } else {
                 None
             },
             predecessor_phase,
-            review_gate,
+            review_gate: None,
             abandon_intent: session.abandon_intent.is_some(),
             local_progress_unsettled: None,
         };
         let actions = derive_task_actions(&action_evidence);
-        let (predecessor_session_id, successor_session_id) = store
-            .task_session_chain_neighbors(&session.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task chain: {error}")))?;
-        // Resolve the live routing target for this Task's parent Project. The
-        // historical project_session_id stays as provenance; the routing target
-        // is its non-terminal successor when the historical session is terminal.
-        // A broken chain (terminal historical, no live successor) surfaces as
-        // `None` rather than failing status — the actionable failure belongs to
-        // the routing operations (wake, review), not the read.
-        let (routing_project_session_id, project_route_succeeded) =
-            match crate::ops::project::resolve_task_project_route(store.as_ref(), &session).await {
-                Ok(route) => (Some(route.current.to_string()), route.succeeded),
-                Err(_) => (None, false),
-            };
-        Ok(TaskSessionSnapshot {
+        Ok(TaskSnapshot {
             issue_id: session.launch.issue.id.as_str().to_string(),
             issue_identifier: session.launch.issue.identifier,
-            session_id: session.id.to_string(),
-            project_id: session.launch.project.id.as_str().to_string(),
+            task_id: session.id.to_string(),
+            external_project_id: session.launch.project.id.as_str().to_string(),
             project: session.launch.project.slug,
             pm_snapshot_synced_at: session.launch.pm_snapshot_synced_at,
             pm_writeback: session.pm_writeback,
             wave: wave.name().to_string(),
-            project_session_id: session.project_session_id.to_string(),
-            routing_project_session_id,
-            project_route_succeeded,
-            predecessor_session_id,
-            successor_session_id,
-            current_directive_version: session.current_directive_version,
-            incorporated_directive_version: session.incorporated_directive_version,
-            status: session.status,
-            status_reason: session.status_reason,
-            status_at: session.status_at,
+            project_id: session.project_id.to_string(),
+            status: work_status,
             worktree: session.worktree.display().to_string(),
             workspace_slug: session.workspace_slug,
             lifecycle: session.lifecycle,
@@ -4660,7 +4040,7 @@ pub fn task_snapshot(session: &TaskSession) -> OpsResult<TaskSessionSnapshot> {
             provider: session.provider,
             provider_session_id: session.provider_session_id,
             process_alive,
-            latest_process: session.latest_process,
+            launch,
             latest_event,
             created_at: session.created_at,
             updated_at: session.updated_at,
@@ -4911,45 +4291,74 @@ fn git_output_owned(worktree: &Path, args: &[String]) -> OpsResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
-fn queue_command(issue: &str, kind: ChildCommandKind) -> OpsResult<TaskControlResult> {
+fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut session = store
-            .get_task_session_by_issue(issue)
+            .get_task_by_issue(issue)
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         reconcile_task_pr(&store, &mut session).await?;
         reconcile_process_liveness(&store, &mut session).await?;
-        let issue_id = session.launch.issue.identifier.clone();
-        let observation = session.observation.clone();
-        let source = command_source(&store, &session).await?;
-        let result = super::child::queue_command(
-            &store,
-            super::child::ChildSession::Task(Box::new(session)),
-            source,
-            kind,
-        )
-        .await?;
-        Ok(task_control_result(issue_id, observation, result))
+        let receipt =
+            super::child::append_steer(&store, ChildRef::Task(session.id.clone()), &message)
+                .await?;
+        if !matches!(
+            task_work_status(&store, &session).await?,
+            WorkStatus::Running { .. }
+        ) {
+            relaunch_inactive_process(&store, &mut session).await?;
+        }
+        Ok(TaskControlResult {
+            issue_id: session.launch.issue.identifier.clone(),
+            task_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Steer { receipt },
+            observation: session.observation.clone(),
+        })
     })
 }
 
-pub fn task_follow_up(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::FollowUp { text: message })
-}
-
 pub fn task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::Steer { text: message })
+    queue_task_steer(issue, message)
 }
 
-pub fn task_interrupt(issue: &str, replacement: Option<String>) -> OpsResult<TaskControlResult> {
-    queue_command(issue, ChildCommandKind::Interrupt { replacement })
+pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
+        reconcile_process_liveness(&store, &mut session).await?;
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let run = store
+            .current_run(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .ok_or_else(|| task_error("Task has no active Run to interrupt"))?;
+        let request = AuthenticatedRequest::cli();
+        let receipt = store
+            .interrupt(&ControlCtx::User(&request), &work, &run.id)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        Ok(TaskControlResult {
+            issue_id: session.launch.issue.identifier.clone(),
+            task_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Interrupt { receipt },
+            observation: session.observation,
+        })
+    })
 }
 
-/// Recover an abandoned Task as one linked successor that adopts its worktree,
-/// serial PR history, and current directive.
-pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<TaskSession> {
+/// Recover an abandoned Task as one linked successor that adopts its worktree
+/// and serial PR history.
+pub fn task_recover(issue: &str, reason: Option<String>) -> OpsResult<Task> {
     let issue = issue.to_string();
     block_on_task(async move {
         let store = task_store().await?;
@@ -4961,7 +4370,7 @@ async fn _recover_abandoned_task(
     store: &SharedStore,
     issue: &str,
     reason: Option<String>,
-) -> OpsResult<TaskSession> {
+) -> OpsResult<Task> {
     let reason = reason
         .map(|value| value.trim().to_string())
         .map(|value| {
@@ -4973,134 +4382,79 @@ async fn _recover_abandoned_task(
         })
         .transpose()?;
     let predecessor = store
-        .get_task_session_by_issue(issue)
+        .get_task_by_issue(issue)
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-        .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-    command_source(store, &predecessor).await?;
-
-    if predecessor.status != TaskSessionStatus::Abandoned {
-        if predecessor.status == TaskSessionStatus::Completed {
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    match task_work_status(store, &predecessor).await? {
+        WorkStatus::Done => {
             return Err(task_error(format!(
                 "Task {} is completed; start a new Task rather than recovering it",
                 predecessor.launch.issue.identifier
             )));
         }
-        // A retry after a successful recovery resolves to the live successor.
-        // Return it only when it demonstrably adopted the abandoned attempt's
-        // worktree; an ordinary new attempt uses a different worktree and is not
-        // misreported as recovered.
-        let (prior_id, _) = store
-            .task_session_chain_neighbors(&predecessor.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task chain: {error}")))?;
-        if let Some(prior_id) = prior_id {
-            let prior_id = TaskSessionId::parse(&prior_id)
-                .map_err(|error| task_error(format!("invalid Task predecessor: {error}")))?;
-            if let Some(prior) = store
-                .get_task_session(&prior_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read Task predecessor: {error}")))?
-            {
-                if prior.status == TaskSessionStatus::Abandoned
-                    && prior.worktree == predecessor.worktree
-                {
-                    return Ok(predecessor);
-                }
-            }
+        WorkStatus::Abandoned => {}
+        WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {
+            return Ok(predecessor)
         }
-        return Err(task_error(format!(
-            "Task {} is {}; resume it with `lf task resume {}`. Recover is only for abandoned Tasks.",
-            predecessor.launch.issue.identifier,
-            predecessor.status.as_str(),
-            predecessor.launch.issue.identifier
-        )));
     }
 
     // Refuse every unsafe worktree/branch/PR shape before moving ownership.
-    task_recovery_adoption(store, &predecessor).await?;
-    let carried = store
-        .child_directives(&ChildRef::Task(predecessor.id.clone()))
+    task_recovery_adoption(store, &predecessor)
+        .await
+        .map_err(|error| task_error(format!("validate Task recovery: {error}")))?;
+    let mut carried = store
+        .boundary_seed_for_child(&ChildRef::Task(predecessor.id.clone()))
         .await
         .map_err(|error| task_error(error.to_string()))?
-        .into_iter()
-        .find(|directive| directive.version == predecessor.current_directive_version)
-        .ok_or_else(|| task_error("abandoned Task Session has no current directive"))?;
+        .render();
+    if carried.is_empty() {
+        carried = format!(
+            "Continue {}: {}",
+            predecessor.launch.issue.identifier, predecessor.launch.issue.title
+        );
+    }
     let now = time::OffsetDateTime::now_utc();
-    let status_reason = reason.map_or_else(
-        || format!("recovered from {}; resume to continue", predecessor.id),
-        |reason| {
-            format!(
-                "recovered from {}: {reason}; resume to continue",
-                predecessor.id
-            )
-        },
-    );
-    let successor = TaskSession {
-        id: TaskSessionId::new(),
-        launch: predecessor.launch.clone(),
-        pm_writeback: PmWritebackState::Current,
-        wave_id: predecessor.wave_id.clone(),
-        project_session_id: predecessor.project_session_id.clone(),
-        current_directive_version: 1,
-        incorporated_directive_version: 0,
-        status: TaskSessionStatus::Waiting,
-        status_reason,
-        status_at: now,
-        worktree: predecessor.worktree.clone(),
-        workspace_slug: predecessor.workspace_slug.clone(),
-        lifecycle: predecessor.lifecycle.clone(),
-        lifecycle_phase: crate::task::TaskLifecyclePhase::Kickoff,
-        phase_epoch: 1,
-        phase_cursor: 0,
-        phase_iteration: 0,
-        gate_cycle: 0,
-        gate_proposal: None,
-        agent: predecessor.agent.clone(),
-        provider: predecessor.provider.clone(),
-        provider_session_id: None,
-        latest_process: None,
-        abandon_intent: None,
-        created_at: now,
-        updated_at: now,
-        observation: Observation::NotRequired,
-    };
-    let directive = ChildDirective::initial(
-        ChildRef::Task(successor.id.clone()),
-        carried.text,
-        carried.source,
-    );
-    let succession = store
-        .recover_task_session_successor(&predecessor, &successor, &directive)
+    let _reason = reason;
+    let mut task = predecessor;
+    task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
+    task.phase_epoch += 1;
+    task.phase_cursor = 0;
+    task.phase_iteration = 0;
+    task.gate_cycle = 0;
+    task.gate_proposal = None;
+    task.provider_session_id = None;
+    task.abandon_intent = None;
+    task.updated_at = now;
+    task.observation = Observation::NotRequired;
+    store
+        .reopen_task(&task, None, crate::durable::Author::User, &carried)
         .await
         .map_err(|error| task_error(format!("failed to recover Task: {error}")))?;
-    Ok(succession.session)
+    Ok(task)
 }
 
 pub fn task_resume(
     issue: &str,
-    message: Option<String>,
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<TaskControlResult> {
     let issue = issue.to_string();
-    block_on_task(async move { resume_task_async(&issue, message, model, reason).await })
+    block_on_task(async move { resume_task_async(&issue, model, reason).await })
 }
 
-/// Async core of [`task_resume`], reusable from callers already inside a runtime
-/// (e.g. `lf handoff complete` waking the parent it just resolved).
+/// Async core of [`task_resume`], reusable from callers already inside a runtime.
 pub(crate) async fn resume_task_async(
     issue: &str,
-    message: Option<String>,
     model: Option<String>,
     reason: Option<String>,
 ) -> OpsResult<TaskControlResult> {
     let store = task_store().await?;
     let mut session = store
-        .get_task_session_by_issue(issue)
+        .get_task_by_issue(issue)
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-        .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
     // Compute every branch/worktree/PR adoption precondition before moving any
     // durable ownership — a no-active-PR recovery must not commit the successor
     // before PR rotation rejects an unrelated branch.
@@ -5124,335 +4478,19 @@ pub(crate) async fn resume_task_async(
     reconcile_process_liveness(&store, &mut session).await?;
     let issue_id = session.launch.issue.identifier.clone();
     let observation = session.observation.clone();
-    let source = command_source(&store, &session).await?;
-    let result = super::child::resume_session(
+    let session_id = session.id.to_string();
+    let run = super::child::resume_child(
         &store,
-        super::child::ChildSession::Task(Box::new(session)),
-        source,
-        message,
+        super::child::Child::Task(Box::new(session)),
         model,
         reason,
     )
     .await?;
-    Ok(task_control_result(issue_id, observation, result))
-}
-
-pub fn task_receipt(
-    command_id: &str,
-    until: Option<ChildReceiptUntil>,
-    timeout: Duration,
-) -> OpsResult<TaskReceiptRead> {
-    let command_id =
-        ChildCommandId::parse(command_id).map_err(|error| task_error(error.to_string()))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        let (command, timed_out) = if let Some(until) = until {
-            super::child::wait_for_receipt_condition(&store, &command_id, until, timeout).await?
-        } else {
-            (
-                super::child::read_receipt(&store, &command_id).await?,
-                false,
-            )
-        };
-        let ChildRef::Task(session_id) = &command.target else {
-            return Err(task_error(format!(
-                "command {command_id} belongs to a Project Session"
-            )));
-        };
-        let session = store
-            .get_task_session(session_id)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task Session: {error}")))?
-            .ok_or_else(|| task_error(format!("Task Session {session_id} disappeared")))?;
-        let result = super::child::control_result(&store, &command, command.clone()).await?;
-        Ok(TaskReceiptRead {
-            receipt: task_control_result(
-                session.launch.issue.identifier,
-                Observation::NotRequired,
-                result,
-            ),
-            timed_out,
-        })
-    })
-}
-
-pub fn task_decide(
-    issue: &str,
-    decision_id: &str,
-    choice: String,
-    message: Option<String>,
-) -> OpsResult<TaskControlResult> {
-    let decision_id =
-        ChildDecisionId::parse(decision_id).map_err(|error| task_error(error.to_string()))?;
-    let choice = choice.trim().to_string();
-    if choice.is_empty() {
-        return Err(task_error("decision choice cannot be empty"));
-    }
-    let decision = block_on_task(async {
-        let store = task_store().await?;
-        let session = store
-            .get_task_session_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let events = store
-            .task_events_after(&session.id, 0)
-            .await
-            .map_err(|error| task_error(format!("failed to read task decisions: {error}")))?;
-        events
-            .into_iter()
-            .find_map(|event| match event.kind {
-                TaskEventKind::DecisionRequested {
-                    decision_id: requested_id,
-                    options,
-                    ..
-                } if requested_id == decision_id => Some(options),
-                _ => None,
-            })
-            .ok_or_else(|| task_error(format!("decision {decision_id} was not requested")))
-    })?;
-    if !decision.iter().any(|option| option == &choice) {
-        return Err(task_error(format!(
-            "choice {choice:?} is not one of: {}",
-            decision.join(", ")
-        )));
-    }
-    queue_command(
-        issue,
-        ChildCommandKind::Decide {
-            decision_id,
-            choice,
-            message,
-        },
-    )
-}
-
-pub fn task_request_decision(
-    issue: &str,
-    prompt: String,
-    options: Vec<String>,
-    wait: bool,
-    timeout: Duration,
-) -> OpsResult<TaskDecisionResult> {
-    let prompt = prompt.trim().to_string();
-    let options: Vec<String> = options
-        .into_iter()
-        .map(|option| option.trim().to_string())
-        .filter(|option| !option.is_empty())
-        .collect();
-    if prompt.is_empty() || options.len() < 2 {
-        return Err(task_error(
-            "a decision requires a non-empty prompt and at least two options",
-        ));
-    }
-    block_on_task(async move {
-        let store = task_store().await?;
-        let session = store
-            .get_task_session_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let ambient = std::env::var("LF_TASK_SESSION_ID")
-            .map_err(|_| task_error("decision requests must run inside the owning Task Session"))?;
-        if ambient != session.id.as_str() {
-            return Err(task_error(format!(
-                "Task Session {ambient} cannot request a decision for {}",
-                session.id
-            )));
-        }
-        let lease = task_write_lease_from_env()
-            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
-        let decision_id = ChildDecisionId::new();
-        store
-            .append_task_event_for_lease(
-                &session.id,
-                &lease,
-                &TaskEventKind::DecisionRequested {
-                    decision_id: decision_id.clone(),
-                    prompt,
-                    options,
-                },
-            )
-            .await
-            .map_err(|error| task_error(format!("failed to persist decision request: {error}")))?;
-
-        let deadline = Instant::now() + timeout;
-        loop {
-            let events = store
-                .task_events_after(&session.id, 0)
-                .await
-                .map_err(|error| {
-                    task_error(format!("failed to read decision response: {error}"))
-                })?;
-            if let Some((choice, message)) = events.into_iter().find_map(|event| match event.kind {
-                TaskEventKind::DecisionResolved {
-                    decision_id: resolved_id,
-                    choice,
-                    message,
-                } if resolved_id == decision_id => Some((choice, message)),
-                _ => None,
-            }) {
-                return Ok(TaskDecisionResult {
-                    issue_id: session.launch.issue.identifier.clone(),
-                    session_id: session.id.to_string(),
-                    decision_id: decision_id.to_string(),
-                    resolved: true,
-                    choice: Some(choice),
-                    message,
-                });
-            }
-            if !wait || Instant::now() >= deadline {
-                return Ok(TaskDecisionResult {
-                    issue_id: session.launch.issue.identifier.clone(),
-                    session_id: session.id.to_string(),
-                    decision_id: decision_id.to_string(),
-                    resolved: false,
-                    choice: None,
-                    message: None,
-                });
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-}
-
-pub fn task_review_reply(review_id: &str, text: String) -> OpsResult<InteractionReview> {
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        let review = store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("interaction review {review_id} not found")))?;
-        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
-            task_error("interaction review replies must run inside the reviewed Task Session")
-        })?;
-        if ambient != review.task_session_id.as_str() {
-            return Err(task_error(format!(
-                "Task Session {ambient} cannot reply to review {review_id} for {}",
-                review.task_session_id
-            )));
-        }
-        let lease = task_write_lease_from_env()
-            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
-        store
-            .reply_to_interaction_review(&review_id, &review.task_session_id, &lease, &text)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
-    })
-}
-
-/// An agent session is named by its session id, and only by that. `LF_RUN_ID`
-/// and `LF_PROCESS_ID` name a *run* — the journal mints both into this
-/// process's own environment when any top-level `lf` command starts, so a guard
-/// that reads them refuses the human CLI it exists to serve, whenever it reads.
-fn _require_human_review_authority() -> OpsResult<()> {
-    for variable in ["LF_TASK_SESSION_ID", "LF_PROJECT_SESSION_ID", "LF_WAVE_ID"] {
-        if std::env::var_os(variable).is_some() {
-            return Err(task_error(
-                "human review commands cannot run inside a Task, Project, or Wave agent session",
-            ));
-        }
-    }
-    Ok(())
-}
-
-pub fn task_review_message(review_id: &str, text: String) -> OpsResult<InteractionReview> {
-    _require_human_review_authority()?;
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        store
-            .send_human_interaction_review_message(&review_id, ChildCommandSource::Human, &text)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .get_interaction_review(&review_id)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .ok_or_else(|| task_error(format!("interaction review {review_id} disappeared")))
-    })
-}
-
-pub fn task_review_complete(
-    review_id: &str,
-    disposition: &str,
-    outcome: String,
-) -> OpsResult<InteractionReview> {
-    _require_human_review_authority()?;
-    let review_id = InteractionReviewId::parse(review_id)
-        .map_err(|error| task_error(format!("invalid interaction review: {error}")))?;
-    let disposition = disposition
-        .replace('-', "_")
-        .parse::<InteractionReviewDisposition>()
-        .map_err(|error| task_error(error.to_string()))?;
-    block_on_task(async move {
-        let store = task_store().await?;
-        store
-            .complete_human_interaction_review(&review_id, disposition, &outcome)
-            .await
-            .map_err(|error| task_error(error.to_string()))
-            .map(|(review, _)| review)
-    })
-}
-
-pub fn task_acknowledge(issue: &str, version: u32, summary: String) -> OpsResult<ChildDirective> {
-    let summary = summary.trim().to_string();
-    if summary.is_empty() {
-        return Err(task_error(
-            "directive acknowledgement summary cannot be empty",
-        ));
-    }
-    block_on_task(async move {
-        let store = task_store().await?;
-        let session = store
-            .get_task_session_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
-            .ok_or_else(|| task_error(format!("no Task Session exists for {issue:?}")))?;
-        let ambient = std::env::var("LF_TASK_SESSION_ID").map_err(|_| {
-            task_error("directive acknowledgements must run inside the owning Task Session")
-        })?;
-        if ambient != session.id.as_str() {
-            return Err(task_error(format!(
-                "Task Session {ambient} cannot acknowledge a directive for {}",
-                session.id
-            )));
-        }
-        let lease = task_write_lease_from_env()
-            .map_err(|error| task_error(format!("Task body has no write authority: {error}")))?;
-        let (directive, incorporated) = store
-            .incorporate_child_directive_for_lease(
-                &ChildRef::Task(session.id.clone()),
-                &lease,
-                version,
-                &summary,
-            )
-            .await
-            .map_err(|error| task_error(format!("failed to acknowledge directive: {error}")))?;
-        if incorporated {
-            store
-                .append_task_event_for_lease(
-                    &session.id,
-                    &lease,
-                    &TaskEventKind::DirectiveIncorporated {
-                        directive_id: directive.id.clone(),
-                        version,
-                        summary,
-                    },
-                )
-                .await
-                .map_err(|error| task_error(error.to_string()))?;
-        }
-        Ok(directive)
+    Ok(TaskControlResult {
+        issue_id,
+        task_id: session_id,
+        receipt: super::child::WorkControlReceipt::Resume { run },
+        observation,
     })
 }
 
@@ -5461,5260 +4499,56 @@ pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult>
     if reason.is_empty() {
         return Err(task_error("`lf task abandon --reason` cannot be empty"));
     }
-    queue_command(
-        issue,
-        ChildCommandKind::Abandon {
-            reason: reason.to_string(),
-        },
-    )
+    let reason = reason.to_string();
+    block_on_task(async move {
+        let store = task_store().await?;
+        let mut session = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        reconcile_task_pr(&store, &mut session).await?;
+        reconcile_process_liveness(&store, &mut session).await?;
+        let work = store
+            .work_for_child(&ChildRef::Task(session.id.clone()))
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        let basis = store
+            .current_epoch(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?
+            .current_basis;
+        let receipt = store
+            .abandon(&work, &reason, &basis)
+            .await
+            .map_err(|error| task_error(error.to_string()))?;
+        Ok(TaskControlResult {
+            issue_id: session.launch.issue.identifier.clone(),
+            task_id: session.id.to_string(),
+            receipt: super::child::WorkControlReceipt::Abandon { receipt },
+            observation: session.observation,
+        })
+    })
 }
 
-pub fn task_wait(
-    issue: &str,
-    until: TaskWaitUntil,
-    timeout: Option<Duration>,
-) -> OpsResult<TaskSession> {
+pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -> OpsResult<Task> {
     let started = Instant::now();
     loop {
         let session = task_status(issue)?;
+        let status = block_on_task(async {
+            let store = task_store().await?;
+            task_work_status(&store, &session).await
+        })?;
         let reached = match until {
             TaskWaitUntil::Open => {
-                session.status.is_terminal()
+                matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
                     || active_pr(&session).is_ok_and(|pr| pr.phase() == PrPhase::Open)
             }
-            TaskWaitUntil::Terminal => session.status.is_terminal(),
+            TaskWaitUntil::Terminal => matches!(status, WorkStatus::Done | WorkStatus::Abandoned),
         };
         if reached || timeout.is_some_and(|limit| started.elapsed() >= limit) {
             return Ok(session);
         }
         std::thread::sleep(Duration::from_secs(1));
-    }
-}
-
-pub fn task_attach(issue: &str) -> OpsResult<()> {
-    let session = task_status(issue)?;
-    if !session.status.is_process_active() {
-        return Err(task_error(format!(
-            "task {} is {}; resume it before attaching",
-            session.launch.issue.identifier,
-            session.status.as_str()
-        )));
-    }
-    let tmux_name = session
-        .latest_process
-        .as_ref()
-        .map(|process| process.tmux_name.as_str())
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| task_error("task has no attachable process; resume it first"))?;
-    let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", tmux_name])
-        .status()
-        .map_err(|error| task_error(format!("failed to attach to task: {error}")))?;
-    if !status.success() {
-        return Err(task_error(format!("tmux attach failed for {tmux_name}")));
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-    use std::io::{BufRead, BufReader};
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::process::CommandExt;
-    use std::path::Path;
-    use std::process::Command;
-    use std::sync::Arc;
-    use std::time::Duration;
-
-    use super::{
-        _defer_task_interactions, _recover_abandoned_task, cached_github_observation,
-        changes_snapshot, count_recovery_attempts, decide_open_pr_status, derive_workspace_slug,
-        diff_snapshot, ensure_working_pr, ensure_working_pr_with_authority, file_snapshot,
-        next_pr_slug, parse_pr_slug, parse_workspace_slug, project_context,
-        reconcile_process_liveness, reconcile_task_pr, recover_stalled_task_body,
-        recover_stranded_task_body, refuse_dirty_between_prs, refuse_if_canonical_ahead,
-        require_task_pr_range_nonempty_with_authority, resolve_task_flow, resolve_upstream_base,
-        resume_task_async, succession_workspace_slug, supervise_project_task_bodies,
-        task_recovery_adoption, task_snapshot, unpublished_work,
-        verify_task_pr_range_with_authority, CommittedFollowUp, RotateOptions, TaskControlResult,
-        TaskRecoveryAdoption, TaskWorkspace,
-    };
-    use crate::child_session::{
-        observe, BodyEvidence, BodyIntent, ChildBodyOutcome, ChildCommand, ChildCommandKind,
-        ChildCommandSource, ChildCommandState, ChildDirective, ChildLeaseState,
-        ChildProcessGeneration, ChildRef, ChildWriteLease, MAX_RECOVERY_ATTEMPTS,
-    };
-    use crate::engine::git::is_ancestor;
-    use crate::id::WaveId;
-    use crate::pm::{PmKr, PmProject};
-    use crate::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-    use crate::session_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        ProjectLaunchReceipt, TaskLaunchReceipt,
-    };
-    use crate::store::{open_store, SharedStore, StorageConfig};
-    use crate::task::actions::TaskAction;
-    use crate::task::{
-        AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
-        GithubPr, Observation, PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskPr,
-        TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
-    };
-    use crate::wave::Wave;
-    use loopflow_test_support::TestRepo;
-    use time::OffsetDateTime;
-
-    fn git(repo: &Path, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .current_dir(repo)
-            .args(args)
-            .output()
-            .expect("run git");
-        assert!(
-            output.status.success(),
-            "git {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).trim().to_string()
-    }
-
-    struct TaskLaunchEnv {
-        previous: Vec<(&'static str, Option<OsString>)>,
-        _bin: tempfile::TempDir,
-    }
-
-    impl TaskLaunchEnv {
-        fn install(home: &Path) -> Self {
-            let bin = tempfile::tempdir().expect("fake tmux bin");
-            let tmux = bin.path().join("tmux");
-            std::fs::write(
-                &tmux,
-                "#!/bin/sh\nif [ \"$1\" = \"list-sessions\" ]; then printf 'lf-live-idle-control\\n'; fi\nexit 0\n",
-            )
-            .expect("write fake tmux");
-            let mut permissions = std::fs::metadata(&tmux)
-                .expect("stat fake tmux")
-                .permissions();
-            permissions.set_mode(0o755);
-            std::fs::set_permissions(&tmux, permissions).expect("make fake tmux executable");
-
-            let keys = [
-                "PATH",
-                "LF_BIN",
-                "LF_HOME",
-                "LF_DB_PATH",
-                "LF_CONTROL_BIN",
-                "LF_CONTROL_HOME",
-                "LF_CONTROL_DB_PATH",
-                crate::provider_account::FORWARDED_ACCOUNT_BUNDLE_ENV,
-            ];
-            let previous = keys
-                .into_iter()
-                .map(|key| (key, std::env::var_os(key)))
-                .collect::<Vec<_>>();
-            let path = std::env::var_os("PATH").map_or_else(
-                || bin.path().as_os_str().to_os_string(),
-                |path| {
-                    let mut paths = vec![bin.path().to_path_buf()];
-                    paths.extend(std::env::split_paths(&path));
-                    std::env::join_paths(paths).expect("join fake tmux PATH")
-                },
-            );
-            let db = home.join("loopflow.db");
-            std::env::set_var("PATH", path);
-            std::env::set_var("LF_BIN", "/usr/bin/true");
-            std::env::set_var("LF_HOME", home);
-            std::env::set_var("LF_DB_PATH", &db);
-            std::env::set_var("LF_CONTROL_BIN", "/usr/bin/true");
-            std::env::set_var("LF_CONTROL_HOME", home);
-            std::env::set_var("LF_CONTROL_DB_PATH", db);
-            std::env::remove_var(crate::provider_account::FORWARDED_ACCOUNT_BUNDLE_ENV);
-            Self {
-                previous,
-                _bin: bin,
-            }
-        }
-    }
-
-    impl Drop for TaskLaunchEnv {
-        fn drop(&mut self) {
-            for (key, value) in self.previous.drain(..) {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
-
-    /// Point the store at a temp home, and nothing else. Tests that only read
-    /// persisted state must not borrow `TaskLaunchEnv`: it puts a fake tmux on
-    /// the process-global `PATH`, which reads as a live body to any concurrent
-    /// test resolving tmux.
-    struct StoreEnvGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Vec<(&'static str, Option<OsString>)>,
-    }
-
-    impl StoreEnvGuard {
-        fn new(home: &Path) -> Self {
-            let lock = crate::journal::test_env_lock();
-            let names = [
-                "LF_HOME",
-                "LF_DB_PATH",
-                crate::store::CONTROL_HOME_ENV,
-                crate::store::CONTROL_DB_PATH_ENV,
-            ];
-            let previous = names
-                .into_iter()
-                .map(|name| (name, std::env::var_os(name)))
-                .collect();
-            std::env::set_var("LF_HOME", home);
-            std::env::set_var("LF_DB_PATH", home.join("loopflow.db"));
-            std::env::remove_var(crate::store::CONTROL_HOME_ENV);
-            std::env::remove_var(crate::store::CONTROL_DB_PATH_ENV);
-            Self {
-                _lock: lock,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for StoreEnvGuard {
-        fn drop(&mut self) {
-            for (name, value) in &self.previous {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn task_flow_selection_accepts_skill_flows_and_rejects_ops() {
-        let repo = tempfile::tempdir().unwrap();
-        assert_eq!(
-            resolve_task_flow(repo.path(), Some("code")).unwrap(),
-            "code"
-        );
-        let error = resolve_task_flow(repo.path(), Some("deploy")).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("durable Task flows currently require skills"));
-    }
-
-    /// The launch resolver ignores `LF_CONTROL_BIN`. A legacy body carries
-    /// `LF_CONTROL_BIN` pointing at the (real, existing) binary that created it;
-    /// launch must not relaunch through it. Here `LF_CONTROL_BIN` names a real
-    /// binary while the current Home `LF_BIN` is gone: the launch fails at
-    /// binary resolution, proving the control pin was never consulted (had it
-    /// been, resolution would have succeeded through the real control binary).
-    #[tokio::test]
-    async fn launch_task_process_ignores_control_bin_and_resolves_current_home() {
-        let home = tempfile::tempdir().unwrap();
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-                .await
-                .unwrap(),
-        );
-        let now = OffsetDateTime::now_utc();
-        let mut session = TaskSession {
-            id: TaskSessionId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new("issue-no-pin").unwrap(),
-                    identifier: "INF-NO-PIN".to_string(),
-                    title: "Resolve through current lf".to_string(),
-                    description: "Never read the pinned binary".to_string(),
-                },
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-no-pin").unwrap(),
-                    slug: "no-pin".to_string(),
-                    name: "No pin".to_string(),
-                    prompt_context: String::new(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: WaveId::new(),
-            project_session_id: ProjectSessionId::new(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: TaskSessionStatus::Waiting,
-            status_reason: "ready".to_string(),
-            status_at: now,
-            worktree: home.path().join("worktree"),
-            workspace_slug: "task-no-pin".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            latest_process: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-
-        // LF_CONTROL_BIN names a real, existing binary (the historical pin);
-        // the current Home LF_BIN is gone. The launch must fail at resolution
-        // without burning a generation or spawning tmux.
-        let previous_control_bin = std::env::var_os("LF_CONTROL_BIN");
-        let previous_lf_bin = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_CONTROL_BIN", "/bin/sh");
-        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
-        let result = super::launch_task_process(&store, &mut session).await;
-        match previous_lf_bin {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-        match previous_control_bin {
-            Some(value) => std::env::set_var("LF_CONTROL_BIN", value),
-            None => std::env::remove_var("LF_CONTROL_BIN"),
-        }
-
-        let error = result.expect_err("launch must fail when the current Home lf is missing");
-        assert!(
-            error
-                .to_string()
-                .contains("cannot resolve current lf binary"),
-            "launch must resolve the current Home lf, not the LF_CONTROL_BIN pin: {error}"
-        );
-        // No generation was reserved: the session never started a process.
-        assert!(session.latest_process.is_none());
-    }
-
-    fn changed_workspace() -> (tempfile::TempDir, String, TaskSessionId) {
-        let repo = tempfile::tempdir().expect("create temp repo");
-        git(repo.path(), &["init", "-b", "main"]);
-        git(repo.path(), &["config", "user.name", "Loopflow Test"]);
-        git(
-            repo.path(),
-            &["config", "user.email", "loopflow@example.com"],
-        );
-        std::fs::write(repo.path().join("tracked.txt"), "base\n").expect("write base");
-        git(repo.path(), &["add", "tracked.txt"]);
-        git(repo.path(), &["commit", "-m", "base"]);
-        let base = git(repo.path(), &["rev-parse", "HEAD"]);
-
-        std::fs::write(repo.path().join("committed.txt"), "committed\n")
-            .expect("write committed file");
-        git(repo.path(), &["add", "committed.txt"]);
-        git(repo.path(), &["commit", "-m", "task commit"]);
-        std::fs::write(repo.path().join("tracked.txt"), "staged\n").expect("write staged");
-        git(repo.path(), &["add", "tracked.txt"]);
-        std::fs::write(repo.path().join("tracked.txt"), "unstaged\n").expect("write unstaged");
-        std::fs::write(repo.path().join("untracked.txt"), "untracked\n").expect("write untracked");
-
-        (repo, base, TaskSessionId::new())
-    }
-
-    async fn rotation_task(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
-        rotation_task_with_lease(repo, branch, base_commit, None).await
-    }
-
-    /// Like `rotation_task`, but optionally seeds a dead lease + status — the
-    /// shape an explicit resume must reconcile before reaping the lease and
-    /// launching a successor. The worktree stays the real `repo.path()`.
-    async fn rotation_task_with_lease(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-        lease: Option<(
-            crate::child_session::ChildLeaseState,
-            TaskSessionStatus,
-            Option<ChildBodyOutcome>,
-        )>,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
-        let home = tempfile::tempdir().expect("task home");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
-                .await
-                .expect("open store"),
-        );
-        let now = OffsetDateTime::now_utc();
-        let lease_seed = lease.map(|(state, status, outcome)| {
-            (
-                status,
-                ChildProcessGeneration {
-                    generation: 1,
-                    pid: None,
-                    process_group_id: None,
-                    // A name no tmux server knows, so the liveness probe reads
-                    // it as dead.
-                    tmux_name: format!("dead-lease-{}", WaveId::new()),
-                    agent: "codex".to_string(),
-                    provider: "codex".to_string(),
-                    provider_session_id: None,
-                    started_at: now - time::Duration::hours(1),
-                    state,
-                    outcome,
-                    provenance: None,
-                },
-            )
-        });
-        let wave = Wave::new(
-            WaveId::new(),
-            "task-pr-rotation".to_string(),
-            repo.path().display().to_string(),
-        );
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{}", WaveId::new()))
-                        .expect("project id"),
-                    slug: "task-pr-rotation".to_string(),
-                    name: "Task PR rotation".to_string(),
-                    prompt_context: "Keep one stable worktree.".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: ProjectSessionStatus::Running,
-            status_reason: "test project is running".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("task-pr-rotation".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "task-pr-rotation".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("task-pr-rotation".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let session = TaskSession {
-            id: TaskSessionId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                    identifier: "INF-ROTATE".to_string(),
-                    title: "Rotate Task PRs".to_string(),
-                    description: "Keep the worktree stable.".to_string(),
-                },
-                project: project.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_session_id: project.id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: lease_seed
-                .as_ref()
-                .map(|(status, _)| *status)
-                .unwrap_or(TaskSessionStatus::Waiting),
-            status_reason: if lease_seed.is_some() {
-                "recovered from a vanished body".to_string()
-            } else {
-                "first PR settled".to_string()
-            },
-            status_at: now,
-            worktree: repo.path().to_path_buf(),
-            workspace_slug: "task-pr-proof".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            latest_process: lease_seed.map(|(_, process)| process),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
-            sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: branch.to_string(),
-            base_commit: base_commit.to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            created_at: now,
-            updated_at: now,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-        };
-        store.create_wave(&wave).await.expect("create wave");
-        store
-            .create_project_session(&project)
-            .await
-            .expect("create project");
-        store
-            .create_task_session(&session, &pr)
-            .await
-            .expect("create Task");
-        (home, store, session, pr)
-    }
-
-    async fn parked_gate_task(
-        repo: &TestRepo,
-        branch: &str,
-        ci_state: Option<CiState>,
-        phase_cursor: u32,
-    ) -> (
-        tempfile::TempDir,
-        SharedStore,
-        ProjectSession,
-        TaskSession,
-        TaskPr,
-    ) {
-        let base = repo.head_sha();
-        repo.create_branch(branch);
-        let (home, store, session, mut pr) =
-            gate_task_fixture(repo, branch, &base, false, phase_cursor).await;
-        let project = store
-            .get_project_session(&session.project_session_id)
-            .await
-            .expect("read Project")
-            .expect("Project exists");
-        let now = OffsetDateTime::now_utc();
-        let head = repo.head_sha();
-
-        pr.publication = Some(PrPublication {
-            requested_at: now,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1054,
-                url: "https://github.com/loopflowstudio/loopflow/pull/1054".to_string(),
-                head_sha: Some(head.clone()),
-            }),
-        });
-        pr.github_observation = Some(GithubObservation {
-            checked_at: now,
-            result: GithubObservationResult::Fresh,
-        });
-        pr.ci_observation = ci_state.map(|state| CiObservation {
-            head_sha: head,
-            state,
-            failing_checks: if state == CiState::Failing {
-                vec![CiCheck {
-                    name: "rust-test".to_string(),
-                    url: Some("https://ci.example/rust-test".to_string()),
-                }]
-            } else {
-                Vec::new()
-            },
-            observed_at: now,
-        });
-        pr.updated_at = now;
-        store.update_task_pr(&pr).await.expect("publish fixture PR");
-        if let Some(incident) = super::current_ci_incident(&pr) {
-            store
-                .observe_ci_incident(&incident)
-                .await
-                .expect("record failing CI incident");
-        }
-
-        (home, store, project, session, pr)
-    }
-
-    /// Settle a rotation Task PR as merged, optionally recording a `next_slug`.
-    async fn settle_pr(store: &SharedStore, mut pr: TaskPr, merge: &str, next_slug: Option<&str>) {
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: next_slug.map(str::to_string),
-            github: Some(GithubPr {
-                number: 900,
-                url: "https://example.com/pr/900".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.merge_commit = Some(merge.to_string());
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.settle_task_pr(&pr, None).await.expect("settle PR");
-    }
-
-    async fn settle_completing_pr(store: &SharedStore, mut pr: TaskPr, merge: &str) {
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1037,
-                url: "https://example.com/pr/1037".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.merge_commit = Some(merge.to_string());
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.settle_task_pr(&pr, None).await.expect("settle PR");
-    }
-
-    #[tokio::test]
-    async fn merged_task_resume_refuses_before_reserving_a_generation() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/no-doomed-resume";
-        repo.create_branch(branch);
-        let (home, store, session, pr) = rotation_task(&repo, branch, &base).await;
-        settle_completing_pr(&store, pr, "merge-1037").await;
-        let _env = StoreEnvGuard::new(home.path());
-
-        let before = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read before")
-            .expect("Task exists")
-            .latest_process;
-        let error = resume_task_async(
-            &session.launch.issue.identifier,
-            None,
-            None,
-            Some("status recommended Resume".to_string()),
-        )
-        .await
-        .expect_err("merged Task has no active PR to resume");
-        let after = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read after")
-            .expect("Task exists")
-            .latest_process;
-
-        assert_eq!(
-            error.to_string(),
-            "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
-        );
-        assert_eq!(after, before, "a refusal must not reserve a generation");
-    }
-
-    #[tokio::test]
-    async fn pending_directive_authorizes_a_completing_pr_successor() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/pending-direction";
-        repo.create_branch(branch);
-        let (_home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
-        settle_completing_pr(&store, pr, "merge-pending").await;
-        session.current_directive_version = 2;
-        session.incorporated_directive_version = 1;
-
-        let next =
-            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
-                .await
-                .expect("pending direction may rotate")
-                .expect("serial successor");
-
-        assert_eq!(next.sequence, 2);
-        assert_ne!(next.branch, branch);
-    }
-
-    #[test]
-    fn merged_snapshot_routes_the_persisted_directive_gate() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/persisted-action-proof";
-        repo.create_branch(branch);
-        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-        let (home, expected_complete_refusal, session) = runtime.block_on(async {
-            let (home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
-            settle_completing_pr(&store, pr, "merge-pending").await;
-            session.current_directive_version = 2;
-            session.incorporated_directive_version = 1;
-            store
-                .update_task_session(&session)
-                .await
-                .expect("persist pending directive");
-            let gate = task_completion_gate(&store, &session)
-                .await
-                .expect("completion gate");
-            let refusal = gate
-                .refusal(&session.launch.issue.identifier)
-                .expect("pending directive refuses completion");
-            (home, refusal, session)
-        });
-        drop(runtime);
-        let _env = StoreEnvGuard::new(home.path());
-
-        let snapshot = task_snapshot(&session).expect("snapshot merged Task");
-        assert_eq!(snapshot.active_pr, None);
-        assert_eq!(snapshot.actions.recommended, Some(TaskAction::StartNextPr));
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Complete)
-                .expect("Complete action")
-                .reason,
-            expected_complete_refusal
-        );
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Resume)
-                .expect("Resume action")
-                .reason,
-            "Task INF-ROTATE has no active PR to resume; pull request #1037 merged"
-        );
-    }
-
-    /// Create a parent Task with a published (not merged) PR, then a child Task
-    /// stacked on the parent's tip. The parent's branch is pushed so
-    /// `resolve_verifier_upstream` can fetch `origin/<parent_branch>`. The child
-    /// claims `repo.path()` (the verifier resolves by worktree); the parent is
-    /// moved to a dummy path so both sessions coexist under the `worktree`
-    /// UNIQUE constraint.
-    async fn stacked_rotation_task(
-        repo: &TestRepo,
-        parent_branch: &str,
-        child_branch: &str,
-        parent_base: &str,
-    ) -> (
-        tempfile::TempDir,
-        SharedStore,
-        TaskSession,
-        TaskPr,
-        TaskSession,
-        TaskPr,
-    ) {
-        // Parent: create the branch, commit work, push, then register.
-        repo.create_branch(parent_branch);
-        repo.create_file("parent.txt", "parent work\n");
-        repo.stage_all();
-        repo.commit("parent commit");
-        repo.push_new_branch(parent_branch);
-        let parent_tip = repo.head_sha();
-
-        let (home, store, mut parent_session, mut parent_pr) =
-            rotation_task(repo, parent_branch, parent_base).await;
-
-        // Publish the parent PR (not merged) so the child's `parent_pr_id` is live.
-        parent_pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 900,
-                url: "https://example.com/pr/900".to_string(),
-                head_sha: None,
-            }),
-        });
-        parent_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&parent_pr)
-            .await
-            .expect("publish parent PR");
-
-        // Move the parent off repo.path() so the child can claim it.
-        parent_session.worktree = std::path::PathBuf::from("/dummy/parent-worktree");
-        store
-            .update_task_session(&parent_session)
-            .await
-            .expect("reparent parent worktree");
-
-        // Child: cut from the parent's tip, claim the repo worktree.
-        repo.checkout("main");
-        git(repo.path(), &["branch", child_branch, &parent_tip]);
-        repo.checkout(child_branch);
-
-        let now = OffsetDateTime::now_utc();
-        let child_session = TaskSession {
-            id: TaskSessionId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                    identifier: "INF-STACK".to_string(),
-                    title: "Stacked child".to_string(),
-                    description: "Stacked on the parent.".to_string(),
-                },
-                project: parent_session.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: parent_session.wave_id.clone(),
-            project_session_id: parent_session.project_session_id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: TaskSessionStatus::Waiting,
-            status_reason: "stacked child".to_string(),
-            status_at: now,
-            worktree: repo.path().to_path_buf(),
-            workspace_slug: "stacked-child".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            latest_process: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-        let child_pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: child_session.id.clone(),
-            sequence: 1,
-            slug: "stacked-child".to_string(),
-            branch: child_branch.to_string(),
-            base_commit: parent_tip,
-            parent_pr_id: Some(parent_pr.id.clone()),
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .create_task_session(&child_session, &child_pr)
-            .await
-            .expect("create child Task");
-        (
-            home,
-            store,
-            parent_session,
-            parent_pr,
-            child_session,
-            child_pr,
-        )
-    }
-
-    #[tokio::test]
-    async fn nonempty_refuses_when_head_is_the_recorded_base() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/empty-head";
-        repo.create_branch(branch);
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        let err =
-            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-                .await
-                .expect_err("HEAD == base must refuse as empty");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn nonempty_refuses_a_range_with_no_tree_change() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/no-tree-change";
-        repo.create_branch(branch);
-        repo.create_file("ephemeral.txt", "gone\n");
-        repo.stage_all();
-        repo.commit("add ephemeral");
-        git(repo.path(), &["rm", "ephemeral.txt"]);
-        repo.commit("remove ephemeral");
-
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        let err =
-            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-                .await
-                .expect_err("zero net tree change must refuse as empty");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal for zero tree change, got: {err}"
-        );
-    }
-
-    /// The core hole W2-254 closes: the old `task_pr_has_changes` guard skipped
-    /// emptiness when `pr.github().is_some()`. The shared verifier is
-    /// unconditional — an existing PR with an empty range is refused.
-    #[tokio::test]
-    async fn nonempty_refuses_even_when_the_pr_already_has_a_github_number() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/empty-existing";
-        repo.create_branch(branch);
-        let (_home, store, session, mut pr) = rotation_task(&repo, branch, &base).await;
-
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 925,
-                url: "https://example.com/pr/925".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.update_task_pr(&pr).await.expect("set github number");
-
-        let err =
-            require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-                .await
-                .expect_err("an existing PR with an empty range must refuse");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal despite github number, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn nonempty_passes_for_a_real_range() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-
-        let branch = "jack/real-range";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "real work\n");
-        repo.stage_all();
-        repo.commit("real task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        require_task_pr_range_nonempty_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("a real range must pass the non-empty check");
-    }
-
-    #[tokio::test]
-    async fn stacked_child_measures_from_live_parent_tip() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, _, child_session, _) =
-            stacked_rotation_task(&repo, "jack/stack-parent", "jack/stack-child", &origin_tip)
-                .await;
-
-        repo.create_file("child.txt", "child work\n");
-        repo.stage_all();
-        repo.commit("child commit");
-
-        require_task_pr_range_nonempty_with_authority(&store, &child_session, None, repo.path())
-            .await
-            .expect("stacked child with own work passes against the parent tip");
-    }
-
-    #[tokio::test]
-    async fn stacked_child_refuses_when_empty_against_live_parent() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, _, child_session, _) = stacked_rotation_task(
-            &repo,
-            "jack/stack-parent-empty",
-            "jack/stack-child-empty",
-            &origin_tip,
-        )
-        .await;
-
-        let err = require_task_pr_range_nonempty_with_authority(
-            &store,
-            &child_session,
-            None,
-            repo.path(),
-        )
-        .await
-        .expect_err("empty stacked child must refuse against the parent tip");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal for stacked child, got: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn stacked_child_measures_from_origin_after_parent_collapsed() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, mut parent_pr, child_session, mut child_pr) = stacked_rotation_task(
-            &repo,
-            "jack/collapse-parent",
-            "jack/collapse-child",
-            &origin_tip,
-        )
-        .await;
-
-        repo.create_file("child.txt", "child work\n");
-        repo.stage_all();
-        repo.commit("child commit");
-
-        // Parent merged: land the parent's work on origin/main.
-        repo.checkout("main");
-        repo.create_file("parent.txt", "parent work\n");
-        repo.stage_all();
-        repo.commit("merge parent into main");
-        repo.push();
-        let main_tip = repo.head_sha();
-
-        // Collapse the child onto origin/main (replay only base..HEAD).
-        repo.checkout("jack/collapse-child");
-        git(
-            repo.path(),
-            &[
-                "rebase",
-                "--onto",
-                "origin/main",
-                &parent_pr.base_commit,
-                "jack/collapse-child",
-            ],
-        );
-
-        parent_pr.merge_commit = Some("merge-sha".to_string());
-        parent_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&parent_pr)
-            .await
-            .expect("mark parent merged");
-
-        // `base_commit` is part of `update_task_pr`'s optimistic identity, so
-        // healing it forward needs the dedicated `heal_task_pr_base` write.
-        child_pr.base_commit = main_tip;
-        child_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .heal_task_pr_base(&child_pr)
-            .await
-            .expect("heal child base to main");
-
-        require_task_pr_range_nonempty_with_authority(&store, &child_session, None, repo.path())
-            .await
-            .expect("collapsed child with own work passes against origin/main");
-    }
-
-    #[tokio::test]
-    async fn stacked_child_refuses_when_empty_after_parent_collapsed() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha();
-
-        let (_home, store, _, mut parent_pr, child_session, mut child_pr) = stacked_rotation_task(
-            &repo,
-            "jack/collapse-parent-empty",
-            "jack/collapse-child-empty",
-            &origin_tip,
-        )
-        .await;
-
-        // Parent merged: land the parent's work on origin/main.
-        repo.checkout("main");
-        repo.create_file("parent.txt", "parent work\n");
-        repo.stage_all();
-        repo.commit("merge parent into main");
-        repo.push();
-        let main_tip = repo.head_sha();
-
-        // Collapse the child onto origin/main — no own work to replay.
-        repo.checkout("jack/collapse-child-empty");
-        git(
-            repo.path(),
-            &[
-                "rebase",
-                "--onto",
-                "origin/main",
-                &parent_pr.base_commit,
-                "jack/collapse-child-empty",
-            ],
-        );
-
-        parent_pr.merge_commit = Some("merge-sha".to_string());
-        parent_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&parent_pr)
-            .await
-            .expect("mark parent merged");
-
-        child_pr.base_commit = main_tip;
-        child_pr.updated_at = OffsetDateTime::now_utc();
-        store
-            .heal_task_pr_base(&child_pr)
-            .await
-            .expect("heal child base to main");
-
-        let err = require_task_pr_range_nonempty_with_authority(
-            &store,
-            &child_session,
-            None,
-            repo.path(),
-        )
-        .await
-        .expect_err("empty collapsed child must refuse against origin/main");
-        assert!(
-            err.to_string().contains("empty"),
-            "expected empty-range refusal for collapsed child, got: {err}"
-        );
-    }
-
-    #[test]
-    fn task_context_captures_project_definition_and_kr_state() {
-        let project = PmProject {
-            id: "project-1".to_string(),
-            slug: "pr".to_string(),
-            name: "PR".to_string(),
-            summary: "Ship reliably".to_string(),
-            definition: "Every task has one durable session.".to_string(),
-            krs: vec![
-                PmKr {
-                    text: "Review resumes the same session".to_string(),
-                    holds: true,
-                },
-                PmKr {
-                    text: "Merge wakes the Wave".to_string(),
-                    holds: false,
-                },
-            ],
-            initiative_ids: vec!["initiative-1".to_string()],
-            team_ids: None,
-        };
-
-        assert_eq!(
-            project_context(&project),
-            "Definition:\nEvery task has one durable session.\n\nKRs:\n- [x] Review resumes the same session\n- [ ] Merge wakes the Wave"
-        );
-    }
-
-    #[tokio::test]
-    async fn idle_task_can_defer_its_remaining_interactive_steps() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, _store, mut session, _pr) =
-            rotation_task(&repo, "jack/task-headless", &base).await;
-
-        assert!(_defer_task_interactions(&mut session).unwrap());
-        assert!(session.lifecycle.all_interactions_deferred());
-        assert!(!_defer_task_interactions(&mut session).unwrap());
-
-        session.lifecycle = crate::task::TaskLifecyclePlan::standard("task");
-        session.status = TaskSessionStatus::Completed;
-        assert!(_defer_task_interactions(&mut session)
-            .unwrap_err()
-            .to_string()
-            .contains("terminal Tasks cannot change interaction policy"));
-    }
-
-    /// Seed a second Task under the rotation scaffolding whose durable state is a
-    /// non-active status still carrying a dead lease — the exact shape an explicit
-    /// resume must reconcile before it can reserve a fresh body.
-    /// `outcome` is seeded at row creation because the lease outcome belongs to
-    /// the revoke/finish CAS path — `update_task_session` does not persist it.
-    /// `identity` is the recorded `(pid, process_group_id)`. Both `None` leaves
-    /// the tmux name as the only evidence.
-    async fn dead_lease_task(
-        repo: &TestRepo,
-        branch: &str,
-        base: &str,
-        status: TaskSessionStatus,
-        lease_state: crate::child_session::ChildLeaseState,
-        outcome: Option<ChildBodyOutcome>,
-        identity: (Option<u32>, Option<u32>),
-    ) -> (tempfile::TempDir, SharedStore, TaskSession) {
-        let (pid, process_group_id) = identity;
-        let (home, store, base_session, _pr) = rotation_task(repo, branch, base).await;
-        let now = OffsetDateTime::now_utc();
-        let mut session = base_session.clone();
-        session.id = TaskSessionId::new();
-        session.workspace_slug = "dead-lease-proof".to_string();
-        // Distinct worktree and issue: both columns are UNIQUE and the base Task
-        // already holds the repo root and the rotation issue.
-        session.worktree = repo.path().join(format!("dead-{}", session.id));
-        session.launch.issue.id =
-            LinearIssueId::new(format!("issue-{}", session.id)).expect("issue id");
-        session.launch.issue.identifier = format!("INF-DEAD-{}", session.id);
-        session.set_status(status, "recovered from a vanished body");
-        session.latest_process = Some(ChildProcessGeneration {
-            generation: 1,
-            pid,
-            process_group_id,
-            // A name no tmux server knows, so the liveness probe reads it as dead.
-            tmux_name: format!("dead-lease-{}", session.id),
-            agent: session.agent.clone(),
-            provider: session.provider.clone(),
-            provider_session_id: None,
-            started_at: now - time::Duration::hours(1),
-            state: lease_state,
-            outcome,
-            provenance: None,
-        });
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
-            sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: format!("{branch}-dead"),
-            base_commit: base.to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            created_at: now,
-            updated_at: now,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-        };
-        store
-            .create_task_session(&session, &pr)
-            .await
-            .expect("create dead-lease Task");
-        (home, store, session)
-    }
-
-    /// Pin the body launcher to a binary that does not exist.
-    ///
-    /// A successful spawn needs a real Home `lf`, tmux, and `/bin/zsh` — a CI
-    /// container has none of them, so a test that spawns passes only on a
-    /// developer laptop and is no proof at all. Pinning the launch to a missing
-    /// binary fails it the *same way everywhere*, which leaves the recovery
-    /// decision — the part this module owns — as the only variable.
-    /// `launch_task_process` owns the spawn and is tested separately.
-    fn pin_unlaunchable_body() -> Option<std::ffi::OsString> {
-        let previous = std::env::var_os("LF_BIN");
-        std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
-        previous
-    }
-
-    fn restore_lf_bin(previous: Option<std::ffi::OsString>) {
-        match previous {
-            Some(value) => std::env::set_var("LF_BIN", value),
-            None => std::env::remove_var("LF_BIN"),
-        }
-    }
-
-    async fn stranded_task(
-        repo: &TestRepo,
-        branch: &str,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession) {
-        let base = repo.head_sha();
-        let (home, store, session, _pr) = rotation_task_with_lease(
-            repo,
-            branch,
-            &base,
-            Some((ChildLeaseState::Active, TaskSessionStatus::Running, None)),
-        )
-        .await;
-        // The body owned its PR branch when it died; put the worktree back where
-        // it was so the successor clears the same adoption preconditions an
-        // explicit resume would.
-        git(repo.path(), &["checkout", "-b", branch]);
-        (home, store, session)
-    }
-
-    /// The proof: a Task whose body died is re-dispatched with nobody asking.
-    ///
-    /// The seeded lease names a tmux session no server knows, so the liveness
-    /// probe reads the body as genuinely gone — the same evidence a
-    /// `tmux kill-session` produces. No human command is issued anywhere in this
-    /// test; the supervision path decides on its own.
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
-    #[tokio::test]
-    async fn a_killed_body_under_a_live_task_is_redispatched_with_no_human_action() {
-        // `pin_unlaunchable_body` mutates process-global LF_BIN, and the sibling
-        // test below pins it too: without this lock one restores LF_BIN while the
-        // other still depends on it, and the launch it requires to fail succeeds.
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (_home, store, mut session) = stranded_task(&repo, "jack/w2-267-recovers").await;
-
-        let pinned = pin_unlaunchable_body();
-        let outcome = recover_stranded_task_body(&store, &mut session).await;
-        restore_lf_bin(pinned);
-
-        // The spawn is pinned to fail, so recovery reports the launch error...
-        assert!(outcome.is_err(), "the pinned-missing binary must fail");
-        // ...but it had already reaped the strand and recorded its attempt, and
-        // it did so without any human typing `lf task resume`.
-        let events = store.recent_task_events(&session.id, 64).await.unwrap();
-        assert_eq!(
-            count_recovery_attempts(&events),
-            1,
-            "recovery must durably record the attempt it made"
-        );
-        assert!(
-            events.iter().any(|event| matches!(
-                event.kind,
-                TaskEventKind::BodyRecoveryAttempted { attempt: 1, .. }
-            )),
-            "recovery must be observable, not silent"
-        );
-    }
-
-    /// Retry is bounded: a strand that cannot launch stops and says why rather
-    /// than minting dead generations forever.
-    ///
-    /// This runs the real dispatcher against a launch that always fails — the
-    /// W2-210 shape, where the body's binary is gone. Each failed launch counts
-    /// as an attempt (`launch_task_process` reaps as `Lost` on the way out), so
-    /// the budget is spent by design rather than reset.
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
-    #[tokio::test]
-    async fn an_unlaunchable_strand_exhausts_instead_of_minting_dead_generations() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (_home, store, mut session) = stranded_task(&repo, "jack/w2-267-exhausts").await;
-
-        for expected in 1..=MAX_RECOVERY_ATTEMPTS {
-            let mut current = store.get_task_session(&session.id).await.unwrap().unwrap();
-            let pinned = pin_unlaunchable_body();
-            let _ = recover_stranded_task_body(&store, &mut current).await;
-            restore_lf_bin(pinned);
-            let events = store.recent_task_events(&session.id, 64).await.unwrap();
-            assert_eq!(
-                count_recovery_attempts(&events),
-                expected,
-                "attempt {expected} must be recorded"
-            );
-        }
-
-        // The budget is spent. The next pass must refuse to mint another
-        // generation and must say why instead.
-        let mut spent = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let pinned = pin_unlaunchable_body();
-        let recovered = recover_stranded_task_body(&store, &mut spent).await;
-        restore_lf_bin(pinned);
-        let recovered = recovered.expect("a spent budget surfaces rather than erroring");
-        assert!(!recovered, "an exhausted strand must not redispatch");
-
-        let events = store.recent_task_events(&session.id, 64).await.unwrap();
-        assert_eq!(
-            count_recovery_attempts(&events),
-            MAX_RECOVERY_ATTEMPTS,
-            "exhaustion must not append a further attempt"
-        );
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(persisted.status, TaskSessionStatus::Failed);
-        assert!(
-            persisted.status_reason.contains("did not survive"),
-            "an exhausted strand must say why: {}",
-            persisted.status_reason
-        );
-        session = persisted;
-        let _ = &session;
-    }
-
-    /// The other half of the proof, and the triage's central trap: a Task that
-    /// finished *successfully* also reaps its body as `lost` (W2-171/#913,
-    /// W2-226/#965, W2-227, W2-233/#982). Recovery must not chase it.
-    ///
-    /// Two things are deliberate, and without either the test passes vacuously
-    /// while the terminal guard rots: the `lost` outcome is seeded (an absent one
-    /// would be left alone for the wrong reason), and the worktree is real and on
-    /// the PR branch (otherwise `task_recovery_adoption` refuses first and the
-    /// guard is never reached). Both were caught by mutating the guard away and
-    /// watching this test keep passing.
-    #[tokio::test]
-    async fn a_completed_task_whose_body_was_reaped_triggers_nothing() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, _pr) = rotation_task_with_lease(
-            &repo,
-            "jack/w2-267-completed",
-            &base,
-            Some((
-                ChildLeaseState::Finished,
-                TaskSessionStatus::Completed,
-                Some(ChildBodyOutcome::Lost {
-                    reason: "task process disappeared before recording a terminal outcome"
-                        .to_string(),
-                }),
-            )),
-        )
-        .await;
-        git(repo.path(), &["checkout", "-b", "jack/w2-267-completed"]);
-        let before = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert!(
-            matches!(
-                before
-                    .latest_process
-                    .as_ref()
-                    .and_then(|p| p.outcome.as_ref()),
-                Some(ChildBodyOutcome::Lost { .. })
-            ),
-            "the trap only exists when a completed Task carries a lost body"
-        );
-
-        let recovered = recover_stranded_task_body(&store, &mut session)
-            .await
-            .expect("classify a completed Task");
-
-        assert!(!recovered, "a completed Task must never be recovered");
-        let after = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(after.status, TaskSessionStatus::Completed);
-        assert_eq!(
-            after.latest_process.map(|process| process.generation),
-            before.latest_process.map(|process| process.generation),
-            "a completed Task's body must not be replaced"
-        );
-        let events = store.recent_task_events(&session.id, 64).await.unwrap();
-        assert_eq!(
-            count_recovery_attempts(&events),
-            0,
-            "a completed Task must record no recovery attempt"
-        );
-    }
-
-    /// A process group that has certainly exited: spawn one, reap it, reuse its
-    /// id. Racy only if the kernel recycles this exact pgid mid-test, which reads
-    /// as `Present` — a false failure, never a false pass.
-    fn exited_process_group() -> u32 {
-        let mut child = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg("exit 0")
-            .process_group(0)
-            .spawn()
-            .expect("spawn a short-lived process group");
-        let group = child.id();
-        child.wait().expect("reap the short-lived group");
-        group
-    }
-
-    /// ENG-4, end to end over a real kernel: a lease pinned at `revoked` by a
-    /// corpse releases itself, and the reservation path is executable **only
-    /// after** it does.
-    ///
-    /// The live unrelated pid is the load-bearing part. It models the recycled
-    /// pid a stuck lease accumulates by construction, and under an
-    /// all-identities conjunction this test cannot pass — the stranger's
-    /// `Present` would pin the lease forever, which is the very defect being
-    /// removed, rebuilt inside its own fix.
-    #[tokio::test]
-    async fn a_revoked_lease_over_a_dead_group_releases_and_only_then_reserves() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let mut stranger = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg("sleep 60")
-            .spawn()
-            .expect("spawn an unrelated live process");
-        let recycled_pid = stranger.id();
-        let (_home, store, session) = dead_lease_task(
-            &repo,
-            "jack/eng-4-released",
-            &base,
-            TaskSessionStatus::Waiting,
-            crate::child_session::ChildLeaseState::Revoked,
-            Some(ChildBodyOutcome::Superseded {
-                reason: "body generation 1 stalled; recovering the same Task Session".to_string(),
-            }),
-            // The corpse that pins the lease, plus a pid that is emphatically alive.
-            (Some(recycled_pid), Some(exited_process_group())),
-        )
-        .await;
-        let target = ChildRef::Task(session.id.clone());
-        let revoked = session
-            .latest_process
-            .as_ref()
-            .expect("seeded generation")
-            .clone();
-        // tmux answers `no sessions`, so this test's subject is the lease and the
-        // real process group -- not whether the host running it has tmux. Without
-        // it the (correct) production rule reads an unspawnable tmux as
-        // Unprovable and decides the probe before the group is ever asked.
-        let _tmux = crate::engine::process::FakeTmux::no_session();
-
-        // Before the release the CAS cannot pass: `revoked` satisfies neither
-        // `IS NULL` nor `= 'finished'`. This is the permanent refusal.
-        let mut blocked = session.clone();
-        let generation = blocked.begin_generation("lf-task-eng4-blocked".to_string());
-        assert_eq!(generation, 2);
-        assert!(store
-            .reserve_task_process(&blocked, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve against a revoked lease")
-            .is_none());
-
-        let finished =
-            crate::ops::child::release_dead_revoked_child_body(&store, &target, &revoked)
-                .await
-                .expect("probe and release a lease over a dead group")
-                .expect("a provably absent body releases its lease");
-
-        stranger.kill().expect("kill the unrelated process");
-        stranger.wait().expect("reap the unrelated process");
-        assert_eq!(
-            finished.state,
-            crate::child_session::ChildLeaseState::Finished
-        );
-        assert_eq!(finished.generation, revoked.generation);
-
-        // The release is durable, and the outcome that says *why* the body
-        // stopped survives it — that tag is what the recovery verdict reads next.
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let persisted_process = persisted.latest_process.as_ref().expect("generation");
-        assert_eq!(
-            persisted_process.state,
-            crate::child_session::ChildLeaseState::Finished
-        );
-        assert!(matches!(
-            persisted_process.outcome,
-            Some(ChildBodyOutcome::Superseded { .. })
-        ));
-        // Status is untouched: releasing a lease is not a decision about work.
-        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
-
-        // ...and only now can a successor reserve.
-        let mut launch = persisted.clone();
-        launch.begin_generation("lf-task-eng4-successor".to_string());
-        assert!(store
-            .reserve_task_process(&launch, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve after the release")
-            .is_some());
-    }
-
-    /// The CAS pins the generation as well as the state, so a release can only
-    /// ever settle the exact generation still awaiting reap.
-    #[tokio::test]
-    async fn only_the_matching_revoked_generation_can_finish() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, session) = dead_lease_task(
-            &repo,
-            "jack/eng-4-cas",
-            &base,
-            TaskSessionStatus::Waiting,
-            crate::child_session::ChildLeaseState::Revoked,
-            Some(ChildBodyOutcome::Superseded {
-                reason: "stalled".to_string(),
-            }),
-            (None, Some(exited_process_group())),
-        )
-        .await;
-        let target = ChildRef::Task(session.id.clone());
-        let revoked = session.latest_process.as_ref().expect("generation").clone();
-        let _tmux = crate::engine::process::FakeTmux::no_session();
-
-        // A generation that is not the revoked one is refused.
-        let mismatched = ChildProcessGeneration {
-            generation: revoked.generation + 1,
-            ..revoked.clone()
-        };
-        assert!(
-            crate::ops::child::release_dead_revoked_child_body(&store, &target, &mismatched)
-                .await
-                .is_err(),
-            "a release must not settle a generation the store is not holding"
-        );
-
-        // The real one settles once.
-        crate::ops::child::release_dead_revoked_child_body(&store, &target, &revoked)
-            .await
-            .expect("release the matching generation")
-            .expect("a provably absent body releases");
-
-        // A lease no longer at `revoked` is not releasable again — no double settle.
-        let settled = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let finished = settled.latest_process.as_ref().expect("generation").clone();
-        assert!(
-            crate::ops::child::release_dead_revoked_child_body(&store, &target, &finished)
-                .await
-                .expect("a finished lease is a no-op, not an error")
-                .is_none()
-        );
-    }
-
-    /// The other half of the boundary: a body that is still there keeps its
-    /// lease, and the refusal names the lease rather than blaming the status.
-    #[tokio::test]
-    async fn a_live_group_keeps_its_lease_and_the_refusal_names_it() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let mut child = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg("sleep 60")
-            .process_group(0)
-            .spawn()
-            .expect("spawn a live process group");
-        let live_group = child.id();
-        let (_home, store, mut session) = dead_lease_task(
-            &repo,
-            "jack/eng-4-live",
-            &base,
-            TaskSessionStatus::Waiting,
-            crate::child_session::ChildLeaseState::Revoked,
-            Some(ChildBodyOutcome::Superseded {
-                reason: "stalled".to_string(),
-            }),
-            (Some(live_group), Some(live_group)),
-        )
-        .await;
-        let revoked = session.latest_process.as_ref().expect("generation").clone();
-
-        // Without a deterministic tmux this passes for the WRONG reason on a host
-        // with no tmux: the probe reads Unprovable, the release returns None, and
-        // `is_none()` below holds while proving nothing about the live group.
-        let _tmux = crate::engine::process::FakeTmux::no_session();
-
-        let released = crate::ops::child::release_dead_revoked_child_body(
-            &store,
-            &ChildRef::Task(session.id.clone()),
-            &revoked,
-        )
-        .await
-        .expect("probe a live group");
-
-        // The in-place helper the reservation boundary uses leaves it alone too.
-        super::release_dead_revoked_task_lease(&store, &mut session)
-            .await
-            .expect("a live body is not an error, it is a reason to hold");
-        child.kill().expect("kill the live group");
-        child.wait().expect("reap the live group");
-
-        assert!(released.is_none(), "a live body must keep its lease");
-        assert_eq!(
-            session.latest_process.as_ref().map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Revoked)
-        );
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Revoked),
-            "the lease must still be doing its job in the store"
-        );
-    }
-
-    /// An unprovable identity is not absence. `process_target_exists` answers
-    /// `false` — "absent" — to an id that does not fit `i32`; a release that
-    /// reused it would unbar a second body over a generation nobody could ask
-    /// about.
-    #[tokio::test]
-    async fn an_unprovable_identity_does_not_release_the_lease() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let unaddressable = u32::try_from(i32::MAX).expect("i32::MAX fits u32") + 1;
-        let (_home, store, session) = dead_lease_task(
-            &repo,
-            "jack/eng-4-unprovable",
-            &base,
-            TaskSessionStatus::Waiting,
-            crate::child_session::ChildLeaseState::Revoked,
-            Some(ChildBodyOutcome::Superseded {
-                reason: "stalled".to_string(),
-            }),
-            (None, Some(unaddressable)),
-        )
-        .await;
-        let revoked = session.latest_process.as_ref().expect("generation").clone();
-
-        // tmux answers, so the Unprovable asserted below is the identity's.
-        let _tmux = crate::engine::process::FakeTmux::no_session();
-
-        let released = crate::ops::child::release_dead_revoked_child_body(
-            &store,
-            &ChildRef::Task(session.id.clone()),
-            &revoked,
-        )
-        .await
-        .expect("an unprovable probe is not an error");
-
-        assert!(released.is_none());
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Revoked)
-        );
-    }
-
-    #[tokio::test]
-    // Liveness resolves tmux off the process-global PATH, which a concurrent
-    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn resume_revokes_a_dead_legacy_lease_on_a_waiting_task() {
-        let _env_lock = crate::journal::test_env_lock();
-        // W2-135: a Waiting Task still pinned by a Legacy lease whose body vanished.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session) = dead_lease_task(
-            &repo,
-            "jack/w2-135",
-            &base,
-            TaskSessionStatus::Waiting,
-            crate::child_session::ChildLeaseState::Legacy,
-            None,
-            (None, None),
-        )
-        .await;
-
-        reconcile_process_liveness(&store, &mut session)
-            .await
-            .expect("reconcile a waiting task with a dead legacy lease");
-
-        // The dead lease is reaped so the resume can reserve a fresh body...
-        assert_eq!(
-            session.latest_process.as_ref().map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        // ...while the Session keeps its Waiting status for the resume that follows.
-        assert_eq!(session.status, TaskSessionStatus::Waiting);
-
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
-    }
-
-    #[tokio::test]
-    // Liveness resolves tmux off the process-global PATH, which a concurrent
-    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn resume_revokes_a_dead_active_lease_on_a_failed_task() {
-        let _env_lock = crate::journal::test_env_lock();
-        // W2-122: a Failed Task still holding an Active lease whose body vanished.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session) = dead_lease_task(
-            &repo,
-            "jack/w2-122",
-            &base,
-            TaskSessionStatus::Failed,
-            crate::child_session::ChildLeaseState::Active,
-            None,
-            (None, None),
-        )
-        .await;
-
-        reconcile_process_liveness(&store, &mut session)
-            .await
-            .expect("reconcile a failed task with a dead active lease");
-
-        assert_eq!(
-            session.latest_process.as_ref().map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        assert_eq!(session.status, TaskSessionStatus::Failed);
-
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(crate::child_session::ChildLeaseState::Finished)
-        );
-        assert_eq!(persisted.status, TaskSessionStatus::Failed);
-    }
-
-    #[tokio::test]
-    async fn stalled_delivery_is_reaped_and_waits_without_replay() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, _pr) =
-            rotation_task(&repo, "jack/stalled-delivery", &base).await;
-        session.begin_generation(format!("stalled-body-{}", session.id));
-        let lease = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .expect("reserve stalled body");
-
-        let mut child = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg("sleep 60 & echo $!; wait")
-            .process_group(0)
-            .stdout(std::process::Stdio::piped())
-            .spawn()
-            .expect("spawn stalled process group");
-        let group = child.id();
-        let stdout = child.stdout.take().expect("capture grandchild pid");
-        let mut line = String::new();
-        BufReader::new(stdout)
-            .read_line(&mut line)
-            .expect("read grandchild pid");
-        let grandchild: u32 = line.trim().parse().expect("grandchild pid");
-        let waiter = std::thread::spawn(move || child.wait().expect("reap shell"));
-
-        let process = session.latest_process.as_mut().expect("reserved process");
-        process.pid = Some(group);
-        process.process_group_id = Some(group);
-        process.state = ChildLeaseState::Active;
-        session.set_status(TaskSessionStatus::Running, "fake provider is alive");
-        store.activate_task_process(&session, &lease).await.unwrap();
-
-        let mut command = ChildCommand::new(
-            ChildRef::Task(session.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "do the external thing".to_string(),
-            },
-        );
-        store.create_child_command(&command).await.unwrap();
-        let claimed = store
-            .claim_child_commands_for_lease(&command.target, &lease)
-            .await
-            .unwrap();
-        command = claimed.into_iter().next().expect("claimed command");
-        store
-            .mark_child_command_delivering_for_lease(
-                &command.target,
-                &lease,
-                &command.id,
-                crate::child_session::ChildCommandEffect::LiveSteer,
-            )
-            .await
-            .unwrap();
-        session = store.get_task_session(&session.id).await.unwrap().unwrap();
-
-        let observation = observe(
-            &BodyEvidence {
-                intent: BodyIntent::Active,
-                observable: true,
-                process_alive: true,
-                progress_age: Duration::from_secs(31 * 60),
-                step: Some("task_pursue".to_string()),
-                reason: "fake provider is alive".to_string(),
-            },
-            Duration::from_secs(30 * 60),
-        );
-        let latest_event_id = store
-            .latest_task_event(&session.id)
-            .await
-            .unwrap()
-            .map(|event| event.id);
-        assert!(
-            recover_stalled_task_body(&store, session.clone(), &observation, latest_event_id,)
-                .await
-                .unwrap()
-        );
-        waiter.join().unwrap();
-
-        // SAFETY: signal 0 is an existence probe and uses no pointers.
-        assert_ne!(unsafe { libc::kill(group as i32, 0) }, 0);
-        // SAFETY: signal 0 is an existence probe and uses no pointers.
-        assert_ne!(unsafe { libc::kill(grandchild as i32, 0) }, 0);
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(persisted.status, TaskSessionStatus::Waiting);
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(ChildLeaseState::Finished)
-        );
-        assert!(persisted.status_reason.contains(command.id.as_str()));
-        let receipt = store.get_child_command(&command.id).await.unwrap().unwrap();
-        assert_eq!(receipt.state, ChildCommandState::Uncertain);
-    }
-
-    #[tokio::test]
-    async fn progress_wins_the_race_against_stall_recovery() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, _pr) =
-            rotation_task(&repo, "jack/progress-race", &base).await;
-        session.begin_generation(format!("progress-race-{}", session.id));
-        let lease = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
-            .await
-            .unwrap()
-            .expect("reserve body");
-        session
-            .latest_process
-            .as_mut()
-            .expect("reserved process")
-            .state = ChildLeaseState::Active;
-        session.set_status(TaskSessionStatus::Running, "provider is alive");
-        store.activate_task_process(&session, &lease).await.unwrap();
-        session = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let observed_event_id = store
-            .latest_task_event(&session.id)
-            .await
-            .unwrap()
-            .map(|event| event.id);
-
-        store
-            .append_task_event(
-                &session.id,
-                &TaskEventKind::Progress {
-                    summary: "body advanced before revocation".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-        let revoked = store
-            .revoke_task_process_if_unchanged(
-                &session.id,
-                1,
-                session.status_at,
-                observed_event_id,
-                &ChildBodyOutcome::Superseded {
-                    reason: "stale observation".to_string(),
-                },
-            )
-            .await
-            .unwrap();
-
-        assert!(revoked.is_none());
-        let persisted = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            persisted.latest_process.map(|process| process.state),
-            Some(ChildLeaseState::Active),
-        );
-        assert_eq!(persisted.status, TaskSessionStatus::Running);
-    }
-
-    #[test]
-    fn readable_task_names_are_semantic_and_bounded() {
-        assert_eq!(
-            derive_workspace_slug("Release scoped migrations across every target")
-                .unwrap()
-                .as_str(),
-            "release-scoped-migrations-across-every"
-        );
-        assert_eq!(
-            derive_workspace_slug("Investigate").unwrap().as_str(),
-            "investigate-task"
-        );
-        assert!(parse_workspace_slug("one").is_err());
-        assert!(parse_workspace_slug("release_scoped-migrations").is_err());
-        assert_eq!(
-            parse_pr_slug("released-upgrade-proof").unwrap(),
-            "released-upgrade-proof"
-        );
-        assert!(parse_pr_slug("released/upgrade").is_err());
-    }
-
-    #[test]
-    fn succession_slug_is_distinct_capped_and_per_predecessor() {
-        // A successor's slug must differ from its predecessor's so the successor
-        // can place a fresh worktree when the terminal predecessor's still
-        // occupies disk. The base is capped at four words so the `-s<tail>`
-        // suffix word keeps the segment within the 2-5 word limit.
-        let title = "Release scoped migrations across every target";
-        let base = derive_workspace_slug(title).unwrap();
-        assert_eq!(base.as_str(), "release-scoped-migrations-across-every");
-
-        let pred_a = TaskSessionId::new();
-        let pred_b = TaskSessionId::new();
-        let succ_a = succession_workspace_slug(title, &pred_a).unwrap();
-        let succ_b = succession_workspace_slug(title, &pred_b).unwrap();
-
-        // Distinct from the predecessor slug and from each other.
-        assert_ne!(succ_a.as_str(), base.as_str());
-        assert_ne!(succ_a.as_str(), succ_b.as_str());
-
-        // Valid and within the 2-5 word bound; the base is capped at four words.
-        let words = succ_a.as_str().split('-').count();
-        assert!(
-            (2..=5).contains(&words),
-            "got {words} words in {}",
-            succ_a.as_str()
-        );
-        // The four-word cap holds: the longest title still leaves room for the suffix.
-        let capped =
-            succession_workspace_slug("one two three four five six seven", &pred_a).unwrap();
-        assert_eq!(
-            capped.as_str().split('-').count(),
-            5,
-            "four base words + one suffix word"
-        );
-    }
-
-    #[tokio::test]
-    async fn settled_pr_rotates_the_same_worktree_from_fetched_main() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut first) =
-            rotation_task(&repo, first_branch, &base).await;
-        first.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: Some("follow-up-proof".to_string()),
-            github: Some(GithubPr {
-                number: 911,
-                url: "https://example.com/pr/911".to_string(),
-                head_sha: None,
-            }),
-        });
-        first.merge_commit = Some("merge-911".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&first, None)
-            .await
-            .expect("settle first PR");
-
-        let second = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("rotate PR")
-            .expect("working PR");
-
-        assert_eq!(session.worktree, repo.path());
-        assert_eq!(second.sequence, 2);
-        assert_eq!(second.branch, "jack/task-pr-proof-follow-up-proof");
-        assert_eq!(second.base_commit, base);
-        assert_eq!(second.phase(), PrPhase::Working);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            second.branch
-        );
-        let prs = store.task_prs(&session.id).await.expect("read PR history");
-        assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(prs[0].phase(), PrPhase::Merged);
-        assert_eq!(prs[1].id, second.id);
-    }
-
-    /// The state only a re-mint can produce: sequence 1 merged, the successor
-    /// branch already cut at `b1` and left checked out — the documented
-    /// "partial rotation adopted" shape — with `origin/main` advanced to `b2`
-    /// underneath it. A first mint cuts the branch at its base, so the pair
-    /// agrees by accident and the defect is invisible; only main moving under an
-    /// already-positioned branch separates base from branch.
-    struct RemintFixture {
-        _home: tempfile::TempDir,
-        repo: TestRepo,
-        store: SharedStore,
-        session: TaskSession,
-        settled: TaskPr,
-        b1: String,
-        b2: String,
-    }
-
-    impl RemintFixture {
-        const SUCCESSOR: &str = "jack/task-pr-proof-2";
-
-        /// `carry` names a file committed onto the successor before main moves.
-        async fn new(carry: Option<&str>) -> Self {
-            let repo = TestRepo::new();
-            let b1 = repo.head_sha();
-            let settled_branch = "jack/task-pr-proof";
-            repo.create_branch(settled_branch);
-            repo.create_file("first.txt", "first PR\n");
-            repo.stage_all();
-            repo.commit("first PR");
-            let (home, store, session, mut settled) =
-                rotation_task(&repo, settled_branch, &b1).await;
-            settled.publication = Some(PrPublication {
-                requested_at: OffsetDateTime::now_utc(),
-                after_merge: AfterMerge::Review,
-                next_slug: None,
-                github: Some(GithubPr {
-                    number: 1050,
-                    url: "https://example.com/pr/1050".to_string(),
-                    head_sha: None,
-                }),
-            });
-            settled.merge_commit = Some("merge-1050".to_string());
-            settled.updated_at = OffsetDateTime::now_utc();
-
-            git(repo.path(), &["checkout", "-b", Self::SUCCESSOR, &b1]);
-            if let Some(file) = carry {
-                repo.create_file(file, "work a partial rotation already carried\n");
-                repo.stage_all();
-                repo.commit("carried follow-up");
-            }
-            repo.checkout("main");
-            repo.create_file("elsewhere.txt", "another PR merged\n");
-            repo.stage_all();
-            repo.commit("main advances");
-            repo.push();
-            let b2 = repo.head_sha();
-            assert_ne!(b1, b2, "origin/main must move or the defect cannot show");
-            repo.checkout(Self::SUCCESSOR);
-
-            Self {
-                _home: home,
-                repo,
-                store,
-                session,
-                settled,
-                b1,
-                b2,
-            }
-        }
-
-        async fn settle(&self, next: Option<&TaskPr>) {
-            self.store
-                .settle_task_pr(&self.settled, next)
-                .await
-                .expect("settle merged PR");
-        }
-
-        async fn rotate(&mut self) -> TaskPr {
-            ensure_working_pr(&self.store, &mut self.session)
-                .await
-                .expect("rotate")
-                .expect("working PR")
-        }
-
-        fn cut(&self, pr: &TaskPr) -> CommittedFollowUp {
-            unpublished_work(&self.session.worktree, pr).expect("classify")
-        }
-
-        /// An unpublished successor row recording `base`, as a past mint would have.
-        fn successor_row(&self, base: &str) -> TaskPr {
-            let mut pr = self.settled.clone();
-            pr.id = TaskPrId::new();
-            pr.sequence = 2;
-            pr.slug = "2".to_string();
-            pr.branch = Self::SUCCESSOR.to_string();
-            pr.base_commit = base.to_string();
-            pr.publication = None;
-            pr.merge_commit = None;
-            pr.created_at = OffsetDateTime::now_utc();
-            pr.updated_at = OffsetDateTime::now_utc();
-            pr
-        }
-
-        /// A commit on a sibling branch off `b1` — never on the upstream line.
-        fn sibling_commit(&self) -> String {
-            git(
-                self.repo.path(),
-                &["checkout", "-b", "jack/sibling", &self.b1],
-            );
-            self.repo
-                .create_file("sibling.txt", "another branch's work\n");
-            self.repo.stage_all();
-            self.repo.commit("sibling work");
-            let tip = self.repo.head_sha();
-            self.repo.checkout(Self::SUCCESSOR);
-            tip
-        }
-    }
-
-    /// Sabotage: record `resolve_upstream_base`'s `base_commit` again and this
-    /// goes red, while every first-mint rotation test stays green.
-    #[tokio::test]
-    async fn a_re_mint_after_main_advances_records_the_base_its_branch_forks_from() {
-        let mut fx = RemintFixture::new(None).await;
-        fx.settle(None).await;
-
-        let next = fx.rotate().await;
-
-        assert_eq!(next.sequence, 2);
-        assert_eq!(next.branch, RemintFixture::SUCCESSOR);
-        assert_eq!(
-            next.base_commit, fx.b1,
-            "the fork point of the reused branch, not the upstream tip"
-        );
-        assert_ne!(next.base_commit, fx.b2);
-        assert!(
-            is_ancestor(fx.repo.path(), &next.base_commit, &next.branch).expect("ancestry"),
-            "the recorded base must be an ancestor of its branch"
-        );
-        assert!(matches!(fx.cut(&next), CommittedFollowUp::ProvenEmpty));
-    }
-
-    /// Recording the branch tip instead would read `ProvenEmpty` here and let the
-    /// gate discard committed work — the fail-open hole #1050 closed.
-    #[tokio::test]
-    async fn a_re_mint_holding_committed_work_still_reads_range() {
-        let mut fx = RemintFixture::new(Some("carried.txt")).await;
-        fx.settle(None).await;
-        let carried_tip = fx.repo.head_sha();
-
-        let next = fx.rotate().await;
-
-        assert_eq!(
-            next.base_commit, fx.b1,
-            "the fork point, not the carried tip"
-        );
-        assert_ne!(next.base_commit, carried_tip);
-        assert!(matches!(fx.cut(&next), CommittedFollowUp::Range { .. }));
-    }
-
-    /// The live repair: a row an older mint already wrote heals on adopt, so
-    /// W2-300's wedged successor becomes provable.
-    #[tokio::test]
-    async fn an_incoherent_recorded_base_is_healed_when_the_active_pr_is_adopted() {
-        let mut fx = RemintFixture::new(None).await;
-        // Exactly W2-300's row: base at the newer main tip, branch still at the
-        // older — the legacy signature, M <= B <= upstream.
-        let incoherent = fx.successor_row(&fx.b2);
-        fx.settle(Some(&incoherent)).await;
-        assert!(
-            matches!(fx.cut(&incoherent), CommittedFollowUp::Unprovable { .. }),
-            "fixture must start wedged, or it proves nothing"
-        );
-
-        let adopted = fx.rotate().await;
-
-        assert_eq!(
-            adopted.id, incoherent.id,
-            "the same row, healed — not a new one"
-        );
-        assert_eq!(adopted.base_commit, fx.b1);
-        assert!(matches!(fx.cut(&adopted), CommittedFollowUp::ProvenEmpty));
-        let stored = fx
-            .store
-            .task_prs(&fx.session.id)
-            .await
-            .expect("read PR history")
-            .into_iter()
-            .find(|pr| pr.sequence == 2)
-            .expect("successor row");
-        assert_eq!(stored.base_commit, fx.b1, "the heal must reach the store");
-    }
-
-    /// A foreign base is not a stale mint and must stay fail-closed. It is built
-    /// so the true fork point IS its ancestor (M <= B holds), which is what makes
-    /// this catch an M<=B-only heal: only `B <= upstream` separates the legacy
-    /// signature from contamination.
-    #[tokio::test]
-    async fn a_recorded_base_off_the_upstream_line_is_refused_not_healed() {
-        let mut fx = RemintFixture::new(None).await;
-        let sibling = fx.sibling_commit();
-        let foreign = fx.successor_row(&sibling);
-        fx.settle(Some(&foreign)).await;
-
-        // The two preconditions that give this test its teeth.
-        assert!(
-            is_ancestor(fx.repo.path(), &fx.b1, &sibling).expect("ancestry"),
-            "M <= B must hold, or an M<=B-only heal would refuse this anyway and the test proves nothing"
-        );
-        assert!(
-            !is_ancestor(fx.repo.path(), &sibling, "origin/main").expect("ancestry"),
-            "B must be off the upstream line"
-        );
-        assert!(matches!(
-            fx.cut(&foreign),
-            CommittedFollowUp::Unprovable { .. }
-        ));
-
-        let adopted = fx.rotate().await;
-
-        assert_eq!(
-            adopted.base_commit, sibling,
-            "a base no past mint could have written must not be healed"
-        );
-        assert!(
-            matches!(fx.cut(&adopted), CommittedFollowUp::Unprovable { .. }),
-            "contamination stays Unprovable — the gate keeps refusing"
-        );
-        let stored = fx
-            .store
-            .task_prs(&fx.session.id)
-            .await
-            .expect("read PR history")
-            .into_iter()
-            .find(|pr| pr.sequence == 2)
-            .expect("successor row");
-        assert_eq!(stored.base_commit, sibling, "the store row is untouched");
-    }
-
-    #[tokio::test]
-    async fn rotate_forward_carries_uncommitted_follow_up_edits() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut first) =
-            rotation_task(&repo, first_branch, &base).await;
-        first.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 907,
-                url: "https://example.com/pr/907".to_string(),
-                head_sha: None,
-            }),
-        });
-        first.merge_commit = Some("merge-907".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&first, None)
-            .await
-            .expect("settle first PR");
-
-        // The worker stopped before pushing: follow-up work sits uncommitted.
-        repo.create_file("follow-up.txt", "second PR work\n");
-
-        // The runner's strict path refuses to rotate over a dirty tree.
-        assert!(ensure_working_pr(&store, &mut session.clone())
-            .await
-            .is_err());
-
-        let second = ensure_working_pr_with_authority(
-            &store,
-            &mut session,
-            None,
-            RotateOptions {
-                carry_dirty: true,
-                slug_override: Some("keep-going".to_string()),
-            },
-        )
-        .await
-        .expect("rotate forward")
-        .expect("working PR");
-
-        assert_eq!(second.sequence, 2);
-        assert_eq!(second.branch, "jack/task-pr-proof-keep-going");
-        assert_eq!(second.base_commit, base);
-        assert_eq!(second.phase(), PrPhase::Working);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            second.branch
-        );
-        // The preserved follow-up edit survived the rotation onto the new branch.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up survives"),
-            "second PR work\n"
-        );
-        let prs = store.task_prs(&session.id).await.expect("read PR history");
-        assert_eq!(prs.iter().map(|pr| pr.sequence).collect::<Vec<_>>(), [1, 2]);
-        assert_eq!(prs[0].phase(), PrPhase::Merged);
-    }
-
-    #[tokio::test]
-    async fn reconcile_degrades_and_preserves_cache_when_the_github_read_fails() {
-        // A published PR whose remote can't be read (TestRepo's origin is a local
-        // bare repo, not GitHub, so the read cannot resolve) must not error
-        // reconcile: the cached row stands and freshness degrades. This is what
-        // keeps follow-up/steer/status usable during a quota or network outage —
-        // each funnels through reconcile, which previously `?`-failed on the read.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut pr) = rotation_task(&repo, branch, &base).await;
-        pr.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 914,
-                url: "https://example.com/pr/914".to_string(),
-                head_sha: None,
-            }),
-        });
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.update_task_pr(&pr).await.expect("publish PR");
-
-        let observed = reconcile_task_pr(&store, &mut session)
-            .await
-            .expect("reconcile does not error on a failed GitHub read")
-            .expect("the cached PR is preserved");
-
-        // Cache stands: still Open, no merge fabricated from a failed read.
-        assert_eq!(observed.phase(), PrPhase::Open);
-        assert_eq!(observed.merge_commit, None);
-        match &session.observation {
-            Observation::Degraded { reason, .. } => assert!(!reason.is_empty()),
-            other => panic!("a failed GitHub read must degrade freshness, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn reconcile_skips_the_remote_read_for_an_unpublished_working_pr() {
-        // A working PR has no persisted number; reconcile must neither enumerate
-        // nor read remotely. Proof: a read here WOULD fail (no GitHub origin), yet
-        // freshness says no read was required.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        let (_home, store, mut session, pr) = rotation_task(&repo, branch, &base).await;
-        assert!(pr.github().is_none(), "fixture PR is unpublished");
-
-        let observed = reconcile_task_pr(&store, &mut session)
-            .await
-            .expect("reconcile succeeds")
-            .expect("working PR preserved");
-
-        assert_eq!(observed.phase(), PrPhase::Working);
-        assert_eq!(session.observation, Observation::NotRequired);
-    }
-
-    #[test]
-    fn github_observation_cache_expires_fresh_reads_before_degraded_circuits() {
-        let now = OffsetDateTime::now_utc();
-        let mut pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
-            sequence: 1,
-            slug: "cache-proof".to_string(),
-            branch: "jack/cache-proof".to_string(),
-            base_commit: "base".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: Some(GithubObservation {
-                checked_at: now - time::Duration::seconds(59),
-                result: GithubObservationResult::Fresh,
-            }),
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now - time::Duration::hours(1),
-        };
-        assert!(matches!(
-            cached_github_observation(&pr, now),
-            Some(Observation::Cached { .. })
-        ));
-        pr.github_observation.as_mut().unwrap().checked_at = now - time::Duration::seconds(60);
-        assert_eq!(cached_github_observation(&pr, now), None);
-
-        pr.github_observation = Some(GithubObservation {
-            checked_at: now - time::Duration::minutes(4),
-            result: GithubObservationResult::Degraded {
-                reason: "rate limit exhausted".to_string(),
-            },
-        });
-        assert!(matches!(
-            cached_github_observation(&pr, now),
-            Some(Observation::Degraded { .. })
-        ));
-        pr.github_observation.as_mut().unwrap().checked_at = now - time::Duration::minutes(5);
-        assert_eq!(cached_github_observation(&pr, now), None);
-    }
-
-    #[tokio::test]
-    async fn rotate_carries_committed_follow_up_and_dirty_edits_after_an_out_of_band_merge() {
-        // W2-166 shape: PR merged out of band, then the worker committed *unique*
-        // follow-up work on the settled branch plus left a dirty edit. Rotating to
-        // the next serial PR must carry BOTH the committed range and the dirty
-        // edit — and never re-apply the already-merged work.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("merged.txt", "merged work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-        // The merge landed on main (simulated by advancing origin/main to the tip
-        // GitHub merged), so the rotated branch bases on main which already
-        // carries the merged work.
-        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
-
-        // Post-merge follow-up: two committed commits, then an uncommitted edit.
-        repo.create_file("follow1.txt", "follow-up one\n");
-        repo.stage_all();
-        repo.commit("follow-up one");
-        repo.create_file("follow2.txt", "follow-up two\n");
-        repo.stage_all();
-        repo.commit("follow-up two");
-        repo.create_file("wip.txt", "uncommitted work\n");
-
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &base).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: Some("keep-going".to_string()),
-            github: Some(GithubPr {
-                number: 907,
-                url: "https://example.com/pr/907".to_string(),
-                // The merged branch tip — the cut between merged work and follow-up.
-                head_sha: Some(merged_tip.clone()),
-            }),
-        });
-        settled.merge_commit = Some("merge-907".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged PR");
-
-        let next = ensure_working_pr_with_authority(
-            &store,
-            &mut session,
-            None,
-            RotateOptions {
-                carry_dirty: true,
-                slug_override: Some("keep-going".to_string()),
-            },
-        )
-        .await
-        .expect("rotate forward")
-        .expect("working PR");
-
-        assert_eq!(next.sequence, 2);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            next.branch
-        );
-        // Committed follow-up carried forward.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow1.txt")).expect("follow1 carried"),
-            "follow-up one\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow2.txt")).expect("follow2 carried"),
-            "follow-up two\n"
-        );
-        // Dirty edit carried forward, still uncommitted.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit carried"),
-            "uncommitted work\n"
-        );
-        // The already-merged work lives in the base, not re-applied as a commit:
-        // exactly the two follow-up commits sit beyond origin/main.
-        let beyond = git(
-            repo.path(),
-            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
-        );
-        let subjects: Vec<&str> = beyond.lines().collect();
-        assert_eq!(subjects, vec!["follow-up two", "follow-up one"]);
-        // The merged work is present exactly once (from the base), not duplicated.
-        assert!(repo.path().join("merged.txt").exists());
-    }
-
-    #[tokio::test]
-    async fn a_completing_pr_rotates_only_to_carry_committed_follow_up() {
-        // A completing PR has nothing to rotate to — except follow-up committed
-        // past the merged tip (W2-293), which the completion gate refuses to
-        // settle over. Both halves read the same range, so both are proven here.
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("merged.txt", "merged work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-        git(repo.path(), &["push", "origin", "jack/task-pr-proof:main"]);
-
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &base).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 1042,
-                url: "https://example.com/pr/1042".to_string(),
-                head_sha: Some(merged_tip.clone()),
-            }),
-        });
-        settled.merge_commit = Some("merge-1042".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged completing PR");
-
-        // Nothing past the merged tip: the completing PR does not rotate.
-        let none =
-            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
-                .await
-                .expect("completing PR with no follow-up");
-        assert!(
-            none.is_none(),
-            "a completing PR with no follow-up must not mint a successor"
-        );
-
-        // The body commits the follow-up its directive asked for, after the merge.
-        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
-        repo.stage_all();
-        repo.commit("follow-up the directive asked for");
-
-        let next =
-            ensure_working_pr_with_authority(&store, &mut session, None, RotateOptions::runner())
-                .await
-                .expect("rotate to carry follow-up")
-                .expect("successor PR");
-
-        assert_eq!(next.sequence, 2);
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            next.branch
-        );
-        // The follow-up survives on the successor, and only the follow-up: the
-        // merged work rides in from the base rather than being re-applied.
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("follow-up.txt")).expect("follow-up carried"),
-            "acknowledged follow-up\n"
-        );
-        let beyond = git(
-            repo.path(),
-            &["log", "origin/main..HEAD", "--oneline", "--format=%s"],
-        );
-        assert_eq!(
-            beyond.lines().collect::<Vec<_>>(),
-            vec!["follow-up the directive asked for"]
-        );
-    }
-
-    #[tokio::test]
-    async fn failed_committed_carry_restores_the_settled_branch_for_retry() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let settled_branch = "jack/task-pr-proof";
-        repo.create_branch(settled_branch);
-        repo.create_file("shared.txt", "merged\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-
-        // Main and the post-merge follow-up edit the same line differently, so
-        // carrying the follow-up onto current main must conflict.
-        git(repo.path(), &["checkout", "-b", "main-update", &merged_tip]);
-        repo.create_file("shared.txt", "main moved on\n");
-        repo.stage_all();
-        repo.commit("main update");
-        git(repo.path(), &["push", "origin", "main-update:main"]);
-        git(repo.path(), &["checkout", settled_branch]);
-        repo.create_file("shared.txt", "follow-up edit\n");
-        repo.stage_all();
-        repo.commit("post-merge follow-up");
-        repo.create_file("wip.txt", "dirty follow-up\n");
-
-        let (_home, store, mut session, mut settled) =
-            rotation_task(&repo, settled_branch, &base).await;
-        settled.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 918,
-                url: "https://example.com/pr/918".to_string(),
-                head_sha: Some(merged_tip),
-            }),
-        });
-        settled.merge_commit = Some("merge-918".to_string());
-        settled.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&settled, None)
-            .await
-            .expect("settle merged PR");
-
-        let error = ensure_working_pr_with_authority(
-            &store,
-            &mut session,
-            None,
-            RotateOptions {
-                carry_dirty: true,
-                slug_override: Some("retry".to_string()),
-            },
-        )
-        .await
-        .expect_err("conflicting carry must fail");
-
-        assert!(error.to_string().contains("restored"));
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            settled_branch
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("shared.txt")).expect("commit restored"),
-            "follow-up edit\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(repo.path().join("wip.txt")).expect("dirty edit restored"),
-            "dirty follow-up\n"
-        );
-        assert_eq!(
-            git(repo.path(), &["branch", "--list", "*/task-pr-proof-retry"]),
-            ""
-        );
-        assert_eq!(git(repo.path(), &["stash", "list"]), "");
-    }
-
-    #[test]
-    fn task_control_json_reports_durable_state_and_effect() {
-        let result = TaskControlResult {
-            issue_id: "INF-123".to_string(),
-            session_id: "ts_example".to_string(),
-            command_id: "cc_example".to_string(),
-            directive_version: Some(2),
-            state: crate::child_session::ChildCommandState::Accepted,
-            effect: Some(crate::child_session::ChildCommandEffect::LiveSteer),
-            incorporated: true,
-            generation: Some(2),
-            accepted_at: None,
-            incorporated_at: None,
-            error: None,
-            observation: Observation::NotRequired,
-        };
-
-        assert_eq!(
-            serde_json::to_value(result).unwrap(),
-            serde_json::json!({
-                "issue_id": "INF-123",
-                "session_id": "ts_example",
-                "command_id": "cc_example",
-                "directive_version": 2,
-                "state": "accepted",
-                "effect": "live_steer",
-                "incorporated": true,
-                "generation": 2,
-                "accepted_at": null,
-                "incorporated_at": null,
-                "error": null,
-                "observation": {"freshness": "not_required"},
-            })
-        );
-    }
-
-    #[test]
-    fn task_workspace_reports_committed_staged_unstaged_and_untracked_files() {
-        let (repo, base, session_id) = changed_workspace();
-        let workspace = TaskWorkspace {
-            issue_identifier: "INF-123",
-            session_id: &session_id,
-            worktree: repo.path(),
-            base_commit: &base,
-        };
-
-        let snapshot = changes_snapshot(workspace).expect("inspect task changes");
-        let committed = snapshot
-            .files
-            .iter()
-            .find(|file| file.path == "committed.txt")
-            .expect("committed file");
-        assert!(committed.committed);
-        let tracked = snapshot
-            .files
-            .iter()
-            .find(|file| file.path == "tracked.txt")
-            .expect("tracked file");
-        assert!(tracked.staged && tracked.unstaged);
-        let untracked = snapshot
-            .files
-            .iter()
-            .find(|file| file.path == "untracked.txt")
-            .expect("untracked file");
-        assert!(untracked.untracked);
-
-        let patch = diff_snapshot(workspace, None).expect("inspect task diff");
-        assert!(patch.patch.contains("committed.txt"));
-        assert!(patch.patch.contains("tracked.txt"));
-        assert!(patch.patch.contains("untracked.txt"));
-
-        let untracked_patch =
-            diff_snapshot(workspace, Some("./untracked.txt")).expect("inspect one file");
-        assert_eq!(untracked_patch.path.as_deref(), Some("untracked.txt"));
-        assert!(untracked_patch.patch.contains("+untracked"));
-    }
-
-    #[test]
-    fn task_file_reads_only_files_inside_the_task_worktree() {
-        let (repo, base, session_id) = changed_workspace();
-        let workspace = TaskWorkspace {
-            issue_identifier: "INF-123",
-            session_id: &session_id,
-            worktree: repo.path(),
-            base_commit: &base,
-        };
-
-        let file = file_snapshot(workspace, "./tracked.txt").expect("read task file");
-        assert_eq!(file.path, "tracked.txt");
-        assert_eq!(file.content.as_deref(), Some("unstaged\n"));
-        assert!(file_snapshot(workspace, "../outside.txt").is_err());
-
-        #[cfg(unix)]
-        {
-            let outside = tempfile::NamedTempFile::new().expect("outside file");
-            std::os::unix::fs::symlink(outside.path(), repo.path().join("outside-link"))
-                .expect("create outside symlink");
-            assert!(file_snapshot(workspace, "outside-link").is_err());
-        }
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_a_base_carrying_a_foreign_commit() {
-        // The #877/#882 shape: the branch was cut from a local main that carried
-        // an unpushed commit, so the recorded base itself is off-origin.
-        let repo = TestRepo::new();
-        // Advance local main ahead of origin with a foreign commit; never push it.
-        repo.create_file("foreign.txt", "not this task's work\n");
-        repo.stage_all();
-        repo.commit("foreign canonical-main commit");
-        let contaminated_base = repo.head_sha();
-
-        let branch = "jack/contaminated";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("contaminated base must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("contaminated"),
-            "expected contamination refusal, got: {message}"
-        );
-        assert!(
-            message.contains("foreign canonical-main commit"),
-            "refusal must name the foreign commit, got: {message}"
-        );
-        assert!(
-            message.contains("rebase --onto"),
-            "refusal must print the recovery action, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_heals_a_stale_base_after_origin_advances() {
-        let repo = TestRepo::new();
-        let stale_base = repo.head_sha(); // origin/main at placement time
-
-        // origin advances: land a commit on main and push it.
-        repo.create_file("upstream.txt", "landed upstream\n");
-        repo.stage_all();
-        repo.commit("upstream advance");
-        repo.push();
-        let advanced = repo.head_sha();
-
-        // The Task branch already sits on the advanced origin (e.g. after an
-        // lf pr open rebase), but the recorded base is still the pre-advance sha.
-        let branch = "jack/stale-base";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &stale_base).await;
-
-        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("stale-but-compatible base verifies");
-
-        let healed = store
-            .active_task_pr(&session.id)
-            .await
-            .expect("read active PR")
-            .expect("active PR exists");
-        assert_eq!(
-            healed.base_commit, advanced,
-            "the stale base should heal forward to the current fork point"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_falls_back_to_local_main_without_a_remote() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        // Drop the remote entirely: placement fell back to local main.
-        git(repo.path(), &["remote", "remove", "origin"]);
-
-        let branch = "jack/no-remote";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("no-remote repo verifies against local main");
-    }
-
-    #[tokio::test]
-    async fn verify_passes_for_a_rotated_continuation_pr() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, mut session, mut first) =
-            rotation_task(&repo, first_branch, &base).await;
-        first.publication = Some(PrPublication {
-            requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::Review,
-            next_slug: Some("follow-up".to_string()),
-            github: Some(GithubPr {
-                number: 938,
-                url: "https://example.com/pr/938".to_string(),
-                head_sha: None,
-            }),
-        });
-        first.merge_commit = Some("merge-938".to_string());
-        first.updated_at = OffsetDateTime::now_utc();
-        store
-            .settle_task_pr(&first, None)
-            .await
-            .expect("settle first PR");
-
-        // Rotation cuts PR2 from fetched origin/main; its recorded base is the
-        // fork point, so parity holds by construction.
-        let second = ensure_working_pr(&store, &mut session)
-            .await
-            .expect("rotate PR")
-            .expect("working PR");
-        assert_eq!(second.sequence, 2);
-        repo.create_file("second.txt", "second PR work\n");
-        repo.stage_all();
-        repo.commit("second PR commit");
-
-        verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect("rotated continuation PR verifies");
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_divergent_ancestry_naming_both_sides() {
-        let repo = TestRepo::new();
-        let origin_tip = repo.head_sha(); // P
-
-        // A foreign commit advances local main ahead of origin (not pushed).
-        repo.create_file("foreign.txt", "not this task's work\n");
-        repo.stage_all();
-        repo.commit("foreign canonical-main commit");
-        let contaminated_base = repo.head_sha(); // F = P → F
-
-        // Cut the task branch from the contaminated base.
-        let branch = "jack/divergent";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-
-        // Undo the foreign commit on main and advance origin with a *different*
-        // commit so the recorded base and origin diverge from P.
-        repo.checkout("main");
-        git(repo.path(), &["reset", "--hard", &origin_tip]);
-        repo.create_file("upstream.txt", "landed upstream\n");
-        repo.stage_all();
-        repo.commit("upstream advance");
-        repo.push(); // origin/main = P → U
-
-        // Rebase the task branch onto the current origin, simulating a manual
-        // recovery that forgot to update the recorded base. After this, the
-        // branch history is U → task', but the record still says base = F.
-        repo.checkout(branch);
-        git(
-            repo.path(),
-            &[
-                "rebase",
-                "--onto",
-                "origin/main",
-                &contaminated_base,
-                branch,
-            ],
-        );
-
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("divergent ancestry must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("diverged"),
-            "expected divergence refusal, got: {message}"
-        );
-        // The base side (M..B) names the foreign commit.
-        assert!(
-            message.contains("foreign canonical-main commit"),
-            "refusal must name the base-side foreign commit, got: {message}"
-        );
-        assert!(
-            message.contains("foreign.txt"),
-            "refusal must name the base-side file, got: {message}"
-        );
-        // The upstream side (B..M) names the upstream commit.
-        assert!(
-            message.contains("upstream advance"),
-            "refusal must name the upstream-side commit, got: {message}"
-        );
-        assert!(
-            message.contains("upstream.txt"),
-            "refusal must name the upstream-side file, got: {message}"
-        );
-        assert!(
-            message.contains("rebase --onto"),
-            "refusal must print the recovery action, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_contaminated_range_without_a_remote() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha(); // P
-
-        // Drop the remote: the no-remote path must still catch contamination.
-        git(repo.path(), &["remote", "remove", "origin"]);
-
-        // Advance local main with a foreign commit, cut the branch from it, then
-        // reset main to P — the recorded base is off-local-main.
-        repo.create_file("foreign.txt", "not this task's work\n");
-        repo.stage_all();
-        repo.commit("foreign local-main commit");
-        let contaminated_base = repo.head_sha();
-
-        let branch = "jack/no-remote-contaminated";
-        repo.create_branch(branch);
-        repo.create_file("task.txt", "task work\n");
-        repo.stage_all();
-        repo.commit("task commit");
-
-        repo.checkout("main");
-        git(repo.path(), &["reset", "--hard", &base]);
-        repo.checkout(branch);
-
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &contaminated_base).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("no-remote contaminated range must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("contaminated"),
-            "expected contamination refusal, got: {message}"
-        );
-        assert!(
-            message.contains("foreign local-main commit"),
-            "refusal must name the foreign commit, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn verify_refuses_contaminated_range_after_squash_merged_parent() {
-        // Serial PR shape: PR1 was squash-merged, so origin/main carries a
-        // squash commit rather than PR1's original commits. PR2 was cut from
-        // PR1's original tip (not the squash), so its recorded base carries
-        // commits origin/main doesn't have — the contaminated case.
-        let repo = TestRepo::new();
-
-        // PR1: two commits cut from the initial origin tip.
-        let first_branch = "jack/pr-one";
-        repo.create_branch(first_branch);
-        repo.create_file("pr1-a.txt", "a\n");
-        repo.stage_all();
-        repo.commit("PR1 first commit");
-        repo.create_file("pr1-b.txt", "b\n");
-        repo.stage_all();
-        repo.commit("PR1 second commit");
-        let pr1_tip = repo.head_sha();
-
-        // Squash-merge PR1: origin/main gets a single squash commit on P.
-        repo.checkout("main");
-        git(repo.path(), &["merge", "--squash", first_branch]);
-        repo.stage_all();
-        repo.commit("squash-merge PR1");
-        repo.push();
-
-        // PR2 cut from PR1's original tip (the pre-squash branch), not from the
-        // squash commit — the real-world mistake this test catches.
-        let second_branch = "jack/pr-two";
-        git(repo.path(), &["branch", second_branch, &pr1_tip]);
-        repo.checkout(second_branch);
-        repo.create_file("pr2.txt", "PR2 work\n");
-        repo.stage_all();
-        repo.commit("PR2 commit");
-
-        let (_home, store, session, _pr) = rotation_task(&repo, second_branch, &pr1_tip).await;
-
-        let err = verify_task_pr_range_with_authority(&store, &session, None, repo.path())
-            .await
-            .expect_err("squash-merged parent contamination must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("contaminated"),
-            "expected contamination refusal after squash-merge, got: {message}"
-        );
-        assert!(
-            message.contains("PR1 first commit"),
-            "refusal must name the first pre-squash commit, got: {message}"
-        );
-        assert!(
-            message.contains("PR1 second commit"),
-            "refusal must name the second pre-squash commit, got: {message}"
-        );
-        assert!(
-            message.contains("rebase --onto"),
-            "refusal must print the recovery action, got: {message}"
-        );
-    }
-
-    #[test]
-    fn placement_base_anchors_on_origin_when_a_remote_exists() {
-        let repo = TestRepo::new();
-        let origin = repo.head_sha();
-        // A local-only commit ahead of origin must NOT move the recorded base.
-        repo.create_file("local.txt", "unpushed\n");
-        repo.stage_all();
-        repo.commit("unpushed local commit");
-
-        let (base_ref, base_commit) =
-            resolve_upstream_base(repo.path(), "main").expect("resolve base");
-        assert_eq!(base_ref, "origin/main");
-        assert_eq!(
-            base_commit, origin,
-            "the base must anchor on fetched origin, not the ahead-of-origin local tip"
-        );
-    }
-
-    #[test]
-    fn placement_base_falls_back_to_local_main_without_a_remote() {
-        let repo = TestRepo::new();
-        git(repo.path(), &["remote", "remove", "origin"]);
-        repo.create_file("local.txt", "local only\n");
-        repo.stage_all();
-        repo.commit("local commit");
-        let local_tip = repo.head_sha();
-
-        let (base_ref, base_commit) =
-            resolve_upstream_base(repo.path(), "main").expect("resolve base");
-        assert_eq!(base_ref, "refs/heads/main");
-        assert_eq!(base_commit, local_tip);
-    }
-
-    #[test]
-    fn placement_refuses_when_canonical_main_is_ahead_of_origin() {
-        let repo = TestRepo::new();
-        // Simulate the #877/#882 root cause: canonical main carries an unpushed
-        // commit its upstream lacks.
-        repo.create_file("ahead.txt", "unpushed canonical work\n");
-        repo.stage_all();
-        repo.commit("unpushed canonical commit");
-
-        let err = refuse_if_canonical_ahead(repo.path(), "main")
-            .expect_err("ahead-of-origin canonical main must refuse placement");
-        let message = err.to_string();
-        assert!(
-            message.contains("ahead of origin/main"),
-            "expected control-plane refusal, got: {message}"
-        );
-        assert!(
-            message.contains("unpushed canonical commit"),
-            "refusal must name the unpushed commit, got: {message}"
-        );
-    }
-
-    /// W2-144 gen 7: a dead process on an open-PR Task with a queued `Resume`
-    /// must relaunch (consuming the Resume) instead of settling to `Waiting`.
-    /// Without a queued Resume, the existing settle-to-Waiting behavior holds.
-    #[tokio::test]
-    // Liveness resolves tmux off the process-global PATH, which a concurrent
-    // `TaskLaunchEnv` test replaces with a fake that answers "alive".
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn reconcile_process_liveness_consumes_queued_resume_before_settling() {
-        let _env_lock = crate::journal::test_env_lock();
-        let dir = tempfile::tempdir().unwrap();
-        let store: SharedStore = Arc::new(
-            open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
-                .await
-                .unwrap(),
-        );
-        let now = OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            WaveId::new(),
-            "queue-bridge".to_string(),
-            dir.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{}", WaveId::new())).unwrap(),
-                    slug: "queue-bridge".to_string(),
-                    name: "Queue bridge".to_string(),
-                    prompt_context: "Test".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: ProjectSessionStatus::Running,
-            status_reason: "test".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "lf-project-test".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("thread".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_project_session(&project).await.unwrap();
-
-        let task = TaskSession {
-            id: TaskSessionId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).unwrap(),
-                    identifier: "INF-QUEUE".to_string(),
-                    title: "Queue bridge proof".to_string(),
-                    description: "Resume must be consumed.".to_string(),
-                },
-                project: project.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_session_id: project.id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: TaskSessionStatus::Running,
-            status_reason: "task is running".to_string(),
-            status_at: now,
-            worktree: dir.path().to_path_buf(),
-            workspace_slug: "queue-bridge".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "lf-task-queue-bridge".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("thread".to_string()),
-                started_at: now - time::Duration::seconds(30),
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-
-        let mut pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: task.id.clone(),
-            sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch: "jack/queue-bridge".to_string(),
-            base_commit: "0".repeat(40),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_task_session(&task, &pr).await.unwrap();
-
-        // Promote the PR to Open (published on GitHub) after creation.
-        pr.publication = Some(PrPublication {
-            requested_at: now,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 999,
-                url: "https://github.com/loopflow/loopflow/pull/999".to_string(),
-                head_sha: Some("head-1".to_string()),
-            }),
-        });
-        pr.updated_at = OffsetDateTime::now_utc();
-        store.update_task_pr(&pr).await.unwrap();
-
-        // --- Without a queued Resume: settles to Waiting (existing behavior) ---
-        let mut idle = store.get_task_session(&task.id).await.unwrap().unwrap();
-        super::reconcile_process_liveness(&store, &mut idle)
-            .await
-            .expect("settle without Resume");
-        assert_eq!(
-            idle.status,
-            TaskSessionStatus::Waiting,
-            "idle task settles to Waiting"
-        );
-
-        // --- With a queued Resume: relaunches, does NOT settle to Waiting ---
-        // Re-arm the task to Running with a stale process for the second pass.
-        idle.set_status(TaskSessionStatus::Running, "re-armed for resume proof");
-        idle.latest_process = Some(ChildProcessGeneration {
-            generation: 2,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "lf-task-queue-bridge-2".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("thread".to_string()),
-            started_at: OffsetDateTime::now_utc() - time::Duration::seconds(30),
-            state: crate::child_session::ChildLeaseState::Active,
-            outcome: None,
-            provenance: None,
-        });
-        store.update_task_session(&idle).await.unwrap();
-
-        let resume = ChildCommand::new(
-            ChildRef::Task(task.id.clone()),
-            ChildCommandSource::Human,
-            ChildCommandKind::Resume { message: None },
-        );
-        store.create_child_command(&resume).await.unwrap();
-
-        let mut with_resume = store.get_task_session(&task.id).await.unwrap().unwrap();
-        let result = super::reconcile_process_liveness(&store, &mut with_resume).await;
-
-        // The bridge fired: relaunch was attempted. In the test env the launch
-        // fails (lf_bin = /usr/bin/false), so we get an error — but the key
-        // proof is that the status is NOT Waiting (it took the relaunch path).
-        assert_ne!(
-            with_resume.status,
-            TaskSessionStatus::Waiting,
-            "a queued Resume must prevent the Waiting settle"
-        );
-        // Either the launch failed (error returned) or a new generation started
-        // (Starting). Both prove the bridge consumed the Resume.
-        assert!(
-            result.is_err() || with_resume.status == TaskSessionStatus::Starting,
-            "bridge should relaunch, got status={}, result={:?}",
-            with_resume.status.as_str(),
-            result.as_ref().err().map(|e| e.to_string())
-        );
-
-        // The Resume command is still in the queue (not yet claimed by a
-        // successful generation), but it was not discarded — the bridge
-        // attempted a relaunch to consume it.
-        let commands = store
-            .list_child_commands(&ChildRef::Task(task.id))
-            .await
-            .unwrap();
-        let resume_still_pending = commands.iter().any(|cmd| {
-            matches!(cmd.kind, ChildCommandKind::Resume { .. }) && !cmd.state.is_terminal()
-        });
-        assert!(
-            resume_still_pending,
-            "the Resume command is still in the queue, not discarded"
-        );
-    }
-
-    #[tokio::test]
-    async fn recover_refuses_a_non_abandoned_task() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        let (_home, store, session, _pr) = rotation_task(&repo, branch, &base).await;
-
-        let error = _recover_abandoned_task(&store, &session.launch.issue.identifier, None)
-            .await
-            .expect_err("a waiting Task resumes instead of recovering");
-        assert!(error.to_string().contains("lf task resume"), "{error}");
-        assert_eq!(
-            store
-                .get_task_session_by_issue(&session.launch.issue.identifier)
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
-            session.id
-        );
-    }
-
-    #[tokio::test]
-    async fn recover_abandoned_task_adopts_existing_worktree_pr_and_direction() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("recovery.txt", "work survives abandonment\n");
-        repo.stage_all();
-        repo.commit("task work");
-        let (_home, store, session, pr) = rotation_task(&repo, branch, &base).await;
-
-        let target = ChildRef::Task(session.id.clone());
-        let command = ChildCommand::new(
-            target.clone(),
-            ChildCommandSource::Human,
-            ChildCommandKind::Steer {
-                text: "finish the existing PR".to_string(),
-            },
-        );
-        let directive = ChildDirective::replacement(
-            target,
-            1,
-            "finish the existing PR".to_string(),
-            command.source.clone(),
-            command.id.clone(),
-        );
-        store
-            .create_child_command_with_directive(&command, &directive)
-            .await
-            .expect("record current direction");
-        let mut abandoned = store.get_task_session(&session.id).await.unwrap().unwrap();
-        abandoned.set_status(TaskSessionStatus::Abandoned, "operator stopped the attempt");
-        store.update_task_session(&abandoned).await.unwrap();
-
-        let successor = _recover_abandoned_task(
-            &store,
-            &abandoned.launch.issue.identifier,
-            Some("the work is still valid".to_string()),
-        )
-        .await
-        .expect("recover abandoned Task");
-        assert_ne!(successor.id, abandoned.id);
-        assert_eq!(successor.status, TaskSessionStatus::Waiting);
-        assert_eq!(successor.worktree, abandoned.worktree);
-        assert_eq!(successor.workspace_slug, abandoned.workspace_slug);
-        assert!(successor.latest_process.is_none());
-        assert_eq!(
-            successor.lifecycle_phase,
-            crate::task::TaskLifecyclePhase::Kickoff
-        );
-        assert!(successor.status_reason.contains("the work is still valid"));
-
-        assert!(store.task_prs(&abandoned.id).await.unwrap().is_empty());
-        let adopted_prs = store.task_prs(&successor.id).await.unwrap();
-        assert_eq!(adopted_prs.len(), 1);
-        assert_eq!(adopted_prs[0].id, pr.id);
-        let carried = store
-            .child_directives(&ChildRef::Task(successor.id.clone()))
-            .await
-            .unwrap();
-        assert_eq!(carried.len(), 1);
-        assert_eq!(carried[0].text, directive.text);
-        assert_eq!(carried[0].source, directive.source);
-
-        let repeated = _recover_abandoned_task(
-            &store,
-            &successor.launch.issue.identifier,
-            Some("the work is still valid".to_string()),
-        )
-        .await
-        .expect("recovery retry converges");
-        assert_eq!(repeated.id, successor.id);
-
-        let mut completed = repeated;
-        completed.set_status(TaskSessionStatus::Completed, "recovered work landed");
-        store.update_task_session(&completed).await.unwrap();
-        let error = _recover_abandoned_task(
-            &store,
-            &completed.launch.issue.identifier,
-            Some("try again".to_string()),
-        )
-        .await
-        .expect_err("a completed recovered Task cannot be recovered again");
-        assert!(error.to_string().contains("is completed"), "{error}");
-    }
-
-    // ── Task recovery adoption preconditions (W2-251) ───────────────────────
-    //
-    // Recovery must refuse unsafe worktree/branch state before moving any
-    // durable ownership. Each test proves one adoption precondition; the
-    // unrelated-branch test additionally proves refusal leaves the predecessor,
-    // successor link, PR sequence, lease, and worktree untouched.
-
-    fn checkout_branch(repo: &TestRepo, branch: &str) {
-        let status = Command::new("git")
-            .current_dir(repo.path())
-            .args(["checkout", branch])
-            .status()
-            .expect("checkout");
-        assert!(status.success(), "checkout {branch} failed");
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_an_unrelated_branch_before_moving_ownership() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        // Seed a dead Active lease so refusal's "leases untouched" is load-bearing:
-        // without the gate, reconcile_process_liveness would reap it.
-        let (_home, store, session, first) = rotation_task_with_lease(
-            &repo,
-            first_branch,
-            &base,
-            Some((
-                crate::child_session::ChildLeaseState::Active,
-                TaskSessionStatus::Waiting,
-                None,
-            )),
-        )
-        .await;
-        settle_pr(&store, first, "merge-unrelated", None).await;
-
-        // The worktree is on an unrelated branch — neither settled nor the
-        // deterministic next branch.
-        repo.create_branch("jack/unrelated");
-        let prs_before = store.task_prs(&session.id).await.expect("read PRs");
-        let lease_before = store
-            .get_task_session(&session.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .latest_process
-            .clone()
-            .expect("dead lease seeded");
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("unrelated branch must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("between-PR recovery expected settled branch"),
-            "expected unrelated-branch refusal, got: {message}"
-        );
-        assert!(
-            message.contains("jack/unrelated"),
-            "refusal must name the current branch, got: {message}"
-        );
-        assert!(
-            message.contains("refused before moving any ownership"),
-            "refusal must name the contract, got: {message}"
-        );
-
-        // Refusal left the PR sequence, lease, status, and worktree untouched.
-        assert_eq!(
-            store.task_prs(&session.id).await.expect("reread PRs"),
-            prs_before,
-            "PR sequence untouched"
-        );
-        let after = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            after.latest_process,
-            Some(lease_before),
-            "dead lease untouched — the gate is what prevents the reap"
-        );
-        assert_eq!(after.status, TaskSessionStatus::Waiting, "status untouched");
-        assert_eq!(
-            git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "jack/unrelated",
-            "worktree branch untouched"
-        );
-    }
-
-    /// The supervisor's stall recovery restarts a body into the Task worktree, so
-    /// it clears the same adoption gate as an explicit resume. Without it a stalled
-    /// Task sitting on an unrelated branch has its lease reaped and a successor
-    /// committed, only for rotation to reject the branch afterwards.
-    #[tokio::test]
-    async fn supervised_restart_refuses_an_unrelated_branch() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) = rotation_task_with_lease(
-            &repo,
-            first_branch,
-            &base,
-            Some((ChildLeaseState::Active, TaskSessionStatus::Running, None)),
-        )
-        .await;
-        settle_pr(&store, first, "merge-supervised", None).await;
-        repo.create_branch("jack/unrelated");
-        // Re-read as the supervisor does: a stale status_at would make the
-        // revoke's compare-and-swap decline on its own and prove nothing.
-        let session = store.get_task_session(&session.id).await.unwrap().unwrap();
-        let lease_before = session.latest_process.clone().expect("active lease seeded");
-
-        // No delivering command, so the plan is a plain restart: the path that
-        // would otherwise commit a successor.
-        let observation = observe(
-            &BodyEvidence {
-                intent: BodyIntent::Active,
-                observable: true,
-                process_alive: true,
-                progress_age: Duration::from_secs(31 * 60),
-                step: Some("task_pursue".to_string()),
-                reason: "body is alive but stalled".to_string(),
-            },
-            Duration::from_secs(30 * 60),
-        );
-        let latest_event_id = store
-            .latest_task_event(&session.id)
-            .await
-            .unwrap()
-            .map(|event| event.id);
-
-        assert!(
-            !recover_stalled_task_body(&store, session.clone(), &observation, latest_event_id)
-                .await
-                .expect("an unsafe worktree declines recovery; it does not fail the supervisor"),
-            "an unrelated branch must not be restarted"
-        );
-
-        let after = store.get_task_session(&session.id).await.unwrap().unwrap();
-        assert_eq!(
-            after.latest_process,
-            Some(lease_before),
-            "lease untouched — the gate is what prevents the reap"
-        );
-        assert_eq!(after.status, TaskSessionStatus::Running, "status untouched");
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_a_dirty_worktree_between_prs() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
-        settle_pr(&store, first, "merge-dirty", None).await;
-
-        // Uncommitted follow-up work on the settled branch: the runner's strict
-        // rotation cannot carry it, so recovery must refuse before moving
-        // ownership and point the human at `lf pr next`.
-        repo.create_file("follow-up.txt", "uncommitted\n");
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("dirty between-PR worktree must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("uncommitted changes"),
-            "expected dirty refusal, got: {message}"
-        );
-        assert!(
-            message.contains("lf pr next"),
-            "refusal must name the recovery action, got: {message}"
-        );
-        assert!(
-            message.contains("refused before moving any ownership"),
-            "refusal must name the contract, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_a_missing_branch() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
-        settle_pr(&store, first, "merge-missing", None).await;
-
-        // Delete the ref the worktree is checked out on; HEAD dangles off a
-        // branch that no longer exists.
-        Command::new("git")
-            .current_dir(repo.path())
-            .args(["update-ref", "-d", &format!("refs/heads/{first_branch}")])
-            .status()
-            .expect("delete branch ref");
-        assert_eq!(
-            git(repo.path(), &["symbolic-ref", "--short", "HEAD"]),
-            first_branch,
-            "HEAD still names the deleted branch"
-        );
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("missing branch must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("no longer exists"),
-            "expected missing-branch refusal, got: {message}"
-        );
-        assert!(
-            message.contains(first_branch),
-            "refusal must name the missing branch, got: {message}"
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_adopts_an_active_pr_branch_and_allows_ongoing_work() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        // rotation_task seeds an active (Working) PR on `branch`.
-        let (_home, store, session, _pr) =
-            rotation_task_with_lease(&repo, branch, &base, None).await;
-
-        // Dirty ongoing work on the active PR's branch is allowed — recovery
-        // must not drop in-progress work.
-        repo.create_file("wip.txt", "ongoing\n");
-
-        let adoption = task_recovery_adoption(&store, &session)
-            .await
-            .expect("active PR on its branch is adopted, dirty work allowed");
-        assert_eq!(
-            adoption,
-            TaskRecoveryAdoption::Active {
-                branch: branch.to_string()
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn recovery_refuses_a_crash_boundary() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let branch = "jack/task-pr-proof";
-        repo.create_branch(branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, _pr) =
-            rotation_task_with_lease(&repo, branch, &base, None).await;
-
-        // Drive the worktree into a conflicting rebase: advance main with a
-        // conflicting edit, then rebase the branch onto it.
-        repo.checkout("main");
-        repo.create_file("first.txt", "main wins\n");
-        repo.stage_all();
-        repo.commit("main advance");
-        checkout_branch(&repo, branch);
-        let rebase = Command::new("git")
-            .current_dir(repo.path())
-            .args(["rebase", "main"])
-            .output()
-            .expect("run rebase");
-        assert!(
-            !rebase.status.success(),
-            "rebase must conflict to seed a crash boundary"
-        );
-
-        let err = task_recovery_adoption(&store, &session)
-            .await
-            .expect_err("crash boundary must refuse");
-        let message = err.to_string();
-        assert!(
-            message.contains("mid-rebase"),
-            "expected crash-boundary refusal, got: {message}"
-        );
-        assert!(
-            message.contains("refused before moving any ownership"),
-            "refusal must name the contract, got: {message}"
-        );
-
-        // Cleanup so the temp repo drops cleanly.
-        let _ = Command::new("git")
-            .current_dir(repo.path())
-            .args(["rebase", "--abort"])
-            .status();
-    }
-
-    #[tokio::test]
-    async fn between_prs_recovery_selects_the_deterministic_next_branch() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
-        settle_pr(&store, first, "merge-942", Some("follow-up")).await;
-
-        // The deterministic next branch the gate must select, read from the
-        // settled PR the gate reads (not the pre-settle local copy).
-        let settled = store
-            .task_prs(&session.id)
-            .await
-            .expect("read settled PR")
-            .pop()
-            .expect("settled PR");
-        let next = format!("{first_branch}-follow-up");
-        assert_eq!(next_pr_slug(&settled, None), "follow-up");
-
-        // The worktree is already on the next branch — a partial rotation the
-        // gate must adopt, not refuse as an unrelated branch.
-        Command::new("git")
-            .current_dir(repo.path())
-            .args(["checkout", "-b", &next])
-            .status()
-            .expect("cut next branch");
-
-        let adoption = task_recovery_adoption(&store, &session)
-            .await
-            .expect("partial rotation onto the next branch is adopted");
-        assert_eq!(
-            adoption,
-            TaskRecoveryAdoption::BetweenPrs {
-                settled: first_branch.to_string(),
-                next
-            }
-        );
-    }
-
-    #[tokio::test]
-    async fn refuse_dirty_between_prs_blocks_after_an_out_of_band_merge() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let first_branch = "jack/task-pr-proof";
-        repo.create_branch(first_branch);
-        repo.create_file("first.txt", "first PR\n");
-        repo.stage_all();
-        repo.commit("first PR");
-        let (_home, store, session, first) =
-            rotation_task_with_lease(&repo, first_branch, &base, None).await;
-        repo.create_file("wip.txt", "ongoing\n");
-
-        // While the PR is active, dirty ongoing work is fine.
-        refuse_dirty_between_prs(&store, &session)
-            .await
-            .expect("active PR with dirty work is allowed");
-
-        // The PR merges out of band -> settled -> between-PR. The post-reconcile
-        // guard must now refuse the dirty between-PR before the lease is reaped
-        // or a successor body is launched.
-        settle_pr(&store, first, "merge-out-of-band", None).await;
-        let err = refuse_dirty_between_prs(&store, &session)
-            .await
-            .expect_err("dirty between-PR after merge must refuse");
-        assert!(
-            err.to_string().contains("lf pr next"),
-            "expected dirty between-PR refusal, got: {err}"
-        );
-    }
-
-    // ── completion gate (W2-237) ───────────────────────────────────────────
-    // A Task may be completed in the PM only once every active PR is settled
-    // and every required review is approved. The tests below prove the gate and
-    // the reconcile advance/repair around it reproduce the W2-151 / W2-138
-    // ordering: a merge observed while a required review is open does not close
-    // the Task; the Task closes exactly once after the review approves.
-
-    use super::{
-        complete_task_session_with_authority, reconcile_task_completion, task_completion_gate,
-    };
-    use crate::interaction_review::{
-        InteractionReview, InteractionReviewDisposition, InteractionReviewEvidence,
-        InteractionReviewId, InteractionReviewPr, InteractionReviewStatus, InteractionReviewer,
-    };
-    use crate::task::{
-        PmWritebackOperation, TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan,
-    };
-
-    /// A Gate-phase Task Session whose initial PR may be left working or settled.
-    async fn gate_task_fixture(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-        settle: bool,
-        phase_cursor: u32,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
-        let home = tempfile::tempdir().expect("task home");
-        let db_path = home.path().join("loopflow.db");
-        let store = Arc::new(
-            open_store(&StorageConfig::sqlite(db_path.clone()))
-                .await
-                .expect("open store"),
-        );
-        let now = OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            WaveId::new(),
-            "completion-gate".to_string(),
-            repo.path().display().to_string(),
-        );
-        let project = ProjectSession {
-            id: ProjectSessionId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(format!("project-{}", WaveId::new()))
-                        .expect("project id"),
-                    slug: "completion-gate".to_string(),
-                    name: "Completion gate".to_string(),
-                    prompt_context: "Keep the gate honest.".to_string(),
-                },
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: wave.id().clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: ProjectSessionStatus::Running,
-            status_reason: "test project is running".to_string(),
-            status_at: now,
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("completion-gate".to_string()),
-            latest_process: Some(ChildProcessGeneration {
-                generation: 1,
-                pid: None,
-                process_group_id: None,
-                tmux_name: "completion-gate".to_string(),
-                agent: "codex".to_string(),
-                provider: "codex".to_string(),
-                provider_session_id: Some("completion-gate".to_string()),
-                started_at: now,
-                state: crate::child_session::ChildLeaseState::Active,
-                outcome: None,
-                provenance: None,
-            }),
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let session = TaskSession {
-            id: TaskSessionId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                    identifier: "INF-GATE".to_string(),
-                    title: "Prove the completion gate".to_string(),
-                    description: "Completion waits on the review gate.".to_string(),
-                },
-                project: project.launch.project.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_session_id: project.id.clone(),
-            current_directive_version: 0,
-            incorporated_directive_version: 0,
-            status: TaskSessionStatus::Waiting,
-            status_reason: "merged; awaiting gate".to_string(),
-            status_at: now,
-            worktree: repo.path().to_path_buf(),
-            workspace_slug: "completion-gate".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: TaskLifecyclePhase::Gate,
-            phase_epoch: 2,
-            phase_cursor,
-            phase_iteration: 0,
-            gate_cycle: 1,
-            gate_proposal: Some(TaskGateProposal {
-                status: TaskSessionStatus::Completed,
-                reason: "merged and reviewed".to_string(),
-            }),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            latest_process: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::task::Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
-            sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: branch.to_string(),
-            base_commit: base_commit.to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store.create_wave(&wave).await.expect("create wave");
-        store
-            .create_project_session(&project)
-            .await
-            .expect("create project");
-        store
-            .create_task_session(&session, &pr)
-            .await
-            .expect("create Task");
-        if !settle {
-            return (home, store, session, pr);
-        }
-        // Settle the PR as merged-with-complete-task after creation (the session
-        // is created with a sequence-1 Working PR).
-        let mut merged = pr.clone();
-        merged.publication = Some(PrPublication {
-            requested_at: now,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
-            github: Some(GithubPr {
-                number: 912,
-                url: "https://example.com/pr/912".to_string(),
-                head_sha: Some(repo.head_sha()),
-            }),
-        });
-        merged.merge_commit = Some("merge-912".to_string());
-        merged.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&merged)
-            .await
-            .expect("settle merged PR");
-        (home, store, session, merged)
-    }
-
-    /// A Gate-phase Task Session with one merged `CompleteTask` PR, ready for a
-    /// required review to be opened against its gate waitpoint.
-    async fn gate_task(
-        repo: &TestRepo,
-        branch: &str,
-        base_commit: &str,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr) {
-        gate_task_fixture(repo, branch, base_commit, true, 0).await
-    }
-
-    /// Open a required Human review at the Session's current waitpoint and
-    /// return its id with the lease that opened it. Pass `None` to reserve a
-    /// fresh lease; pass a prior lease to open a second review on the same
-    /// generation, which a Session can only do while that lease stays active.
-    async fn open_gate_review(
-        store: &SharedStore,
-        session: &mut TaskSession,
-        pr: &TaskPr,
-        lease: Option<ChildWriteLease>,
-    ) -> (InteractionReviewId, ChildWriteLease) {
-        let lease = if let Some(lease) = lease {
-            lease
-        } else {
-            session.begin_generation("gate-review".to_string());
-            let lease = store
-                .reserve_task_process(session, TaskSessionStatus::Waiting)
-                .await
-                .expect("reserve process")
-                .expect("lease");
-            if let Some(process) = &mut session.latest_process {
-                process.state = crate::child_session::ChildLeaseState::Active;
-            }
-            session.set_status(TaskSessionStatus::Running, "gate review active");
-            store
-                .activate_task_process(session, &lease)
-                .await
-                .expect("activate process");
-            lease
-        };
-        let plan = session.phase_plan();
-        let review = InteractionReview {
-            id: InteractionReviewId::new(),
-            wave_id: session.wave_id.clone(),
-            project_session_id: session.project_session_id.clone(),
-            task_session_id: session.id.clone(),
-            phase: session.lifecycle_phase,
-            phase_epoch: session.phase_epoch,
-            flow: plan.flow.clone(),
-            step: "demo".to_string(),
-            step_index: session.phase_cursor,
-            phase_iteration: session.phase_iteration,
-            policy: plan.interaction_policy,
-            reviewer: InteractionReviewer::Human,
-            status: InteractionReviewStatus::Requested,
-            reason: "Prove the gate holds.".to_string(),
-            prompt: "Prove the gate holds.".to_string(),
-            evidence: InteractionReviewEvidence {
-                worktree: session.worktree.clone(),
-                branch: pr.branch.clone(),
-                base_commit: pr.base_commit.clone(),
-                head_commit: pr.base_commit.clone(),
-                worktree_fingerprint: "fingerprint".to_string(),
-                pr: Some(InteractionReviewPr {
-                    number: 912,
-                    url: "https://example.com/pr/912".to_string(),
-                }),
-            },
-            requested_by_generation: lease.generation,
-            reviewer_generation: None,
-            disposition: None,
-            outcome: None,
-            requested_at: OffsetDateTime::now_utc(),
-            completed_at: None,
-        };
-        store
-            .open_interaction_review(session, &review, &lease)
-            .await
-            .expect("open gate review");
-        (review.id, lease)
-    }
-
-    #[test]
-    fn merged_snapshot_routes_the_persisted_review_gate() {
-        let repo = TestRepo::new();
-        let branch = "jack/merged-review-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-        let (home, expected_complete_refusal, review_id, session) = runtime.block_on(async {
-            let (home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-            let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-            let gate = task_completion_gate(&store, &session)
-                .await
-                .expect("completion gate");
-            let refusal = gate
-                .refusal(&session.launch.issue.identifier)
-                .expect("required review refuses completion");
-            (home, refusal, review_id, session)
-        });
-        drop(runtime);
-        let _env = StoreEnvGuard::new(home.path());
-
-        let snapshot = task_snapshot(&session).expect("snapshot review-blocked Task");
-        assert_eq!(snapshot.active_pr, None);
-        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Review));
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Complete)
-                .expect("Complete action")
-                .reason,
-            expected_complete_refusal
-        );
-        assert!(
-            expected_complete_refusal.contains(review_id.as_str()),
-            "completion refusal must name the actual required review"
-        );
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Resume)
-                .expect("Resume action")
-                .reason,
-            "Task INF-GATE has no active PR to resume; pull request #912 merged"
-        );
-    }
-
-    #[test]
-    fn merged_snapshot_with_a_clear_gate_recommends_completion() {
-        let repo = TestRepo::new();
-        let branch = "jack/merged-complete-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let runtime = tokio::runtime::Runtime::new().expect("test runtime");
-        let (home, session) = runtime.block_on(async {
-            let (home, _store, session, _pr) = gate_task(&repo, branch, &base).await;
-            (home, session)
-        });
-        drop(runtime);
-        let _env = StoreEnvGuard::new(home.path());
-
-        let snapshot = task_snapshot(&session).expect("snapshot completable Task");
-        assert_eq!(snapshot.active_pr, None);
-        assert_eq!(snapshot.actions.recommended, Some(TaskAction::Complete));
-        assert!(
-            snapshot
-                .actions
-                .status(TaskAction::Complete)
-                .expect("Complete action")
-                .available
-        );
-        assert_eq!(
-            snapshot
-                .actions
-                .status(TaskAction::Resume)
-                .expect("Resume action")
-                .reason,
-            "Task INF-GATE has no active PR to resume; pull request #912 merged"
-        );
-    }
-
-    #[tokio::test]
-    async fn completion_gate_is_satisfied_with_no_prs_and_no_reviews() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let (_home, store, mut session, _pr) = gate_task(&repo, branch, &repo.head_sha()).await;
-        // The PR is settled (merged) and no required reviews are open: the gate
-        // is satisfied, so clean no-PR / no-review work can still complete.
-        session.status = TaskSessionStatus::Waiting;
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-        assert!(
-            gate.satisfied,
-            "gate should be satisfied: {:?}",
-            gate.blockers
-        );
-    }
-
-    // ── settling over a proven-empty successor (W2-304) ────────────────────
-    // The lifecycle rotates a serial successor after a `Review` merge. When the
-    // work is done that successor is never published and never authored, and
-    // `lf task complete` refused on it: publishing opens a zero-commit PR, and
-    // abandoning leaves the Session `Waiting` so the next rotation mints PR N+1.
-    // `task_complete` resolves the machine registry itself, so these drive the two
-    // functions it composes: `task_completion_gate` and
-    // `complete_task_session_with_authority`.
-
-    const SUCCESSOR_BRANCH: &str = "jack/gate-proof-2";
-
-    /// Merged work on `jack/gate-proof`, plus a successor rotated behind it whose
-    /// branch starts at `successor_base`. The merged PR is relanded `Review` — the
-    /// disposition that actually rotates.
-    async fn merged_task_with_successor(
-        repo: &TestRepo,
-        successor_base: Option<&str>,
-    ) -> (tempfile::TempDir, SharedStore, TaskSession, TaskPr, TaskPr) {
-        let merged_branch = "jack/gate-proof";
-        let base = repo.head_sha();
-        repo.create_branch(merged_branch);
-        repo.create_file("merged.txt", "the real work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let (home, store, mut session, merged) = gate_task(repo, merged_branch, &base).await;
-        session.status = TaskSessionStatus::Waiting;
-
-        let mut merged = merged;
-        merged
-            .publication
-            .as_mut()
-            .expect("published PR")
-            .after_merge = AfterMerge::Review;
-        merged.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&merged)
-            .await
-            .expect("reland merged PR for review");
-        // `settle_task_pr` re-presents the settled row and compares it field for
-        // field; `publication.requested_at` loses sub-second precision through the
-        // store, so only the round-tripped row compares equal to itself.
-        let merged = store
-            .get_task_pr(&merged.id)
-            .await
-            .expect("read merged PR")
-            .expect("merged row");
-
-        match successor_base {
-            Some(base) => git(repo.path(), &["checkout", "-b", SUCCESSOR_BRANCH, base]),
-            None => {
-                git(repo.path(), &["checkout", "--orphan", SUCCESSOR_BRANCH]);
-                git(
-                    repo.path(),
-                    &["commit", "--allow-empty", "-m", "rewritten successor"],
-                )
-            }
-        };
-        let now = OffsetDateTime::now_utc();
-        let successor = TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: session.id.clone(),
-            sequence: merged.sequence + 1,
-            slug: "successor".to_string(),
-            branch: SUCCESSOR_BRANCH.to_string(),
-            base_commit: successor_base.unwrap_or(&base).to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .settle_task_pr(&merged, Some(&successor))
-            .await
-            .expect("rotate successor");
-        (home, store, session, merged, successor)
-    }
-
-    async fn pr_phase(store: &SharedStore, id: &TaskPrId) -> PrPhase {
-        store
-            .get_task_pr(id)
-            .await
-            .expect("read PR")
-            .expect("PR row")
-            .phase()
-    }
-
-    #[tokio::test]
-    async fn a_merged_task_settles_over_a_proven_empty_successor() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, _merged, successor) =
-            merged_task_with_successor(&repo, Some(&base)).await;
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate over empty successor");
-        assert!(
-            gate.satisfied,
-            "the rotation's empty artifact must not block merged work: {:?}",
-            gate.blockers
-        );
-        assert_eq!(
-            gate.discardable_successor.as_ref().map(|pr| &pr.id),
-            Some(&successor.id)
-        );
-        assert_eq!(
-            pr_phase(&store, &successor.id).await,
-            PrPhase::Working,
-            "the gate must classify without mutating"
-        );
-
-        session.set_status(TaskSessionStatus::Completed, "merged work settled");
-        complete_task_session_with_authority(
-            &store,
-            &session,
-            gate.discardable_successor.as_ref(),
-            None,
-        )
-        .await
-        .expect("complete over the empty successor");
-
-        let prs = store.task_prs(&session.id).await.expect("read PRs");
-        assert_eq!(
-            prs.len(),
-            1,
-            "the artifact must be gone and no replacement minted: {prs:?}"
-        );
-        assert_eq!(prs[0].phase(), PrPhase::Merged);
-        assert!(store
-            .active_task_pr(&session.id)
-            .await
-            .expect("read active PR")
-            .is_none());
-
-        // Terminal status has proven non-monotonic in this wave (W2-296/W2-299),
-        // so reconciling a settled Task must not walk it back or mint a PR.
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile after settling");
-        assert_eq!(session.status, TaskSessionStatus::Completed);
-        assert_eq!(
-            store.task_prs(&session.id).await.expect("read PRs").len(),
-            1
-        );
-    }
-
-    #[tokio::test]
-    async fn a_pending_required_review_blocks_completion_and_keeps_the_successor() {
-        let repo = TestRepo::new();
-        let base = repo.head_sha();
-        let (_home, store, mut session, merged, successor) =
-            merged_task_with_successor(&repo, Some(&base)).await;
-
-        // If the discard were a precondition rather than part of completing, this
-        // review would block *after* the successor was dropped, leaving a
-        // non-terminal Task with no active PR — the exact shape
-        // `ensure_working_pr_with_authority` rotates a fresh empty PR from.
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &merged, None).await;
-        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with review open");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason().contains("awaiting review"),
-            "the refusal must name the review: {}",
-            gate.reason()
-        );
-        assert_eq!(
-            pr_phase(&store, &successor.id).await,
-            PrPhase::Working,
-            "a completion blocked for any other reason must leave the successor active"
-        );
-
-        // The store, not caller ordering, is what makes a pre-gate discard
-        // unrepresentable: skipping a PR is legal only while completing.
-        assert!(
-            complete_task_session_with_authority(&store, &session, Some(&successor), None)
-                .await
-                .is_err(),
-            "dropping a successor outside a completing transaction must refuse"
-        );
-
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::Approved,
-                "approved",
-            )
-            .await
-            .expect("approve review");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate after approval");
-        assert!(gate.satisfied, "{:?}", gate.blockers);
-        session.set_status(TaskSessionStatus::Completed, "merged work settled");
-        complete_task_session_with_authority(
-            &store,
-            &session,
-            gate.discardable_successor.as_ref(),
-            None,
-        )
-        .await
-        .expect("complete after approval");
-        assert_eq!(
-            store.task_prs(&session.id).await.expect("read PRs").len(),
-            1,
-            "one completion must settle it with no replacement minted"
-        );
-    }
-
-    /// Only a successor proven to hold nothing may be discarded. A `Range` is
-    /// authored work that completing would strand; an `Unprovable` base means the
-    /// branch cannot be *shown* empty, which is not the same as being empty —
-    /// `is_ancestor` reports the same false for a base whose object is gone.
-    #[tokio::test]
-    async fn a_successor_that_is_not_proven_empty_is_never_discardable() {
-        for (case, commits_work, expected) in [
-            ("range", true, "follow-up work is committed on unpublished"),
-            (
-                "unprovable",
-                false,
-                "recorded base is not an ancestor of the unpublished branch",
-            ),
-        ] {
-            let repo = TestRepo::new();
-            let base = repo.head_sha();
-            let (_home, store, session, _merged, successor) =
-                merged_task_with_successor(&repo, commits_work.then_some(base.as_str())).await;
-            if commits_work {
-                repo.create_file("follow-up.txt", "work that must not be dropped\n");
-                repo.stage_all();
-                repo.commit("follow-up work");
-            }
-
-            let gate = task_completion_gate(&store, &session)
-                .await
-                .unwrap_or_else(|error| panic!("{case}: {error}"));
-            assert!(!gate.satisfied, "{case} must fail closed");
-            assert!(
-                gate.discardable_successor.is_none(),
-                "{case} must never be classified discardable"
-            );
-            assert!(
-                gate.reason().contains(expected),
-                "{case} must say why: {}",
-                gate.reason()
-            );
-            assert_eq!(
-                pr_phase(&store, &successor.id).await,
-                PrPhase::Working,
-                "{case} must leave the row untouched"
-            );
-            if commits_work {
-                assert_eq!(
-                    super::rev_parse(repo.path(), SUCCESSOR_BRANCH).expect("resolve tip"),
-                    repo.head_sha(),
-                    "{case} must preserve the committed follow-up"
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn completion_gate_blocks_when_follow_up_range_is_unprovable() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        let base = repo.head_sha();
-        repo.create_branch(branch);
-        let (_home, store, session, pr) = gate_task(&repo, branch, &base).await;
-
-        let mut unprovable = pr.clone();
-        unprovable
-            .publication
-            .as_mut()
-            .and_then(|publication| publication.github.as_mut())
-            .expect("published github PR")
-            .head_sha = None;
-        unprovable.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&unprovable)
-            .await
-            .expect("remove published head");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with missing head");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason()
-                .contains("published pull request head is missing"),
-            "missing head must fail closed: {}",
-            gate.reason()
-        );
-
-        git(
-            repo.path(),
-            &["checkout", "--orphan", "jack/rewritten-head"],
-        );
-        git(
-            repo.path(),
-            &["commit", "--allow-empty", "-m", "rewritten published head"],
-        );
-        let rewritten_head = repo.head_sha();
-        git(repo.path(), &["checkout", branch]);
-
-        unprovable
-            .publication
-            .as_mut()
-            .and_then(|publication| publication.github.as_mut())
-            .expect("published github PR")
-            .head_sha = Some(rewritten_head);
-        unprovable.updated_at = OffsetDateTime::now_utc();
-        store
-            .update_task_pr(&unprovable)
-            .await
-            .expect("record rewritten published head");
-
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate with rewritten head");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason()
-                .contains("published pull request head is not an ancestor"),
-            "rewritten head must fail closed: {}",
-            gate.reason()
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
-    async fn completion_is_withheld_over_work_committed_past_the_merged_tip() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        let base = repo.head_sha();
-        repo.create_branch(branch);
-        repo.create_file("merged.txt", "merged work\n");
-        repo.stage_all();
-        repo.commit("merged work");
-        let merged_tip = repo.head_sha();
-
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let mut open = pr.clone();
-        open.merge_commit = None;
-        open.github_observation = None;
-        open.publication
-            .as_mut()
-            .and_then(|publication| publication.github.as_mut())
-            .expect("published github PR")
-            .head_sha = Some(merged_tip.clone());
-        store.update_task_pr(&open).await.expect("open fixture PR");
-
-        repo.create_file("follow-up.txt", "acknowledged follow-up\n");
-        repo.stage_all();
-        repo.commit("follow-up the directive asked for");
-
-        git(
-            repo.path(),
-            &[
-                "remote",
-                "set-url",
-                "origin",
-                "https://github.com/test/repo.git",
-            ],
-        );
-        let bin = tempfile::tempdir().expect("fake gh bin");
-        let gh = bin.path().join("gh");
-        std::fs::write(
-            &gh,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s\\n' '{{\"merged\":true,\"state\":\"closed\",\"merge_commit_sha\":\"merge-912\",\"number\":912,\"html_url\":\"https://example.com/pr/912\",\"head\":{{\"sha\":\"{merged_tip}\"}}}}'\n"
-            ),
-        )
-        .expect("write fake gh");
-        let mut permissions = std::fs::metadata(&gh).expect("stat fake gh").permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&gh, permissions).expect("make fake gh executable");
-        let _env_lock = crate::journal::test_env_lock();
-        let previous_path = std::env::var_os("PATH");
-        let path = match &previous_path {
-            Some(previous) => format!("{}:{}", bin.path().display(), previous.to_string_lossy()),
-            None => bin.path().display().to_string(),
-        };
-        std::env::set_var("PATH", path);
-        let observed = reconcile_task_pr(&store, &mut session).await;
-        match previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
-
-        let observed = observed
-            .expect("observe merged PR")
-            .expect("persist merged PR");
-        assert_eq!(observed.phase(), PrPhase::Merged);
-        assert_ne!(
-            session.status,
-            TaskSessionStatus::Completed,
-            "merge observation must not complete over committed follow-up"
-        );
-
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile with follow-up outstanding");
-        assert_ne!(
-            session.status,
-            TaskSessionStatus::Completed,
-            "reconcile must not complete over committed follow-up"
-        );
-        assert_eq!(session.pm_writeback, PmWritebackState::Current);
-        assert!(repo.path().join("follow-up.txt").exists());
-    }
-
-    #[tokio::test]
-    async fn completion_gate_blocks_on_a_pending_required_review() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-
-        // The merged PR is settled, but the required Human review is open: the
-        // gate must block on the review, not on the PR.
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-        assert!(!gate.satisfied);
-        assert!(
-            gate.reason().contains(&review_id.as_str().to_string()),
-            "blocker should name the open review {}: {}",
-            review_id,
-            gate.reason()
-        );
-
-        // Approve the review and the gate closes.
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::Approved,
-                "approved",
-            )
-            .await
-            .expect("approve review");
-        let gate = task_completion_gate(&store, &session)
-            .await
-            .expect("gate after approve");
-        assert!(
-            gate.satisfied,
-            "gate should close after approval: {:?}",
-            gate.blockers
-        );
-    }
-
-    #[tokio::test]
-    async fn a_superseded_kickoff_changes_request_does_not_bar_completion() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
-        session.phase_epoch = 1;
-        session.gate_cycle = 0;
-        session.gate_proposal = None;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::ChangesRequested,
-                "repair the design",
-            )
-            .await
-            .expect("request kickoff changes");
-        session.enter_iterate().expect("enter repair iteration");
-
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-
-        assert!(
-            gate.satisfied,
-            "superseded kickoff review: {:?}",
-            gate.blockers
-        );
-    }
-
-    #[tokio::test]
-    async fn the_newest_gate_cycle_supersedes_an_earlier_changes_request() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (first, lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        store
-            .complete_human_interaction_review(
-                &first,
-                InteractionReviewDisposition::ChangesRequested,
-                "repair cycle one",
-            )
-            .await
-            .expect("request gate changes");
-        session.enter_iterate().expect("enter repair iteration");
-        session
-            .enter_gate(TaskGateProposal {
-                status: TaskSessionStatus::Completed,
-                reason: "repair verified".to_string(),
-            })
-            .expect("enter the next gate cycle");
-        store
-            .update_task_session_for_lease(&session, &lease)
-            .await
-            .expect("persist the next gate cycle");
-        let (second, _lease) = open_gate_review(&store, &mut session, &pr, Some(lease)).await;
-        store
-            .complete_human_interaction_review(
-                &second,
-                InteractionReviewDisposition::Approved,
-                "repair approved",
-            )
-            .await
-            .expect("approve the latest gate");
-
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-
-        assert!(
-            gate.satisfied,
-            "newest gate should supersede: {:?}",
-            gate.blockers
-        );
-    }
-
-    #[tokio::test]
-    async fn a_rejected_gate_cycle_still_bars_completion_from_iterate() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::ChangesRequested,
-                "repair the implementation",
-            )
-            .await
-            .expect("request gate changes");
-        session.enter_iterate().expect("return to iteration");
-
-        let gate = task_completion_gate(&store, &session).await.expect("gate");
-
-        assert!(!gate.satisfied);
-        assert!(gate.reason().contains(review_id.as_str()));
-    }
-
-    #[tokio::test]
-    async fn reconcile_advances_completion_once_the_gate_closes() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        session.set_status(TaskSessionStatus::Waiting, "merged; awaiting gate");
-
-        // Reconcile with the review still open: no completion, no writeback.
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile while gate open");
-        assert_ne!(
-            session.status,
-            TaskSessionStatus::Completed,
-            "Task must not complete while the required review is open"
-        );
-        assert_eq!(session.pm_writeback, PmWritebackState::Current);
-
-        // Approve the review; the next reconcile completes the Task exactly once.
-        store
-            .complete_human_interaction_review(
-                &review_id,
-                InteractionReviewDisposition::Approved,
-                "approved",
-            )
-            .await
-            .expect("approve review");
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("reconcile after gate closes");
-        assert_eq!(session.status, TaskSessionStatus::Completed);
-        // The advance fires the CompleteTask writeback exactly once. In the test
-        // environment there is no Linear initiative, so the writeback lands as
-        // Pending (it attempted and will retry) — never Current-without-attempt,
-        // and never a second stacked operation.
-        assert!(
-            matches!(
-                session.pm_writeback,
-                PmWritebackState::Pending {
-                    operation: PmWritebackOperation::CompleteTask,
-                    ..
-                }
-            ),
-            "advance must fire the CompleteTask writeback once, got {:?}",
-            session.pm_writeback
-        );
-
-        // A duplicate reconcile does not stack a second operation: still
-        // Completed, still a single Pending CompleteTask writeback.
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("duplicate reconcile");
-        assert_eq!(session.status, TaskSessionStatus::Completed);
-        assert!(
-            matches!(
-                session.pm_writeback,
-                PmWritebackState::Pending {
-                    operation: PmWritebackOperation::CompleteTask,
-                    ..
-                }
-            ),
-            "duplicate reconcile must not stack a second writeback, got {:?}",
-            session.pm_writeback
-        );
-    }
-
-    #[tokio::test]
-    async fn repair_reverts_a_premature_completion_to_waiting() {
-        let repo = TestRepo::new();
-        let branch = "jack/gate-proof";
-        repo.create_branch(branch);
-        let base = repo.head_sha();
-        let (_home, store, mut session, pr) = gate_task(&repo, branch, &base).await;
-        let (review_id, _lease) = open_gate_review(&store, &mut session, &pr, None).await;
-        // Simulate the W2-151 premature completion: the PM says done while the
-        // required review is still open.
-        session.set_status(TaskSessionStatus::Completed, "merged and completed");
-        session.pm_writeback = PmWritebackState::Current;
-
-        reconcile_task_completion(&store, &mut session, None)
-            .await
-            .expect("repair reconcile");
-
-        assert_eq!(
-            session.status,
-            TaskSessionStatus::Waiting,
-            "premature completion must revert to Waiting"
-        );
-        assert!(
-            matches!(
-                session.pm_writeback,
-                PmWritebackState::Pending {
-                    operation: PmWritebackOperation::ReopenTask,
-                    ..
-                }
-            ),
-            "repair must queue a ReopenTask writeback, got {:?}",
-            session.pm_writeback
-        );
-        assert!(
-            session
-                .status_reason
-                .contains(&review_id.as_str().to_string())
-                || session.status_reason.contains("outran its gates"),
-            "repair reason should be actionable: {}",
-            session.status_reason
-        );
-
-        // Nothing was lost: the PR, the review, and the directive rows survive.
-        let prs = store.task_prs(&session.id).await.expect("read PRs");
-        assert_eq!(prs.len(), 1, "PR row must survive repair");
-        assert!(
-            store
-                .list_interaction_reviews(Some(&session.wave_id))
-                .await
-                .expect("read reviews")
-                .iter()
-                .any(|review| review.id == review_id),
-            "review row must survive repair"
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_keeps_pending_and_unknown_gate_tasks_parked() {
-        let _env_lock = crate::journal::test_env_lock();
-        for (label, state) in [("pending", Some(CiState::Pending)), ("unknown", None)] {
-            let repo = TestRepo::new();
-            let branch = format!("jack/gate-{label}");
-            let (home, store, project, session, _pr) =
-                parked_gate_task(&repo, &branch, state, 0).await;
-            let _launch_env = TaskLaunchEnv::install(home.path());
-
-            supervise_project_task_bodies(&store, &project)
-                .await
-                .expect("supervise parked Gate");
-
-            let persisted = store
-                .get_task_session(&session.id)
-                .await
-                .expect("read Task")
-                .expect("Task exists");
-            assert_eq!(persisted.status, TaskSessionStatus::Waiting, "{label}");
-            assert_eq!(
-                persisted.lifecycle_phase,
-                crate::task::TaskLifecyclePhase::Gate,
-                "{label}"
-            );
-            assert_eq!(persisted.phase_cursor, 0, "{label}");
-            assert!(persisted.latest_process.is_none(), "{label}");
-            assert!(
-                store
-                    .list_child_commands(&ChildRef::Task(session.id.clone()))
-                    .await
-                    .expect("read Task commands")
-                    .is_empty(),
-                "{label}"
-            );
-            assert!(
-                store
-                    .list_interaction_reviews(Some(&session.wave_id))
-                    .await
-                    .expect("read interaction reviews")
-                    .is_empty(),
-                "{label}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_creates_one_existing_ci_fix_wake_for_red() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
-            parked_gate_task(&repo, "jack/gate-red", Some(CiState::Failing), 0).await;
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("first red supervision");
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("duplicate red supervision");
-
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("read Task commands");
-        assert_eq!(
-            commands.len(),
-            1,
-            "the incident identity deduplicates wakes"
-        );
-        assert!(matches!(commands[0].kind, ChildCommandKind::CiFix { .. }));
-        let persisted = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("ci-fix launch reserves a generation")
-                .generation,
-            1
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_enqueues_one_attributable_wake_for_live_idle_red() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, mut session, _pr) =
-            parked_gate_task(&repo, "jack/gate-live-idle", Some(CiState::Failing), 0).await;
-        session.begin_generation("lf-live-idle-control".to_string());
-        let lease = store
-            .reserve_task_process(&session, TaskSessionStatus::Waiting)
-            .await
-            .expect("reserve live control body")
-            .expect("waiting Task reserves one generation");
-        if let Some(process) = session.latest_process.as_mut() {
-            process.state = crate::child_session::ChildLeaseState::Active;
-        }
-        session.set_status(
-            TaskSessionStatus::Running,
-            "Project review owns the Gate step; provider turn is idle",
-        );
-        store
-            .activate_task_process(&session, &lease)
-            .await
-            .expect("activate live control body");
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("first live-idle red supervision");
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("duplicate live-idle red supervision");
-
-        let commands = store
-            .list_child_commands(&ChildRef::Task(session.id.clone()))
-            .await
-            .expect("read Task commands");
-        assert_eq!(commands.len(), 1, "the current failure wakes once");
-        assert!(matches!(commands[0].kind, ChildCommandKind::CiFix { .. }));
-        assert_eq!(commands[0].state, ChildCommandState::Persisted);
-        assert_eq!(commands[0].claimed_by_generation, None);
-
-        let incidents = store
-            .ci_incidents_since(OffsetDateTime::UNIX_EPOCH, None, None)
-            .await
-            .expect("read CI incidents");
-        let incident = incidents
-            .iter()
-            .find(|row| row.incident.task_session_id == session.id)
-            .expect("live-idle incident exists");
-        assert_eq!(
-            incident.incident.trigger_command_id.as_ref(),
-            Some(&commands[0].id),
-            "the wake must be attributable before the live control body claims it"
-        );
-        assert_eq!(incident.incident.responded_at, None);
-
-        let persisted = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(
-            persisted.status,
-            TaskSessionStatus::Running,
-            "{}",
-            persisted.status_reason
-        );
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("control generation remains active")
-                .generation,
-            lease.generation,
-            "supervision must not interrupt or replace the live control body"
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_relaunches_a_fresh_green_gate_exactly_once() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
-            parked_gate_task(&repo, "jack/gate-green", Some(CiState::Passing), 0).await;
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("first green supervision");
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("duplicate green supervision");
-
-        let persisted = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(persisted.status, TaskSessionStatus::Starting);
-        assert_eq!(
-            persisted
-                .latest_process
-                .as_ref()
-                .expect("green Gate relaunch reserves a generation")
-                .generation,
-            1,
-            "the second observation must not reserve another generation"
-        );
-        assert!(
-            store
-                .list_interaction_reviews(Some(&session.wave_id))
-                .await
-                .expect("read interaction reviews")
-                .is_empty(),
-            "Project reconciliation launches Gate; the Gate body owns review creation"
-        );
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the env lock serializes process-global launch vars
-    async fn project_supervision_does_not_relaunch_green_after_gate_advances() {
-        let _env_lock = crate::journal::test_env_lock();
-        let repo = TestRepo::new();
-        let (home, store, project, session, _pr) =
-            parked_gate_task(&repo, "jack/gate-advanced", Some(CiState::Passing), 1).await;
-        let _launch_env = TaskLaunchEnv::install(home.path());
-
-        supervise_project_task_bodies(&store, &project)
-            .await
-            .expect("supervise advanced Gate");
-
-        let persisted = store
-            .get_task_session(&session.id)
-            .await
-            .expect("read Task")
-            .expect("Task exists");
-        assert_eq!(persisted.phase_cursor, 1);
-        assert!(
-            persisted.latest_process.is_none(),
-            "green observation cannot reopen an advanced Gate"
-        );
-        assert!(
-            store
-                .list_interaction_reviews(Some(&session.wave_id))
-                .await
-                .expect("read interaction reviews")
-                .is_empty(),
-            "Project reconciliation cannot create a second review"
-        );
-    }
-
-    /// Build an open Task PR with a GitHub receipt and an optional CI reading
-    /// for `head_sha`, the minimal shape `decide_open_pr_status` reads.
-    fn open_pr_with_ci(number: u32, head_sha: &str, state: Option<CiState>) -> TaskPr {
-        let now = OffsetDateTime::now_utc();
-        TaskPr {
-            id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
-            sequence: 1,
-            slug: "w2-231".to_string(),
-            branch: "feature".to_string(),
-            base_commit: "base".to_string(),
-            parent_pr_id: None,
-            publication: Some(PrPublication {
-                requested_at: now,
-                after_merge: AfterMerge::Review,
-                next_slug: None,
-                github: Some(GithubPr {
-                    number,
-                    url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
-                    head_sha: Some(head_sha.to_string()),
-                }),
-            }),
-            merge_commit: None,
-            abandoned_at: None,
-            github_observation: None,
-            ci_observation: state.map(|state| CiObservation {
-                head_sha: head_sha.to_string(),
-                state,
-                failing_checks: if state == CiState::Failing {
-                    vec![CiCheck {
-                        name: "build".to_string(),
-                        url: Some("https://ci/build".to_string()),
-                    }]
-                } else {
-                    Vec::new()
-                },
-                observed_at: now,
-            }),
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-
-    #[test]
-    fn decide_open_pr_status_blocks_on_degraded_github_observation() {
-        // A turn that ran blind to GitHub cannot be said to have repaired the
-        // head: block on the named capability with the PR still attached.
-        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
-        let (status, reason) =
-            decide_open_pr_status(&pr, Some("GitHub API rate limit exceeded"), false);
-        assert_eq!(status, TaskSessionStatus::Blocked);
-        assert!(reason.contains("github-observation"), "reason: {reason}");
-        assert!(reason.contains("rate limit"), "reason: {reason}");
-        assert!(reason.contains("#42 stays attached"), "reason: {reason}");
-    }
-
-    #[test]
-    fn decide_open_pr_status_blocks_on_no_change_failing_ci() {
-        // The body completed but the head did not advance and CI is still
-        // Failing — a no-change report, not a healthy PR observation.
-        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Failing));
-        let (status, reason) = decide_open_pr_status(&pr, None, false);
-        assert_eq!(status, TaskSessionStatus::Blocked);
-        assert!(reason.contains("did not repair"), "reason: {reason}");
-        assert!(reason.contains("#42 stays attached"), "reason: {reason}");
-    }
-
-    #[test]
-    fn decide_open_pr_status_waits_when_head_advanced_even_if_failing() {
-        // The body pushed (head advanced) — that is progress, so the Task waits
-        // for CI to resolve instead of blocking a genuine attempt.
-        let pr = open_pr_with_ci(42, "sha-2", Some(CiState::Failing));
-        let (status, reason) = decide_open_pr_status(&pr, None, true);
-        assert_eq!(status, TaskSessionStatus::Waiting);
-        assert!(reason.contains("open for review"), "reason: {reason}");
-    }
-
-    #[test]
-    fn decide_open_pr_status_waits_on_healthy_ci() {
-        let pending = open_pr_with_ci(42, "sha-1", Some(CiState::Pending));
-        assert_eq!(
-            decide_open_pr_status(&pending, None, false).0,
-            TaskSessionStatus::Waiting
-        );
-        let passing = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
-        assert_eq!(
-            decide_open_pr_status(&passing, None, false).0,
-            TaskSessionStatus::Waiting
-        );
-        // No required checks / gh unavailable reads as unknown-healthy, so an
-        // env without CI configured is never penalized with a block.
-        let unknown = open_pr_with_ci(42, "sha-1", None);
-        assert_eq!(
-            decide_open_pr_status(&unknown, None, false).0,
-            TaskSessionStatus::Waiting
-        );
-    }
-
-    #[test]
-    fn decide_open_pr_status_degraded_dominates_healthy_ci() {
-        // A degraded observation blocks even when the cached CI reading looks
-        // healthy: the reading may simply be stale.
-        let pr = open_pr_with_ci(42, "sha-1", Some(CiState::Passing));
-        let (status, reason) = decide_open_pr_status(&pr, Some("network unreachable"), true);
-        assert_eq!(status, TaskSessionStatus::Blocked);
-        assert!(reason.contains("github-observation"), "reason: {reason}");
     }
 }

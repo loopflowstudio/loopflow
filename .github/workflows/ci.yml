@@ -48,6 +48,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Materialize draft migrations for tests
+        run: |
+          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          uv run python scripts/canonicalize_migrations.py "$VERSION"
       - uses: Swatinem/rust-cache@v2
         with:
           key: test

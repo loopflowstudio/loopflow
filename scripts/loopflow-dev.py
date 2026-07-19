@@ -486,10 +486,7 @@ def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
 def cmd_screenshots() -> int:
     """Generate app screenshots."""
     script = REPO_ROOT / "scripts" / "generate_screenshots.py"
-    result = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=REPO_ROOT,
-    )
+    result = subprocess.run([sys.executable, str(script)], cwd=REPO_ROOT)
     return result.returncode
 
 

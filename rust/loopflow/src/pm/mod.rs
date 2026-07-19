@@ -125,7 +125,7 @@ pub struct PmItemUpdate {
 }
 
 /// A read of one issue's human-editable content plus its comments, taken to
-/// stream Linear edits into a Task Session. `revision` is the provider's
+/// stream Linear edits into a Task. `revision` is the provider's
 /// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
 /// compared — not trusted as identity — so out-of-order responses never move
 /// the cursor backward.

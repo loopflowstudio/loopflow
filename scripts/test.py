@@ -6,9 +6,9 @@ Runs only the CI suites the branch actually touches, so the iterative
 matrix every pass. Stdlib only.
 
     uv run python scripts/test.py            # run suites the branch touched
+    uv run python scripts/test.py --reuse-passing  # reuse this exact tree's pass
     uv run python scripts/test.py --all      # run every suite
     uv run python scripts/test.py --list     # print the plan, run nothing
-    uv run python scripts/test.py --history 30  # judge the budget window
 
 Suites mirror the jobs in .github/workflows/ci.yml. Slow suites (loopflow,
 e2e) stay off in changed-mode unless forced with --all or their own flag,
@@ -18,6 +18,7 @@ since they dominate wall-clock time.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -29,7 +30,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -46,7 +47,7 @@ XCODE_DERIVED_DATA = ".build/xcode-derived-data"
 # Failure artifacts (phase logs, xcresult bundles) land here so a worker can
 # repair the first red signal without reopening Xcode. Ignored (.lf/tmp/*).
 GATE_ARTIFACT_ROOT = REPO_ROOT / ".lf" / "tmp" / "gate"
-GATE_HISTORY_SCHEMA = 1
+GATE_EVIDENCE_SCHEMA = 2
 
 
 def _run_artifact_root() -> Path:
@@ -60,10 +61,9 @@ def _run_artifact_root() -> Path:
     return GATE_ARTIFACT_ROOT / f"run-{os.getpid()}"
 
 
-# Per-phase wall-clock budgets in seconds, keyed by Command.label. Generous
-# headroom over the measured real-run times in release/GATE_BUDGET.md: a
-# healthy phase never trips its budget, a hung one always does. No phase runs
-# unbounded — an unlisted label falls back to DEFAULT_BUDGET_S.
+# Per-phase wall-clock limits in seconds, keyed by Command.label. These kill
+# hangs; they are not performance targets. An unlisted label falls back to
+# DEFAULT_BUDGET_S.
 PHASE_BUDGETS: dict[str, int] = {
     "rustfmt": 120,
     "clippy": 900,
@@ -314,7 +314,7 @@ _UI_CAPABILITY_HELP = (
 def _ui_host_commands(_changed: list[str]) -> list[Command]:
     swift_dir = REPO_ROOT / "swift"
     # Land the result bundle beside this run's phase logs, under the pid-scoped
-    # artifact dir (release/GATE_BUDGET.md, release/UI_HOST_GATE.md). A fixed
+    # artifact dir (release/UI_HOST_GATE.md). A fixed
     # path in derived data collided across runs — xcodebuild exits 64 rather
     # than overwrite an existing bundle, so the second `--ui-host` run onward
     # died before launching a test. This path is fresh per invocation.
@@ -518,7 +518,7 @@ def print_plan(plans: list[Plan], changed: list[str]) -> None:
                 print(f"         $ {_fmt_cmd(cmd)}  (budget {_budget_for(cmd.label)}s)")
 
 
-# --- Durable history -----------------------------------------------------
+# --- Durable evidence ----------------------------------------------------
 
 
 @dataclass
@@ -548,7 +548,9 @@ class GateRun:
     kind: str
     branch: str
     head: str
-    task_session_id: Optional[str]
+    worktree: str
+    tree_fingerprint: Optional[str]
+    plan_fingerprint: str
     started_at: str
     finished_at: Optional[str]
     status: str
@@ -563,23 +565,20 @@ class GateRun:
 
     def as_record(self) -> dict[str, object]:
         record: dict[str, object] = {
-            "schema": GATE_HISTORY_SCHEMA,
+            "schema": GATE_EVIDENCE_SCHEMA,
             "run_id": self.run_id,
             "kind": self.kind,
             "branch": self.branch,
             "head": self.head,
+            "worktree": self.worktree,
+            "tree_fingerprint": self.tree_fingerprint,
+            "plan_fingerprint": self.plan_fingerprint,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "status": self.status,
             "phases": [phase.as_record() for phase in self.phases],
         }
-        if self.task_session_id:
-            record["task_session_id"] = self.task_session_id
         return record
-
-
-class _MeasurementFailure(RuntimeError):
-    pass
 
 
 def _utc_now() -> datetime:
@@ -588,10 +587,6 @@ def _utc_now() -> datetime:
 
 def _format_timestamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _parse_timestamp(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
 def _git_value(*args: str) -> str:
@@ -605,9 +600,92 @@ def _git_value(*args: str) -> str:
     return result.stdout.strip()
 
 
-def _gate_history_root() -> Path:
+def _gate_evidence_root() -> Path:
     common_dir = _git_value("rev-parse", "--path-format=absolute", "--git-common-dir")
     return Path(common_dir) / "loopflow" / "pre-land" / "runs"
+
+
+def _tree_fingerprint() -> str:
+    """Hash the tracked and untracked worktree content that tests read."""
+    digest = hashlib.sha256()
+    listed = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+    )
+    for raw_path in sorted(path for path in listed.stdout.split(b"\0") if path):
+        path = REPO_ROOT / os.fsdecode(raw_path)
+        digest.update(b"path\0")
+        digest.update(raw_path)
+        digest.update(b"\0")
+        if not path.exists() and not path.is_symlink():
+            digest.update(b"deleted\0")
+            continue
+        file_stat = path.lstat()
+        digest.update(str(file_stat.st_mode).encode())
+        digest.update(b"\0")
+        if path.is_symlink():
+            digest.update(os.fsencode(os.readlink(path)))
+        elif path.is_file():
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        elif path.is_dir():
+            submodule_head = subprocess.run(
+                ["git", "-C", str(path), "rev-parse", "HEAD"],
+                check=False,
+                capture_output=True,
+            )
+            digest.update(submodule_head.stdout)
+    return digest.hexdigest()
+
+
+def _plan_fingerprint(plans: list[Plan]) -> str:
+    selected = []
+    for plan in plans:
+        if not plan.run:
+            continue
+        selected.append(
+            {
+                "suite": plan.suite.name,
+                "commands": [
+                    {
+                        "label": cmd.label,
+                        "argv": cmd.argv,
+                        "cwd": str(cmd.cwd.relative_to(REPO_ROOT)),
+                    }
+                    for cmd in plan.commands
+                ],
+            }
+        )
+    payload = json.dumps(selected, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _find_reusable_run(tree_fingerprint: str, plan_fingerprint: str) -> Optional[Path]:
+    worktree = str(REPO_ROOT.resolve())
+    evidence_dir = _gate_evidence_root() / "changed"
+    for path in sorted(evidence_dir.glob("*.json"), reverse=True):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        phases = record.get("phases")
+        if (
+            record.get("schema") == GATE_EVIDENCE_SCHEMA
+            and record.get("status") == "passed"
+            and record.get("worktree") == worktree
+            and record.get("tree_fingerprint") == tree_fingerprint
+            and record.get("plan_fingerprint") == plan_fingerprint
+            and isinstance(phases, list)
+            and phases
+            and all(isinstance(phase, dict) and phase.get("status") == "passed" for phase in phases)
+        ):
+            return path
+    return None
 
 
 def _not_run_phase(suite: str, cmd: Command) -> PhaseOutcome:
@@ -621,7 +699,13 @@ def _not_run_phase(suite: str, cmd: Command) -> PhaseOutcome:
     )
 
 
-def _new_gate_run(kind: str, plans: list[Plan], now: Optional[datetime] = None) -> GateRun:
+def _new_gate_run(
+    kind: str,
+    plans: list[Plan],
+    tree_fingerprint: Optional[str],
+    plan_fingerprint: str,
+    now: Optional[datetime] = None,
+) -> GateRun:
     started = now or _utc_now()
     run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}-{secrets.token_hex(4)}"
     phases = [
@@ -632,7 +716,9 @@ def _new_gate_run(kind: str, plans: list[Plan], now: Optional[datetime] = None) 
         kind=kind,
         branch=_git_value("rev-parse", "--abbrev-ref", "HEAD"),
         head=_git_value("rev-parse", "HEAD"),
-        task_session_id=os.environ.get("LF_TASK_SESSION_ID"),
+        worktree=str(REPO_ROOT.resolve()),
+        tree_fingerprint=tree_fingerprint,
+        plan_fingerprint=plan_fingerprint,
         started_at=_format_timestamp(started),
         finished_at=None,
         status="running",
@@ -661,7 +747,6 @@ def _write_run_record(path: Path, record: dict[str, object]) -> None:
 class _GateRecorder:
     run: GateRun
     path: Path
-    required: bool
     enabled: bool = True
 
     def checkpoint(self) -> None:
@@ -671,250 +756,34 @@ class _GateRecorder:
             _write_run_record(self.path, self.run.as_record())
         except OSError as exc:
             self.enabled = False
-            label = "FAILED" if self.required else "WARNING"
-            message = f"MEASUREMENT {label}: cannot persist gate evidence at {self.path}: {exc}"
-            if self.required:
-                raise _MeasurementFailure(message) from exc
-            print(message, file=sys.stderr, flush=True)
+            print(
+                f"MEASUREMENT WARNING: cannot persist gate evidence at {self.path}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
-def _start_recorder(kind: str, plans: list[Plan]) -> Optional[_GateRecorder]:
+def _start_recorder(
+    kind: str,
+    plans: list[Plan],
+    tree_fingerprint: Optional[str],
+    plan_fingerprint: str,
+) -> Optional[_GateRecorder]:
     try:
-        run = _new_gate_run(kind, plans)
-        path = _gate_history_root() / kind / f"{run.run_id}.json"
+        run = _new_gate_run(kind, plans, tree_fingerprint, plan_fingerprint)
+        path = _gate_evidence_root() / kind / f"{run.run_id}.json"
     except (OSError, subprocess.SubprocessError) as exc:
-        label = "FAILED" if kind == "full" else "WARNING"
-        message = (
-            f"MEASUREMENT {label}: cannot resolve durable gate evidence under "
-            f"<git-common-dir>/loopflow/pre-land/runs/{kind}: {exc}"
+        print(
+            "MEASUREMENT WARNING: cannot resolve durable gate evidence under "
+            f"<git-common-dir>/loopflow/pre-land/runs/{kind}: {exc}",
+            file=sys.stderr,
+            flush=True,
         )
-        if kind == "full":
-            raise _MeasurementFailure(message) from exc
-        print(message, file=sys.stderr, flush=True)
         return None
 
-    recorder = _GateRecorder(run=run, path=path, required=kind == "full")
+    recorder = _GateRecorder(run=run, path=path)
     recorder.checkpoint()
     return recorder
-
-
-@dataclass
-class HistoryEntry:
-    path: Path
-    started_at: Optional[datetime]
-    branch: str
-    head: str
-    status: str
-    elapsed_s: float
-    budget_s: int
-    issues: list[str]
-    starts_clock: bool
-
-
-@dataclass
-class HistoryReport:
-    days: int
-    entries: list[HistoryEntry]
-    observation_days: float
-    verdict: str
-    reason: str
-
-
-def _filename_timestamp(path: Path) -> Optional[datetime]:
-    timestamp = path.stem.split("-", 1)[0]
-    try:
-        return datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
-
-
-def _history_entry(path: Path) -> HistoryEntry:
-    filename_started = _filename_timestamp(path)
-    try:
-        record = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return HistoryEntry(
-            path=path,
-            started_at=filename_started,
-            branch="?",
-            head="?",
-            status="unreadable",
-            elapsed_s=0.0,
-            budget_s=0,
-            issues=[f"unreadable record: {exc}"],
-            starts_clock=False,
-        )
-
-    issues: list[str] = []
-    if not isinstance(record, dict):
-        return HistoryEntry(
-            path=path,
-            started_at=filename_started,
-            branch="?",
-            head="?",
-            status="invalid",
-            elapsed_s=0.0,
-            budget_s=0,
-            issues=["record is not a JSON object"],
-            starts_clock=False,
-        )
-
-    schema_ok = record.get("schema") == GATE_HISTORY_SCHEMA
-    kind_ok = record.get("kind") == "full"
-    if not schema_ok:
-        issues.append(f"unsupported schema {record.get('schema')!r}")
-    if not kind_ok:
-        issues.append(f"kind is {record.get('kind')!r}, expected 'full'")
-
-    started_at = filename_started
-    raw_started = record.get("started_at")
-    if isinstance(raw_started, str):
-        try:
-            started_at = _parse_timestamp(raw_started)
-        except ValueError:
-            issues.append(f"invalid started_at {raw_started!r}")
-    else:
-        issues.append("missing started_at")
-
-    branch = record.get("branch") if isinstance(record.get("branch"), str) else "?"
-    head = record.get("head") if isinstance(record.get("head"), str) else "?"
-    status = record.get("status") if isinstance(record.get("status"), str) else "invalid"
-    if status == "running":
-        issues.append("incomplete measurement (status running)")
-    elif status not in {"passed", "failed"}:
-        issues.append(f"invalid run status {status!r}")
-
-    phases = record.get("phases")
-    elapsed_s = 0.0
-    budget_s = 0
-    seen: set[tuple[str, str]] = set()
-    phase_statuses: list[str] = []
-    if not isinstance(phases, list) or not phases:
-        issues.append("phase evidence is empty or invalid")
-    else:
-        for index, phase in enumerate(phases):
-            if not isinstance(phase, dict):
-                issues.append(f"phase {index + 1} is not an object")
-                continue
-            suite = phase.get("suite")
-            label = phase.get("phase")
-            phase_name = f"{suite}/{label}"
-            if not isinstance(suite, str) or not isinstance(label, str):
-                issues.append(f"phase {index + 1} has no valid suite/phase label")
-                continue
-            identity = (suite, label)
-            if identity in seen:
-                issues.append(f"duplicate phase {phase_name}")
-            seen.add(identity)
-
-            raw_budget = phase.get("budget_s")
-            raw_elapsed = phase.get("elapsed_s")
-            phase_status = phase.get("status")
-            over_budget = phase.get("over_budget")
-            if not isinstance(raw_budget, int) or raw_budget <= 0:
-                issues.append(f"{phase_name} has invalid budget")
-                continue
-            if not isinstance(raw_elapsed, (int, float)) or raw_elapsed < 0:
-                issues.append(f"{phase_name} has invalid elapsed time")
-                continue
-            if not isinstance(over_budget, bool):
-                issues.append(f"{phase_name} has invalid over_budget verdict")
-                continue
-            if phase_status not in {"passed", "failed", "timed_out", "missing_tool", "not_run"}:
-                issues.append(f"{phase_name} has invalid status {phase_status!r}")
-                continue
-
-            elapsed = float(raw_elapsed)
-            elapsed_s += elapsed
-            budget_s += raw_budget
-            phase_statuses.append(phase_status)
-            if phase_status in {"missing_tool", "not_run"}:
-                issues.append(f"incomplete phase {phase_name} ({phase_status})")
-            if phase_status == "timed_out" or over_budget or elapsed > raw_budget:
-                issues.append(f"OVER BUDGET {phase_name}: {elapsed:.1f}s / {raw_budget}s budget")
-
-    if status == "passed" and any(phase_status != "passed" for phase_status in phase_statuses):
-        issues.append("run is passed but one or more phases did not pass")
-    if status in {"passed", "failed"} and not isinstance(record.get("finished_at"), str):
-        issues.append("completed run is missing finished_at")
-
-    return HistoryEntry(
-        path=path,
-        started_at=started_at,
-        branch=branch,
-        head=head,
-        status=status,
-        elapsed_s=elapsed_s,
-        budget_s=budget_s,
-        issues=issues,
-        starts_clock=schema_ok and kind_ok and started_at is not None,
-    )
-
-
-def _history_report(days: int, now: Optional[datetime] = None) -> HistoryReport:
-    current = (now or _utc_now()).astimezone(timezone.utc)
-    history_dir = _gate_history_root() / "full"
-    if history_dir.exists() and not history_dir.is_dir():
-        raise NotADirectoryError(f"full gate history path is not a directory: {history_dir}")
-    paths = sorted(history_dir.glob("*.json"))
-    entries = [_history_entry(path) for path in paths]
-    entries.sort(key=lambda entry: entry.started_at or datetime.min.replace(tzinfo=timezone.utc))
-
-    starts = [entry.started_at for entry in entries if entry.starts_clock and entry.started_at]
-    oldest = min(starts) if starts else None
-    observation_days = max(0.0, (current - oldest).total_seconds() / 86400) if oldest else 0.0
-    cutoff = current - timedelta(days=days)
-    unknown_time = [entry for entry in entries if entry.started_at is None]
-    window = [
-        entry for entry in entries if entry.started_at is not None and entry.started_at >= cutoff
-    ]
-    gaps = unknown_time + [entry for entry in window if entry.issues]
-
-    if not entries:
-        verdict = "IN PROGRESS"
-        reason = "no full pre-land record exists; the observation clock has not started"
-    elif gaps:
-        verdict = "NOT HOLDING"
-        reason = f"{len(gaps)} full run(s) in the evidence boundary have gaps or overruns"
-    elif oldest is None:
-        verdict = "NOT HOLDING"
-        reason = "no readable schema-1 full run can establish the observation clock"
-    elif observation_days < days:
-        verdict = "IN PROGRESS"
-        reason = f"{observation_days:.1f} of {days} required days observed"
-    elif not window:
-        verdict = "NOT HOLDING"
-        reason = f"no full pre-land run exists in the trailing {days}-day window"
-    else:
-        verdict = "HOLDING"
-        reason = (
-            f"all {len(window)} full run(s) in the trailing {days} days are complete and in budget"
-        )
-
-    return HistoryReport(
-        days=days,
-        entries=entries,
-        observation_days=observation_days,
-        verdict=verdict,
-        reason=reason,
-    )
-
-
-def _print_history(report: HistoryReport) -> None:
-    print(f"Full pre-land history: {_gate_history_root() / 'full'}")
-    if not report.entries:
-        print("  (no records)")
-    for entry in report.entries:
-        timestamp = _format_timestamp(entry.started_at) if entry.started_at else "unknown-time"
-        head = entry.head[:8] if entry.head != "?" else "?"
-        print(
-            f"  {timestamp}  {entry.status.upper():<10} {entry.branch} {head}  "
-            f"{entry.elapsed_s:.1f}s / {entry.budget_s}s budget"
-        )
-        for issue in entry.issues:
-            print(f"    {entry.path.name}: {issue}")
-    print(f"Observation window: {report.observation_days:.1f} / {report.days} days")
-    print(f"Verdict: {report.verdict} — {report.reason}")
 
 
 # --- Running -------------------------------------------------------------
@@ -1084,7 +953,11 @@ def _run_suite(
     return SuiteOutcome(True, time.monotonic() - started, phases)
 
 
-def run_plans(plans: list[Plan], kind: str = "changed") -> int:
+def run_plans(
+    plans: list[Plan],
+    kind: str = "changed",
+    reuse_passing: bool = False,
+) -> int:
     artifact_root = _run_artifact_root()
     total_budget = sum(_plan_budget(p) for p in plans if p.run)
     running = [p.suite.name for p in plans if p.run]
@@ -1093,10 +966,26 @@ def run_plans(plans: list[Plan], kind: str = "changed") -> int:
         print(f"Artifacts on failure: {artifact_root}")
 
     try:
-        recorder = _start_recorder(kind, plans)
-    except _MeasurementFailure as exc:
-        print(str(exc), file=sys.stderr, flush=True)
-        return 1
+        tree_fingerprint = _tree_fingerprint()
+    except (OSError, subprocess.SubprocessError) as exc:
+        tree_fingerprint = None
+        print(f"MEASUREMENT WARNING: cannot fingerprint the working tree: {exc}", file=sys.stderr)
+    plan_fingerprint = _plan_fingerprint(plans)
+
+    if reuse_passing and kind == "changed" and running and tree_fingerprint is not None:
+        try:
+            reusable = _find_reusable_run(tree_fingerprint, plan_fingerprint)
+        except (OSError, subprocess.SubprocessError) as exc:
+            reusable = None
+            print(f"MEASUREMENT WARNING: cannot read passing gate evidence: {exc}", file=sys.stderr)
+        if reusable is not None:
+            print(
+                "Result: REUSED passing affected-suite evidence for the identical "
+                f"tree and plan ({reusable.name})"
+            )
+            return 0
+
+    recorder = _start_recorder(kind, plans, tree_fingerprint, plan_fingerprint)
 
     def _checkpoint_phase(outcome: PhaseOutcome) -> None:
         if recorder is None:
@@ -1105,23 +994,15 @@ def run_plans(plans: list[Plan], kind: str = "changed") -> int:
         recorder.checkpoint()
 
     outcomes: dict[str, SuiteOutcome] = {}
-    try:
-        for plan in plans:
-            if plan.run:
-                outcomes[plan.suite.name] = _run_suite(plan, artifact_root, _checkpoint_phase)
-    except _MeasurementFailure as exc:
-        print(str(exc), file=sys.stderr, flush=True)
-        return 1
+    for plan in plans:
+        if plan.run:
+            outcomes[plan.suite.name] = _run_suite(plan, artifact_root, _checkpoint_phase)
 
     failed = [(name, outcome) for name, outcome in outcomes.items() if not outcome.ok]
-    measurement_failure: Optional[str] = None
     if recorder is not None:
         recorder.run.status = "failed" if failed else "passed"
         recorder.run.finished_at = _format_timestamp(_utc_now())
-        try:
-            recorder.checkpoint()
-        except _MeasurementFailure as exc:
-            measurement_failure = str(exc)
+        recorder.checkpoint()
 
     print("\n" + "=" * 72)
     print(" SUMMARY")
@@ -1156,12 +1037,10 @@ def run_plans(plans: list[Plan], kind: str = "changed") -> int:
     if not outcomes:
         print("No suites ran (nothing changed). Use --all to force the full matrix.")
         return 0
-    if failed or measurement_failure:
+    if failed:
         for name, outcome in failed:
             print(f"[{name}] {outcome.failure}")
-        if measurement_failure:
-            print(measurement_failure, file=sys.stderr)
-        names = ", ".join(name for name, _ in failed) or "measurement"
+        names = ", ".join(name for name, _ in failed)
         print(
             f"\nResult: FAIL ({len(passed)} passed, {len(failed)} failed: {names}) "
             f"in {total_elapsed:.0f}s / {total_budget}s budget"
@@ -1181,10 +1060,9 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--all", action="store_true", help="run every suite, slow ones included")
     parser.add_argument(
-        "--history",
-        type=int,
-        metavar="DAYS",
-        help="read durable full-gate budget evidence for the trailing DAYS",
+        "--reuse-passing",
+        action="store_true",
+        help="reuse a passing changed-mode run for the identical tree and plan",
     )
     parser.add_argument(
         "--base",
@@ -1205,26 +1083,14 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         )
     args = parser.parse_args(argv)
     forced = {suite.name for suite in SUITES if getattr(args, suite.name.replace("-", "_"))}
-    if args.history is not None:
-        if args.history <= 0:
-            parser.error("--history DAYS must be greater than zero")
-        if args.all or args.base or args.list_only or forced:
-            parser.error("--history cannot be combined with run-selection flags")
+    if args.reuse_passing and (args.all or "ui-host" in forced):
+        parser.error("--reuse-passing cannot be combined with --all or --ui-host")
     return args
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
     forced = {suite.name for suite in SUITES if getattr(args, suite.name.replace("-", "_"))}
-
-    if args.history is not None:
-        try:
-            report = _history_report(args.history)
-            _print_history(report)
-        except (OSError, subprocess.SubprocessError) as exc:
-            print(f"HISTORY FAILED: {exc}", file=sys.stderr)
-            return 1
-        return 0
 
     base = _resolve_base(args.base)
     changed = changed_files(base)
@@ -1241,7 +1107,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         kind = "required_host"
     else:
         kind = "changed"
-    return run_plans(plans, kind=kind)
+    return run_plans(plans, kind=kind, reuse_passing=args.reuse_passing)
 
 
 if __name__ == "__main__":

@@ -208,7 +208,7 @@ include!(concat!(env!("OUT_DIR"), "/builtin_ops_prompts.rs"));
 mod tests {
     use super::*;
 
-    const WAVE_AUTHORING_DOC: &str = include_str!("../../../../docs/wave-authoring.md");
+    const WAVES_DOC: &str = include_str!("../../../../docs/waves.md");
 
     #[test]
     fn wave_model_is_embedded_in_prompts_and_docs() {
@@ -226,16 +226,16 @@ mod tests {
         assert!(!design.contains("1-*.md"));
         assert!(scan_waves.contains("lf pm show"));
         assert!(split_wave.contains("lf pm"));
-        assert!(WAVE_AUTHORING_DOC.contains("GOAL.md"));
-        assert!(WAVE_AUTHORING_DOC.contains("Linear"));
-        assert!(!WAVE_AUTHORING_DOC.contains("1-fix-crash-loop.md"));
+        assert!(WAVES_DOC.contains("GOAL.md"));
+        assert!(WAVES_DOC.contains("Linear"));
+        assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
 
         // The ingest skill is gone; workers are handed their task at dispatch.
         assert!(get_builtin_skill("ingest").is_none());
     }
 
     #[test]
-    fn interactive_skills_support_human_and_parent_reviewers() {
+    fn interactive_skills_support_human_and_parent_feedback() {
         for name in [
             "code-review",
             "demo",
@@ -297,7 +297,7 @@ mod tests {
         assert!(!project.contains("lf loop"));
 
         let task = get_builtin_skill("task_pursue").expect("task pursue");
-        assert!(task.contains("second Task Session"));
+        assert!(task.contains("second Task"));
         assert!(task.contains("lf pr land"));
         assert!(task.contains("lf task complete"));
         assert!(!task.contains("lf pm task done"));
@@ -316,6 +316,34 @@ mod tests {
                 assert!(flow.contains(&format!("- {step}")));
             }
             assert!(!flow.contains("loop:"));
+        }
+    }
+
+    #[test]
+    fn builtin_skills_do_not_name_retired_child_controls() {
+        let retired = [
+            "lf handoff",
+            "lf reviews",
+            "lf task follow-up",
+            "lf task receipt",
+            "lf task acknowledge",
+            "lf task decide",
+            "lf task request-decision",
+            "lf task review",
+            "lf project follow-up",
+            "lf project receipt",
+            "lf project acknowledge",
+            "lf project decide",
+            "lf project request-decision",
+        ];
+
+        for (name, skill) in BUILTIN_STEPS.iter() {
+            for command in retired {
+                assert!(
+                    !skill.contains(command),
+                    "{name} still instructs agents to run retired `{command}`"
+                );
+            }
         }
     }
 
@@ -362,16 +390,11 @@ mod tests {
     #[test]
     fn build_is_one_bounded_pass_without_delivery() {
         let flow = get_builtin_flow("build").expect("build flow");
-        for step in [
-            "kickoff",
-            "review-design",
-            "implement",
-            "compress",
-            "lint",
-            "gate",
-        ] {
+        for step in ["kickoff", "implement", "compress", "lint", "gate"] {
             assert!(flow.contains(&format!("- {step}")));
         }
+        assert!(flow.contains("name: review-design"));
+        assert!(flow.contains("feedback: true"));
         assert!(!flow.contains("loop:"));
         assert!(!flow.contains("deploy"));
         assert!(!flow.contains("pr land"));

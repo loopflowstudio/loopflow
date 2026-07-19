@@ -13,9 +13,13 @@
 mod support;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::ops::{create_or_update_pr, land, submit, LandOptions, NullProgress, PrOptions};
+use loopflow::ops::{
+    create_or_update_pr, land, rebase_with_recovery, submit, LandOptions, NullProgress, PrOptions,
+    RebaseOptions,
+};
 use loopflow::task::{AfterMerge, GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
@@ -224,9 +228,14 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
         !range_commits.contains("upstream advance"),
         "the merged upstream commit must be excluded from the range, got:\n{range_commits}"
     );
+    assert_eq!(
+        range_commits.lines().count(),
+        1,
+        "final range is one commit"
+    );
     assert!(
-        range_commits.contains("serial PR commit"),
-        "the Task's own commit must be in the range, got:\n{range_commits}"
+        range_commits.contains("lf land: collapse authored history"),
+        "the Task's authored tree must be represented by the final commit, got:\n{range_commits}"
     );
     let files = git_out(&repo, &["diff", "--name-only", &range]);
     assert!(
@@ -235,13 +244,76 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
     );
 }
 
-/// `lf pr publish` / `lf pr open` rebases behind-base branches onto origin, which
-/// advances the fork point. Without healing, the recorded `base_commit` goes
-/// stale and `lf task changes` (base..HEAD) balloons to include every commit the
-/// rebase pulled in — while GitHub's range stays clean. This regression proves
-/// the publish path heals the base so the two views stay aligned.
 #[test]
-fn publish_heals_the_recorded_base_after_rebasing_onto_origin() {
+fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let stale_base = repo.head_sha();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+
+    let branch = "jack/rejected-rebase-push";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.push_new_branch(branch);
+
+    repo.checkout("main");
+    repo.create_file("upstream.txt", "landed upstream\n");
+    repo.stage_all();
+    repo.commit("upstream advance");
+    repo.push();
+    let target = repo.head_sha();
+    repo.checkout(branch);
+
+    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nwhile read old new ref; do\n  if [ \"$ref\" = \"refs/heads/{branch}\" ]; then exit 1; fi\ndone\nexit 0\n"
+        ),
+    )
+    .expect("write rejecting hook");
+    let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
+
+    let error = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: true,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("the remote must reject the rewritten branch");
+    assert!(
+        error.to_string().contains("git push --force-with-lease"),
+        "expected the push failure, got: {error}"
+    );
+    assert!(
+        loopflow::engine::git::is_ancestor(repo.path(), &target, &repo.head_sha()).unwrap(),
+        "the local rebase must complete before the rejected push"
+    );
+
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.session.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(
+        pr.base_commit, stale_base,
+        "a failed remote postcondition must not advance durable Task metadata"
+    );
+}
+
+/// Publication is not an integration boundary. A branch behind origin is
+/// pushed unchanged, its recorded fork remains authoritative, and a later
+/// explicit rebase owns the rewrite.
+#[test]
+fn publish_keeps_a_behind_branch_and_recorded_base_unchanged() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new(); // origin/main = P
     let stale_base = repo.head_sha();
@@ -261,14 +333,14 @@ fn publish_heals_the_recorded_base_after_rebasing_onto_origin() {
     repo.commit("task commit");
     repo.push_new_branch(branch);
 
-    // origin/main advances past the recorded base, so publish must rebase.
+    // origin/main advances past the recorded base. Publication must not rebase.
     repo.checkout("main");
     repo.create_file("upstream.txt", "landed upstream\n");
     repo.stage_all();
     repo.commit("upstream advance");
     repo.push();
-    let advanced = repo.head_sha();
     repo.checkout(branch);
+    let before_publish = repo.head_sha();
 
     let task = register_task(home.path(), repo.path(), branch, &stale_base);
 
@@ -281,19 +353,21 @@ fn publish_heals_the_recorded_base_after_rebasing_onto_origin() {
         },
         &NullProgress,
     )
-    .expect("publish rebases and heals");
+    .expect("publish without integration");
 
-    // The rebase advanced the fork point; the recorded base healed to match, so
-    // lf task changes (base..HEAD) equals GitHub's range and excludes the pulled
-    // upstream commit.
+    assert_eq!(
+        repo.head_sha(),
+        before_publish,
+        "a clean publication must not rewrite local HEAD"
+    );
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.session.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(
-        pr.base_commit, advanced,
-        "publish must heal the stale base to the rebased fork point"
+        pr.base_commit, stale_base,
+        "publication must not advance the recorded integration base"
     );
     let files = git_out(
         &repo,
@@ -301,7 +375,13 @@ fn publish_heals_the_recorded_base_after_rebasing_onto_origin() {
     );
     assert!(
         files.contains("task.txt") && !files.contains("upstream.txt"),
-        "the healed range must show only this Task's work, got:\n{files}"
+        "the original authored range must remain intact, got:\n{files}"
+    );
+    assert!(
+        !std::path::Path::new(&git_out(&repo, &["rev-parse", "--absolute-git-dir"]))
+            .join("loopflow/rebase-owner.json")
+            .exists(),
+        "publication must not create rebase ownership state"
     );
 }
 
@@ -597,16 +677,26 @@ fn serial_rotation_heals_stale_base_and_lands_the_continuation() {
         "recorded base must equal GitHub's range fork point"
     );
 
-    // The Task's own commit is in the range; the upstream commit is excluded.
+    // The Task's authored tree is one final commit; upstream stays excluded.
     let range = format!("{}..HEAD", pr.base_commit);
     let range_commits = git_out(&repo, &["log", "--oneline", "--no-decorate", &range]);
     assert!(
         !range_commits.contains("upstream advance"),
         "the merged upstream commit must be excluded, got:\n{range_commits}"
     );
+    assert_eq!(
+        range_commits.lines().count(),
+        1,
+        "final range is one commit"
+    );
     assert!(
-        range_commits.contains("serial rotation commit"),
-        "the Task's own commit must be in the range, got:\n{range_commits}"
+        range_commits.contains("lf land: collapse authored history"),
+        "the Task's authored tree must be represented by the final commit, got:\n{range_commits}"
+    );
+    let files = git_out(&repo, &["diff", "--name-only", &range]);
+    assert!(
+        files.contains("task.txt") && !files.contains("upstream.txt"),
+        "the collapsed range must preserve only Task work, got:\n{files}"
     );
 }
 

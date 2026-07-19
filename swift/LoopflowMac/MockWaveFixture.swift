@@ -5,7 +5,7 @@ import Loopflow
 /// Fixture data for the `mock-waves` UI-test mode (`AppTestMode.mockWaves`).
 ///
 /// It bypasses the `lf` registry entirely so the populated Wave surface renders
-/// deterministically offline — the stable list's green/red/black lenses and the
+/// deterministically offline — the stable list's green/red/blue/black lenses and the
 /// selected Wave's full detail hierarchy (objective, Projects, KRs, Task rows
 /// with verbatim attention lenses). That makes the "selected" screenshot state
 /// real and, crucially, lets the AttributeGraph cycle capture drive the
@@ -55,13 +55,15 @@ enum MockWaveFixture {
     /// (parent set) to exercise future-ancestry row indentation.
     static var waves: [Wave] {
         [
-            Wave(id: "wave-1", name: "infrastructure", repo: repoPath, status: .running,
+            Wave(id: "wave-1", name: "infrastructure", repo: repoPath,
+                 status: .running(runID: "run_infrastructure"),
                  live: true, activeTasks: 1, activeProjects: 1),
-            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .idle,
+            Wave(id: "wave-2", name: "intelligence", repo: repoPath, status: .ready,
                  live: false, activeTasks: 2, activeProjects: 1),
-            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .idle,
+            Wave(id: "wave-3", name: "feedback", repo: repoPath, status: .ready,
                  live: false, activeTasks: 0, activeProjects: 0),
-            Wave(id: "wave-4", name: "cadenza", repo: repoPath, status: .running,
+            Wave(id: "wave-4", name: "cadenza", repo: repoPath,
+                 status: .running(runID: "run_cadenza"),
                  live: true, activeTasks: 0, activeProjects: 0, parentWaveId: "wave-1"),
         ]
     }
@@ -123,8 +125,7 @@ enum MockWaveFixture {
       "wave": {
         "id": "wave-1",
         "name": "infrastructure",
-        "status": "running",
-        "paused": false,
+        "status": {"running":{"run_id":"run_00000000000000000000000000000004"}},
         "goal": "Make releases boring.",
         "repo": "/src/loopflow",
         "active_tasks": 1,
@@ -134,9 +135,10 @@ enum MockWaveFixture {
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+          "id": "home_00000000000000000000000000000001",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "2026-07-01T00:00:00Z",
+          "observed_at": "2026-07-17T00:00:00Z"
         }
       },
       "loop_state": "idle",
@@ -153,15 +155,15 @@ enum MockWaveFixture {
             ]
           },
           "runtime": {
-            "session_id": "ps_11111111111111111111111111111111",
-            "status": "waiting",
+            "work_id": "ps_11111111111111111111111111111111",
+            "status": "ready",
             "reason": "supervised Tasks are active",
-            "status_at": "2026-07-13T18:00:00Z",
+            "updated_at": "2026-07-13T18:00:00Z",
             "iteration": 2,
             "pending_observations": 0,
             "provider": "codex",
             "process_alive": false,
-            "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
+            "observation": {"category": "needs_input", "reason": "supervised Tasks are active", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iteration 2"}
           },
           "directive": {
             "version": 1,
@@ -192,14 +194,14 @@ enum MockWaveFixture {
                 }
               },
               "runtime": {
-                "session_id": "ts_22222222222222222222222222222222",
-                "project_session_id": "ps_11111111111111111111111111111111",
-                "status": "waiting",
+                "work_id": "ts_22222222222222222222222222222222",
+                "project_id": "ps_11111111111111111111111111111111",
+                "status": "ready",
                 "reason": "waiting for review",
-                "status_at": "2026-07-13T19:00:00Z",
+                "updated_at": "2026-07-13T19:00:00Z",
                 "provider": "codex",
                 "process_alive": false,
-                "observation": {"category": "needs_input", "reason": "waiting for review", "owner": "human", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
+                "observation": {"category": "needs_input", "reason": "waiting for review", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
               },
               "directive": {
                 "version": 2,
@@ -216,9 +218,9 @@ enum MockWaveFixture {
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": 7200,
                 "next_owner": "review",
-                "actions": {"recommended":"review","actions":[{"action":"recover","available":false,"reason":"body is not dead; PR is open for review"},{"action":"resume","available":false,"reason":"awaiting review; resume after review to address feedback"},{"action":"review","available":true,"reason":"checks passed; awaiting review"},{"action":"start_next_pr","available":false,"reason":"PR is open, not merged"},{"action":"complete","available":false,"reason":"PR is open, not merged"},{"action":"no_action","available":false,"reason":"action available: review the PR"}]},
+                "actions":{"recommended":"review","reason":"checks passed; awaiting review"},
                 "pm_completed": false,
-                "session_status": "waiting",
+                "work_status": "ready",
                 "process": {"state": "not_expected", "alive": null, "reason": null},
                 "local_progress": {"state": "observed", "unsettled": true, "dirty": false, "authored_commits": true, "recovery_required": false, "reason": null},
                 "active_pr_phase": "open"
@@ -268,9 +270,9 @@ enum MockWaveFixture {
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": null,
                 "next_owner": "project",
-                "actions": {"recommended":null,"actions":[{"action":"recover","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"resume","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"review","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"start_next_pr","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"complete","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"no_action","available":false,"reason":"no Task Session; start one with `lf task run`"}]},
+                "actions":{"recommended":null,"reason":"Task is ready to start"},
                 "pm_completed": false,
-                "session_status": null,
+                "work_status": null,
                 "process": {"state": "not_applicable", "alive": null, "reason": null},
                 "local_progress": {"state": "not_applicable", "unsettled": false, "dirty": null, "authored_commits": null, "recovery_required": null, "reason": null},
                 "active_pr_phase": null
@@ -333,9 +335,10 @@ enum MockWaveFixture {
       },
       "home_runtime": {
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {"kind": "ssh", "host": "mini-heart", "port": null}
+          "id": "home_00000000000000000000000000000001",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "2026-07-01T00:00:00Z",
+          "observed_at": "2026-07-17T00:00:00Z"
         },
         "state": "running",
         "reason": "resident is serving on the Home",

@@ -1,14 +1,16 @@
-//! `lf ssh <host> -- <cmd...>` — run a command on a remote home carrying the
-//! caller's *local* credentials, resolved per invocation.
+//! `lf ssh <HomeId|host> -- <cmd...>` — run a command on a remote machine.
 //!
-//! The "bring your auth with you" model: credentials are resolved on this
-//! machine, forwarded into the remote process environment as a stdin preamble
-//! (never in argv, `ps`, or logs), and are NOT persisted on the remote — they
-//! die with the process. The remote host stays a stateless compute surface.
-//! Detached work is rejected when an account bundle is forwarded because it
-//! would outlive that credential lease.
+//! Foreground commands bring narrowly resolved local credentials. Managed
+//! Claude/Codex accounts stay behind a foreground Unix-socket broker; the
+//! remote receives only an opaque lease handle and a provider process receives
+//! only its selected token. Detached work is rejected because it would outlive
+//! that credential lease.
 //!
-//! Forwarded bundle: GitHub (`gh`), Claude/Codex agent OAuth, and — the
+//! A `HomeId` target resolves through the locally observed route and makes the
+//! remote process prove that it is the addressed Home before dispatch.
+//! `--remote-native` is the durable lifecycle mode: it forwards no credentials.
+//!
+//! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
 //! store rather than the environment. The remote `resolve_pm_token` reads
 //! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf pm` works.
@@ -27,29 +29,89 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
 
+use crate::durable::HomeId;
 use crate::pm::PmProviderKind;
-use crate::provider_account::{
-    encode_forwarded_account_bundle, local_forwarded_account_bundle, ForwardedAccountBundle,
-    FORWARDED_ACCOUNT_BUNDLE_ENV, FORWARDED_ACCOUNT_STORE_ENV, PROVIDER_ACCOUNT_ENV,
+use crate::provider_account::lease::{
+    self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
 };
 use crate::provider_auth::{extract_claude_token, extract_codex_access_token};
+
+pub const EXPECTED_HOME_ID_ENV: &str = "LF_EXPECTED_HOME_ID";
 
 /// Default repository path (relative to `$HOME`) the remote command runs in.
 pub const DEFAULT_REPO: &str = "src/loopflow";
 
 /// The local credential bundle forwarded to the remote. Absent credentials are
 /// simply not exported — the remote falls back to whatever it can resolve.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Credentials {
-    pub gh_token: Option<String>,
-    pub claude_token: Option<String>,
-    pub codex_token: Option<String>,
-    pub account_bundle: Option<ForwardedAccountBundle>,
-    pub pm_token: Option<String>,
+#[derive(Default)]
+struct Credentials {
+    gh_token: Option<String>,
+    provider_authority: ProviderAuthority,
+    pm_token: Option<String>,
     /// PM provider the token belongs to (e.g. `linear`).
-    pub pm_provider: Option<String>,
+    pm_provider: Option<String>,
     /// Doppler-backed secrets resolved locally, forwarded as `export NAME=value`.
-    pub secrets: Vec<(String, String)>,
+    secrets: Vec<(String, String)>,
+}
+
+enum ProviderAuthority {
+    Ambient {
+        claude_token: Option<String>,
+        codex_token: Option<String>,
+    },
+    Lease(PreparedAccountLease),
+}
+
+impl Default for ProviderAuthority {
+    fn default() -> Self {
+        Self::Ambient {
+            claude_token: None,
+            codex_token: None,
+        }
+    }
+}
+
+impl Credentials {
+    fn take_account_lease(&mut self) -> Option<PreparedAccountLease> {
+        match std::mem::take(&mut self.provider_authority) {
+            ProviderAuthority::Lease(lease) => Some(lease),
+            ambient @ ProviderAuthority::Ambient { .. } => {
+                self.provider_authority = ambient;
+                None
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let provider_authority = match &self.provider_authority {
+            ProviderAuthority::Ambient {
+                claude_token,
+                codex_token,
+            } => format!(
+                "ambient(claude={}, codex={})",
+                claude_token.is_some(),
+                codex_token.is_some()
+            ),
+            ProviderAuthority::Lease(_) => "lease".to_string(),
+        };
+        formatter
+            .debug_struct("Credentials")
+            .field("gh_token", &self.gh_token.is_some())
+            .field("provider_authority", &provider_authority)
+            .field("pm_token", &self.pm_token.is_some())
+            .field("pm_provider", &self.pm_provider)
+            .field(
+                "secrets",
+                &self
+                    .secrets
+                    .iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 /// Run `cmd` on `host` in `$HOME/<repo>` with the local credential bundle
@@ -63,18 +125,121 @@ pub struct Credentials {
 /// the forwarded `GH_TOKEN` over HTTPS, so agent forwarding is dead weight that
 /// would hand the caller's whole SSH identity to the remote.
 pub fn run(
-    dest: &str,
+    target: &str,
     repo: Option<&str>,
     secret_names: &[String],
     forward_agent: bool,
+    remote_native: bool,
+    selection: &AccountSelection,
     cmd: &[String],
 ) -> anyhow::Result<()> {
     if cmd.is_empty() {
         return Err(anyhow!(
-            "lf ssh needs a command after `--`, e.g. `lf ssh {dest} -- lf pr open`"
+            "lf ssh needs a command after `--`, e.g. `lf ssh {target} -- lf pr open`"
         ));
     }
-    run_with_env(dest, None, repo, secret_names, forward_agent, cmd, &[])
+    if remote_native && !secret_names.is_empty() {
+        return Err(anyhow!(
+            "--remote-native cannot forward --secret values; install authority on the remote Home"
+        ));
+    }
+    let target = resolve_target(target)?;
+    let expected = target.home_id.as_ref().map(HomeId::as_str);
+    let extra_env = expected
+        .map(|home_id| vec![(EXPECTED_HOME_ID_ENV, home_id)])
+        .unwrap_or_default();
+    if remote_native {
+        return run_without_credentials(
+            &target.dest,
+            target.port,
+            repo,
+            forward_agent,
+            cmd,
+            &extra_env,
+        );
+    }
+    run_with_env(
+        &target.dest,
+        target.port,
+        repo,
+        secret_names,
+        forward_agent,
+        selection,
+        cmd,
+        &extra_env,
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SshTarget {
+    dest: String,
+    port: Option<u16>,
+    home_id: Option<HomeId>,
+}
+
+fn resolve_target(target: &str) -> anyhow::Result<SshTarget> {
+    let Ok(home_id) = HomeId::parse(target) else {
+        return Ok(SshTarget {
+            dest: target.to_string(),
+            port: None,
+            home_id: None,
+        });
+    };
+    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    let home = runtime
+        .block_on(async {
+            let store = crate::store::open_existing_store().await?;
+            store.home_by_id(&home_id).await.ok().flatten()
+        })
+        .ok_or_else(|| anyhow!("Home {home_id} was not found in the local store"))?;
+    let route = crate::engine::wave_home::HomeRoute::parse(&home.route).ok_or_else(|| {
+        anyhow!(
+            "Home {home_id} route {:?} is not a remote SSH route",
+            home.route
+        )
+    })?;
+    Ok(SshTarget {
+        dest: route
+            .ssh_destination()
+            .ok_or_else(|| anyhow!("Home {home_id} is local; lf ssh needs a remote Home"))?,
+        port: route.ssh_port(),
+        home_id: Some(home_id),
+    })
+}
+
+fn run_without_credentials(
+    dest: &str,
+    port: Option<u16>,
+    repo: Option<&str>,
+    forward_agent: bool,
+    cmd: &[String],
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
+    let repo = repo.unwrap_or(DEFAULT_REPO);
+    let preamble = build_preamble(&Credentials::default(), None, dest, repo, cmd, extra_env);
+    match run_ssh(dest, port, forward_agent, None, &preamble)? {
+        SshOutcome::Success => Ok(()),
+        SshOutcome::CommandFailure(code) => std::process::exit(code),
+        SshOutcome::ConnectionFailure => unreachable!("transport failures return errors"),
+    }
+}
+
+pub fn capture_remote_native(
+    home_id: &HomeId,
+    repo: &str,
+    cmd: &[String],
+) -> Result<String, SshCaptureError> {
+    let target = resolve_target(home_id.as_str())
+        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
+    let preamble = build_preamble(
+        &Credentials::default(),
+        None,
+        &target.dest,
+        repo,
+        cmd,
+        &[(EXPECTED_HOME_ID_ENV, home_id.as_str())],
+    );
+    run_ssh_capture(&target.dest, target.port, None, &preamble)
 }
 
 /// Run a Wave-home-routed `lf` command on `dest` (an `owner@host` destination)
@@ -83,9 +248,11 @@ pub fn run(
 /// break in the forward loop. Reuses the same credential-forwarding preamble as
 /// `lf ssh`; no new transport or secret path.
 pub fn run_routed(
+    home_id: &HomeId,
     dest: &str,
     port: Option<u16>,
     repo: Option<&str>,
+    selection: &AccountSelection,
     cmd: &[String],
 ) -> anyhow::Result<()> {
     run_with_env(
@@ -94,37 +261,13 @@ pub fn run_routed(
         repo,
         &[],
         false,
+        selection,
         cmd,
-        &[(crate::engine::wave_home::HOME_ROUTED_ENV, "1")],
+        &[
+            (crate::engine::wave_home::HOME_ROUTED_ENV, "1"),
+            (EXPECTED_HOME_ID_ENV, home_id.as_str()),
+        ],
     )
-}
-
-/// Run a routed `lf` command on `dest`/`port` and capture its stdout, used by
-/// the Home probe to read a remote `lf status --json` over the same SSH and
-/// credential machinery. On a transport failure returns [`SshCaptureError`] so
-/// the caller can classify unreachable distinctly from a command that ran but
-/// answered unexpectedly.
-pub fn capture_routed(
-    dest: &str,
-    port: Option<u16>,
-    cmd: &[String],
-) -> Result<String, SshCaptureError> {
-    let repo = DEFAULT_REPO;
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let credentials = runtime
-        .block_on(resolve_credentials(&[]))
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    reject_detached_account_forwarding(credentials.account_bundle.is_some(), cmd)
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let preamble = build_preamble(
-        &credentials,
-        dest,
-        repo,
-        cmd,
-        &[(crate::engine::wave_home::HOME_ROUTED_ENV, "1")],
-    );
-    run_ssh_capture(dest, port, &preamble)
 }
 
 /// Why a captured SSH command did not yield usable stdout.
@@ -138,30 +281,106 @@ pub enum SshCaptureError {
     Local(String),
 }
 
+impl std::fmt::Display for SshCaptureError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreachable(reason) | Self::Local(reason) => formatter.write_str(reason),
+            Self::Command { code, stderr } if stderr.is_empty() => {
+                write!(formatter, "remote command exited with status {code}")
+            }
+            Self::Command { code, stderr } => {
+                write!(
+                    formatter,
+                    "remote command exited with status {code}: {stderr}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SshCaptureError {}
+
+#[allow(clippy::too_many_arguments)]
 fn run_with_env(
     dest: &str,
     port: Option<u16>,
     repo: Option<&str>,
     secret_names: &[String],
     forward_agent: bool,
+    selection: &AccountSelection,
     cmd: &[String],
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
+    if lease::account_lease_active() {
+        return Err(anyhow!(
+            "an inherited account lease cannot be re-forwarded over SSH; put `lf ssh` on the outer account-selected invocation"
+        ));
+    }
     let repo = repo.unwrap_or(DEFAULT_REPO);
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let credentials = runtime.block_on(resolve_credentials(secret_names))?;
-    reject_detached_account_forwarding(credentials.account_bundle.is_some(), cmd)?;
-    let preamble = build_preamble(&credentials, dest, repo, cmd, extra_env);
-    run_ssh(dest, port, forward_agent, &preamble)
+    let mut credentials = runtime.block_on(resolve_credentials(secret_names, selection))?;
+    if let ProviderAuthority::Lease(prepared) = &credentials.provider_authority {
+        println!("Account lease: {}", format_account_plan(&prepared.lease));
+    }
+    let account_lease = credentials.take_account_lease();
+    reject_detached_account_forwarding(account_lease.is_some(), cmd)?;
+    let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
+    let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
+    let preamble = build_preamble(
+        &credentials,
+        remote_handle.as_ref(),
+        dest,
+        repo,
+        cmd,
+        extra_env,
+    );
+    let outcome = run_ssh(dest, port, forward_agent, broker.as_ref(), &preamble)?;
+    // `process::exit` skips destructors. Close the broker and remove its local
+    // socket before preserving a nonzero remote command's exact exit code.
+    drop(broker);
+    match outcome {
+        SshOutcome::Success => Ok(()),
+        SshOutcome::CommandFailure(code) => std::process::exit(code),
+        SshOutcome::ConnectionFailure => {
+            unreachable!("run_ssh returns transport failures as errors")
+        }
+    }
+}
+
+fn format_account_plan(lease: &lease::AccountLease) -> String {
+    lease
+        .grants
+        .iter()
+        .map(|grant| {
+            let accounts = grant
+                .accounts
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let route = match accounts.as_slice() {
+                [] => "unavailable".to_string(),
+                [account] => account.clone(),
+                [first, rest @ ..] => format!("{first}, then {}", rest.join(", then ")),
+            };
+            format!("{}: {route}", grant.provider.display_name())
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn reject_detached_account_forwarding(
-    has_account_bundle: bool,
+    has_account_lease: bool,
     cmd: &[String],
 ) -> anyhow::Result<()> {
-    if has_account_bundle && cmd.first().is_some_and(|program| program == "tmux") {
+    let detached_program = cmd.first().is_some_and(|program| {
+        matches!(
+            program.as_str(),
+            "tmux" | "screen" | "nohup" | "daemon" | "systemd-run"
+        )
+    });
+    if has_account_lease && (detached_program || cmd.iter().any(|arg| arg == "--detach")) {
         return Err(anyhow!(
-            "cannot forward ephemeral provider accounts into a remote tmux command; \
+            "cannot forward ephemeral provider accounts into detached remote work; \
              run the remote command in the foreground or authenticate on the remote host"
         ));
     }
@@ -171,43 +390,26 @@ fn reject_detached_account_forwarding(
 /// Resolve the credential bundle from local sources. Auth tokens that aren't
 /// present resolve to `None`; a `--secret` that can't be resolved is a hard
 /// error (the caller explicitly asked for it). Nothing here prints a value.
-async fn resolve_credentials(secret_names: &[String]) -> anyhow::Result<Credentials> {
+async fn resolve_credentials(
+    secret_names: &[String],
+    selection: &AccountSelection,
+) -> anyhow::Result<Credentials> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut secrets = Vec::with_capacity(secret_names.len());
     for name in secret_names {
         secrets.push((name.clone(), resolve_doppler_secret(name)?));
     }
-    let selector = std::env::var(PROVIDER_ACCOUNT_ENV).ok();
-    if selector
-        .as_deref()
-        .is_some_and(|value| value.trim().is_empty())
-    {
-        return Err(anyhow!(
-            "--account requires a non-empty account id or login email"
-        ));
-    }
-    let account_bundle = match crate::store::open_existing_store().await {
-        Some(store) => {
-            local_forwarded_account_bundle(&std::sync::Arc::new(store), selector.as_deref()).await?
-        }
-        None if selector.is_some() => {
-            return Err(anyhow!("account store unavailable for --account"));
-        }
-        None => None,
-    };
-    let (claude_token, codex_token) = if account_bundle.is_some() {
-        (None, None)
-    } else {
-        (
-            extract_claude_token(&home).map(|token| token.access_token),
-            extract_codex_access_token(&home),
-        )
+    let account_lease = lease::prepare_root_lease(selection).await?;
+    let provider_authority = match account_lease {
+        Some(lease) => ProviderAuthority::Lease(lease),
+        None => ProviderAuthority::Ambient {
+            claude_token: extract_claude_token(&home).map(|token| token.access_token),
+            codex_token: extract_codex_access_token(&home),
+        },
     };
     Ok(Credentials {
         gh_token: resolve_gh_token(),
-        claude_token,
-        codex_token,
-        account_bundle,
+        provider_authority,
         pm_token: resolve_pm_token().await,
         pm_provider: Some(PmProviderKind::Linear.as_str().to_string()),
         secrets,
@@ -283,6 +485,7 @@ fn is_valid_env_name(name: &str) -> bool {
 /// values travel only through this channel, never through argv.
 fn build_preamble(
     credentials: &Credentials,
+    lease_handle: Option<&AccountLeaseHandle>,
     host: &str,
     repo: &str,
     cmd: &[String],
@@ -328,41 +531,50 @@ fn build_preamble(
             sh_quote("!f(){ echo username=x-access-token; echo \"password=$GH_TOKEN\"; };f")
         ));
     }
-    if let Some(token) = nonempty(&credentials.claude_token) {
-        lines.push(format!(
-            "export CLAUDE_CODE_OAUTH_TOKEN={}",
-            sh_quote(token)
-        ));
+    if let ProviderAuthority::Ambient {
+        claude_token,
+        codex_token,
+    } = &credentials.provider_authority
+    {
+        if let Some(token) = nonempty(claude_token) {
+            lines.push(format!(
+                "export CLAUDE_CODE_OAUTH_TOKEN={}",
+                sh_quote(token)
+            ));
+        }
+        if let Some(token) = nonempty(codex_token) {
+            lines.push(format!("export CODEX_ACCESS_TOKEN={}", sh_quote(token)));
+        }
     }
-    if let Some(token) = nonempty(&credentials.codex_token) {
-        lines.push(format!("export CODEX_ACCESS_TOKEN={}", sh_quote(token)));
-    }
-    if let Some(account_bundle) = &credentials.account_bundle {
-        match encode_forwarded_account_bundle(account_bundle) {
-            Ok(bundle) => lines.push(format!(
-                "export {FORWARDED_ACCOUNT_BUNDLE_ENV}={}",
-                sh_quote(&bundle)
+    if let Some(lease_handle) = lease_handle {
+        match lease_handle.encode() {
+            Ok(handle) => lines.push(format!(
+                "export {}={}",
+                lease::ACCOUNT_LEASE_ENV,
+                sh_quote(&handle)
             )),
             Err(error) => lines.push(format!(
                 "echo {} >&2; exit 1",
-                sh_quote(&format!("could not encode provider accounts: {error}"))
+                sh_quote(&format!("could not encode account lease: {error}"))
             )),
         }
-        lines.push(
-            "LF_ACCOUNT_LEASE_DIR=$(mktemp -d \"${TMPDIR:-/tmp}/lf-account.XXXXXX\") || exit 1"
-                .to_string(),
-        );
-        lines.push("export LF_ACCOUNT_LEASE_DIR".to_string());
+        lines.push("unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CONFIG_DIR".to_string());
+        lines.push("unset CODEX_ACCESS_TOKEN OPENAI_API_KEY CODEX_HOME".to_string());
         lines.push(format!(
-            "export {FORWARDED_ACCOUNT_STORE_ENV}=\"$LF_ACCOUNT_LEASE_DIR/router.db\""
+            "LF_ACCOUNT_LEASE_SOCKET={}",
+            sh_quote(&lease_handle.socket.to_string_lossy())
         ));
         lines.push(
-            "trap 'status=$?; trap - EXIT; rm -rf -- \"$LF_ACCOUNT_LEASE_DIR\"; exit \"$status\"' EXIT"
+            "trap 'status=$?; trap - EXIT; rm -f -- \"$LF_ACCOUNT_LEASE_SOCKET\"; exit \"$status\"' EXIT"
                 .to_string(),
         );
         lines.push("trap 'exit 129' HUP".to_string());
         lines.push("trap 'exit 130' INT".to_string());
         lines.push("trap 'exit 143' TERM".to_string());
+        lines.push(
+            "lf --__account-lease-probe || { echo 'remote lf cannot use the forwarded account lease; install the same loopflow version on both hosts' >&2; exit 1; }"
+                .to_string(),
+        );
     }
     if let Some(token) = nonempty(&credentials.pm_token) {
         lines.push(format!("export LF_FORWARDED_PM_TOKEN={}", sh_quote(token)));
@@ -390,7 +602,9 @@ fn build_preamble(
         .map(|arg| sh_quote(arg))
         .collect::<Vec<_>>()
         .join(" ");
-    lines.push(if credentials.account_bundle.is_some() {
+    // Under a lease the shell must survive the command so its EXIT trap can
+    // remove the forwarded socket; without one, exec saves a process.
+    lines.push(if lease_handle.is_some() {
         remote_cmd
     } else {
         format!("exec {remote_cmd}")
@@ -448,7 +662,12 @@ enum SshOutcome {
 /// `BatchMode=yes` is the primary hang killer: it refuses every interactive
 /// prompt (password, passphrase, unknown host key) rather than blocking on the
 /// tty forever. The timeouts bound the connect handshake and a stalled session.
-fn ssh_args(dest: &str, port: Option<u16>, forward_agent: bool) -> Vec<String> {
+fn ssh_args(
+    dest: &str,
+    port: Option<u16>,
+    forward_agent: bool,
+    broker: Option<&AccountLeaseBroker>,
+) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if forward_agent {
         args.push("-A".to_string());
@@ -456,6 +675,20 @@ fn ssh_args(dest: &str, port: Option<u16>, forward_agent: bool) -> Vec<String> {
     if let Some(port) = port {
         args.push("-p".to_string());
         args.push(port.to_string());
+    }
+    if let Some(broker) = broker {
+        args.push("-R".to_string());
+        args.push(format!(
+            "{}:{}",
+            broker.remote_socket().display(),
+            broker.local_socket().display()
+        ));
+        args.push("-o".to_string());
+        args.push("StreamLocalBindUnlink=yes".to_string());
+        args.push("-o".to_string());
+        args.push("StreamLocalBindMask=0177".to_string());
+        args.push("-o".to_string());
+        args.push("ExitOnForwardFailure=yes".to_string());
     }
     args.push("-o".to_string());
     args.push("BatchMode=yes".to_string());
@@ -492,16 +725,17 @@ fn connection_error(host: &str) -> anyhow::Error {
 }
 
 /// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
-/// propagating the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
+/// classifying the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
 /// so an unreachable or misconfigured host fails fast instead of hanging.
 fn run_ssh(
     dest: &str,
     port: Option<u16>,
     forward_agent: bool,
+    broker: Option<&AccountLeaseBroker>,
     preamble: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<SshOutcome> {
     let mut child = Command::new("ssh")
-        .args(ssh_args(dest, port, forward_agent))
+        .args(ssh_args(dest, port, forward_agent, broker))
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -517,9 +751,8 @@ fn run_ssh(
 
     let status = child.wait().context("ssh did not complete")?;
     match classify_exit(status.code()) {
-        SshOutcome::Success => Ok(()),
+        outcome @ (SshOutcome::Success | SshOutcome::CommandFailure(_)) => Ok(outcome),
         SshOutcome::ConnectionFailure => Err(connection_error(dest)),
-        SshOutcome::CommandFailure(code) => std::process::exit(code),
     }
 }
 
@@ -530,10 +763,11 @@ fn run_ssh(
 fn run_ssh_capture(
     dest: &str,
     port: Option<u16>,
+    broker: Option<&AccountLeaseBroker>,
     preamble: &str,
 ) -> Result<String, SshCaptureError> {
     let mut child = Command::new("ssh")
-        .args(ssh_args(dest, port, false))
+        .args(ssh_args(dest, port, false, broker))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -562,121 +796,22 @@ fn run_ssh_capture(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-    use std::fs;
-
-    use tempfile::tempdir;
-
     use super::*;
-    use crate::provider_account::ForwardedAccountSelection;
 
-    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
-
-    impl EnvRestore {
-        fn capture(names: &[&'static str]) -> Self {
-            Self(
-                names
-                    .iter()
-                    .map(|name| (*name, std::env::var_os(name)))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Drop for EnvRestore {
-        fn drop(&mut self) {
-            for (name, value) in &self.0 {
-                match value {
-                    Some(value) => std::env::set_var(name, value),
-                    None => std::env::remove_var(name),
-                }
-            }
-        }
-    }
-
-    struct CurrentDirRestore(std::path::PathBuf);
-
-    impl CurrentDirRestore {
-        fn enter(path: &std::path::Path) -> Self {
-            let current = std::env::current_dir().unwrap();
-            std::env::set_current_dir(path).unwrap();
-            Self(current)
-        }
-    }
-
-    impl Drop for CurrentDirRestore {
-        fn drop(&mut self) {
-            std::env::set_current_dir(&self.0).unwrap();
-        }
-    }
-
-    fn full_bundle() -> Credentials {
-        let claude = crate::provider_account::parse_account_id("primary").unwrap();
-        let codex = crate::provider_account::parse_account_id("reserve").unwrap();
+    fn full_credentials() -> Credentials {
         Credentials {
             gh_token: Some("gh-secret".to_string()),
-            claude_token: None,
-            codex_token: None,
-            account_bundle: Some(ForwardedAccountBundle::new(
-                ForwardedAccountSelection::Routed {
-                    repo_id: crate::repository::RepoId::parse("loopflowstudio/loopflow").unwrap(),
-                    routes: vec![
-                        crate::provider_account::ForwardedProviderRoute {
-                            provider: crate::provider_auth::Provider::Claude,
-                            accounts: vec![claude.clone()],
-                        },
-                        crate::provider_account::ForwardedProviderRoute {
-                            provider: crate::provider_auth::Provider::Codex,
-                            accounts: vec![codex.clone()],
-                        },
-                    ],
-                },
-                vec![
-                    crate::provider_account::ForwardedProviderAccount {
-                        provider: crate::provider_auth::Provider::Claude,
-                        account_id: claude.clone(),
-                        login_email: Some(
-                            crate::profile::EmailAddress::parse("personal@example.com").unwrap(),
-                        ),
-                        credential_state: crate::store::CredentialState::Connected,
-                        routing_state: crate::store::RoutingState::Automatic,
-                        plan: Some("max".to_string()),
-                        paid_through: None,
-                        utilization_percent: None,
-                        cooldown_until: None,
-                        cooldown_reason: None,
-                    },
-                    crate::provider_account::ForwardedProviderAccount {
-                        provider: crate::provider_auth::Provider::Codex,
-                        account_id: codex.clone(),
-                        login_email: Some(
-                            crate::profile::EmailAddress::parse("engineering@example.com").unwrap(),
-                        ),
-                        credential_state: crate::store::CredentialState::Connected,
-                        routing_state: crate::store::RoutingState::Automatic,
-                        plan: Some("max".to_string()),
-                        paid_through: None,
-                        utilization_percent: None,
-                        cooldown_until: None,
-                        cooldown_reason: None,
-                    },
-                ],
-                vec![
-                    crate::provider_account::ForwardedProviderCredential::new(
-                        crate::provider_auth::Provider::Claude,
-                        claude,
-                        "claude-primary".to_string(),
-                    ),
-                    crate::provider_account::ForwardedProviderCredential::new(
-                        crate::provider_auth::Provider::Codex,
-                        codex,
-                        "codex-reserve".to_string(),
-                    ),
-                ],
-            )),
+            provider_authority: ProviderAuthority::default(),
             pm_token: Some("linear-secret".to_string()),
             pm_provider: Some("linear".to_string()),
             secrets: vec![("STRIPE_KEY".to_string(), "sk-live-123".to_string())],
+        }
+    }
+
+    fn lease_handle() -> AccountLeaseHandle {
+        AccountLeaseHandle {
+            socket: PathBuf::from("/tmp/lf-account-test.sock"),
+            secret: "test-secret".to_string(),
         }
     }
 
@@ -688,31 +823,61 @@ mod tests {
         assert!(reject_detached_account_forwarding(true, &cmd)
             .unwrap_err()
             .to_string()
-            .contains("remote tmux"));
+            .contains("detached remote work"));
+        assert!(reject_detached_account_forwarding(
+            true,
+            &["lf".to_string(), "wave".to_string(), "--detach".to_string()]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn inherited_lease_rejects_ssh_before_transport() {
+        let _lock = crate::journal::test_env_lock();
+        let previous = std::env::var_os(lease::ACCOUNT_LEASE_ENV);
+        std::env::set_var(lease::ACCOUNT_LEASE_ENV, "forwarded");
+        let result = run(
+            "must-not-be-reached.invalid",
+            None,
+            &[],
+            false,
+            false,
+            &AccountSelection::default(),
+            &["true".to_string()],
+        );
+        match previous {
+            Some(value) => std::env::set_var(lease::ACCOUNT_LEASE_ENV, value),
+            None => std::env::remove_var(lease::ACCOUNT_LEASE_ENV),
+        }
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("cannot be re-forwarded over SSH"));
     }
 
     #[test]
     fn preamble_exports_every_credential_and_execs_command() {
         let cmd = vec!["lf".to_string(), "op".to_string(), "pr".to_string()];
-        let preamble = build_preamble(&full_bundle(), "mini-heart", "src/loopflow", &cmd, &[]);
+        let handle = lease_handle();
+        let preamble = build_preamble(
+            &full_credentials(),
+            Some(&handle),
+            "mini-heart",
+            "src/loopflow",
+            &cmd,
+            &[],
+        );
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
         assert!(!preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN="));
         assert!(!preamble.contains("export CODEX_ACCESS_TOKEN="));
-        let encoded =
-            encode_forwarded_account_bundle(full_bundle().account_bundle.as_ref().unwrap())
-                .unwrap();
-        assert!(preamble.contains(&format!(
-            "export {FORWARDED_ACCOUNT_BUNDLE_ENV}='{}'",
-            encoded
-        )));
+        assert!(preamble.contains(&format!("export {}=", lease::ACCOUNT_LEASE_ENV)));
         assert!(!preamble.contains("claude-primary"));
         assert!(!preamble.contains("codex-reserve"));
         assert!(!preamble.contains("refresh_token"));
         assert!(!preamble.contains("/accounts/"));
-        assert!(preamble.contains("LF_ACCOUNT_LEASE_DIR=$(mktemp -d"));
-        assert!(preamble.contains(&format!("export {FORWARDED_ACCOUNT_STORE_ENV}=")));
-        assert!(preamble.contains("trap - EXIT; rm -rf --"));
+        assert!(preamble.contains("lf --__account-lease-probe"));
+        assert!(preamble.contains("trap - EXIT; rm -f --"));
         assert!(preamble.contains("export LF_FORWARDED_PM_TOKEN='linear-secret'"));
         assert!(preamble.contains("export LF_FORWARDED_PM_PROVIDER='linear'"));
         // Locally-resolved Doppler secret, forwarded by value; no Doppler token.
@@ -730,259 +895,17 @@ mod tests {
         assert!(preamble.trim_end().ends_with("'lf' 'op' 'pr'"));
     }
 
-    #[allow(clippy::await_holding_lock)]
-    #[test]
-    fn foreground_account_lease_removes_its_store_on_command_exit() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let bin = temp.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        let ssh = bin.join("ssh");
-        fs::write(&ssh, "#!/bin/sh\nexec bash -s\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = fs::metadata(&ssh).unwrap().permissions();
-            permissions.set_mode(0o755);
-            fs::set_permissions(&ssh, permissions).unwrap();
-        }
-        let _restore = EnvRestore::capture(&["HOME", "PATH"]);
-        std::env::set_var("HOME", temp.path());
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::set_var(
-            "PATH",
-            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
-        );
-        let record = temp.path().join("lease-path");
-        let cmd = vec![
-            "sh".to_string(),
-            "-c".to_string(),
-            "printf '%s' \"$LF_ACCOUNT_LEASE_DIR\" > \"$LEASE_RECORD\"; : > \"$LF_FORWARDED_ACCOUNT_STORE\""
-                .to_string(),
-        ];
-        let preamble = build_preamble(
-            &full_bundle(),
-            "host",
-            ".",
-            &cmd,
-            &[("LEASE_RECORD", record.to_str().unwrap())],
-        );
-        run_ssh("host", None, false, &preamble).unwrap();
-        let lease = PathBuf::from(fs::read_to_string(record).unwrap());
-        assert!(!lease.exists());
-        assert!(!lease.join("router.db").exists());
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[test]
-    fn explicit_account_reaches_foreground_ssh_outside_a_repository() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let bin = temp.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        let transport_input = temp.path().join("ssh-input");
-        let ssh = bin.join("ssh");
-        fs::write(
-            &ssh,
-            format!("#!/bin/sh\ncat > '{}'\n", transport_input.display()),
-        )
-        .unwrap();
-        let codex = bin.join("codex");
-        fs::write(
-            &codex,
-            r#"#!/bin/sh
-IFS= read -r line
-printf '{"id":1,"result":{}}\n'
-IFS= read -r line
-IFS= read -r line
-printf '{"id":2,"result":{"account":null}}\n'
-"#,
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            for executable in [&ssh, &codex] {
-                let mut permissions = fs::metadata(executable).unwrap().permissions();
-                permissions.set_mode(0o755);
-                fs::set_permissions(executable, permissions).unwrap();
-            }
-        }
-        let _restore = EnvRestore::capture(&[
-            "HOME",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "PATH",
-            crate::provider_account::ACCOUNT_REPO_ID_ENV,
-            PROVIDER_ACCOUNT_ENV,
-            FORWARDED_ACCOUNT_BUNDLE_ENV,
-            FORWARDED_ACCOUNT_STORE_ENV,
-        ]);
-        std::env::set_var("HOME", temp.path());
-        std::env::set_var("LF_HOME", temp.path());
-        let database = temp.path().join("loopflow.db");
-        std::env::set_var("LF_DB_PATH", &database);
-        std::env::remove_var(crate::provider_account::ACCOUNT_REPO_ID_ENV);
-        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
-        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
-        std::env::set_var(PROVIDER_ACCOUNT_ENV, "engineering");
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::set_var(
-            "PATH",
-            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
-        );
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let store = std::sync::Arc::new(
-            runtime
-                .block_on(crate::store::open_store(
-                    &crate::store::StorageConfig::sqlite(database),
-                ))
-                .unwrap(),
-        );
-        let account_home = temp.path().join("accounts/engineering");
-        fs::create_dir_all(&account_home).unwrap();
-        fs::write(
-            account_home.join("auth.json"),
-            r#"{"tokens":{"access_token":"e30.eyJleHAiOjQxMDI0NDQ4MDB9.sig","id_token":"e30.eyJlbWFpbCI6ImVuZ2luZWVyaW5nQGV4YW1wbGUuY29tIn0.sig"}}"#,
-        )
-        .unwrap();
-        let account = crate::provider_account::new_account(
-            crate::provider_auth::Provider::Codex,
-            crate::provider_account::parse_account_id("engineering").unwrap(),
-            account_home,
-            None,
-        );
-        runtime
-            .block_on(store.upsert_provider_account(&account))
-            .unwrap();
-        let outside = temp.path().join("outside");
-        fs::create_dir(&outside).unwrap();
-        let _cwd = CurrentDirRestore::enter(&outside);
-
-        run("host", Some("."), &[], false, &["lf".to_string()]).unwrap();
-
-        let input = fs::read_to_string(transport_input).unwrap();
-        assert!(input.contains(FORWARDED_ACCOUNT_BUNDLE_ENV));
-        assert!(input.trim_end().ends_with("'lf'"));
-    }
-
-    #[allow(clippy::await_holding_lock)]
-    #[test]
-    fn explicit_account_errors_before_ssh_transport() {
-        let _lock = crate::journal::test_env_lock();
-        let temp = tempdir().unwrap();
-        let bin = temp.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        let marker = temp.path().join("ssh-spawned");
-        let ssh = bin.join("ssh");
-        fs::write(
-            &ssh,
-            format!("#!/bin/sh\n: > '{}'\nexit 99\n", marker.display()),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let mut permissions = fs::metadata(&ssh).unwrap().permissions();
-            permissions.set_mode(0o755);
-            fs::set_permissions(&ssh, permissions).unwrap();
-        }
-        let _restore = EnvRestore::capture(&[
-            "HOME",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "PATH",
-            crate::provider_account::ACCOUNT_REPO_ID_ENV,
-            PROVIDER_ACCOUNT_ENV,
-            FORWARDED_ACCOUNT_BUNDLE_ENV,
-            FORWARDED_ACCOUNT_STORE_ENV,
-        ]);
-        std::env::set_var("HOME", temp.path());
-        std::env::set_var("LF_HOME", temp.path());
-        let database = temp.path().join("loopflow.db");
-        std::env::set_var("LF_DB_PATH", &database);
-        std::env::remove_var(crate::provider_account::ACCOUNT_REPO_ID_ENV);
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::set_var(
-            "PATH",
-            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
-        );
-        std::env::remove_var(FORWARDED_ACCOUNT_BUNDLE_ENV);
-        std::env::remove_var(FORWARDED_ACCOUNT_STORE_ENV);
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let store = std::sync::Arc::new(
-            runtime
-                .block_on(crate::store::open_store(
-                    &crate::store::StorageConfig::sqlite(database),
-                ))
-                .unwrap(),
-        );
-        let command = ["lf".to_string()];
-        let outside = temp.path().join("outside");
-        fs::create_dir(&outside).unwrap();
-        let _cwd = CurrentDirRestore::enter(&outside);
-
-        std::env::set_var(PROVIDER_ACCOUNT_ENV, "   ");
-        let error = run("host", Some("."), &[], false, &command).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "--account requires a non-empty account id or login email"
-        );
-        assert!(!marker.exists());
-
-        std::env::set_var(PROVIDER_ACCOUNT_ENV, "missing");
-        let error = run("host", Some("."), &[], false, &command).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("no managed Claude or Codex account matches 'missing'"));
-        assert!(!marker.exists());
-
-        for account_id in ["engineering-one", "engineering-two"] {
-            let account = crate::provider_account::new_account(
-                crate::provider_auth::Provider::Codex,
-                crate::provider_account::parse_account_id(account_id).unwrap(),
-                temp.path().join("accounts").join(account_id),
-                None,
-            );
-            runtime
-                .block_on(store.upsert_provider_account(&account))
-                .unwrap();
-        }
-        std::env::set_var(PROVIDER_ACCOUNT_ENV, "engineering");
-        let error = run("host", Some("."), &[], false, &command).unwrap_err();
-        assert!(error.to_string().contains(
-            "'engineering' matches several codex accounts: engineering-one, engineering-two"
-        ));
-        assert!(!marker.exists());
-
-        let offline = crate::provider_account::new_account(
-            crate::provider_auth::Provider::Codex,
-            crate::provider_account::parse_account_id("offline").unwrap(),
-            temp.path().join("accounts/offline"),
-            None,
-        );
-        runtime
-            .block_on(store.upsert_provider_account(&offline))
-            .unwrap();
-        std::env::set_var(PROVIDER_ACCOUNT_ENV, "offline");
-        let error = run("host", Some("."), &[], false, &command).unwrap_err();
-        assert!(error.to_string().contains(
-            "no authenticated codex account remains; reconnect 'offline' with `lf auth connect codex offline`"
-        ));
-        assert!(!marker.exists());
-    }
-
     #[test]
     fn preamble_omits_absent_credentials() {
         let creds = Credentials {
-            claude_token: Some("only-claude".to_string()),
+            provider_authority: ProviderAuthority::Ambient {
+                claude_token: Some("only-claude".to_string()),
+                codex_token: None,
+            },
             ..Credentials::default()
         };
         let cmd = vec!["lf".to_string(), "runs".to_string()];
-        let preamble = build_preamble(&creds, "host", "src/loopflow", &cmd, &[]);
+        let preamble = build_preamble(&creds, None, "host", "src/loopflow", &cmd, &[]);
 
         assert!(preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN='only-claude'"));
         assert!(!preamble.contains("GH_TOKEN"));
@@ -997,6 +920,7 @@ printf '{"id":2,"result":{"account":null}}\n'
         let cmd = vec!["lf".to_string(), "pr".to_string(), "open".to_string()];
         let preamble = build_preamble(
             &Credentials::default(),
+            None,
             "mini-heart",
             "src/loopflow",
             &cmd,
@@ -1004,6 +928,36 @@ printf '{"id":2,"result":{"account":null}}\n'
         );
         assert!(preamble.contains("export LF_HOME_ROUTED='1'"));
         assert!(preamble.trim_end().ends_with("exec 'lf' 'pr' 'open'"));
+    }
+
+    #[test]
+    fn remote_native_preamble_carries_identity_and_no_local_authority() {
+        let cmd = vec!["lf".to_string(), "start".to_string(), "product".to_string()];
+        let preamble = build_preamble(
+            &Credentials::default(),
+            None,
+            "jack@buildbox",
+            "src/loopflow",
+            &cmd,
+            &[(
+                EXPECTED_HOME_ID_ENV,
+                "home_00000000000000000000000000000001",
+            )],
+        );
+
+        assert!(
+            preamble.contains("export LF_EXPECTED_HOME_ID='home_00000000000000000000000000000001'")
+        );
+        for secret in [
+            "GH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CODEX_ACCESS_TOKEN",
+            "LF_FORWARDED_PM_TOKEN",
+            lease::ACCOUNT_LEASE_ENV,
+        ] {
+            assert!(!preamble.contains(secret));
+        }
+        assert!(preamble.trim_end().ends_with("exec 'lf' 'start' 'product'"));
     }
 
     #[test]
@@ -1015,11 +969,21 @@ printf '{"id":2,"result":{"account":null}}\n'
             ..Credentials::default()
         };
         let cmd = vec!["lf".to_string()];
-        let preamble = build_preamble(&creds, "host", "src/loopflow", &cmd, &[]);
+        let preamble = build_preamble(&creds, None, "host", "src/loopflow", &cmd, &[]);
 
         assert!(preamble.contains(r#"export GH_TOKEN='a'\''b; rm -rf ~ #'"#));
         // The dangerous substring never appears unquoted at a statement start.
         assert!(!preamble.contains("\nrm -rf"));
+    }
+
+    #[test]
+    fn credential_debug_output_redacts_values() {
+        let debug = format!("{:?}", full_credentials());
+
+        assert!(!debug.contains("gh-secret"));
+        assert!(!debug.contains("linear-secret"));
+        assert!(!debug.contains("sk-live-123"));
+        assert!(debug.contains("STRIPE_KEY"));
     }
 
     #[test]
@@ -1030,7 +994,7 @@ printf '{"id":2,"result":{"account":null}}\n'
 
     #[test]
     fn ssh_args_bound_the_connection() {
-        let args = ssh_args("jack@mini-heart", None, false);
+        let args = ssh_args("jack@mini-heart", None, false, None);
         // Primary hang killer: never block on an interactive prompt.
         assert!(args.iter().any(|a| a == "BatchMode=yes"));
         // Connect handshake and stalled-session bounds.
@@ -1040,6 +1004,10 @@ printf '{"id":2,"result":{"account":null}}\n'
         // Still targets the destination and runs the piped preamble.
         assert!(args.iter().any(|a| a == "jack@mini-heart"));
         assert_eq!(args.last().unwrap(), "bash -s");
+        assert_eq!(
+            args.iter().filter(|arg| arg.as_str() == "bash -s").count(),
+            1
+        );
         // Agent forwarding stays opt-out; no -p without an explicit port.
         assert!(!args.iter().any(|a| a == "-A"));
         assert!(!args.iter().any(|a| a == "-p"));
@@ -1047,14 +1015,14 @@ printf '{"id":2,"result":{"account":null}}\n'
 
     #[test]
     fn ssh_args_pass_an_explicit_port() {
-        let args = ssh_args("jack@host", Some(2222), false);
+        let args = ssh_args("jack@host", Some(2222), false, None);
         let p = args.iter().position(|a| a == "-p").expect("-p present");
         assert_eq!(args[p + 1], "2222");
     }
 
     #[test]
     fn ssh_args_opt_in_agent_forwarding() {
-        let args = ssh_args("host", None, true);
+        let args = ssh_args("host", None, true, None);
         assert_eq!(args.first().unwrap(), "-A");
     }
 

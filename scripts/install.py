@@ -328,56 +328,41 @@ def _resolve_install_dir() -> Path:
 
 def _stage_binaries(local_bin: Path) -> None:
     """Copy freshly built lf into this worktree's local-bin/."""
-    _install_cli_binaries(local_bin)
+    local_bin.mkdir(parents=True, exist_ok=True)
+    _atomic_install(ROOT / "target" / "release" / "lf", local_bin / "lf")
 
 
-def _install_cli_binaries(install_dir: Path) -> None:
-    """Atomically copy freshly built lf into install_dir."""
-    install_dir.mkdir(parents=True, exist_ok=True)
-    built = ROOT / "target" / "release"
-    _atomic_install(built / "lf", install_dir / "lf")
-
-
-def _sync_skills(lf_bin: Path) -> None:
-    """Mirror loopflow skills into ~/.claude/skills and ~/.agents/skills (codex).
-
-    Runs after the binary install so the freshly built `lf` regenerates the
-    global skill catalog. A failure here doesn't fail the install—the binaries
-    are already in place—so we warn and move on.
-    """
-    typer.echo("Syncing skills into ~/.claude and ~/.agents...")
-    try:
-        code = _stream_process([str(lf_bin), "sync-skills", "--yes"], "skills", cwd=ROOT)
-    except OSError as exc:
-        typer.echo(f"skill sync failed ({exc}); binaries installed, skills unchanged", err=True)
-        return
-    if code != 0:
-        typer.echo(
-            f"skill sync failed (exit {code}); binaries installed, skills unchanged",
-            err=True,
+def _promote_with_candidate(
+    candidate: Path,
+    install_dir: Path,
+    app_source: Path | None = None,
+    applications_dir: Path | None = None,
+) -> None:
+    """Delegate every machine-global mutation to the freshly built lf."""
+    # Resolve the /Applications target at call time so the module global stays
+    # authoritative (a def-time default would freeze the real /Applications).
+    if applications_dir is None:
+        applications_dir = APPLICATIONS_DIR
+    command = [
+        str(candidate),
+        "install",
+        "promote",
+        "--cli-target",
+        str(install_dir / "lf"),
+        "--sync-skills",
+    ]
+    if app_source is not None:
+        command.extend(
+            [
+                "--app-source",
+                str(app_source),
+                "--app-target",
+                str(applications_dir / f"{APP_NAME}.app"),
+                "--legacy-app-target",
+                str(applications_dir / f"{LEGACY_APP_NAME}.app"),
+            ]
         )
-
-
-def _promote(local_bin: Path, install_dir: Path, applications_dir: Path = APPLICATIONS_DIR) -> None:
-    """Make this worktree's build the active one.
-
-    Symlinks lf from the resolved bin dir to local-bin/ (so rebuilds take
-    effect with no extra skill) and copies Loopflow.app into /Applications.
-    """
-    install_dir.mkdir(parents=True, exist_ok=True)
-    link = install_dir / "lf"
-    if link.is_symlink() or link.exists():
-        link.unlink()
-    link.symlink_to(local_bin / "lf")
-
-    app_dst = applications_dir / f"{APP_NAME}.app"
-    if app_dst.exists():
-        shutil.rmtree(app_dst)
-    # Drop the pre-rename bundle so /Applications doesn't keep two copies.
-    legacy = applications_dir / f"{LEGACY_APP_NAME}.app"
-    if legacy.exists():
-        shutil.rmtree(legacy)
-    shutil.copytree(local_bin / f"{APP_NAME}.app", app_dst, symlinks=True)
+    _run_or_raise(command, "promote", cwd=ROOT)
 
 
 # --- Loopflow bundle ---
@@ -555,8 +540,7 @@ def refresh(
         if not no_pull:
             _refresh_default_branch(ROOT)
         _build_cli_binaries()
-        _install_cli_binaries(resolved_install_dir)
-        _sync_skills(resolved_install_dir / "lf")
+        _promote_with_candidate(ROOT / "target" / "release" / "lf", resolved_install_dir)
     except (subprocess.CalledProcessError, StageError) as exc:
         typer.echo(f"refresh failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -594,11 +578,11 @@ def local(
         executable_names = ", ".join(path.name for path in spec.executables)
         typer.echo(f"  Contents/MacOS/: {executable_names}")
         if use:
-            typer.echo(f"Would promote: symlink lf into {install_dir}")
+            typer.echo(f"Would promote lf into {install_dir} through the Rust safety boundary")
             typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             typer.echo("Would sync skills into ~/.claude/skills and ~/.agents/skills")
         else:
-            typer.echo("Would not promote (pass --use to symlink onto PATH and install the app)")
+            typer.echo("Would not promote (pass --use to install onto PATH and install the app)")
         return
 
     total_start = time.monotonic()
@@ -611,11 +595,14 @@ def local(
         typer.echo(f"Built {spec.app_path}")
 
         if use:
-            typer.echo(f"Promoting this worktree (symlinking lf into {install_dir})...")
-            _promote(LOCAL_BIN, install_dir)
+            typer.echo(f"Promoting this worktree through lf install into {install_dir}...")
+            _promote_with_candidate(
+                LOCAL_BIN / "lf",
+                install_dir,
+                app_source=spec.app_path,
+            )
             typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
             _report_path_collisions(install_dir)
-            _sync_skills(install_dir / "lf")
 
         else:
             typer.echo(f"\nBuilt into {LOCAL_BIN}. Run with --use to make it the active build.")

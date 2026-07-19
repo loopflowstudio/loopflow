@@ -1,20 +1,20 @@
----
-layout: default
-title: Troubleshooting
----
-
 # Troubleshooting
 
-Common issues and solutions.
+Each section: symptom, cause, fix. Commands are complete and runnable as
+written.
 
 ## A Wave is not running
 
-The Loopflow app invokes its bundled `lf` and talks directly to each Wave.
-Inspect the selected Wave, then start it in the foreground:
+**Symptom:** The app or `lf ls` shows the Wave stopped; `lf chat` reports no
+listener.
+
+**Cause:** No resident process is serving the Wave — nothing starts one
+automatically except the app, `lf start`, or a cron wake.
 
 ```bash
-lf status <wave> --json
-lf wave <wave>
+lf status <wave> --json    # current registry + runtime evidence
+lf home probe <wave>       # reachable? stopped? running? — with the next action
+lf start <wave>            # idempotently start the Wave on its placed Home
 ```
 
 ## Task Session stops advancing
@@ -26,37 +26,41 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf task attach INF-123
+lf queue
+lf work feedback task task_...
 ```
 
-`attach` opens the audited Task control prompt; it does not write bytes into a
-provider terminal. Answer a pending decision, send a follow-up, or resume a
-stopped process through the same Task Session:
+`feedback` opens the recorded provider session. Send durable direction without
+opening it via Steer, continue past the boundary, or resume a stopped process
+through the same Task Work:
 
 ```bash
-lf task decide INF-123 cd_123 approve
-lf task follow-up INF-123 "address the latest review"
-lf task resume INF-123 "continue from the failure"
+lf task steer INF-123 "address the latest review"
+lf task interrupt INF-123
+lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Session, directive, worktree, and active PR, but gives the next body generation
-to the selected agent. It refuses while another body is still writing; interrupt
-that body first.
-
-If a control returned a command id, inspect or wait for its durable receipt:
-
-```bash
-lf task receipt cc_123 --wait --timeout 30s --json
-```
+Work, Steers, worktree, and active PR, but gives the next Launch to the selected
+agent. It refuses while another executor is still writing; interrupt that
+boundary first. A Steer is durable before live delivery is attempted. Provider
+acceptance is not incorporation; the Basis of a later successful boundary is.
 
 ## Rate limits
 
 **Symptom:** Tasks fail with rate limit errors.
 
-Claude, Codex, Gemini, and OpenCode have usage limits. Resume the same Session
-on another supported Session provider:
+One-shot headless runs retry transient capacity, rate-limit, availability, and
+transport failures four times. Codex and Claude continue the same provider
+session, preserving partial work; the backoff ladder tops out at 30 seconds.
+
+Managed-account subscription exhaustion takes a different path: Loopflow marks
+the account unavailable until its reported reset and immediately tries the next
+account in the grant. `--account` retains the normal route as fallback;
+`--only-account` stays inside the accounts it names.
+
+If the retries exhaust for a managed Task, resume it on another provider:
 
 ```bash
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
@@ -73,25 +77,23 @@ Other options:
 
 **Symptom:** Git worktree commands fail or show stale data.
 
-List all worktrees:
+List all worktrees, then clean up stale entries:
 
 ```bash
 lf wt list
+lf wt prune --dry-run    # show what would be removed
+lf wt prune              # force-remove unprotected worktrees and their branches
 ```
 
-Clean up stale entries:
-
-```bash
-lf wt prune
-```
-
-If the default branch looks stale after a PR operation you ran from a sibling worktree, rebase the current branch:
+Feature-worktree integration fetches and pins `origin/<default>` without
+moving the default-branch checkout:
 
 ```bash
 lf rebase
 ```
 
-Loopflow updates the default-branch worktree as part of the rebase path.
+The feature branch uses the current remote base even when the sibling default
+checkout has not moved.
 
 ## Project or Task is waiting
 

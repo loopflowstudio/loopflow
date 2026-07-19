@@ -14,7 +14,7 @@ use anyhow::{anyhow, Result};
 use crate::journal::open_ledger;
 use crate::lf::output::{format_cost, truncate, Colors};
 use crate::store::sqlite::SqliteStore;
-use crate::store::RunEventRow;
+use crate::store::{RunEventRow, TurnSpendRow};
 use crate::wave::journal::short_id;
 
 const WINDOW_DAYS: i64 = 7;
@@ -489,8 +489,8 @@ pub fn trace(
             .map_err(|err| anyhow!("failed to read trace: {err}"))?
     };
 
-    let spans = trace_spans(&events);
     let launches = store.agent_launches_matching(&trace_id)?;
+    let spans = trace_spans(&events, &store.turn_spend_since(0)?);
     if events_mode {
         return trace_events(&launches, launch_prefix, jsonl);
     }
@@ -898,11 +898,11 @@ pub struct SkillRunEntry {
     pub worktree: String,
     pub wave: Option<String>,
     /// Roadmap Project slug that owns this run, when it launched inside a
-    /// Project/Task Session. `None` for runs with no plan attribution — the join
+    /// Project/Task. `None` for runs with no plan attribution — the join
     /// is never inferred.
     pub project: Option<String>,
     /// Roadmap Task's Linear issue identifier (e.g. `W2-122`) that owns this run,
-    /// when it launched inside a Task Session. `None` when unattributed. This is
+    /// when it launched inside a Task. `None` when unattributed. This is
     /// the key that drills a roadmap row to its runs and complete trace.
     pub task: Option<String>,
     pub flow: Option<String>,
@@ -1146,19 +1146,30 @@ pub struct SpanDto {
     pub output_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
-    pub duration_secs: Option<f64>,
     pub provider: Option<String>,
     pub model: Option<String>,
 }
 
-fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
+/// One process in a run trace, with the spend of every Turn its agents ran.
+///
+/// The exec ledger knows the process tree; `agent_turns` knows what the
+/// provider measured. Joining them on `process_id` is the only way to say what
+/// a process cost.
+fn trace_spans(events: &[RunEventRow], spend: &[TurnSpendRow]) -> Vec<SpanDto> {
     let mut by_process: BTreeMap<&str, Vec<&RunEventRow>> = BTreeMap::new();
     for event in events {
         by_process.entry(&event.process_id).or_default().push(event);
     }
+    let mut spend_by_process: BTreeMap<&str, Vec<&TurnSpendRow>> = BTreeMap::new();
+    for turn in spend {
+        spend_by_process
+            .entry(&turn.exec_id)
+            .or_default()
+            .push(turn);
+    }
     let mut spans: Vec<_> = by_process
-        .into_values()
-        .map(|mut process_events| {
+        .into_iter()
+        .map(|(process_id, mut process_events)| {
             process_events.sort_by_key(|event| event.seq);
             let started = process_events
                 .iter()
@@ -1170,13 +1181,14 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
                 .rev()
                 .find(|event| event.node == "run" && event.event != "started")
                 .copied();
-            // Usage rows are per-boundary deltas; the process's spend is
-            // their sum.
-            let usage_rows = || {
-                process_events
-                    .iter()
-                    .filter(|event| event.input_tokens.is_some())
-            };
+            let turns = spend_by_process.get(process_id);
+            let turns = || turns.into_iter().flatten();
+            let providers = turns()
+                .map(|turn| turn.provider.as_str())
+                .collect::<BTreeSet<_>>();
+            let models = turns()
+                .map(|turn| turn.model.as_deref())
+                .collect::<BTreeSet<_>>();
             SpanDto {
                 run_id: started.run_id.clone(),
                 process_id: started.process_id.clone(),
@@ -1197,74 +1209,21 @@ fn trace_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
                 status: terminal
                     .map(|event| event.event.clone())
                     .unwrap_or_else(|| "open".to_string()),
-                input_tokens: sum_optional_i64(usage_rows().map(|event| event.input_tokens)),
-                output_tokens: sum_optional_i64(usage_rows().map(|event| event.output_tokens)),
-                cache_read_tokens: sum_optional_i64(
-                    usage_rows().map(|event| event.cache_read_tokens),
-                ),
-                cost_usd: sum_optional_f64(usage_rows().map(|event| event.cost_usd)),
-                duration_secs: sum_optional_f64(usage_rows().map(|event| event.duration_secs)),
-                provider: process_events
-                    .iter()
-                    .rev()
-                    .find_map(|event| event.provider.clone()),
-                model: process_events
-                    .iter()
-                    .rev()
-                    .find_map(|event| event.model.clone()),
+                input_tokens: sum_optional_i64(turns().map(|turn| turn.input_tokens)),
+                output_tokens: sum_optional_i64(turns().map(|turn| turn.output_tokens)),
+                cache_read_tokens: sum_optional_i64(turns().map(|turn| turn.cache_read_tokens)),
+                cost_usd: sum_optional_f64(turns().map(|turn| turn.cost_usd)),
+                provider: (providers.len() == 1)
+                    .then(|| providers.first().map(|provider| (*provider).to_string()))
+                    .flatten(),
+                model: (models.len() == 1)
+                    .then(|| models.first().copied().flatten().map(str::to_string))
+                    .flatten(),
             }
         })
         .collect();
     spans.sort_by_key(|span| (span.started_at, span.process_id.clone()));
     spans
-}
-
-/// Every row that carries a usage report, at its own grain: a skill boundary
-/// names its skill and owns that skill's spend, a terminal run row names its
-/// command and owns whatever ran outside any skill. Rows are already deltas —
-/// sum them for any rollup.
-///
-/// `trace_spans` folds a whole process into one span, which is right for a
-/// process tree and wrong for asking where the tokens went inside it.
-pub(crate) fn boundary_spans(events: &[RunEventRow]) -> Vec<SpanDto> {
-    let mut rows: Vec<&RunEventRow> = events
-        .iter()
-        .filter(|event| event.input_tokens.is_some())
-        .filter(|event| (event.node == "run" || event.node == "skill") && event.event != "started")
-        .collect();
-    // `seq` is the production order; wall time can jump backwards under clock sync.
-    rows.sort_by_key(|event| (event.process_id.as_str(), event.seq));
-
-    rows.into_iter()
-        .map(|event| SpanDto {
-            run_id: event.run_id.clone(),
-            process_id: event.process_id.clone(),
-            parent_process_id: event.parent_process_id.clone(),
-            seq: event.seq,
-            node: event.node.clone(),
-            name: event.skill.clone().or_else(|| {
-                event
-                    .command
-                    .as_deref()
-                    .and_then(parse_argv)
-                    .map(|argv| argv.join(" "))
-            }),
-            repo: event.repo.clone(),
-            wave: event.wave.clone(),
-            flow: event.flow.clone(),
-            skill: event.skill.clone(),
-            started_at: event.ts,
-            ended_at: Some(event.ts),
-            status: event.event.clone(),
-            input_tokens: event.input_tokens,
-            output_tokens: event.output_tokens,
-            cache_read_tokens: event.cache_read_tokens,
-            cost_usd: event.cost_usd,
-            duration_secs: event.duration_secs,
-            provider: event.provider.clone(),
-            model: event.model.clone(),
-        })
-        .collect()
 }
 
 fn status_label(event: &str) -> &'static str {
@@ -1395,10 +1354,10 @@ pub(crate) fn format_tokens(value: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        boundary_spans, format_duration, format_tokens, plan_orphans, plan_reconcile,
-        summarize_execs, trace_id_for_address, trace_spans,
+        format_duration, format_tokens, plan_orphans, plan_reconcile, summarize_execs,
+        trace_id_for_address, trace_spans,
     };
-    use crate::store::RunEventRow;
+    use crate::store::{RunEventRow, TurnSpendRow};
     use crate::trace::AgentLaunchRow;
 
     const NOW: i64 = 1_800_000_000;
@@ -1438,6 +1397,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 10,
+            control: None,
         }
     }
 
@@ -1639,13 +1599,26 @@ mod tests {
             skill: None,
             step_index: None,
             error: None,
-            input_tokens: None,
-            output_tokens: None,
+        }
+    }
+
+    fn turn(process: &str, at: i64, input: i64, cost: f64) -> TurnSpendRow {
+        TurnSpendRow {
+            turn_id: format!("turn-{process}-{at}"),
+            launch_id: format!("launch-{process}"),
+            trace_id: process.to_string(),
+            exec_id: process.to_string(),
+            repo: "/src/loopflow".to_string(),
+            wave: None,
+            flow: None,
+            skill: None,
+            provider: "claude".to_string(),
+            model: Some("opus".to_string()),
+            at,
+            input_tokens: Some(input),
+            output_tokens: Some(0),
             cache_read_tokens: None,
-            cost_usd: None,
-            duration_secs: None,
-            provider: None,
-            model: None,
+            cost_usd: Some(cost),
         }
     }
 
@@ -1717,60 +1690,74 @@ mod tests {
 
     #[test]
     fn a_span_that_never_closed_is_open_not_zero_width() {
-        let spans = trace_spans(&[row("abc", 0, 100, "run", "started")]);
+        let spans = trace_spans(&[row("abc", 0, 100, "run", "started")], &[]);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].status, "open");
         assert_eq!(spans[0].ended_at, None);
     }
 
-    /// The charts group these rows and must reconcile with `lf usage`. Rows are
-    /// per-boundary deltas: each skill row owns its spend and the terminal run
-    /// row owns only what ran outside any skill — summing every boundary yields
-    /// the run total exactly once.
+    /// The charts group these rows and must reconcile with `lf usage`. Each turn
+    /// owns exactly what the provider measured for that one exchange, so summing
+    /// turns yields the run total exactly once.
     #[test]
-    fn boundary_spend_sums_to_the_run_total_without_double_counting() {
-        let mut events = vec![
+    fn a_trace_span_sums_the_turns_its_process_ran() {
+        let events = vec![
             row("trace", 1, 100, "run", "started"),
-            row("trace", 2, 110, "skill", "completed"),
-            row("trace", 3, 120, "skill", "completed"),
             row("trace", 4, 130, "run", "completed"),
         ];
-        events[1].skill = Some("implement".to_string());
-        events[1].input_tokens = Some(100);
-        events[2].skill = Some("gate".to_string());
-        events[2].input_tokens = Some(50);
-        events[3].input_tokens = Some(0); // nothing ran outside the skills
+        let spend = vec![turn("trace", 110, 100, 1.0), turn("trace", 120, 50, 0.25)];
 
-        let spend = boundary_spans(&events);
-        let total: i64 = spend.iter().map(|s| s.input_tokens.unwrap_or(0)).sum();
+        let spans = trace_spans(&events, &spend);
 
-        assert_eq!(total, 150, "boundaries must sum to the run total");
-        assert_eq!(spend.len(), 3);
-        assert_eq!(spend[0].skill.as_deref(), Some("implement"));
-        assert_eq!(spend[0].input_tokens, Some(100));
-        assert_eq!(spend[1].skill.as_deref(), Some("gate"));
-        assert_eq!(spend[1].input_tokens, Some(50));
-        assert_eq!(spend[2].input_tokens, Some(0));
-    }
-
-    #[test]
-    fn a_trace_span_sums_its_process_boundaries() {
-        let mut events = vec![
-            row("trace", 1, 100, "run", "started"),
-            row("trace", 2, 110, "skill", "completed"),
-            row("trace", 3, 120, "skill", "completed"),
-            row("trace", 4, 130, "run", "completed"),
-        ];
-        events[1].input_tokens = Some(100);
-        events[1].cost_usd = Some(1.0);
-        events[2].input_tokens = Some(50);
-        events[2].cost_usd = Some(0.25);
-        events[3].input_tokens = Some(0);
-
-        let spans = trace_spans(&events);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].input_tokens, Some(150));
         assert_eq!(spans[0].cost_usd, Some(1.25));
+        assert_eq!(spans[0].provider.as_deref(), Some("claude"));
+    }
+
+    /// A process that ran no agent spent nothing — which is not the same fact as
+    /// a provider that reported nothing, and must not read as zero.
+    #[test]
+    fn a_process_with_no_turns_reports_unknown_spend_not_zero() {
+        let spans = trace_spans(&[row("abc", 0, 100, "run", "completed")], &[]);
+
+        assert_eq!(spans[0].input_tokens, None);
+        assert_eq!(spans[0].cost_usd, None);
+        assert_eq!(spans[0].provider, None);
+    }
+
+    /// Turns are joined to their own process: one process's spend can never be
+    /// attributed to another in the same trace.
+    #[test]
+    fn turn_spend_lands_only_on_the_process_that_ran_it() {
+        let events = vec![
+            row("parent", 0, 100, "run", "completed"),
+            row("child", 0, 105, "run", "completed"),
+        ];
+        let spend = vec![turn("child", 110, 70, 0.5)];
+
+        let spans = trace_spans(&events, &spend);
+        let parent = spans.iter().find(|s| s.process_id == "parent").unwrap();
+        let child = spans.iter().find(|s| s.process_id == "child").unwrap();
+
+        assert_eq!(parent.input_tokens, None);
+        assert_eq!(child.input_tokens, Some(70));
+    }
+
+    #[test]
+    fn a_mixed_provider_process_is_not_misattributed_to_one_provider() {
+        let events = vec![row("process", 0, 100, "run", "completed")];
+        let mut codex = turn("process", 120, 30, 0.25);
+        codex.turn_id = "turn-codex".to_string();
+        codex.launch_id = "launch-codex".to_string();
+        codex.provider = "codex".to_string();
+        codex.model = None;
+
+        let spans = trace_spans(&events, &[turn("process", 110, 70, 0.5), codex]);
+
+        assert_eq!(spans[0].input_tokens, Some(100));
+        assert_eq!(spans[0].provider, None);
+        assert_eq!(spans[0].model, None);
     }
 
     #[test]
@@ -1789,22 +1776,6 @@ mod tests {
         let value = serde_json::to_value(&running[0]).expect("serialize");
         assert_eq!(value["ended"], serde_json::Value::Null);
         assert_eq!(value["status"], "running");
-    }
-
-    #[test]
-    fn repeated_skill_boundaries_have_distinct_wire_identity() {
-        let mut events = vec![
-            row("trace", 1, 100, "skill", "completed"),
-            row("trace", 2, 100, "skill", "completed"),
-        ];
-        for event in &mut events {
-            event.skill = Some("implement".to_string());
-            event.input_tokens = Some(10 * event.seq);
-        }
-
-        let boundaries = boundary_spans(&events);
-        assert_eq!(boundaries.len(), 2);
-        assert_ne!(boundaries[0].seq, boundaries[1].seq);
     }
 
     #[test]

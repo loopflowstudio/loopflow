@@ -5,14 +5,15 @@
 //! environment classify the same way. A completeness guard walks the clap tree
 //! and fails CI when a new `--wave`-bearing command is not registered.
 //!
-//! The five divergences W2-151 left behind (`lf home probe`, `lf reviews
-//! catch-up`, `lf roadmap`, `lf project start`, `lf project promote`) were
+//! The remaining divergences W2-151 left behind (`lf home probe`, `lf roadmap`,
+//! `lf project start`, `lf project promote`) were
 //! fixed on main before this test shipped. The matrix is the proof they stay
 //! fixed: any command that silently drops a stale UUID or invents its own
 //! resolution rule fails a cell.
 
 use std::collections::HashSet;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -42,8 +43,6 @@ enum WaveForm {
     Positional,
     /// `WaveTargetArgs` flattened: `--wave <name>`.
     Target,
-    /// `--wave <name>` on the top-level `Cli` (prepended before the subcommand).
-    Global,
     /// `--channel <name>` (radio pub).
     Channel,
     /// `<name>` positional channel (radio sub).
@@ -94,11 +93,7 @@ struct Cmd {
 /// `LF_WAVE_ID` / `LF_CHANNEL` directly. The completeness guard checks
 /// these exist as real clap leaves but does not discover them via the
 /// `wave`-arg walk.
-const AMBIENT_ONLY: &[&[&str]] = &[
-    &["reviews", "catch-up"],
-    &["radio", "pub"],
-    &["radio", "sub"],
-];
+const AMBIENT_ONLY: &[&[&str]] = &[&["radio", "pub"], &["radio", "sub"]];
 
 /// Commands whose optional `--wave` narrows a machine-wide result instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
@@ -203,14 +198,6 @@ const COMMANDS: &[Cmd] = &[
             global_default: true,
             ..Special::NONE
         },
-    },
-    Cmd {
-        id: "reviews catch-up",
-        path: &["reviews", "catch-up"],
-        base_args: &["reviews", "catch-up", "--plan"],
-        wave_form: WaveForm::Global,
-        kind: Kind::Read,
-        special: Special::NONE,
     },
     // ── Mutations ────────────────────────────────────────────────────────
     // `chat post` and `radio pub` use stdin for text: their `trailing_var_arg`
@@ -445,14 +432,6 @@ const COMMANDS: &[Cmd] = &[
         kind: Kind::Mutation,
         special: Special::NONE,
     },
-    Cmd {
-        id: "home start",
-        path: &["home", "start"],
-        base_args: &["home", "start", "--json"],
-        wave_form: WaveForm::Positional,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
 ];
 
 // ─── Environments ───────────────────────────────────────────────────────
@@ -535,8 +514,7 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // are transport names, not managed Wave selections. All intentionally
     // bypass managed-selection validation.
     if env.id == "explicit-unknown"
-        && (matches!(cmd.id, "pm init" | "home start")
-            || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
+        && (cmd.id == "pm init" || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
     {
         return Outcome::Resolved;
     }
@@ -546,6 +524,13 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // command errors before checking `--channel`. `radio sub` with a
     // positional channel subscribes directly — no ambient resolution.
     if env.id == "explicit-override" && cmd.wave_form == WaveForm::Channel {
+        return Outcome::StaleIdentity;
+    }
+
+    // Project start now resolves caller authority at the CLI surface before
+    // creating anything. An inherited hand-set name without a registry row is
+    // stale transport evidence, not an explicit target selection.
+    if cmd.id == "project start" && env.id == "stale-name" {
         return Outcome::StaleIdentity;
     }
 
@@ -577,6 +562,10 @@ fn classify(output: &std::process::Output) -> Outcome {
         if resolution_text.contains("is not registered on this machine") {
             return Outcome::UnknownExplicit;
         }
+        if resolution_text.contains("owning Wave") && resolution_text.contains("is not registered")
+        {
+            return Outcome::StaleIdentity;
+        }
         if resolution_text.contains("stale") {
             return Outcome::StaleIdentity;
         }
@@ -607,6 +596,16 @@ fn classify(output: &std::process::Output) -> Outcome {
 fn seed(home: &Path, repo: &Path) -> Wave {
     std::fs::create_dir_all(home).expect("home");
     std::fs::create_dir_all(repo).expect("repo");
+
+    // `project promote` reaches an authored agent flow after successful Wave
+    // resolution. Keep this resolution test hermetic instead of invoking the
+    // developer's real provider CLI.
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).expect("test bin");
+    let codex = bin.join("codex");
+    std::fs::write(&codex, "#!/bin/sh\nexit 1\n").expect("fake codex");
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755))
+        .expect("fake codex permissions");
 
     // Git repo on a clean main — `lf project start` requires this before
     // reaching wave resolution.
@@ -667,31 +666,19 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     let explicit = env.explicit_wave.as_deref();
 
-    match cmd.wave_form {
-        WaveForm::Global => {
-            if let Some(w) = explicit {
+    args.extend(cmd.base_args.iter().map(|s| s.to_string()));
+    if let Some(w) = explicit {
+        match cmd.wave_form {
+            WaveForm::Flag | WaveForm::Target => {
                 args.push("--wave".to_string());
                 args.push(w.to_string());
             }
-            args.extend(cmd.base_args.iter().map(|s| s.to_string()));
-        }
-        _ => {
-            args.extend(cmd.base_args.iter().map(|s| s.to_string()));
-            if let Some(w) = explicit {
-                match cmd.wave_form {
-                    WaveForm::Flag | WaveForm::Target => {
-                        args.push("--wave".to_string());
-                        args.push(w.to_string());
-                    }
-                    WaveForm::Positional | WaveForm::ChanPos => {
-                        args.push(w.to_string());
-                    }
-                    WaveForm::Channel => {
-                        args.push("--channel".to_string());
-                        args.push(w.to_string());
-                    }
-                    WaveForm::Global => unreachable!(),
-                }
+            WaveForm::Positional | WaveForm::ChanPos => {
+                args.push(w.to_string());
+            }
+            WaveForm::Channel => {
+                args.push("--channel".to_string());
+                args.push(w.to_string());
             }
         }
     }
@@ -709,13 +696,21 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
         .args(&args)
         .current_dir(repo)
         .env("LF_HOME", home)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                home.join("bin").display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         // Redirect HOME so `lf cron add` writes plists into the temp dir,
         // not the real ~/Library/LaunchAgents.
         .env("HOME", home)
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
 
@@ -776,26 +771,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
     command.output().expect("lf runs")
 }
 
-fn _stop_started_homes(home: &Path, repo: &Path) {
-    // `lf home start` launches the Wave resident out of process. Stop every
-    // name this matrix can resolve before the temp Home disappears so the
-    // test never leaves resident processes behind on the host.
-    for wave in ["product", "ghost", "unknown-explicit"] {
-        let _ = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .args(["stop", wave])
-            .current_dir(repo)
-            .env("LF_HOME", home)
-            .env("HOME", home)
-            .env_remove("LF_DB_PATH")
-            .env_remove("LF_CONTROL_HOME")
-            .env_remove("LF_CONTROL_DB_PATH")
-            .env_remove("LF_RUN_ID")
-            .env_remove("LF_CHANNEL")
-            .env_remove("LF_WAVE_ID")
-            .output();
-    }
-}
-
 // ─── Matrix test ────────────────────────────────────────────────────────
 
 /// Every Wave-scoped command × every environment. The expected outcome is
@@ -844,9 +819,6 @@ fn matrix_every_command_every_environment() {
 
             total += 1;
             let output = run_lf(&home, &repo, cmd, env);
-            if cmd.id == "home start" {
-                _stop_started_homes(&home, &repo);
-            }
             let outcome = classify(&output);
             let expected = expected_outcome(cmd, env);
 

@@ -1,7 +1,6 @@
 ---
 requires: scratch/<branch>.md
 produces: code, tests
-default_agent: codex
 action_style: procedural
 ---
 Turn the design doc into working code.
@@ -40,8 +39,10 @@ The design doc and style guides are in your context.
    - Match existing patterns in the codebase
 
 3. **Verify**
-   - Run tests to confirm nothing broke
+   - Run the smallest behavioral test that proves the behavior you changed
    - Run the "done when" check from the design doc
+   - Do not run an affected-suite or full-repository gate here; gate and CI own
+     those broader proofs
 
 ## Rules
 

@@ -344,7 +344,8 @@ Connect providers once, then route each repository through managed accounts:
 lf auth status                   # GitHub / Claude / Codex / OpenCode Zen / Linear
 lf auth github                   # connect a provider in your browser
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf auth accounts claude          # list connected accounts
+lf auth accounts claude          # cached account state; no network request
+lf auth accounts --verify        # compare cached state with every provider now
 
 lf profile create --chrome-profile primary@example.com --as primary
 lf auth access set claude primary@ --profile primary
@@ -367,6 +368,11 @@ verifies the login email from its ID token; Claude uses the selected Chrome
 profile email. `auth import` adopts an existing isolated credential — or the
 current macOS Keychain login when the account home is empty — without another
 OAuth flow.
+
+`auth accounts --verify` labels cached and live state separately. A revoked
+credential is recorded as missing and prints the exact `lf auth connect`
+recovery command; agent routes skip it and continue through the next healthy
+account.
 
 Routing controls per account:
 

@@ -586,7 +586,8 @@ const TRANSIENT_RETRY_DELAYS: [Duration; 4] = [
     Duration::from_secs(30),
 ];
 const RETRY_PROMPT: &str = "Continue the original task after the transient provider failure. Re-read the current workspace state, finish any interrupted work, and return the result.";
-const FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
+const LIMIT_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account reached its subscription limit. Re-read the current workspace state and finish any interrupted work.";
+const CREDENTIAL_FAILOVER_PROMPT: &str = "Continue this task after the previous provider account credential was revoked. Re-read the current workspace state and finish any interrupted work.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -606,6 +607,9 @@ pub enum AgentFailure {
     /// The selected managed account exhausted a subscription window.
     #[error("account subscription limit")]
     AccountSubscriptionLimit { resets_at: Option<i64> },
+    /// The selected managed account's credential was explicitly revoked.
+    #[error("account credential invalidated")]
+    AccountCredentialInvalidated,
 }
 
 /// Build `thread/start` params for Codex app-server sessions.
@@ -967,7 +971,7 @@ fn _launch_with_transient_retries(
 ) -> Result<LaunchResult, CoreError> {
     let mut attempt_config = launch.clone();
     let mut attempt = 1;
-    let mut subscription_failure = None;
+    let mut account_failure = None;
 
     loop {
         let (mut result, can_failover) = match run(&attempt_config, attempt > 1)? {
@@ -976,7 +980,7 @@ fn _launch_with_transient_retries(
                 can_failover,
             } => (result, can_failover),
             AgentAttempt::AccountUnavailable(error) => {
-                let Some(result) = subscription_failure else {
+                let Some(result) = account_failure else {
                     return Err(error);
                 };
                 tracing::warn!(%error, "alternate provider account unavailable");
@@ -995,7 +999,12 @@ fn _launch_with_transient_retries(
         let Some(failure) = failure else {
             return Ok(result);
         };
-        if matches!(failure, AgentFailure::AccountSubscriptionLimit { .. }) && !can_failover {
+        if matches!(
+            failure,
+            AgentFailure::AccountSubscriptionLimit { .. }
+                | AgentFailure::AccountCredentialInvalidated
+        ) && !can_failover
+        {
             return Ok(result);
         }
         let Some(transient_delay) = retry_delays.get(attempt - 1).copied() else {
@@ -1009,15 +1018,23 @@ fn _launch_with_transient_retries(
         attempt_config = launch.clone();
         let (delay, failover) = match &failure {
             AgentFailure::AccountSubscriptionLimit { .. } => {
-                subscription_failure = Some(result.clone());
+                account_failure = Some(result.clone());
                 attempt_config.task_prompt = format!(
-                    "{FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
+                    "{LIMIT_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
+                    launch.task_prompt
+                );
+                (Duration::ZERO, true)
+            }
+            AgentFailure::AccountCredentialInvalidated => {
+                account_failure = Some(result.clone());
+                attempt_config.task_prompt = format!(
+                    "{CREDENTIAL_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
                 );
                 (Duration::ZERO, true)
             }
             _ => {
-                subscription_failure = None;
+                account_failure = None;
                 let resume_token = _provider_resume_token(&result).or(launch.resume_token.clone());
                 if matches!(harness.as_str(), "claude" | "codex") {
                     if let Some(resume_token) = resume_token {
@@ -1049,12 +1066,25 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
     if result.exit_code == 0 {
         return None;
     }
+    if _find_provider_error(result, _classify_credential_invalidated).is_some() {
+        return Some(AgentFailure::AccountCredentialInvalidated);
+    }
     if let Some(signal) = _account_limit_signal(harness, result).filter(|signal| signal.limited) {
         return Some(AgentFailure::AccountSubscriptionLimit {
             resets_at: signal.resets_at,
         });
     }
     _find_provider_error(result, classify_retryable_agent_failure)
+}
+
+fn _classify_credential_invalidated(text: &str) -> Option<()> {
+    let text = text.to_ascii_lowercase();
+    (text.contains("token_invalidated")
+        || text.contains("refresh_token_invalidated")
+        || text.contains("refresh token was revoked")
+        || text.contains("access token could not be refreshed")
+        || text.contains("your session has ended. please log in again"))
+    .then_some(())
 }
 
 fn _find_provider_error<T>(result: &LaunchResult, classify: fn(&str) -> Option<T>) -> Option<T> {
@@ -1369,13 +1399,22 @@ fn _launch_agent_once(
     };
     let mut can_failover = account_route.is_some();
     if let (Some(route), Ok(result)) = (&account_route, &result) {
-        let resume_token = _provider_resume_token(result);
-        let signal = _account_limit_signal(&harness, result);
-        let limited = signal.as_ref().is_some_and(|signal| signal.limited);
-        if let Err(error) = route.record_launch_blocking(resume_token, signal) {
-            tracing::warn!(%error, "failed to record provider account launch");
-            if limited {
+        let credential_invalidated =
+            _find_provider_error(result, _classify_credential_invalidated).is_some();
+        if credential_invalidated {
+            if let Err(error) = route.record_credential_invalidated_blocking("token_invalidated") {
+                tracing::warn!(%error, "failed to record invalidated provider credential");
                 can_failover = false;
+            }
+        } else {
+            let resume_token = _provider_resume_token(result);
+            let signal = _account_limit_signal(&harness, result);
+            let limited = signal.as_ref().is_some_and(|signal| signal.limited);
+            if let Err(error) = route.record_launch_blocking(resume_token, signal) {
+                tracing::warn!(%error, "failed to record provider account launch");
+                if limited {
+                    can_failover = false;
+                }
             }
         }
     }
@@ -2661,9 +2700,57 @@ trust_level = "trusted"
         assert_eq!(result.exit_code, 0);
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[1].resume_token, None);
-        assert!(attempts[1].task_prompt.starts_with(FAILOVER_PROMPT));
+        assert!(attempts[1].task_prompt.starts_with(LIMIT_FAILOVER_PROMPT));
         assert!(attempts[1].task_prompt.contains("compress the branch"));
         assert_eq!(waits, vec![Duration::ZERO]);
+    }
+
+    #[test]
+    fn revoked_credential_fails_over_without_resuming_the_account_session() {
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            task_prompt: "open the pull request".to_string(),
+            ..Default::default()
+        };
+        let failure = failed_result(
+            "Your authentication token has been invalidated (token_invalidated). Please sign in again.",
+        );
+        assert_eq!(
+            _classify_agent_failure("codex", &failure),
+            Some(AgentFailure::AccountCredentialInvalidated)
+        );
+        let mut results = vec![
+            failure,
+            LaunchResult {
+                exit_code: 0,
+                ..Default::default()
+            },
+        ]
+        .into_iter();
+        let mut attempts = Vec::new();
+
+        let result = _launch_with_transient_retries(
+            &launch,
+            &auto_process(),
+            &[Duration::from_secs(30)],
+            |config, retry| {
+                assert_eq!(retry, !attempts.is_empty());
+                attempts.push(config.clone());
+                Ok(managed_attempt(
+                    results.next().expect("scripted launch result"),
+                ))
+            },
+            |delay| assert_eq!(delay, Duration::ZERO),
+        )
+        .expect("credential failover succeeds");
+
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[1].resume_token, None);
+        assert!(attempts[1]
+            .task_prompt
+            .starts_with(CREDENTIAL_FAILOVER_PROMPT));
+        assert!(attempts[1].task_prompt.contains("open the pull request"));
     }
 
     #[test]

@@ -1542,6 +1542,9 @@ pub enum AuthCommand {
     Accounts {
         /// Provider name (optional)
         provider: Option<String>,
+        /// Ask each provider now instead of reporting only cached state
+        #[arg(long)]
+        verify: bool,
     },
     /// Record provider-specific account identity, routing, and billing state
     Set {

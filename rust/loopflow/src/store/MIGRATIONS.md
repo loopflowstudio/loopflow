@@ -46,13 +46,22 @@ that is merely behind main — adding only drafts — stays green.
 Rust CI materializes the draft set in its disposable checkout before running the
 test suite. This exercises the same deterministic schema and generated registry
 the release cut would produce without publishing either one. The checkout is
-discarded after the job; source builds and the shared store still see only
-canonical migrations from a merged release.
+discarded after the job; if the active version already has a canonical batch,
+the materializer advances the disposable package to the next patch namespace.
+Source builds and the shared store still see only canonical migrations from a
+merged release.
 
 The runner temporarily disables foreign-key actions around the transaction so a
 SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
 migration that leaves a dangling reference rolls back as one unit.
+
+Persisted JSON is schema too. Changing a required field, enum variant, or wire
+shape in a DTO stored by the database requires an ordinal-free repair draft and
+a typed upgrade test seeded with the previous shape. Before commit, the runner
+deserializes every registered persisted JSON column into its current Rust type
+and reports all incompatible rows together; any failure rolls back the complete
+migration transaction.
 
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the

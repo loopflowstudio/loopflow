@@ -651,41 +651,72 @@ fn apply_sqlite_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
-    validate_json_column::<crate::task::PmWritebackState>(
+    let mut failures = validate_json_column::<crate::task::PmWritebackState>(
         conn,
         "tasks",
         "id",
         "pm_writeback_json",
     )?;
-    validate_json_column::<crate::task::TaskGateProposal>(
+    failures.extend(validate_json_column::<crate::task::TaskGateProposal>(
         conn,
         "tasks",
         "id",
         "gate_proposal_json",
-    )?;
-    validate_json_column::<crate::task::CiObservation>(conn, "task_prs", "id", "ci_observation")?;
-    validate_json_column::<crate::task::GithubObservation>(
+    )?);
+    failures.extend(validate_json_column::<crate::task::CiObservation>(
+        conn,
+        "task_prs",
+        "id",
+        "ci_observation",
+    )?);
+    failures.extend(validate_json_column::<crate::task::GithubObservation>(
         conn,
         "task_prs",
         "id",
         "github_observation",
-    )?;
-    validate_json_column::<crate::task::TaskEventKind>(conn, "task_events", "id", "kind_json")?;
-    validate_json_column::<crate::project::ProjectEventKind>(
+    )?);
+    failures.extend(validate_json_column::<crate::task::TaskEventKind>(
+        conn,
+        "task_events",
+        "id",
+        "kind_json",
+    )?);
+    failures.extend(validate_json_column::<crate::project::ProjectEventKind>(
         conn,
         "project_events",
         "id",
         "kind_json",
-    )?;
-    validate_json_column::<crate::project::ChildEventPayload>(
+    )?);
+    failures.extend(validate_json_column::<crate::project::ChildEventPayload>(
         conn,
         "observation_outbox",
         "id",
         "payload_json",
-    )?;
-    validate_json_column::<Vec<String>>(conn, "ci_incidents", "identity", "failure_set_json")?;
-    validate_json_column::<crate::durable::RunTrigger>(conn, "runs", "id", "trigger_json")?;
-    validate_json_column::<crate::durable::WaitOn>(conn, "waits", "id", "on_json")
+    )?);
+    failures.extend(validate_json_column::<Vec<String>>(
+        conn,
+        "ci_incidents",
+        "identity",
+        "failure_set_json",
+    )?);
+    failures.extend(validate_json_column::<crate::durable::RunTrigger>(
+        conn,
+        "runs",
+        "id",
+        "trigger_json",
+    )?);
+    failures.extend(validate_json_column::<crate::durable::WaitOn>(
+        conn, "waits", "id", "on_json",
+    )?);
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidData(format!(
+            "semantic migration check failed:\n  - {}",
+            failures.join("\n  - ")
+        )))
+    }
 }
 
 fn validate_json_column<T: DeserializeOwned>(
@@ -693,22 +724,21 @@ fn validate_json_column<T: DeserializeOwned>(
     table: &str,
     key: &str,
     column: &str,
-) -> StoreResult<()> {
+) -> StoreResult<Vec<String>> {
     let sql =
         format!("SELECT CAST({key} AS TEXT), {column} FROM {table} WHERE {column} IS NOT NULL");
     let mut statement = conn.prepare(&sql)?;
     let rows = statement.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
+    let mut failures = Vec::new();
     for row in rows {
         let (row_key, json) = row?;
-        serde_json::from_str::<T>(&json).map_err(|error| {
-            StoreError::InvalidData(format!(
-                "semantic migration check failed for {table}.{column} row {row_key}: {error}"
-            ))
-        })?;
+        if let Err(error) = serde_json::from_str::<T>(&json) {
+            failures.push(format!("{table}.{column} row {row_key}: {error}"));
+        }
     }
-    Ok(())
+    Ok(failures)
 }
 
 pub(crate) fn apply_sqlite_with_backup(
@@ -1526,9 +1556,10 @@ mod tests {
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
+    const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
 
-    fn _reopen_repair_is_canonical() -> bool {
-        let marker = format!("-- draft: {REOPEN_REPAIR_NAME}");
+    fn _draft_is_canonical(name: &str) -> bool {
+        let marker = format!("-- draft: {name}");
         MIGRATIONS
             .iter()
             .any(|migration| migration.sql.lines().any(|line| line == marker.as_str()))
@@ -1581,10 +1612,10 @@ mod tests {
         }
     }
 
-    fn _reopen_repair_sql() -> String {
+    fn _repair_sql(name: &str) -> String {
         let drafts =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
-        let prefix = format!("{REOPEN_REPAIR_NAME}__");
+        let prefix = format!("{name}__");
         let repair = fs::read_dir(&drafts)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -1593,7 +1624,7 @@ mod tests {
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
             })
-            .expect("reopen repair is canonical or present as an ordinal-free draft");
+            .expect("repair is canonical or present as an ordinal-free draft");
         fs::read_to_string(repair).unwrap()
     }
 
@@ -2708,7 +2739,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_reopen_writeback_upgrades_to_a_typed_stable_task() {
+    fn legacy_persisted_json_upgrades_to_typed_stable_tasks() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
         let conn = rusqlite::Connection::open(&path).unwrap();
@@ -2735,7 +2766,7 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute(
+        conn.execute_batch(
             "INSERT INTO task_sessions (
                 id, issue_id, issue_identifier, issue_title, issue_description,
                 project_id, project_slug, project_name, project_prompt_context, wave_id,
@@ -2743,7 +2774,16 @@ mod tests {
                 agent, provider, created_at, updated_at,
                 pm_snapshot_synced_at, pm_writeback_json, project_session_id,
                 current_directive_version, incorporated_directive_version
-             ) VALUES (
+             ) VALUES
+             (
+                'ts_completed', 'issue-completed', 'INF-DONE', 'Finish it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'completed', 'done', 10, '/repo.inf-done',
+                'jack/inf-done', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
                 'ts_reopen', 'issue-reopen', 'INF-REOPEN', 'Resume it', '',
                 'project-reopen', 'runtime', 'Runtime', 'Definition',
                 '00000000-0000-0000-0000-000000000001',
@@ -2751,12 +2791,61 @@ mod tests {
                 'jack/inf-reopen', 'base-sha', 'codex', 'codex', 10, 20,
                 9, '{\"state\":\"pending\",\"operation\":\"reopen_task\",\"error\":\"offline\"}',
                 'ps_reopen', 1, 1
-             )",
-            [],
+             ),
+             (
+                'ts_blocked', 'issue-blocked', 'INF-BLOCKED', 'Unblock it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'blocked', 'dependency', 10, '/repo.inf-blocked',
+                'jack/inf-blocked', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_failed', 'issue-failed', 'INF-FAILED', 'Recover it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'failed', 'provider error', 10, '/repo.inf-failed',
+                'jack/inf-failed', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_abandoned', 'issue-abandoned', 'INF-ABANDONED', 'Retire it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'abandoned', 'superseded', 10, '/repo.inf-abandoned',
+                'jack/inf-abandoned', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_current', 'issue-current', 'INF-CURRENT', 'Keep it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'waiting', 'review', 10, '/repo.inf-current',
+                'jack/inf-current', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             );",
         )
         .unwrap();
 
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        apply_set(&conn, prefix_before("interaction_reviews")).unwrap();
+        conn.execute_batch(
+            "UPDATE task_sessions
+             SET gate_proposal_json = CASE id
+                 WHEN 'ts_completed' THEN '{\"status\":\"completed\",\"reason\":\"all done\"}'
+                 WHEN 'ts_reopen' THEN '{\"status\":\"waiting\",\"reason\":\"needs another pass\"}'
+                 WHEN 'ts_blocked' THEN '{\"status\":\"blocked\",\"reason\":\"dependency\"}'
+                 WHEN 'ts_failed' THEN '{\"status\":\"failed\",\"reason\":\"provider error\"}'
+                 WHEN 'ts_abandoned' THEN '{\"status\":\"abandoned\",\"reason\":\"superseded\"}'
+                 WHEN 'ts_current' THEN '{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}'
+             END
+             WHERE id IN (
+                 'ts_completed', 'ts_reopen', 'ts_blocked', 'ts_failed', 'ts_abandoned',
+                 'ts_current'
+             );",
+        )
+        .unwrap();
+
         apply_set(&conn, MIGRATIONS).unwrap();
         let stale: String = conn
             .query_row(
@@ -2765,10 +2854,34 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        if !_reopen_repair_is_canonical() {
+        if !_draft_is_canonical(REOPEN_REPAIR_NAME) {
             assert!(stale.contains("reopen_task"));
-            conn.execute_batch(&_reopen_repair_sql()).unwrap();
+            conn.execute_batch(&_repair_sql(REOPEN_REPAIR_NAME))
+                .unwrap();
         }
+        if !_draft_is_canonical(GATE_PROPOSAL_REPAIR_NAME) {
+            conn.execute_batch(&_repair_sql(GATE_PROPOSAL_REPAIR_NAME))
+                .unwrap();
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM tasks
+                 WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -2780,10 +2893,18 @@ mod tests {
                  WHERE external_issue_id='issue-reopen'",
                 [],
             )?;
+            conn.execute(
+                "UPDATE tasks
+                 SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                 WHERE external_issue_id='issue-completed'",
+                [],
+            )?;
             Ok(())
         })
         .unwrap_err();
-        assert!(error.to_string().contains("tasks.pm_writeback_json"));
+        let message = error.to_string();
+        assert!(message.contains("tasks.pm_writeback_json"));
+        assert!(message.contains("tasks.gate_proposal_json"));
         assert_eq!(
             conn.query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -2798,11 +2919,21 @@ mod tests {
         let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
         store.health_check().unwrap();
         let tasks = store.list_tasks(None).unwrap();
-        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks.len(), 6);
+        let reopen = tasks
+            .iter()
+            .find(|task| task.launch.issue.identifier == "INF-REOPEN")
+            .unwrap();
         assert!(matches!(
-            tasks[0].pm_writeback,
+            reopen.pm_writeback,
             crate::task::PmWritebackState::Current
         ));
+        let mut decisions = tasks
+            .iter()
+            .map(|task| task.gate_proposal.as_ref().unwrap().done)
+            .collect::<Vec<_>>();
+        decisions.sort_unstable();
+        assert_eq!(decisions, vec![false, false, false, false, false, true]);
     }
 
     #[test]

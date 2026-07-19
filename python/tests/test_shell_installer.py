@@ -47,7 +47,13 @@ def _write_stubs(stub_dir: Path) -> None:
         "#!/bin/sh\n"
         'dir=""; prev=""\n'
         'for a in "$@"; do [ "$prev" = "-C" ] && dir="$a"; prev="$a"; done\n'
-        '[ -n "$dir" ] && echo x > "$dir/lf"\n'
+        'if [ -n "$dir" ]; then\n'
+        '  cat > "$dir/lf" <<\'LF\'\n'
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >> \"$LFTEST_PROMOTE_LOG\"\n"
+        "exit 0\n"
+        "LF\n"
+        "fi\n"
         "exit 0\n"
     )
     for f in (curl, tar):
@@ -79,6 +85,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         "PATH": f"{stub_dir}:{os.environ['PATH']}",
         "LF_INSTALL_DIR": str(tmp_path / "dest"),
         "LFTEST_LOG": str(tmp_path / "curl.log"),
+        "LFTEST_PROMOTE_LOG": str(tmp_path / "promote.log"),
     }
 
 
@@ -118,6 +125,16 @@ def test_equals_version_builds_versioned_url(
     result = _run(installer, ["--version=0.9.9"], env)
     assert result.returncode == 0, result.stderr
     assert "download/v0.9.9/" in (tmp_path / "curl.log").read_text()
+
+
+def test_downloaded_candidate_owns_activation(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    result = _run(installer, [], env)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "promote.log").read_text().strip() == (
+        f"install promote --cli-target {tmp_path / 'dest/lf'}"
+    )
 
 
 def test_missing_version_value_fails_clearly(installer: Path, env: dict[str, str]) -> None:

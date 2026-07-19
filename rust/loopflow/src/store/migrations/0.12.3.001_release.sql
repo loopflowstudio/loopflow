@@ -1,7 +1,4 @@
--- name: repair_legacy_task_gate_proposals
--- id: c6528abe5b7b5709187fea308a40b67f
--- depends_on: 
-
+-- draft: repair_legacy_task_gate_proposals
 -- TaskGateProposal replaced the Session-era terminal status with a boolean.
 UPDATE tasks
 SET gate_proposal_json = json_remove(

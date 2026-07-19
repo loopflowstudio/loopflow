@@ -24,31 +24,30 @@ and:
 
 ## Current implementation slice
 
-### Slice 1: Run owns execution
+### Slice 2: durable questions
 
-Implement only the execution-model reduction in this pass:
+Implement the exchange and its provider-independent shell surface in this pass:
 
-- move runner containment, cwd, and starting/live/stopping/ended transitions
-  from control Launch onto Run;
-- replace same-Run Launch replacement with a new Recovery Run when the runner
-  containment changes;
-- rename the trace hierarchy from AgentLaunch to AgentInvocation and preserve
-  AgentInvocation -> Turn capture;
-- relate invocations to a supervising Run for provenance without granting
-  authority or using that relation for Interrupt/recovery target selection;
-- migrate Rust and Swift DTOs and current schema with one implementation and no
-  compatibility view or dual read/write.
+- persist one Ask exchange under the current Turn with a derived User or
+  immediate-parent route and first-answer-wins semantics;
+- add `lf ask`, `lf ask wait`, `lf work asks`, and `lf work answer`;
+- make the blocking command wake its routed parent after commit and preserve the
+  exchange across shell or Run loss;
+- derive User and child attention by querying answerable exchanges;
+- delete Feedback, Continue, reviewer flags, attention columns, and their
+  special runner servicing paths rather than adapting them to Ask;
+- expose Ask and Answer in trace and current DTO surfaces without legacy fields
+  or compatibility reads.
 
-Do not implement Ask, Answer, answer workers, runner lane changes, or interactive
-demo in this slice. Feedback deletion belongs to the Ask slice. Attention or
-handback fields may remain temporarily on AgentInvocation solely to preserve
-current Feedback and interactive behavior, but they cannot carry Run
-containment or authority. Record each temporary field in `scratch/questions.md`
-and make its deletion an explicit dependency of Slice 2.
+Do not implement Project or Wave answer agents, concurrent runner lanes, or the
+interactive Demo handback in this slice. A parent or User may answer through the
+explicit CLI; automated servicing belongs to Slice 3.
 
-This slice is complete when focused store, recovery, trace, DTO fixture, and
-Swift tests pass; Interrupt and recovery contain no latest-invocation query;
-and the Slice 1 symbols listed under Code absence are gone.
+Use one defining proof: a live child Turn blocks in `lf ask`, an authorized
+parent answers the exact exchange, the command prints that Answer, and the same
+Turn remains current. The proof must also show that an unrelated or stale Run
+cannot answer. Defer broad Rust, Swift, clippy, and migration suites to the final
+gate.
 
 ## Execution model
 

@@ -137,14 +137,6 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     Cmd {
-        id: "memory show",
-        path: &["memory", "show"],
-        base_args: &["memory", "show"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "chat history",
         path: &["chat"],
         base_args: &["chat", "--history", "--json"],
@@ -556,11 +548,6 @@ fn seed(home: &Path, repo: &Path) -> Wave {
             payload: r#"{"projects":[],"items":[]}"#.to_string(),
         })
         .expect("seed pm snapshot");
-
-    // Wave directory with MEMORY.md — `lf memory show` reads it.
-    let wave_dir = repo.join("wave/product");
-    std::fs::create_dir_all(&wave_dir).expect("wave dir");
-    std::fs::write(wave_dir.join("MEMORY.md"), "PRODUCT MEMORY\n").expect("seed memory");
 
     // Commit everything so the repo is clean.
     git(&["add", "."]);

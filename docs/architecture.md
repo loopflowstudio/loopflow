@@ -733,9 +733,10 @@ control lane. Interaction and Handoff ids disappear.
 
 **Current.** `wave/<name>/MEMORY.md` is the one Wave memory truth. Prompt
 assembly reads applicable ancestor files directly, oldest ancestor first.
-There is no memory event stream, write endpoint, replay buffer, or export
-workflow. Agents edit the reviewed file through ordinary repository changes;
-`lf memory show` is read-only convenience and works while the Wave is stopped.
+There is no memory event stream, write endpoint, replay buffer, export
+workflow, or CLI surface. Agents edit the reviewed file through ordinary
+repository changes; the file is truth while the Wave runs and while it is
+stopped.
 
 ## Decentralized Home
 

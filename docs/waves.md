@@ -91,12 +91,11 @@ decisions, dead ends, what a downstream task should know. It is an ordinary
 reviewed repository file:
 
 ```bash
-lf memory show -w shipper
 $EDITOR wave/shipper/MEMORY.md
 ```
 
-`lf memory show` is read-only convenience and does not require a running Wave.
-Edit the file directly when the active work calls for it. `update-wave` owns
+The file is the whole memory surface — read and edit it directly, running Wave
+or not. `update-wave` owns
 deliberate end-of-work curation: merge durable context into the existing
 structure, correct stale entries, and drop transient Run detail. When a task ships,
 its context folds forward into memory and the remaining Linear tasks — fold,

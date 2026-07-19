@@ -11,7 +11,6 @@ pub mod home;
 pub mod install;
 pub mod launch;
 pub mod list;
-pub mod memory;
 pub mod ops;
 pub mod profile;
 pub mod run;

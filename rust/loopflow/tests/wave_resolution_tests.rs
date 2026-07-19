@@ -251,77 +251,6 @@ fn pm_show_honors_the_shared_resolution_rules() {
     let _ = uuid;
 }
 
-/// Chat and memory resolve the same Wave as `status` and `pm show`.
-/// `lf memory show` (via `chat::resolve_target`) reads the resolved wave's
-/// MEMORY.md across the whole matrix: UUID, hand-set name, explicit override,
-/// stale error, no-context error. Before the shared resolver, a hand-set name
-/// silently dropped and a stale UUID was indistinguishable from no wave.
-#[test]
-fn memory_show_resolves_like_status_across_environments() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let home = tmp.path().join("home");
-    let repo = tmp.path().join("repo");
-    let wave = seed(&home, &repo, "product");
-    let uuid = wave.id().as_str();
-
-    // The wave owns a MEMORY.md under its repo; a serverless `show` reads it.
-    let wave_dir = repo.join("wave/product");
-    std::fs::create_dir_all(&wave_dir).expect("wave dir");
-    std::fs::write(wave_dir.join("MEMORY.md"), "PRODUCT MEMORY\n").expect("seed memory");
-
-    let memory =
-        |args: &[&str], id: Option<&str>| -> std::process::Output { lf(&home, &repo, args, id) };
-    let stdout = |output: &std::process::Output| -> String {
-        assert!(
-            output.status.success(),
-            "memory show failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        String::from_utf8_lossy(&output.stdout).to_string()
-    };
-
-    // Durable UUID → its registry name → that wave's MEMORY.md.
-    assert_eq!(
-        stdout(&memory(&["memory", "show"], Some(uuid))),
-        "PRODUCT MEMORY\n"
-    );
-
-    // Hand-set name resolves the same wave (the arm that used to drop).
-    assert_eq!(
-        stdout(&memory(&["memory", "show"], Some("product"))),
-        "PRODUCT MEMORY\n"
-    );
-
-    // Explicit `--wave` beats a wrong ambient UUID.
-    assert_eq!(
-        stdout(&memory(
-            &["memory", "show", "--wave", "product"],
-            Some(&WaveId::new().to_string()),
-        )),
-        "PRODUCT MEMORY\n"
-    );
-
-    // Stale UUID: a loud, classified error naming the id — not a silent empty
-    // read.
-    let stale_id = WaveId::new().to_string();
-    let stale = memory(&["memory", "show"], Some(&stale_id));
-    assert!(!stale.status.success());
-    let stale_err = String::from_utf8_lossy(&stale.stderr);
-    assert!(
-        stale_err.contains("stale") && stale_err.contains(&stale_id),
-        "stale stderr: {stale_err}"
-    );
-
-    // No context: a read is not a publish, so it errors and names the fix.
-    let missing = memory(&["memory", "show"], None);
-    assert!(!missing.status.success());
-    assert!(
-        String::from_utf8_lossy(&missing.stderr).contains("--wave"),
-        "missing-context stderr: {}",
-        String::from_utf8_lossy(&missing.stderr)
-    );
-}
-
 /// W2-240: an explicit `--wave` naming an unknown wave is rejected with the
 /// same classified error from every consumer — never silently accepted (the
 /// memory bug), never misdirected to a sync command (the PM bug), never given
@@ -357,10 +286,16 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &["memory", "show", "--wave", "definitely-unknown"],
+            &[
+                "chat",
+                "--history",
+                "--json",
+                "--wave",
+                "definitely-unknown",
+            ],
             None,
         ),
-        "memory show (no ambient)",
+        "chat history (no ambient)",
     );
     assert_rejected(
         lf(
@@ -386,10 +321,16 @@ fn unknown_explicit_wave_is_rejected_identically_by_every_consumer() {
         lf(
             &home,
             &repo,
-            &["memory", "show", "--wave", "definitely-unknown"],
+            &[
+                "chat",
+                "--history",
+                "--json",
+                "--wave",
+                "definitely-unknown",
+            ],
             Some(uuid),
         ),
-        "memory show (with ambient)",
+        "chat history (with ambient)",
     );
     assert_rejected(
         lf(

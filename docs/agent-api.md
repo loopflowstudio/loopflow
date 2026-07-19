@@ -102,13 +102,9 @@ worktree.
 
 ## Memory
 
-```bash
-lf memory show -w infrastructure
-```
-
 `wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
-the ordinary repository workflow; `lf memory show` is a read-only convenience
-that also works while the Wave is stopped.
+the ordinary repository workflow; the file is truth, running Wave or not, and
+there is no separate CLI or server surface for it.
 
 ## Ship
 

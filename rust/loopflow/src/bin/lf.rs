@@ -1433,7 +1433,6 @@ fn main() -> anyhow::Result<()> {
                 unreachable!("install dispatches before home routing")
             }
             Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
-            Some(Commands::Memory { cmd }) => loopflow::lf::commands::memory::run(cmd),
             Some(Commands::Ssh {
                 target,
                 repo,

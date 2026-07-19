@@ -2920,12 +2920,6 @@ mod tests {
     }
 
     #[test]
-    fn memory_has_no_cli_surface() {
-        assert!(Cli::try_parse_from(["lf", "memory"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "memory", "show"]).is_err());
-    }
-
-    #[test]
     fn evidence_receipt_command_is_absent() {
         assert!(Cli::command().find_subcommand("receipt").is_none());
         let cli = Cli::try_parse_from(["lf", "receipt", "show", "chat_turn:turn-3"])

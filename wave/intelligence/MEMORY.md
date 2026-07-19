@@ -154,8 +154,8 @@ context, its launch situation, execution, and outcome.
   second checkpoint to reconcile with it.
 - **Memory is Wave-owned, not process-owned.** A running listener or provider
   does not hold a more authoritative version. Reviewed repository edits curate
-  the file, and `lf memory show` is a direct read that works with every server
-  stopped.
+  the file, and reading it is an ordinary file read that works with every
+  server stopped — there is no CLI surface for memory.
 - **Inheritance is explicit and file-based.** Prompt assembly reads applicable
   ancestor Wave memories oldest-first. Project and Task Work do not own memory,
   and unrelated recent Wave chat is never ambient prompt context.

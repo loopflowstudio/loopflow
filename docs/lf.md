@@ -365,14 +365,14 @@ lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
 lf chat --follow -w intelligence            # watch and speak from one terminal pane
 lf chat --history --json -w intelligence    # read the saved tail while stopped
-lf memory show                              # print the wave's MEMORY.md
-lf memory show -w intelligence              # read a named Wave while it is stopped
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
-| `lf memory show` | Read the selected Wave's origin `MEMORY.md` directly; no listener or provider is required |
+
+A Wave's durable memory is the ordinary repository file `wave/<name>/MEMORY.md`
+— read and edit it directly.
 
 Managed Work processes default to their invoking Wave through `LF_WAVE_ID`. From a
 human shell, pass `--wave`; repository location does not identify one of the
@@ -381,7 +381,7 @@ Waves sharing `main`.
 | Flag | Description |
 |------|-------------|
 | `-w, --wave NAME` | Target a wave by name |
-| `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
+| `--parent` | Target the invoking wave's parent (`lf chat`) |
 | `--follow` | Replay the selected thread's latest 12 turns and continue live while typed lines post (`lf chat`) |
 | `--history --json` | Read the selected Wave's durable local thread without requiring a listener (`lf chat`) |
 | `--limit N` | Bound a `--history` read (default: 12) |

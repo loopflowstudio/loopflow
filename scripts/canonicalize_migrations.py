@@ -29,9 +29,11 @@ identically. The draft id is authoring-time identity only; it never appears in
 canonical output. An empty draft set is a no-op.
 
 Writing requires explicit release-cut authority. CI may materialize the same tree
-in its disposable checkout with `--materialize-for-tests`; all other invocations
-are previews. Stdlib only, so the release path needs no Python environment — only
-an interpreter.
+in its disposable checkout with `--materialize-for-tests`; when the active
+package version has already published a batch, that authority models the next
+patch and bumps the disposable Cargo workspace version with it. All other
+invocations are previews. Stdlib only, so the release path needs no Python
+environment — only an interpreter.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
+PACKAGE_MANIFEST = REPO_ROOT / "Cargo.toml"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
 # `<name>__<id>.sql`; the readable name never contains `__`, so the last `__`
 # separates it from the immutable 128-bit token (32 hex chars).
@@ -235,6 +238,35 @@ def _new_registry_text(entries: str) -> str:
     return source[:end] + entries + source[end:]
 
 
+def _test_package_manifest(current: str, next_version: str) -> str:
+    if not PACKAGE_MANIFEST.is_file():
+        _fail(f"test materialization cannot find {PACKAGE_MANIFEST.name}")
+    lines = PACKAGE_MANIFEST.read_text().splitlines(keepends=True)
+    in_workspace_package = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "[workspace.package]":
+            in_workspace_package = True
+            continue
+        if stripped.startswith("["):
+            in_workspace_package = False
+        if not in_workspace_package:
+            continue
+        body = line.rstrip("\r\n")
+        newline = line[len(body) :]
+        match = re.match(r'^(\s*version\s*=\s*")([^"]+)(".*)$', body)
+        if match is None:
+            continue
+        if match.group(2) != current:
+            _fail(
+                f"{PACKAGE_MANIFEST.name} workspace version {match.group(2)!r} "
+                f"does not match requested test version {current!r}"
+            )
+        lines[index] = f"{match.group(1)}{next_version}{match.group(3)}{newline}"
+        return "".join(lines)
+    _fail(f"{PACKAGE_MANIFEST.name} has no [workspace.package] version")
+
+
 def _atomic_write(path: Path, data: str) -> None:
     """Replace `path` atomically via a temp file in the same directory + os.replace."""
     handle = tempfile.NamedTemporaryFile(
@@ -255,7 +287,13 @@ def _atomic_write(path: Path, data: str) -> None:
         raise
 
 
-def _install(canonical: Path, sql: str, drafts: list[Draft], registry_text: str) -> None:
+def _install(
+    canonical: Path,
+    sql: str,
+    drafts: list[Draft],
+    registry_text: str,
+    package_manifest_text: str | None,
+) -> None:
     """Write the planned batch atomically: on any failure, restore byte-for-byte.
 
     Order matters for rollback: create canonical files, replace the registry, then
@@ -263,8 +301,10 @@ def _install(canonical: Path, sql: str, drafts: list[Draft], registry_text: str)
     deleted drafts, the original registry, and removing created files.
     """
     original_registry = MIGRATIONS_RS.read_bytes()
+    original_manifest = PACKAGE_MANIFEST.read_bytes() if package_manifest_text else None
     deleted: list[tuple[Path, bytes]] = []
     registry_written = False
+    manifest_written = False
     canonical_written = False
     try:
         if canonical.exists():
@@ -273,6 +313,9 @@ def _install(canonical: Path, sql: str, drafts: list[Draft], registry_text: str)
         canonical_written = True
         _atomic_write(MIGRATIONS_RS, registry_text)
         registry_written = True
+        if package_manifest_text is not None:
+            _atomic_write(PACKAGE_MANIFEST, package_manifest_text)
+            manifest_written = True
         for draft in drafts:
             path = DRAFTS_DIR / draft.filename
             data = path.read_bytes()
@@ -281,6 +324,9 @@ def _install(canonical: Path, sql: str, drafts: list[Draft], registry_text: str)
     except BaseException as error:
         for path, data in deleted:
             path.write_bytes(data)
+        if manifest_written:
+            assert original_manifest is not None
+            PACKAGE_MANIFEST.write_bytes(original_manifest)
         if registry_written:
             MIGRATIONS_RS.write_bytes(original_registry)
         if canonical_written:
@@ -342,11 +388,21 @@ def main() -> None:
         namespace = tuple(int(match.group(index)) for index in range(1, 4))
         if namespace == (major, minor, patch):
             release_files.append(path.name)
+    package_manifest_text = None
     if release_files:
-        _fail(
-            f"release {major}.{minor}.{patch} already has canonical migration(s): "
-            f"{', '.join(sorted(release_files))}"
-        )
+        if write_mode != "--materialize-for-tests":
+            _fail(
+                f"release {major}.{minor}.{patch} already has canonical migration(s): "
+                f"{', '.join(sorted(release_files))}"
+            )
+        current = f"{major}.{minor}.{patch}"
+        patch += 1
+        next_version = f"{major}.{minor}.{patch}"
+        next_file = MIGRATIONS_DIR / f"{next_version}.001_release.sql"
+        if next_file.exists():
+            _fail(f"test release {next_version} already has canonical migration {next_file.name}")
+        package_manifest_text = _test_package_manifest(current, next_version)
+        print(f"test materialization advances the disposable package {current} -> {next_version}")
 
     canonical = MIGRATIONS_DIR / f"{major}.{minor}.{patch}.001_release.sql"
     print(f"canonicalizing {len(ordered)} draft(s) into {major}.{minor}.{patch}.001_release:")
@@ -357,7 +413,7 @@ def main() -> None:
         return
 
     registry_text = _new_registry_text(_entry(major, minor, patch))
-    _install(canonical, _batch_sql(ordered), ordered, registry_text)
+    _install(canonical, _batch_sql(ordered), ordered, registry_text, package_manifest_text)
     print(
         f"wrote 1 canonical migration from {len(ordered)} draft(s); "
         "run scripts/check_migrations.py to verify"

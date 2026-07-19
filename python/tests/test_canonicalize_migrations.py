@@ -204,6 +204,22 @@ def test_test_materialization_has_explicit_disposable_authority(repo: Path) -> N
     assert (repo / MIGRATIONS / "0.12.0.001_release.sql").exists()
 
 
+def test_test_materialization_models_the_next_patch_after_a_release(repo: Path) -> None:
+    (repo / "Cargo.toml").write_text(
+        '[workspace]\n\n[workspace.package]\nversion = "0.12.2"\nedition = "2021"\n'
+    )
+    draft(repo, "first_patch")
+    assert run(repo, "0.12.2").returncode == 0
+    draft(repo, "next_patch")
+
+    result = run(repo, "0.12.2", "--materialize-for-tests")
+
+    assert result.returncode == 0, result.stderr
+    assert "0.12.2 -> 0.12.3" in result.stdout
+    assert (repo / MIGRATIONS / "0.12.3.001_release.sql").exists()
+    assert 'version = "0.12.3"' in (repo / "Cargo.toml").read_text()
+
+
 def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:
     def build(name: str) -> Path:
         repo = tmp_path / name

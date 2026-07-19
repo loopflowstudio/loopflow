@@ -260,10 +260,8 @@ jobs:
 
             src="$tmpdir/lf"
             dst="$install_dir/lf"
-            tmp="$install_dir/.lf.tmp.$$"
-            cp "$src" "$tmp"
-            chmod +x "$tmp"
-            mv -f "$tmp" "$dst"
+            chmod +x "$src"
+            "$src" install promote --cli-target "$dst"
 
             echo "Installed to $install_dir/lf"
 

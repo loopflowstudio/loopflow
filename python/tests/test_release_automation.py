@@ -230,6 +230,21 @@ def test_release_dmg_workflow_bounds_build_and_upload():
     )
 
 
+def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
+    release = yaml.load(
+        (ROOT / ".github/workflows/release.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    installer = next(
+        step["run"]
+        for step in release["jobs"]["release"]["steps"]
+        if step.get("name") == "Generate shell installer"
+    )
+
+    assert '"$src" install promote --cli-target "$dst"' in installer
+    assert 'mv -f "$tmp" "$dst"' not in installer
+
+
 def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     test_script = (ROOT / "scripts/test.py").read_text()

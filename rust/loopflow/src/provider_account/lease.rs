@@ -436,6 +436,11 @@ enum BrokerOperation {
         account_id: ProviderAccountId,
         signal: RateLimitSignal,
     },
+    RecordCredentialInvalidated {
+        provider: Provider,
+        account_id: ProviderAccountId,
+        reason: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -751,6 +756,26 @@ impl BrokerState {
                 .await?;
                 Ok(BrokerResponse::Ok)
             }
+            BrokerOperation::RecordCredentialInvalidated {
+                provider,
+                account_id,
+                reason,
+            } => {
+                self.grant_contains(provider, &account_id)?;
+                self.prepared
+                    .store
+                    .record_provider_account_credential_invalidated(
+                        provider.as_str(),
+                        &account_id,
+                        &reason,
+                    )
+                    .await?;
+                self.prepared
+                    .credentials
+                    .remove(&(provider, account_id.clone()));
+                self.spent_preferences.insert((provider, account_id));
+                Ok(BrokerResponse::Ok)
+            }
         }
     }
 }
@@ -1055,6 +1080,24 @@ impl AccountLeaseClient {
             provider,
             account_id: account_id.clone(),
             signal: signal.clone(),
+        })? {
+            BrokerResponse::Ok => Ok(()),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn record_credential_invalidated(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        reason: &str,
+    ) -> Result<(), ProviderAccountError> {
+        match self.request(BrokerOperation::RecordCredentialInvalidated {
+            provider,
+            account_id: account_id.clone(),
+            reason: reason.to_string(),
         })? {
             BrokerResponse::Ok => Ok(()),
             _ => Err(ProviderAccountError::Runtime(
@@ -1512,6 +1555,24 @@ mod tests {
                 .resolve(Provider::Codex, None)
                 .unwrap()
                 .account_id,
+            id("primary")
+        );
+        client
+            .record_credential_invalidated(Provider::Codex, &id("reserve"), "token_invalidated")
+            .unwrap();
+        let invalidated = client
+            .account_facts(Provider::Codex, &id("reserve"))
+            .unwrap();
+        assert!(!invalidated.credential_available);
+        assert!(invalidated.account.is_some_and(|account| {
+            account.credential_state == crate::store::CredentialState::Missing
+                && account.cooldown_reason.as_deref() == Some("token_invalidated")
+        }));
+        assert!(client
+            .resolve_exact(Provider::Codex, &id("reserve"), None)
+            .is_err());
+        assert_eq!(
+            client.resolve(Provider::Codex, None).unwrap().account_id,
             id("primary")
         );
         let _lock = crate::journal::test_env_lock();

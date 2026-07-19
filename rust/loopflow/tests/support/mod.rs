@@ -17,7 +17,12 @@ use time::OffsetDateTime;
 
 /// Ambient authority a live agent process exports. Tests must never inherit the
 /// real Run that invoked the suite.
-const AMBIENT_AGENT_ENV: [&str; 3] = ["LF_RUN_CONTEXT", "LF_RUN_LEASE", "LF_WAVE_ID"];
+const AMBIENT_AGENT_ENV: [&str; 4] = [
+    "LF_RUN_CONTEXT",
+    "LF_RUN_LEASE",
+    "LF_WAVE_ID",
+    "LF_ACCOUNT_LEASE",
+];
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

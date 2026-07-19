@@ -12,6 +12,18 @@ env:
   LOOPFLOW_MIGRATION_AUTHORITY: published
 
 jobs:
+  release-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Exercise revoked-token recovery
+        run: >-
+          cargo test -p loopflow --test agent_tests
+          release_acceptance_recovers_from_a_revoked_selected_account -- --exact
+
   native-packages:
     strategy:
       fail-fast: false

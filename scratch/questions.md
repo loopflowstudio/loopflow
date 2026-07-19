@@ -21,17 +21,27 @@
 
 ## File-only memory curation blocker
 
-`wave/intelligence/MEMORY.md` still describes the deleted live-memory stream,
-write routes, and `lf memory add|update` commands as current architecture. This
-repair leaves it untouched because the operating contract says Wave memory is
-server-owned and explicitly forbids a direct file edit.
+Three server-owned Wave memories still teach architecture deleted by this
+redesign:
+
+- `wave/intelligence/MEMORY.md` describes `MemoryAdded` / `MemoryUpdated`, a
+  replay buffer, memory broadcasts and SSE frames, `/memory`, `lf memory
+  add|update`, and `lf sub` as current architecture.
+- `wave/product/MEMORY.md` describes `lf radio pub|sub`, `bus_messages`,
+  `bus_cursors`, channel bylines, and inherited live memory as current
+  architecture.
+- `wave/infrastructure/MEMORY.md` still says "the db is the bus" and names the
+  deleted bus tables and cursor protocol.
+
+This repair leaves them untouched because the operating contract says Wave
+memory is server-owned and explicitly forbids a direct file edit.
 
 There is no compliant write path left: `lf memory --help` exposes only `show`,
 and the Wave server has no memory route. The `update-wave` skill still instructs
 an agent to edit `MEMORY.md` through the ordinary repository workflow, which is
 the direct write this repair is not authorized to perform. Either restore an
 owned curation command or explicitly make reviewed repository edits the
-authority; then curate the stale Intelligence memory through that chosen path.
+authority; then curate all three stale memories through that chosen path.
 
 ## PR #1052 carry-forward
 

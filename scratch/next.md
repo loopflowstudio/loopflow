@@ -1,21 +1,24 @@
-# Slice 6C: delete producerless evidence Receipts
+# Slice 6D1: remove false Session identity
 
 ## Implement
 
-- Delete the evidence `Receipt` model, kinds, parser, and `lf receipt` resolver
-  command. No current feature authors these pointers after memory became a file.
-- Delete receipt-only resolved-record DTOs, docs, tests, and authored-flow
-  dispatch.
-- Delete receipt-only PR reference/identity helpers and the all-Task-PR store
-  query. Keep the CI repository identity path directly on current Task PR data.
-- Retain generic mutation result types named `*Receipt`; those are operation
-  outcomes, not evidence pointers.
-- Add no tombstone command or compatibility alias.
+- Rename Task workspace DTO `session_id` fields to `task_id` in Rust, Swift,
+  fixtures, and tests.
+- Rename `ChildControlActivity.session_id` to `work_id` across Rust/Swift wire
+  mirrors and journal fixtures.
+- Replace `LaunchSurfaceRecord.sessionId` (an alias of `launch.id`) with
+  `launchId` in its consumers.
+- Rename production Rust Project/Task locals, parameters, errors, comments,
+  prompts, and help that call stable Work a Session.
+- Replace user docs that advertise Task Session, Project Session, or durable
+  Session identity with Task Work, Project Work, or Launch as appropriate.
+- Retain explicitly named provider session ids and real tmux, Ghostty, browser,
+  and human sessions. Do not redesign server topology in this pass.
 
 ## Done when
 
-- [x] the evidence Receipt module and CLI command are absent.
-- [x] no current producer, parser, resolver, DTO, or docs remain.
-- [x] PR/CI behavior uses direct Task PR fields without receipt identity types.
-- [x] authored flows reject `receipt` as a command and focused behavior, fmt,
-      and all-target clippy pass.
+- [ ] Task workspace JSON names `task_id`; child activity JSON names `work_id`.
+- [ ] Launch presentation consumers name `launchId`.
+- [ ] production Project/Task code does not call stable Work or ids sessions.
+- [ ] user docs contain no Task Session, Project Session, or durable Session.
+- [ ] Rust/Swift DTO and focused behavior tests, fmt, and all-target clippy pass.

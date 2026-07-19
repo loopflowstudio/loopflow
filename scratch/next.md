@@ -1,30 +1,26 @@
-# Slice 3: make Wave memory file-only
+# Slice 4: remove ambient Wave chat from prompts
 
 ## Implement
 
-- Make `wave/<name>/MEMORY.md` the only Wave memory truth.
-- Delete memory-added/updated journal variants, runtime folds/state/broadcasts,
-  memory facts, replay, HTTP writes, SSE frames, receipts, and Swift mirrors.
-- Delete `lf memory add|log|update`, hidden aliases, and the export-memory skill.
-  Keep exactly `lf memory show` as a direct read that works with all servers
-  stopped.
-- Assemble Project/Task memory directly from applicable ancestor Wave
-  `MEMORY.md` files, oldest-first. Do not read journal/live deltas.
-- Remove Doctor, cron, prompt, docs, golden, and builtin references to live
-  memory curation.
+- Delete `PromptComponents.wave_chat`, its gather/render/budget/debug/trace
+  paths, and the `<lf:wave-chat-recent>` prompt section.
+- Delete live/journal Wave-chat fallback from generic Project/Task prompt
+  assembly. Recent transcript order is never an implicit context rule.
+- Narrow skill launch seeding so Wave context is deliberate: applicable
+  `MEMORY.md` may be selected, arbitrary recent chat may not.
+- Update builtin wording, docs, Swift comments, tests, traces, and goldens.
 
 ## Preserve
 
-- `GOAL.md` and `MEMORY.md` as authored/durable Wave files.
-- Generic mutation result types named `*Receipt`; evidence Receipt deletion is
-  a later slice.
-- Wave conversation itself; ambient transcript injection is the next slice.
+- Wave conversation, `ChatTurn`, listener journal, `lf chat`, and the Mac Wave
+  chat UI as product surfaces pending server-topology design.
+- Explicitly selected child Turn/output used to conduct Feedback.
+- Ancestor `MEMORY.md` prompt context.
 
 ## Done when
 
-- [ ] journal/runtime/server/SSE/Swift memory facts and writes are absent.
-- [ ] CLI exposes exactly `lf memory show`, usable without a server.
-- [ ] prompt memory reads only ancestor `MEMORY.md` files oldest-first.
-- [ ] export-memory and live-curation docs/prompts/tests are absent.
-- [ ] focused memory/journal/runtime/prompt/CLI/Swift proofs, fmt, and clippy
-      pass.
+- [ ] `PromptComponents` and prompt assembly have no Wave chat field/tag.
+- [ ] Project/Task prompt tests seed real recent Wave turns and prove they are
+      absent while selected memory remains.
+- [ ] No general runtime or prompt path calls `gather_wave_chat`.
+- [ ] Focused prompt/context/run/builtin/golden proofs, fmt, and clippy pass.

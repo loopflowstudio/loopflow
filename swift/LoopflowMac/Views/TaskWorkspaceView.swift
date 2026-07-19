@@ -73,7 +73,6 @@ final class TaskTerminalStore: ObservableObject {
 
 enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
-    case feedback = "Feedback"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -103,8 +102,6 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
-    @State private var feedbackCommand: [String]?
-    @State private var feedbackError: String?
 
     init(
         task: TaskPlanningSnapshot,
@@ -137,8 +134,6 @@ struct TaskWorkspaceView: View {
                 switch section {
                 case .changes:
                     changesView
-                case .feedback:
-                    feedbackView
                 case .terminal:
                     TaskTerminalWorkspaceView(
                         taskId: runtime.workId,
@@ -158,7 +153,6 @@ struct TaskWorkspaceView: View {
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
         .task(id: runtime?.workId) { await loadChanges() }
-        .task(id: "feedback:\(runtime?.workId ?? "none")") { await prepareFeedback() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -236,38 +230,6 @@ struct TaskWorkspaceView: View {
             }
             .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    @ViewBuilder
-    private var feedbackView: some View {
-        if !canFeedback {
-            ContentUnavailableView(
-                "No Feedback needs you",
-                systemImage: "checkmark.circle",
-                description: Text("This Task is not waiting for User attention.")
-            )
-        } else if let feedbackCommand, let workspace, let runtime {
-            GhosttyTerminalView(
-                workingDirectory: workspace.worktree,
-                argv: feedbackCommand,
-                sessionId: "task-feedback-\(runtime.workId)"
-            )
-            .id(runtime.workId)
-            .background(LoopflowPalette.dark.background)
-        } else if let feedbackError {
-            ContentUnavailableView(
-                "Feedback unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text(feedbackError)
-            )
-        } else {
-            ProgressView("Preparing Feedback…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private var canFeedback: Bool {
-        attention.level == .blue
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {
@@ -377,28 +339,6 @@ struct TaskWorkspaceView: View {
             error = nil
         } catch {
             self.error = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func prepareFeedback() async {
-        guard canFeedback else {
-            feedbackCommand = nil
-            feedbackError = nil
-            return
-        }
-        let repoPath = repoPath
-        let taskId = task.id
-        do {
-            feedbackCommand = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.resolvedTaskFeedbackCommand(
-                    repoPath: repoPath,
-                    taskId: taskId
-                )
-            }.value
-            feedbackError = nil
-        } catch {
-            feedbackError = error.localizedDescription
         }
     }
 

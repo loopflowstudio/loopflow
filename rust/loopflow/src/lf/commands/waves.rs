@@ -21,7 +21,7 @@ use crate::child::{
     body_progress_age, observe, BodyEvidence, BodyIntent, BodyObservation, ChildRef,
     ObservationRecipient, DEFAULT_STALL_AFTER,
 };
-use crate::durable::{AttentionRoute, Containment, Home, WorkRef, WorkStatus};
+use crate::durable::{Containment, Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
@@ -284,7 +284,7 @@ pub struct LocalProgressEvidence {
 struct TaskAttentionEvidence {
     process: TaskProcessEvidence,
     local_progress: LocalProgressEvidence,
-    user_feedback: bool,
+    user_ask: bool,
 }
 
 /// A Task's shared attention projection and the evidence that proves it.
@@ -1353,7 +1353,7 @@ async fn snapshot_task_detail(
     let resume_refusal = task.and_then(|task| {
         crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
     });
-    let (action_evidence, user_feedback) = match task {
+    let (action_evidence, user_ask) = match task {
         Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
@@ -1362,10 +1362,7 @@ async fn snapshot_task_detail(
             let work = store
                 .work_for_child(&ChildRef::Task(task.id.clone()))
                 .await?;
-            let feedback = store.feedback(&work).await?;
-            let user_feedback = feedback
-                .as_ref()
-                .is_some_and(|feedback| feedback.attention == AttentionRoute::User);
+            let user_ask = store.has_pending_user_ask_for_work(&work).await?;
             let work_status = store.work_status(&work).await?;
             (
                 Some(TaskActionEvidence {
@@ -1383,7 +1380,7 @@ async fn snapshot_task_detail(
                     abandon_intent: task.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
                 }),
-                user_feedback,
+                user_ask,
             )
         }
         None => (None, false),
@@ -1395,7 +1392,7 @@ async fn snapshot_task_detail(
         TaskAttentionEvidence {
             process,
             local_progress,
-            user_feedback,
+            user_ask,
         },
         action_evidence.as_ref(),
         observed_at,
@@ -1576,17 +1573,17 @@ fn derive_task_attention(
     let TaskAttentionEvidence {
         process,
         local_progress,
-        user_feedback,
+        user_ask,
     } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
     let live = process.alive == Some(true);
     let user_attention = next_move.owner == NextMoveOwner::User;
-    let (level, reason) = if user_feedback {
+    let (level, reason) = if user_ask {
         (
             TaskAttentionLevel::Blue,
-            "Waiting for your feedback".to_string(),
+            "Waiting for your answer".to_string(),
         )
     } else if live && user_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())

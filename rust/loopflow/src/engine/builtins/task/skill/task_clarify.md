@@ -15,8 +15,8 @@ instructions, current worktree, and any existing design note in `scratch/`.
 - Write or tighten the single Task design note only when the change is not yet
   computable. Preserve a clear existing design.
 - Resolve reversible ambiguity with the simpler path. When a choice changes
-  scope, behavior, or authority, state the exact question and alternatives in
-  the interactive step; the derived Feedback routes it to the supervisor.
+  scope, behavior, or authority, run `lf ask "<exact question>"`; continue the
+  same Turn after the parent Answer returns.
 - Do not implement beyond a trivial probe that makes the design computable.
 
 ## Computable design contract

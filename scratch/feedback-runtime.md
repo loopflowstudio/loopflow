@@ -33,6 +33,8 @@ Implement the exchange and its provider-independent shell surface in this pass:
 - add `lf ask`, `lf ask wait`, `lf work asks`, and `lf work answer`;
 - make the blocking command wake its routed parent after commit and preserve the
   exchange across shell or Run loss;
+- mirror each committed Ask and Answer to the asking Work's Linear surface as
+  an idempotent comment without putting Linear on the blocking response path;
 - derive User and child attention by querying answerable exchanges;
 - delete Feedback, Continue, reviewer flags, attention columns, and their
   special runner servicing paths rather than adapting them to Ask;
@@ -213,6 +215,14 @@ revisions. Work Basis moves for durable direction such as Steer, not for a tool
 call and its result already incorporated by that Turn. Recovery reads the
 exchange directly. The unused `ToolResponseWrite` revision behavior is not
 precedent for this exchange.
+
+Ask and Answer are also visible where the Work is managed. After committing an
+exchange transition, enqueue an idempotent Linear comment for the asking Work:
+the Ask comment records the question and route; the Answer comment records the
+exact response and author. The durable exchange remains authoritative. Linear
+publication never delays `lf ask` returning an already-committed Answer, and a
+failed publication remains observable and retryable without duplicating a
+comment after recovery.
 
 The child Run lease opens the Ask. The Answer route is stored, not supplied by
 the caller:
@@ -548,6 +558,9 @@ A standalone review skill can remain a direct operation; it owns no lifecycle.
   handback can advance the step.
 - An Answer cannot enter the Steer queue, and a Steer cannot satisfy an Ask.
   Recorded Answers therefore cannot replay at a later boundary.
+- Every committed Ask and Answer is eventually mirrored once as a comment on
+  the asking Work's Linear surface. Linear failure cannot roll back the
+  exchange or keep a child blocked after its Answer commits.
 - A Project can continue a core flow turn while its detached answer agent
   answers a Task, subject only to provider capacity.
 - A Wave can continue its core pass while its detached answer agent answers a

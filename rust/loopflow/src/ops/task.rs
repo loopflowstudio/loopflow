@@ -30,7 +30,7 @@ use crate::store::{
 };
 use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
-    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, FeedbackReviewer, GithubObservation,
+    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
     PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
     TaskPrId,
@@ -58,7 +58,6 @@ pub struct TaskLaunchOptions {
     pub flows: TaskFlowOverrides,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
-    pub reviewer: Option<FeedbackReviewer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,22 +330,12 @@ async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
         .map_err(|error| task_error(error.to_string()))
 }
 
-fn _set_task_reviewer(task: &mut Task, reviewer: FeedbackReviewer) -> bool {
-    if task.lifecycle.all_reviewed_by(reviewer) {
-        return false;
-    }
-    task.lifecycle.set_reviewer(reviewer);
-    task.updated_at = time::OffsetDateTime::now_utc();
-    true
-}
-
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<Task> {
     let TaskLaunchOptions {
         name,
         flows,
         stack_on,
         directive,
-        reviewer,
     } = options;
     let directive = directive
         .map(|directive| {
@@ -442,12 +431,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     task.plan.identifier, task.plan.identifier,
                 )));
             }
-            if reviewer.is_some_and(|reviewer| _set_task_reviewer(task, reviewer)) {
-                store
-                    .update_task(task)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-            }
         }
         Ok((existing, None))
     })?;
@@ -463,7 +446,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         .flows
         .clone()
         .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
-    let lifecycle = resolve_task_lifecycle(&main_repo, &project_flows, &flows, reviewer)?;
+    let lifecycle = resolve_task_lifecycle(&main_repo, &project_flows, &flows)?;
     let segment = match name.as_deref() {
         Some(name) => parse_workspace_slug(name)?,
         None => match &terminal_predecessor_id {
@@ -762,7 +745,7 @@ pub fn task_start(
         .flows
         .clone()
         .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
-    resolve_task_lifecycle(&main, &project_flows, &options.flows, options.reviewer)?;
+    resolve_task_lifecycle(&main, &project_flows, &options.flows)?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
@@ -843,7 +826,6 @@ fn resolve_task_lifecycle(
     repo: &Path,
     project: &crate::pm::ProjectFlowPlan,
     overrides: &TaskFlowOverrides,
-    reviewer: Option<FeedbackReviewer>,
 ) -> OpsResult<crate::task::TaskLifecyclePlan> {
     let first = overrides
         .first
@@ -863,11 +845,9 @@ fn resolve_task_lifecycle(
     let first = resolve_task_flow(repo, first, false)?;
     let loop_flow = resolve_task_flow(repo, loop_flow, false)?;
     let finally = resolve_task_flow(repo, finally, true)?;
-    let mut lifecycle = crate::task::TaskLifecyclePlan::standard(first, loop_flow, finally);
-    if let Some(reviewer) = reviewer {
-        lifecycle.set_reviewer(reviewer);
-    }
-    Ok(lifecycle)
+    Ok(crate::task::TaskLifecyclePlan::standard(
+        first, loop_flow, finally,
+    ))
 }
 
 fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
@@ -1359,14 +1339,6 @@ pub(crate) fn request_task_pr_merge(
         else {
             return Ok(false);
         };
-        let feedback = feedback_gate(&store, &task).await?;
-        if !feedback.satisfied {
-            return Err(task_error(format!(
-                "Task {} cannot request a pull request merge while {}",
-                task.plan.identifier,
-                feedback.reason()
-            )));
-        }
         let head_sha = head_sha
             .filter(|head| !head.trim().is_empty())
             .ok_or_else(|| {
@@ -2796,40 +2768,30 @@ async fn reconcile_task_pr_with_authority(
                     CommittedFollowUp::ProvenEmpty
                 );
             if completes {
-                // Even with the PR merged, an authored Feedback checkpoint must
-                // be continued before the Task can complete in the PM. The PR is
-                // settling in flight, so only that Feedback fact is checked here;
-                // do not bypass it or infer merge from a green head.
-                let gate = feedback_gate(store, task).await?;
-                if gate.satisfied {
-                    let proposal = crate::task::TaskGateProposal {
-                        done: true,
-                        reason: format!(
-                            "pull request #{} merged and completed the Task",
-                            github_pr.number
-                        ),
-                    };
-                    match task.lifecycle_phase {
-                        crate::task::TaskLifecyclePhase::First => {
-                            task
-                                .enter_loop()
-                                .map_err(|error| task_error(error.to_string()))?;
-                            task
-                                .enter_finally(proposal)
-                                .map_err(|error| task_error(error.to_string()))?;
-                        }
-                        crate::task::TaskLifecyclePhase::Loop => {
-                            task
-                                .enter_finally(proposal)
-                                .map_err(|error| task_error(error.to_string()))?;
-                        }
-                        crate::task::TaskLifecyclePhase::Finally => {
-                            task.gate_proposal = Some(proposal);
-                            task.updated_at = now;
-                        }
+                let proposal = crate::task::TaskGateProposal {
+                    done: true,
+                    reason: format!(
+                        "pull request #{} merged and completed the Task",
+                        github_pr.number
+                    ),
+                };
+                match task.lifecycle_phase {
+                    crate::task::TaskLifecyclePhase::First => {
+                        task.enter_loop()
+                            .map_err(|error| task_error(error.to_string()))?;
+                        task.enter_finally(proposal)
+                            .map_err(|error| task_error(error.to_string()))?;
                     }
-                    reconcile_pm_writeback(store, task, Some(&url)).await;
+                    crate::task::TaskLifecyclePhase::Loop => {
+                        task.enter_finally(proposal)
+                            .map_err(|error| task_error(error.to_string()))?;
+                    }
+                    crate::task::TaskLifecyclePhase::Finally => {
+                        task.gate_proposal = Some(proposal);
+                        task.updated_at = now;
+                    }
                 }
+                reconcile_pm_writeback(store, task, Some(&url)).await;
             }
             Some(TaskEventKind::PrMerged {
                 pr_id: pr.id.clone(),
@@ -3370,13 +3332,10 @@ async fn ensure_working_pr_with_authority(
         }
     }
     let committed_carry = committed_follow_up_range(&task.worktree, &settled)?;
-    // A settled completing PR normally never rotates: completion is pending on
-    // its explicit Feedback checkpoint, not on a follow-up PR.
-    // `reconcile_task_completion` commits Work completion once that checkpoint
-    // is continued. Two things
-    // independently authorize one more serial PR: follow-up committed past the
-    // merged tip, which the completion gate refuses to settle over, and a
-    // pending directive, which the successor exists to incorporate.
+    // A settled completing PR normally never rotates. Two things independently
+    // authorize one more serial PR: follow-up committed past the merged tip,
+    // which the completion gate refuses to settle over, and a pending
+    // directive, which the successor exists to incorporate.
     if settled.after_merge() == AfterMerge::CompleteTask
         && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
@@ -3674,14 +3633,13 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
                 "Task worktree has uncommitted changes; publish or explicitly abandon them first",
             ));
         }
-        // The completion gate requires every active PR to be settled and any
-        // authored Feedback checkpoint to be continued before PM completion.
-        // Do not bypass either fact or infer merge from a green head.
+        // The completion gate requires every active PR to be settled. Do not
+        // bypass that fact or infer merge from a green head.
         let gate = task_completion_gate(&store, &task).await?;
         if let Some(refusal) = gate.refusal(&task.plan.identifier) {
-            // Nothing has been written. A refusal here — open Feedback, a
-            // committed follow-up, anything — leaves a discardable successor
-            // active, so the Task keeps its PR and no rotation is provoked.
+            // Nothing has been written. A refusal leaves a discardable
+            // successor active, so the Task keeps its PR and no rotation is
+            // provoked.
             return Err(task_error(refusal));
         }
         propose_task_done(&mut task, summary.clone())?;
@@ -3899,8 +3857,7 @@ async fn retry_pm_writeback(store: &SharedStore, task: &mut Task) {
 // ---------------------------------------------------------------------------
 // Completion gate: the single source of truth for "may this Task be completed
 // in the PM yet?" A Task is completable only when every active PR is settled
-// (merged or explicitly abandoned) AND no Feedback boundary remains open.
-// Every path that sets a Task to `Completed` and
+// (merged or explicitly abandoned). Every path that sets a Task to `Completed` and
 // fires the `CompleteTask` PM writeback consults this gate, so the PM row, the
 // durable Task, PR state, and Work flow converge monotonically.
 // ---------------------------------------------------------------------------
@@ -3944,48 +3901,17 @@ impl CompletionGate {
     }
 }
 
-impl CompletionGate {
-    fn unsatisfied(blockers: Vec<String>) -> Self {
-        Self {
-            satisfied: false,
-            blockers,
-            discardable_successor: None,
-        }
-    }
-}
-
-/// Open Feedback blocks terminal completion. Continuing it
-/// advances the playhead; no historical disposition participates in closure.
-async fn feedback_gate(store: &SharedStore, task: &Task) -> OpsResult<CompletionGate> {
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    let feedback = store
-        .feedback(&work)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    Ok(if feedback.is_none() {
-        CompletionGate {
-            satisfied: true,
-            blockers: Vec::new(),
-            discardable_successor: None,
-        }
-    } else {
-        CompletionGate::unsatisfied(vec!["current Feedback has not continued".to_string()])
-    })
-}
-
-/// Evaluate the completion gate against the Task's durable PR and Feedback
-/// state. Pure over store state: running it twice changes nothing. Use this from
-/// paths where the PR state is already persisted (`task_complete`, the
-/// reconcile advance, the repair). The merge-reconcile path uses
-/// [`feedback_gate`] first, since the PR it is settling is not yet on disk.
+/// Evaluate the completion gate against the Task's durable PR state. Pure over
+/// store state: running it twice changes nothing.
 pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<CompletionGate> {
-    let mut gate = feedback_gate(store, task).await?;
+    let mut gate = CompletionGate {
+        satisfied: true,
+        blockers: Vec::new(),
+        discardable_successor: None,
+    };
     let work_done = task_work_status(store, task).await? == WorkStatus::Done;
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
@@ -4827,7 +4753,7 @@ mod tests {
             ..TaskFlowOverrides::default()
         };
 
-        let plan = resolve_task_lifecycle(repo.path(), &project, &overrides, None)
+        let plan = resolve_task_lifecycle(repo.path(), &project, &overrides)
             .expect("resolve lifecycle");
 
         assert_eq!(plan.first.flow, "incident");
@@ -4852,7 +4778,7 @@ mod tests {
         };
 
         let error =
-            resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default(), None)
+            resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default())
                 .expect_err("reject unsafe finally flow");
 
         assert!(error

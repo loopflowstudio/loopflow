@@ -5,11 +5,11 @@ import Testing
 
 @Suite("Work Census")
 struct WorkCensusTests {
-    @Test("Only User-attention Invocation rows are openable")
-    func projectionAssignsInvocationIdentityOnlyToUserAttention() throws {
+    @Test("Invocation rows are openable only with an attach command")
+    func projectionAssignsInvocationIdentityOnlyToAttachableInvocations() throws {
         let roadmap = try minimalRoadmap()
-        let userInvocation = invocation(id: "invocation-user", attentionKind: "user")
-        let parentInvocation = invocation(id: "invocation-parent", attentionKind: "parent")
+        let userInvocation = invocation(id: "invocation-user", attachable: true)
+        let parentInvocation = invocation(id: "invocation-parent", attachable: false)
 
         let census = WorkCensus(
             roadmap: roadmap,
@@ -33,7 +33,7 @@ struct WorkCensusTests {
         #expect(workRows.allSatisfy { $0.invocationId == nil && !$0.isOpenable })
     }
 
-    private func invocation(id: String, attentionKind: String) -> InvocationSurfaceRecord {
+    private func invocation(id: String, attachable: Bool) -> InvocationSurfaceRecord {
         let work = WorkReference(
             kind: .task,
             id: "ts_now00000000000000000000000000000"
@@ -65,18 +65,8 @@ struct WorkCensusTests {
             work: work,
             waveId: "wave-1",
             homeRoute: "local",
-            attention: InvocationAttentionRecord(
-                kind: attentionKind,
-                work: attentionKind == "parent"
-                    ? WorkReference(
-                        kind: .project,
-                        id: "ps_11111111111111111111111111111111"
-                    )
-                    : nil
-            ),
-            attentionAt: "2026-07-17T12:01:00Z",
             handback: nil,
-            attachArgv: nil
+            attachArgv: attachable ? ["tmux", "attach-session", "-t", "lf-task"] : nil
         )
     }
 

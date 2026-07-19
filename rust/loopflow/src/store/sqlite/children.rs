@@ -24,9 +24,9 @@ use crate::project::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    AfterMerge, CiObservation, FeedbackReviewer, GithubObservation, GithubPr,
-    LinearObservationApply, LinearObservationOutcome, PrMergeRequest, PrPhase, PrPublication, Task,
-    TaskEvent, TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
+    AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
+    LinearObservationOutcome, PrMergeRequest, PrPhase, PrPublication, Task, TaskEvent,
+    TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
     TaskPhasePlan, TaskPr, TaskPrId,
 };
 
@@ -1480,13 +1480,13 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     issue_description, pm_snapshot_synced_at, pm_writeback_json,
     worktree, workspace_slug,
     agent, provider, provider_session_id, abandon_requested_at, abandon_reason,
-    iterate_flow, iterate_reviewer, phase_cursor, phase_iteration,
-    kickoff_flow, kickoff_reviewer, gate_flow, gate_reviewer,
+    iterate_flow, phase_cursor, phase_iteration,
+    kickoff_flow, gate_flow,
     lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json,
     created_at, updated_at
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
@@ -1494,8 +1494,8 @@ const TASK_COLUMNS: &str = "SELECT
     t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
     t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
     t.abandon_requested_at, t.abandon_reason,
-    t.iterate_flow, t.iterate_reviewer, t.phase_cursor, t.phase_iteration,
-    t.kickoff_flow, t.kickoff_reviewer, t.gate_flow, t.gate_reviewer,
+    t.iterate_flow, t.phase_cursor, t.phase_iteration,
+    t.kickoff_flow, t.gate_flow,
     t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_SELECT: &str = "SELECT
@@ -1504,8 +1504,8 @@ pub(super) const TASK_SELECT: &str = "SELECT
     t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
     t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
     t.abandon_requested_at, t.abandon_reason,
-    t.iterate_flow, t.iterate_reviewer, t.phase_cursor, t.phase_iteration,
-    t.kickoff_flow, t.kickoff_reviewer, t.gate_flow, t.gate_reviewer,
+    t.iterate_flow, t.phase_cursor, t.phase_iteration,
+    t.kickoff_flow, t.gate_flow,
     t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
@@ -1513,46 +1513,43 @@ const TASK_UPDATE: &str = "UPDATE tasks SET
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16, iterate_reviewer=?17,
-    kickoff_flow=?20, kickoff_reviewer=?21,
-    gate_flow=?22, gate_reviewer=?23,
-    created_at=?28, updated_at=?29
+    iterate_flow=?16, kickoff_flow=?19, gate_flow=?20,
+    created_at=?25, updated_at=?26
     WHERE id=?1";
 const TASK_REOPEN_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16, iterate_reviewer=?17, phase_cursor=?18,
-    phase_iteration=?19, kickoff_flow=?20, kickoff_reviewer=?21,
-    gate_flow=?22, gate_reviewer=?23, lifecycle_phase=?24,
-    phase_epoch=?25, gate_cycle=?26, gate_proposal_json=?27,
-    created_at=?28, updated_at=?29
+    iterate_flow=?16, phase_cursor=?17,
+    phase_iteration=?18, kickoff_flow=?19,
+    gate_flow=?20, lifecycle_phase=?21,
+    phase_epoch=?22, gate_cycle=?23, gate_proposal_json=?24,
+    created_at=?25, updated_at=?26
     WHERE id=?1";
 const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16, iterate_reviewer=?17,
-    lifecycle_phase=CASE WHEN ?25>=phase_epoch THEN ?24 ELSE lifecycle_phase END,
+    iterate_flow=?16,
+    lifecycle_phase=CASE WHEN ?22>=phase_epoch THEN ?21 ELSE lifecycle_phase END,
     phase_cursor=CASE
-        WHEN ?25>phase_epoch OR
-             (?25=phase_epoch AND (?19>phase_iteration OR
-                                   (?19=phase_iteration AND ?18>phase_cursor)))
-        THEN ?18 ELSE phase_cursor
+        WHEN ?22>phase_epoch OR
+             (?22=phase_epoch AND (?18>phase_iteration OR
+                                   (?18=phase_iteration AND ?17>phase_cursor)))
+        THEN ?17 ELSE phase_cursor
     END,
     phase_iteration=CASE
-        WHEN ?25>phase_epoch THEN ?19
-        WHEN ?25=phase_epoch THEN MAX(phase_iteration, ?19)
+        WHEN ?22>phase_epoch THEN ?18
+        WHEN ?22=phase_epoch THEN MAX(phase_iteration, ?18)
         ELSE phase_iteration
     END,
-    kickoff_flow=?20, kickoff_reviewer=?21,
-    gate_flow=?22, gate_reviewer=?23,
-    phase_epoch=MAX(phase_epoch, ?25),
-    gate_cycle=CASE WHEN ?25>=phase_epoch THEN ?26 ELSE gate_cycle END,
-    gate_proposal_json=CASE WHEN ?25>=phase_epoch THEN ?27 ELSE gate_proposal_json END,
-    created_at=?28, updated_at=?29
+    kickoff_flow=?19, gate_flow=?20,
+    phase_epoch=MAX(phase_epoch, ?22),
+    gate_cycle=CASE WHEN ?22>=phase_epoch THEN ?23 ELSE gate_cycle END,
+    gate_proposal_json=CASE WHEN ?22>=phase_epoch THEN ?24 ELSE gate_proposal_json END,
+    created_at=?25, updated_at=?26
     WHERE id=?1";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1625,13 +1622,10 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
                 .map(|intent| intent.reason.clone()),
         ),
         Box::new(task.lifecycle.loop_.flow.clone()),
-        Box::new(task.lifecycle.loop_.reviewer.as_str().to_string()),
         Box::new(i64::from(task.phase_cursor)),
         Box::new(i64::from(task.phase_iteration)),
         Box::new(task.lifecycle.first.flow.clone()),
-        Box::new(task.lifecycle.first.reviewer.as_str().to_string()),
         Box::new(task.lifecycle.finally.flow.clone()),
-        Box::new(task.lifecycle.finally.reviewer.as_str().to_string()),
         Box::new(task.lifecycle_phase.storage_str().to_string()),
         Box::new(i64::from(task.phase_epoch)),
         Box::new(i64::from(task.gate_cycle)),
@@ -1946,39 +1940,21 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: PathBuf::from(row.get::<_, String>(6)?),
         workspace_slug: row.get(7)?,
         lifecycle: TaskLifecyclePlan {
-            first: TaskPhasePlan {
-                flow: row.get(22)?,
-                reviewer: row
-                    .get::<_, String>(23)?
-                    .parse::<FeedbackReviewer>()
-                    .map_err(|error| invalid_column(23, error))?,
-            },
-            loop_: TaskPhasePlan {
-                flow: row.get(18)?,
-                reviewer: row
-                    .get::<_, String>(19)?
-                    .parse::<FeedbackReviewer>()
-                    .map_err(|error| invalid_column(19, error))?,
-            },
-            finally: TaskPhasePlan {
-                flow: row.get(24)?,
-                reviewer: row
-                    .get::<_, String>(25)?
-                    .parse::<FeedbackReviewer>()
-                    .map_err(|error| invalid_column(25, error))?,
-            },
+            first: TaskPhasePlan { flow: row.get(21)? },
+            loop_: TaskPhasePlan { flow: row.get(18)? },
+            finally: TaskPhasePlan { flow: row.get(22)? },
         },
-        lifecycle_phase: TaskLifecyclePhase::from_storage_str(&row.get::<_, String>(26)?)
-            .map_err(|error| invalid_column(26, error))?,
-        phase_epoch: row.get::<_, i64>(27)? as u32,
-        phase_cursor: row.get::<_, i64>(20)? as u32,
-        phase_iteration: row.get::<_, i64>(21)? as u32,
-        gate_cycle: row.get::<_, i64>(28)? as u32,
+        lifecycle_phase: TaskLifecyclePhase::from_storage_str(&row.get::<_, String>(23)?)
+            .map_err(|error| invalid_column(23, error))?,
+        phase_epoch: row.get::<_, i64>(24)? as u32,
+        phase_cursor: row.get::<_, i64>(19)? as u32,
+        phase_iteration: row.get::<_, i64>(20)? as u32,
+        gate_cycle: row.get::<_, i64>(25)? as u32,
         gate_proposal: row
-            .get::<_, Option<String>>(29)?
+            .get::<_, Option<String>>(26)?
             .map(|json| serde_json::from_str(&json))
             .transpose()
-            .map_err(|error| invalid_column(29, error))?,
+            .map_err(|error| invalid_column(26, error))?,
         agent: row.get(8)?,
         provider: row.get(9)?,
         provider_session_id: row.get(10)?,

@@ -323,11 +323,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WorkCommand,
     },
-    /// List current User-attention Feedback, oldest first
-    Queue {
-        #[arg(long)]
-        json: bool,
-    },
     /// Internal: run a Project or Task body holding the ambient Run lease
     #[command(name = "__work", hide = true)]
     WorkRunner {
@@ -654,7 +649,7 @@ pub enum InvocationCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
-    /// Show current Epoch, Basis, Run, Wait, and Feedback projection
+    /// Show current Epoch, Basis, Run, and Wait projection
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -692,20 +687,6 @@ pub enum WorkCommand {
     Answer {
         ask_id: crate::durable::AskId,
         text: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Present the current User-attention Feedback in its recorded Invocation
-    Feedback {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-    },
-    /// Continue past the current Feedback boundary
-    Continue {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
         #[arg(long)]
         json: bool,
     },
@@ -867,9 +848,6 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Route future Feedback checkpoints to the User or parent Project
-        #[arg(long, value_enum, value_name = "USER|PARENT")]
-        reviewer: Option<crate::task::FeedbackReviewer>,
         #[arg(long)]
         json: bool,
     },
@@ -895,9 +873,6 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Route future Feedback checkpoints to the User or parent Project
-        #[arg(long, value_enum, value_name = "USER|PARENT")]
-        reviewer: Option<crate::task::FeedbackReviewer>,
         #[arg(long)]
         json: bool,
     },
@@ -2104,34 +2079,10 @@ mod tests {
     }
 
     #[test]
-    fn task_run_and_start_accept_explicit_reviewer() {
-        for (argv, expected) in [
-            (
-                vec!["lf", "task", "run", "INF-123", "--reviewer", "parent"],
-                crate::task::FeedbackReviewer::Parent,
-            ),
-            (
-                vec![
-                    "lf",
-                    "task",
-                    "start",
-                    "project-1",
-                    "Ship auth",
-                    "--reviewer",
-                    "user",
-                ],
-                crate::task::FeedbackReviewer::User,
-            ),
-        ] {
-            let cli = Cli::try_parse_from(argv).expect("parse Task reviewer");
-            let reviewer = match cli.command {
-                Some(Commands::Task {
-                    cmd: TaskCommand::Run { reviewer, .. } | TaskCommand::Start { reviewer, .. },
-                }) => reviewer,
-                other => panic!("expected Task launch, got {other:?}"),
-            };
-            assert_eq!(reviewer, Some(expected));
-        }
+    fn task_run_rejects_retired_reviewer_flag() {
+        assert!(
+            Cli::try_parse_from(["lf", "task", "run", "INF-123", "--reviewer", "parent"]).is_err()
+        );
     }
 
     #[test]
@@ -2564,41 +2515,30 @@ mod tests {
             }) if kind == "task" && id == "task_1" && message == "inspect the failure"
         ));
 
-        let continue_cli = Cli::try_parse_from(["lf", "work", "continue", "project", "project_1"])
-            .expect("parse Work continue");
+        let asks = Cli::try_parse_from(["lf", "work", "asks", "project", "project_1"])
+            .expect("parse Work asks");
         assert!(matches!(
-            continue_cli.command,
+            asks.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Continue { kind, id, json: false }
+                cmd: WorkCommand::Asks { kind: Some(kind), id: Some(id), json: false }
             }) if kind == "project" && id == "project_1"
         ));
-
-        let feedback = Cli::try_parse_from(["lf", "work", "feedback", "task", "task_1"])
-            .expect("parse Feedback presentation");
+        let answer = Cli::try_parse_from([
+            "lf",
+            "work",
+            "answer",
+            "ask_00000000000000000000000000000001",
+            "keep the durable exchange",
+            "--json",
+        ])
+        .expect("parse Work answer");
         assert!(matches!(
-            feedback.command,
+            answer.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Feedback { kind, id }
-            }) if kind == "task" && id == "task_1"
+                cmd: WorkCommand::Answer { text, json: true, .. }
+            }) if text == "keep the durable exchange"
         ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "feedback",
-            "task",
-            "task_1",
-            "--continue-on-success",
-        ])
-        .is_err());
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "feedback",
-            "task",
-            "task_1",
-            "--continue-on-exit",
-        ])
-        .is_err());
+        assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
 
         let place = Cli::try_parse_from([
@@ -2626,6 +2566,24 @@ mod tests {
             "home_00000000000000000000000000000001",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn cli_parses_ask_and_wait_as_shell_arguments() {
+        let ask =
+            Cli::try_parse_from(["lf", "ask", "Which proof matters?"]).expect("parse Ask question");
+        assert!(matches!(
+            ask.command,
+            Some(Commands::Ask { args }) if args == ["Which proof matters?"]
+        ));
+        let wait =
+            Cli::try_parse_from(["lf", "ask", "wait", "ask_00000000000000000000000000000001"])
+                .expect("parse Ask wait");
+        assert!(matches!(
+            wait.command,
+            Some(Commands::Ask { args })
+                if args == ["wait", "ask_00000000000000000000000000000001"]
+        ));
     }
 
     #[test]

@@ -121,19 +121,6 @@ enum LaunchTargetLauncher {
         )
     }
 
-    /// Keep the Feedback controller local. `lf invocation present` owns the one Home
-    /// hop needed to reach the recorded provider terminal.
-    static func feedbackCommand(for attach: InvocationSurfaceRecord) -> Command {
-        let lfPath = Bundle.main.url(forAuxiliaryExecutable: "lf")?.path ?? "lf"
-        return Command(
-            cwd: "/",
-            argv: [
-                lfPath, "work", "feedback", attach.work.kind.rawValue, attach.work.id,
-            ],
-            environment: [:]
-        )
-    }
-
     /// Probe the machine and launch into the pure capability the resolver reads.
     /// The worktree is only probed on a local Home; a remote worktree is never
     /// locally proven. The provider and session id determine whether an IDE can

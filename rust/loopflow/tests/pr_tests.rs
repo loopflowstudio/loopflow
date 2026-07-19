@@ -447,10 +447,6 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
         .expect("read rotated Task")
         .expect("Task remains present");
     assert!(durable_task.gate_proposal.is_none());
-    assert!(runtime
-        .block_on(task.store.feedback(&work))
-        .expect("read Task Feedback")
-        .is_none());
     assert!(!matches!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done

@@ -452,12 +452,11 @@ impl SqliteStore {
                     ));
                 }
                 require_turn_for_run(&tx, turn_id, &run.id)?;
-                let ended = tx.execute(
+                tx.execute(
                     "UPDATE agent_turns SET status=?2, ended_at=COALESCE(ended_at, ?3)
                      WHERE id=?1 AND status='running'",
                     params![turn_id.as_str(), outcome.as_turn_status(), now_unix()],
                 )?;
-                let _ = ended;
                 AdvanceReceipt::Turn(control_turn_in(&tx, turn_id)?)
             }
             RunAdvance::Wait { on } => {
@@ -654,6 +653,12 @@ impl SqliteStore {
                 "Turn {turn_id} already has an unanswered Ask"
             )));
         }
+        if let Some(existing) = latest_ask_for_turn_in(&tx, &turn_id)? {
+            if existing.question == question {
+                tx.commit()?;
+                return Ok(existing);
+            }
+        }
         let route = match parent_work(&tx, &run.work)? {
             Some(parent) => AnswerRoute::Parent(parent),
             None => {
@@ -695,16 +700,22 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let run = validate_run_lease(&conn, lease)?;
         require_invocation_for_run(&conn, invocation_id, &run.id)?;
-        let turn_id = current_or_latest_turn_for_invocation_in(&conn, invocation_id)?;
         let ask = match ask_id {
-            Some(ask_id) => ask_by_id_in(&conn, ask_id)?,
-            None => latest_ask_for_turn_in(&conn, &turn_id)?.ok_or(StoreError::NotFound)?,
+            Some(ask_id) => {
+                let ask = ask_by_id_in(&conn, ask_id)?;
+                let (epoch_id, work) = ask_epoch_work_in(&conn, &ask.turn_id)?;
+                if epoch_id != run.epoch_id || work != run.work {
+                    return Err(StoreError::InvalidAuthority(
+                        "Ask does not belong to this Run's Work Epoch".to_string(),
+                    ));
+                }
+                ask
+            }
+            None => {
+                let turn_id = current_or_latest_turn_for_invocation_in(&conn, invocation_id)?;
+                latest_ask_for_turn_in(&conn, &turn_id)?.ok_or(StoreError::NotFound)?
+            }
         };
-        if ask.turn_id != turn_id {
-            return Err(StoreError::InvalidAuthority(
-                "Ask does not belong to the current Turn".to_string(),
-            ));
-        }
         Ok(ask)
     }
 
@@ -787,6 +798,23 @@ impl SqliteStore {
     pub fn pending_user_asks(&self) -> StoreResult<Vec<AskExchange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         query_answerable_asks(&conn, "a.route_kind='user'", [])
+    }
+
+    pub fn has_pending_user_ask_for_work(&self, work: &WorkRef) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM ask_exchanges a
+                JOIN agent_turns t ON t.id=a.turn_id
+                JOIN epochs e ON e.id=t.epoch_id
+                WHERE a.route_kind='user' AND a.answered_at IS NULL
+                  AND e.state='open' AND e.work_kind=?1 AND e.work_id=?2
+                  AND t.status NOT IN ('completed', 'interrupted')
+             )",
+            params![work.kind(), work.id()],
+            |row| row.get(0),
+        )
+        .map_err(StoreError::from)
     }
 
     pub fn invocation_surface(
@@ -2142,39 +2170,6 @@ fn handback_state(state: BoundaryState) -> &'static str {
     }
 }
 
-fn flow_position_in(
-    conn: &Connection,
-    work: &WorkRef,
-    epoch_id: &EpochId,
-) -> StoreResult<FlowPosition> {
-    conn.query_row(
-        "SELECT flow, step, step_index, iteration, updated_at
-         FROM work_flow_positions WHERE epoch_id=?1",
-        [epoch_id.as_str()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
-        },
-    )
-    .map_err(StoreError::from)
-    .and_then(|row| {
-        Ok(FlowPosition {
-            work: work.clone(),
-            epoch_id: epoch_id.clone(),
-            flow: row.0,
-            step: row.1,
-            step_index: row.2 as u32,
-            iteration: row.3 as u32,
-            updated_at: OffsetDateTime::from_unix_timestamp(row.4).map_err(invalid_durable)?,
-        })
-    })
-}
-
 fn parent_work(conn: &Connection, work: &WorkRef) -> StoreResult<Option<WorkRef>> {
     match work {
         WorkRef::Wave(_) => Ok(None),
@@ -2236,6 +2231,27 @@ fn current_or_latest_turn_for_invocation_in(
         .optional()?
         .ok_or(StoreError::NotFound)?;
     TurnId::parse(&id).map_err(invalid_durable)
+}
+
+fn ask_epoch_work_in(conn: &Connection, turn_id: &TurnId) -> StoreResult<(EpochId, WorkRef)> {
+    let (epoch_id, wave_id, project_id, task_id) = conn.query_row(
+        "SELECT e.id, e.wave_id, e.project_id, e.task_id
+         FROM agent_turns t JOIN epochs e ON e.id=t.epoch_id
+         WHERE t.id=?1",
+        [turn_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        },
+    )?;
+    Ok((
+        EpochId::parse(&epoch_id).map_err(invalid_durable)?,
+        work_from_parts((wave_id, project_id, task_id))?,
+    ))
 }
 
 fn insert_ask(conn: &Connection, ask: &AskExchange) -> StoreResult<()> {
@@ -2366,10 +2382,7 @@ fn pending_ask_for_turn_in(
         .transpose()
 }
 
-fn latest_ask_for_turn_in(
-    conn: &Connection,
-    turn_id: &TurnId,
-) -> StoreResult<Option<AskExchange>> {
+fn latest_ask_for_turn_in(conn: &Connection, turn_id: &TurnId) -> StoreResult<Option<AskExchange>> {
     let id = conn
         .query_row(
             "SELECT id FROM ask_exchanges WHERE turn_id=?1

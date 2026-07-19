@@ -843,11 +843,6 @@ mod tests {
         let surface: InvocationSurface = serde_json::from_str(fixture).unwrap();
         assert_eq!(surface.invocation.route.provider, "opaque");
         assert_eq!(surface.work.kind(), "task");
-        assert!(matches!(
-            surface.attention,
-            Some(super::AttentionRoute::User)
-        ));
-        assert!(surface.attention_at.is_some());
 
         let encoded = serde_json::to_string(&surface).unwrap();
         let decoded: InvocationSurface = serde_json::from_str(&encoded).unwrap();

@@ -40,10 +40,6 @@
   },
   "wave_id": "00000000-0000-4000-8000-000000000006",
   "home_route": "jack@local",
-  "attention": {
-    "kind": "user"
-  },
-  "attention_at": "2026-07-17T12:01:00Z",
   "handback": null,
   "attach_argv": ["tmux", "attach-session", "-t", "lf-task"]
 }

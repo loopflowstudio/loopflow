@@ -25,7 +25,7 @@ kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with or steer a Wave.
 
 A Loopflow-launched Wave, Project, or Task agent is an internal participant.
-It receives `LOOPFLOW.md`; typed Work observations and Feedback carry
+It receives `LOOPFLOW.md`; typed Work observations and Ask/Answer carry
 coordination across the parent relationship.
 
 A Wave directing a task is the internal case:
@@ -85,7 +85,8 @@ same stable Work control surface:
 ```bash
 lf work status task task_... --json
 lf work steer task task_... "show the failing fixture" --json
-lf work continue task task_...                      # continue past current Feedback
+lf work asks project proj_... --json                  # pending child questions
+lf work answer ask_... "use the smaller change"    # answer one exact Ask
 ```
 
 A Steer receipt reports immutable delivery attempts, not incorporation. A
@@ -152,7 +153,7 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
 - Answer humans in turn text; use typed Work observations and explicit
-  Feedback points for parent/child coordination.
+  Ask/Answer exchanges for parent/child coordination.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

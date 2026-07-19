@@ -1,7 +1,9 @@
-# Slice 1 follow-ups
+# Slice 2 follow-ups
 
-- `agent_invocations.attention_kind`, `attention_work_kind`, `attention_work_id`,
-  `attention_at`, and `handback_state` remain temporarily so the current
-  Feedback and interactive presentation paths survive the execution-model
-  reduction. Slice 2 must delete them with Feedback and replace their behavior
-  with Ask/Answer plus explicit interactive Demo handback.
+- `handback_state` remains only for the existing opaque interactive Invocation
+  surface. Slice 3 must replace it with Demo's explicit interactive handback.
+- This slice exposes explicit `lf work asks` / `lf work answer` servicing.
+  Detached Project and Wave answer agents remain Slice 3 work.
+- After runner loss, `lf ask wait <ask-id>` may recover an exchange from an
+  earlier Invocation in the same Work Epoch. The explicit id is the fence that
+  distinguishes it from a new Turn's own Ask.

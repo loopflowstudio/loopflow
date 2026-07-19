@@ -4,10 +4,6 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
-use loopflow::child::ChildRef;
-use loopflow::durable::{
-    AttentionRoute, Containment, FlowPosition, InvocationRoute, RunAdvance, RunTrigger,
-};
 use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{
     create_or_update_pr, land, submit, LandOptions, NullProgress, OpsError, PrOptions,
@@ -1079,125 +1075,6 @@ fn latest_land_disposition_wins_before_merge() {
     let log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(log.contains("pr merge 912 --disable"));
     assert!(log.contains("pr edit --add-assignee @me"));
-}
-
-#[test]
-fn land_refuses_to_request_merge_while_task_feedback_is_open() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let repo = TestRepo::new();
-    let log_path = home.path().join("gh.log");
-    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("open", noop_open_script())],
-        home.path(),
-    );
-    let base = repo.head_sha();
-    let branch = "jack/task-feedback-proof";
-    repo.create_branch(branch);
-    repo.create_file("feature.txt", "feature");
-    repo.stage_all();
-    repo.commit("feature work");
-    repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
-    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    runtime.block_on(async {
-        let work = task
-            .store
-            .work_for_child(&ChildRef::Task(task.task.id.clone()))
-            .await
-            .expect("resolve Task Work");
-        let (_, lease) = task
-            .store
-            .reserve_run(&work, RunTrigger::User)
-            .await
-            .expect("reserve Task Run");
-        task.store
-            .advance_run(
-                &lease,
-                RunAdvance::RunStarting {
-                    containment: Containment::Tmux {
-                        name: "feedback-proof".to_string(),
-                    },
-                    cwd: repo.path().to_path_buf(),
-                },
-            )
-            .await
-            .expect("start Task Run");
-        let receipt = task
-            .store
-            .advance_run(
-                &lease,
-                RunAdvance::InvocationStarting {
-                    route: InvocationRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
-                    surface: "tui".to_string(),
-                    resume_token: None,
-                },
-            )
-            .await
-            .expect("start Task Invocation");
-        let loopflow::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
-            panic!("expected Invocation receipt")
-        };
-        let basis = task
-            .store
-            .current_epoch(&work)
-            .await
-            .expect("read Task Epoch")
-            .current_basis;
-        task.store
-            .set_flow_position(
-                &lease,
-                FlowPosition {
-                    work: work.clone(),
-                    epoch_id: basis.epoch_id,
-                    flow: "task".to_string(),
-                    step: "gate".to_string(),
-                    step_index: 0,
-                    iteration: 0,
-                    feedback: true,
-                    updated_at: time::OffsetDateTime::now_utc(),
-                },
-            )
-            .await
-            .expect("set Feedback position");
-        task.store
-            .route_feedback(&lease, &invocation.id, AttentionRoute::User)
-            .await
-            .expect("open Task Feedback");
-    });
-
-    let result = land(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: false,
-            complete: false,
-            next_slug: None,
-            worktree: None,
-            commit_message: None,
-            pr_title: Some("test title".to_string()),
-            pr_body: Some("test body".to_string()),
-            agent: None,
-        },
-        &NullProgress,
-    );
-
-    let error = result.expect_err("open Feedback must refuse merge intent");
-    assert!(error
-        .to_string()
-        .contains("cannot request a pull request merge"));
-    let pr = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read active PR")
-        .expect("active PR");
-    assert!(pr.merge_request().is_none());
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    assert!(!log.contains("pr merge --squash --auto"));
 }
 
 #[test]

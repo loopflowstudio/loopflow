@@ -212,17 +212,9 @@ public struct WorkCensus: Sendable, Hashable {
         staleThresholdSecs: Int
     ) -> WaveActivity {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
-        // Only User-routed attention paints the external attention queue blue.
-        // Parent-routed Feedback remains on the parent's control lane.
-        let userInvocations = invocations.filter {
-            $0.attention?.kind == "user" && $0.attentionAt != nil
-        }
-        let blockingParentIds = Set(userInvocations.map(\.parentId))
-        let waveLevelAttention = userInvocations.contains { $0.parentKind == "wave" }
-
         var rows: [WorkActivity] = []
         var anyRed = false
-        var anyBlue = waveLevelAttention
+        var anyBlue = false
         var handledInvocationIds: Set<String> = []
 
         if case let .available(projectItems, _) = projects {
@@ -232,7 +224,7 @@ public struct WorkCensus: Sendable, Hashable {
                 else { continue }
                 let projectRowId = runtime.workId
                 var projectRed = false
-                var projectBlue = blockingParentIds.contains(runtime.workId)
+                var projectBlue = false
                 var childRows: [WorkActivity] = []
 
                 for task in project.tasks {
@@ -240,9 +232,7 @@ public struct WorkCensus: Sendable, Hashable {
                         !isTerminal(taskRuntime.status)
                     else { continue }
                     let taskRowId = taskRuntime.workId
-                    let blockingInvocation = blockingParentIds.contains(taskRuntime.workId)
-                    var tint = tint(for: task.attention.level)
-                    if blockingInvocation && tint != .red { tint = .blue }
+                    let tint = tint(for: task.attention.level)
                     if tint == .red { projectRed = true }
                     if tint == .blue { projectBlue = true }
                     childRows.append(
@@ -380,10 +370,7 @@ public struct WorkCensus: Sendable, Hashable {
         parentRowId: String?,
         staleThresholdSecs: Int
     ) -> WorkActivity {
-        let userAttention = invocation.attention?.kind == "user" && invocation.attentionAt != nil
-        // The Feedback presentation opens by Work and Invocation, so an empty argv no longer
-        // makes a User-routed Feedback unopenable.
-        let openable = userAttention
+        let openable = !invocation.argv.isEmpty
         return WorkActivity(
             id: "invocation:\(invocation.invocationId)",
             kind: .invocation,
@@ -397,8 +384,8 @@ public struct WorkCensus: Sendable, Hashable {
             step: nil,
             ageSecs: invocation.ageSecs,
             reason: invocation.reason,
-            nextOwner: userAttention ? .user : nil,
-            tint: userAttention ? .blue : .green,
+            nextOwner: nil,
+            tint: .green,
             evidence: isStale(invocation.ageSecs, staleThresholdSecs) ? .stale : .observed,
             invocationId: openable ? invocation.id : nil
         )

@@ -90,20 +90,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
-        #expect(LocalWaveAgentLauncher.taskFeedbackCommand(lfPath: lf, taskId: "task_131") == [
-            lf, "work", "feedback", "task", "task_131",
-        ])
-    }
-
-    @Test("Feedback presentation never requests continuation")
-    func feedbackPresentationCommandShape() throws {
-        let data = try loadFixtureData("invocation_surface.json")
-        let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: data)
-        let command = LaunchTargetLauncher.feedbackCommand(for: surface)
-
-        #expect(Array(command.argv.dropFirst()) == [
-            "work", "feedback", "task", "task_00000000000000000000000000000005",
-        ])
     }
 
     @Test("PR review delegates to lf pr open rather than opening a URL itself")

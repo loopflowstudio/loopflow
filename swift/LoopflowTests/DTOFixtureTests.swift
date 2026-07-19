@@ -127,7 +127,7 @@ struct DTOFixtureTests {
         #expect(activity.kind == .prOpened)
         #expect(activity.title == "Opened PR #1073")
     }
-    @Test("Invocation surface fixture preserves Run ownership, attach, and attention")
+    @Test("Invocation surface fixture preserves Run ownership and attach")
     func invocationSurfaceFixtureRoundTrips() throws {
         let data = try loadFixtureData("invocation_surface.json")
         let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: data)
@@ -137,13 +137,37 @@ struct DTOFixtureTests {
         #expect(surface.status == .active)
         #expect(surface.run.containment == .tmux(name: "lf-task"))
         #expect(surface.run.cwd == "/src/loopflow.task")
-        #expect(surface.attention?.kind == "user")
-        #expect(surface.attentionAt == "2026-07-17T12:01:00Z")
         #expect(surface.argv == ["tmux", "attach-session", "-t", "lf-task"])
 
         let encoded = try JSONEncoder().encode(surface)
         let decoded = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: encoded)
         #expect(decoded == surface)
+    }
+
+    @Test("Turn and Ask fixtures preserve the targeted exchange")
+    func askExchangeFixturesRoundTrip() throws {
+        let turn = try JSONDecoder().decode(
+            TurnRecord.self,
+            from: loadFixtureData("turn.json")
+        )
+        #expect(turn.state == .active)
+        #expect(turn.basis.revision == 4)
+
+        let ask = try JSONDecoder().decode(
+            AskExchangeRecord.self,
+            from: loadFixtureData("ask_exchange.json")
+        )
+        #expect(ask.turnId == turn.id)
+        #expect(ask.route == .parent(WorkReference(
+            kind: .project,
+            id: "proj_00000000000000000000000000000001"
+        )))
+        #expect(ask.answer?.author == .run("run_00000000000000000000000000000001"))
+        #expect(ask.answer?.text == "The live blocking exchange.")
+
+        let encoded = try JSONEncoder().encode(ask)
+        let decoded = try JSONDecoder().decode(AskExchangeRecord.self, from: encoded)
+        #expect(decoded == ask)
     }
 
     @Test("Work status fixture preserves every status and wait kind")

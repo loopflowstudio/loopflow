@@ -1,12 +1,9 @@
-use std::process::{Command, ExitStatus};
-
 use anyhow::{anyhow, Context};
 use serde::Serialize;
 
 use crate::durable::{
-    Answer, AskExchange, AuthenticatedRequest, ControlCtx, EpochReceipt, Feedback,
-    InterruptReceipt, Placement, ProjectId, Run, SteerReceipt, TaskId, UserFeedback, WorkRef,
-    WorkStatus,
+    Answer, AskExchange, AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt,
+    Placement, ProjectId, Run, SteerReceipt, TaskId, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
@@ -18,7 +15,6 @@ struct WorkProjection {
     basis: crate::durable::Basis,
     status: WorkStatus,
     run: Option<Run>,
-    feedback: Option<Feedback>,
 }
 
 #[derive(Debug, Serialize)]
@@ -26,7 +22,6 @@ struct WorkProjection {
 enum WorkReceipt {
     Placed(Placement),
     Steer(SteerReceipt),
-    FeedbackContinued { status: WorkStatus },
     Interrupted(InterruptReceipt),
     Abandoned(EpochReceipt),
 }
@@ -117,28 +112,6 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             };
             print_answer(&answer, *json)?;
         }
-        WorkCommand::Feedback { kind, id } => {
-            let work = parse_work(kind, id)?;
-            run_feedback(&store, &work).await?;
-        }
-        WorkCommand::Continue { kind, id, json } => {
-            let work = parse_work(kind, id)?;
-            let feedback = store
-                .feedback(&work)
-                .await?
-                .ok_or_else(|| anyhow!("{} {} has no current Feedback", work.kind(), work.id()))?;
-            let status = if let Some(lease) = crate::ops::ambient_run_lease(&store).await? {
-                store
-                    .continue_feedback(&ControlCtx::Run(&lease), &work, &feedback.basis)
-                    .await?
-            } else {
-                let request = AuthenticatedRequest::cli();
-                store
-                    .continue_feedback(&ControlCtx::User(&request), &work, &feedback.basis)
-                    .await?
-            };
-            print_receipt(&WorkReceipt::FeedbackContinued { status }, *json)?;
-        }
         WorkCommand::Interrupt { kind, id, json } => {
             let work = parse_work(kind, id)?;
             let run = store
@@ -199,68 +172,6 @@ fn print_answer(answer: &Answer, json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn run_queue(json: bool) -> anyhow::Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async move {
-        let store = open_shared_store().await?;
-        let feedback = store.user_attention().await?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&feedback)?);
-        } else if feedback.is_empty() {
-            println!("No Work needs your attention.");
-        } else {
-            for item in feedback {
-                let feedback = &item.feedback;
-                println!(
-                    "{} {}  {}:{}  {}",
-                    feedback.work.kind(),
-                    feedback.work.id(),
-                    feedback.basis.epoch_id,
-                    feedback.basis.revision,
-                    feedback.position.step,
-                );
-            }
-        }
-        Ok(())
-    })
-}
-
-async fn run_feedback(store: &Store, work: &WorkRef) -> anyhow::Result<()> {
-    let item = find_user_feedback(store, work)
-        .await?
-        .ok_or_else(|| anyhow!("{} {} has no current User Feedback", work.kind(), work.id()))?;
-    println!(
-        "Opening Feedback for {} {} at {}:{} ({})",
-        item.feedback.work.kind(),
-        item.feedback.work.id(),
-        item.feedback.basis.epoch_id,
-        item.feedback.basis.revision,
-        item.feedback.position.step,
-    );
-    let status = present_feedback(&item.feedback)?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("Feedback presentation exited with {status}"))
-    }
-}
-
-fn present_feedback(feedback: &Feedback) -> anyhow::Result<ExitStatus> {
-    Command::new(std::env::current_exe()?)
-        .arg("invocation")
-        .arg("present")
-        .arg(feedback.invocation_id.as_str())
-        .status()
-        .context("present Feedback Invocation")
-}
-
-async fn find_user_feedback(store: &Store, work: &WorkRef) -> anyhow::Result<Option<UserFeedback>> {
-    Ok(store
-        .user_attention()
-        .await?
-        .into_iter()
-        .find(|item| &item.feedback.work == work))
-}
-
 async fn open_shared_store() -> anyhow::Result<Store> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     open_store(&config)
@@ -274,7 +185,6 @@ async fn projection(store: &Store, work: &WorkRef) -> anyhow::Result<WorkProject
         basis: store.current_epoch(work).await?.current_basis,
         status: store.work_status(work).await?,
         run: store.current_run(work).await?,
-        feedback: store.feedback(work).await?,
     })
 }
 
@@ -292,7 +202,7 @@ fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<(
         println!("{}", serde_json::to_string_pretty(projection)?);
     } else {
         println!(
-            "{} {}  {:?}\n  basis: {}:{}\n  run: {}\n  attention: {}",
+            "{} {}  {:?}\n  basis: {}:{}\n  run: {}",
             projection.work.kind(),
             projection.work.id(),
             projection.status,
@@ -302,14 +212,6 @@ fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<(
                 .run
                 .as_ref()
                 .map_or("none", |run| run.id.as_str()),
-            projection.feedback.as_ref().map_or("none", |feedback| {
-                match (&feedback.attention, feedback.attention_at.is_some()) {
-                    (crate::durable::AttentionRoute::User, true) => "user (pending)",
-                    (crate::durable::AttentionRoute::User, false) => "user (parked)",
-                    (crate::durable::AttentionRoute::Parent(_), true) => "parent (pending)",
-                    (crate::durable::AttentionRoute::Parent(_), false) => "parent (parked)",
-                }
-            }),
         );
     }
     Ok(())
@@ -327,7 +229,6 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
                 placement.home_id
             ),
             WorkReceipt::Steer(receipt) => println!("steered {}", receipt.steer.id),
-            WorkReceipt::FeedbackContinued { status } => println!("continued Feedback: {status:?}"),
             WorkReceipt::Interrupted(receipt) => println!("interrupted {}", receipt.run_id),
             WorkReceipt::Abandoned(receipt) => println!("abandoned {}", receipt.epoch.id),
         }

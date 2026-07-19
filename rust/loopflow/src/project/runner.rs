@@ -17,7 +17,7 @@ use crate::durable::{Basis, BoundarySeed, RunLease, WorkStatus};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, default_create_harness, drain_turn_failure_reason,
-    ApprovalPolicy, Harness, RecoveryDecision, SendCurrentOutcome,
+    ApprovalPolicy, Harness, RecoveryDecision,
 };
 use crate::project::{ChildEventPayload, Project, ProjectEventKind, ProjectId};
 use crate::provider_account::recovery::{
@@ -119,32 +119,10 @@ async fn run_project_inner(
     };
     let mut pending = VecDeque::new();
     let initial_input = take_current_input(&store, &project, lease, &mut pending).await?;
-    let initial_child = if initial_input.is_none() {
-        store.child_attention(&work).await?.into_iter().next()
-    } else {
-        None
-    };
     let observations = consume_task_observations(&store, &mut project, lease).await?;
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
-    let prepared = match initial_child.as_ref() {
-        Some(child) => {
-            let mut turn = crate::lf::commands::run::prepare_harness_turn(
-                "project_pursue",
-                &child.render(),
-                wave.name(),
-                None,
-            )?;
-            turn.config.agent = Some(project.agent.clone());
-            PreparedProjectStep {
-                turn,
-                basis: run_lease.basis.clone(),
-            }
-        }
-        None => {
-            prepare_project_flow_step(&store, &mut project, lease, &wave, &flow, &observations)
-                .await?
-        }
-    };
+    let prepared =
+        prepare_project_flow_step(&store, &mut project, lease, &wave, &flow, &observations).await?;
     let (harness_name, _) = crate::engine::config::parse_agent(&project.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -211,20 +189,12 @@ async fn run_project_inner(
     let mut active_basis = prepared.basis.clone();
 
     let mut flow_turn_active = false;
-    let mut control_turn_active = initial_input.is_some() || initial_child.is_some();
-    let mut background_preempted = false;
+    let mut input_turn_active = initial_input.is_some();
     let mut provider_turn_active;
-    let mut pending_child = None;
-    let mut delivered_child = initial_child.as_ref().map(|child| {
-        (
-            child.feedback.invocation_id.clone(),
-            child.feedback.basis.revision,
-        )
-    });
     if let Some(input) = initial_input {
         apply_input(&store, &project, lease, harness.as_mut(), input).await?;
         provider_turn_active = true;
-    } else if control_turn_active {
+    } else if input_turn_active {
         apply_input(
             &store,
             &project,
@@ -308,28 +278,6 @@ async fn run_project_inner(
                         .await?;
                     }
                 }
-                if provider_turn_active && !control_turn_active {
-                    if let Some(child) = store.child_attention(&work).await?.into_iter().next() {
-                        let key = (child.feedback.invocation_id.clone(), child.feedback.basis.revision);
-                        if delivered_child.as_ref() != Some(&key) {
-                            match harness.send_current(&child.render()).await {
-                                SendCurrentOutcome::Sent { .. } => {
-                                    // This provider Turn began as background work, but its
-                                    // result now belongs to the child interaction. Close the
-                                    // active flow body as interrupted when the Turn ends so a
-                                    // successful live delivery cannot advance the playhead.
-                                    control_turn_active = true;
-                                    background_preempted = true;
-                                }
-                                _ => {
-                                    harness.interrupt().await?;
-                                    pending_child = Some(child);
-                                }
-                            }
-                            delivered_child = Some(key);
-                        }
-                    }
-                }
             }
             _ = task_supervision.tick() => {
                 if let Err(error) = crate::ops::task::supervise_project_task_bodies(
@@ -378,9 +326,8 @@ async fn run_project_inner(
                         }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
-                        let was_control_turn = control_turn_active;
-                        control_turn_active = false;
-                        delivered_child = None;
+                        let was_control_turn = input_turn_active;
+                        input_turn_active = false;
                         if let Some(capture) = &capture {
                             let outcome = match status {
                                 Lifecycle::Completed => "completed",
@@ -423,44 +370,15 @@ async fn run_project_inner(
                             }
                         }
                         let flow_iteration_completed = if flow_turn_active {
-                            let flow_status = if background_preempted {
-                                Lifecycle::Interrupted
-                            } else {
-                                status
-                            };
-                            background_preempted = false;
-                            finish_project_flow_turn(&mut flow, flow_status)?
+                            finish_project_flow_turn(&mut flow, status)?
                         } else {
                             false
                         };
                         flow_turn_active = false;
                         if let Some(input) = take_current_input(&store, &project, lease, &mut pending).await? {
                             apply_input(&store, &project, lease, harness.as_mut(), input).await?;
-                            control_turn_active = true;
+                            input_turn_active = true;
                             provider_turn_active = true;
-                            continue;
-                        }
-                        let queued_child = store.child_attention(&work).await?.into_iter().next();
-                        let next_child = pending_child.take().or(queued_child);
-                        if let Some(child) = next_child {
-                            let boundary = store.boundary_seed(&work).await?;
-                            let input = child.render();
-                            if let Some(capture) = &capture {
-                                capture.begin_turn_at("queued", &input, Some(boundary.basis))?;
-                            }
-                            apply_input(
-                                &store,
-                                &project,
-                                lease,
-                                harness.as_mut(),
-                                PendingInput::system(input),
-                            ).await?;
-                            control_turn_active = true;
-                            provider_turn_active = true;
-                            delivered_child = Some((
-                                child.feedback.invocation_id,
-                                child.feedback.basis.revision,
-                            ));
                             continue;
                         }
                         if status != Lifecycle::Interrupted {

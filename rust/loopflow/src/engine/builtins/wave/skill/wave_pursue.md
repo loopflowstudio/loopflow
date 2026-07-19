@@ -67,11 +67,6 @@ its available status/next owner.
   override is needed. This never replaces the Task's Project.
   Independent tasks may run in parallel; never create a second session for one
   issue.
-- Service a pending child Feedback before background portfolio work. Reply with
-  the exact `lf work steer ...` command embedded in `<lf:child-feedback>`, or use
-  its `lf work continue ...` command when Feedback is finished.
-  Delivery attempts are transport evidence; the child's later successful
-  boundary Basis proves application.
 - Use `lf project run <linear-project-id> --directive "<delegation brief>"` to
   create or resume the Project's durable pursuit session. It sleeps while
   supervised Tasks run and wakes from their typed observations. Projects never

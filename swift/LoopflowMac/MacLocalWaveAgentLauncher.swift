@@ -137,12 +137,6 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    static func resolvedTaskFeedbackCommand(repoPath: String, taskId: String) throws -> [String] {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
-        return taskFeedbackCommand(lfPath: lfPath, taskId: taskId)
-    }
-
     /// Open the branch's PR for human review from `worktree`. This delegates to
     /// `lf pr open` — the single presentation boundary — instead of building a
     /// GitHub URL and opening it here, so any later review-surface preference is
@@ -193,10 +187,6 @@ enum LocalWaveAgentLauncher {
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "interrupt", issue]
-    }
-
-    static func taskFeedbackCommand(lfPath: String, taskId: String) -> [String] {
-        [lfPath, "work", "feedback", "task", taskId]
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`

@@ -282,7 +282,7 @@ impl<E: SkillExecutor> FlowEngine<E> {
                     directions: Vec::new(),
                     action_style: None,
                     interactive: Some(false),
-                        content: Some(prompt.clone()),
+                    content: Some(prompt.clone()),
                 },
                 flow_parents: branch.flow_parents.clone(),
             },

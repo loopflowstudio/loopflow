@@ -57,9 +57,9 @@ and observation spans.
 - **Tasks** own implementation worktrees and PR delivery. Every Task
   reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
-- **Task workspace presentation** reads `lf task changes/diff/file --json` and
-  opens blue Feedback through `lf work feedback task <id>` without advancing it.
-  Lifecycle mutations remain `lf task run/resume/interrupt`.
+- **Task workspace presentation** reads `lf task changes/diff/file --json`.
+  Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
+  are answered through the explicit `lf work asks/answer` CLI.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave

@@ -26,15 +26,14 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf queue
-lf work feedback task task_...
+lf work asks
 ```
 
-`feedback` opens the recorded provider session. Send durable direction without
-opening it via Steer, continue past the boundary, or resume a stopped process
-through the same Task Work:
+Answer an exact pending question, send unsolicited durable direction through
+Steer, or resume a stopped process through the same Task Work:
 
 ```bash
+lf work answer ask_... "address the failing check first"
 lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
@@ -113,11 +112,11 @@ lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 
-Typical owners are a Feedback checkpoint, an active child Task, CI, or an
+Typical owners are an unanswered Ask, an active child Task, CI, or an
 explicitly requested merge. Steer, decide, or resume the named Project or Task.
 Task lifecycle observations wake Project Work when their typed route allows it.
-Parent-routed Task Feedback currently requires a live Project Run; if its
-Project is stopped, resume the Project. There is no PR-limit counter to clear.
+`lf ask` wakes a stopped parent before waiting. There is no PR-limit counter to
+clear.
 
 ## Context too large
 

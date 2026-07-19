@@ -3702,7 +3702,11 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        let reviewer_index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "task_feedback_reviewers")
+            .unwrap();
+        apply_set(&conn, &MIGRATIONS[..=reviewer_index]).unwrap();
 
         let task_columns = columns(&conn, "tasks");
         assert!(task_columns.contains(&"iterate_reviewer".to_string()));
@@ -3730,6 +3734,66 @@ mod tests {
             )
             .unwrap();
         assert_eq!(parent, ("parent".into(), "parent".into(), "parent".into()));
+    }
+
+    #[test]
+    fn durable_asks_enforce_complete_answers_and_one_pending_exchange() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+
+        let invocation_columns = columns(&conn, "agent_invocations");
+        for deleted in [
+            "attention_kind",
+            "attention_work_kind",
+            "attention_work_id",
+            "attention_at",
+        ] {
+            assert!(!invocation_columns.contains(&deleted.to_string()));
+        }
+        let task_columns = columns(&conn, "tasks");
+        for deleted in ["kickoff_reviewer", "iterate_reviewer", "gate_reviewer"] {
+            assert!(!task_columns.contains(&deleted.to_string()));
+        }
+        assert!(!columns(&conn, "work_flow_positions").contains(&"interactive".to_string()));
+
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        conn.execute(
+            "INSERT INTO ask_exchanges (
+                id, turn_id, route_kind, route_work_kind, route_work_id,
+                question, asked_at
+             ) VALUES ('ask_one', 'turn_one', 'parent', 'project', 'ps_parent',
+                       'Which proof?', 1)",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO ask_exchanges (
+                    id, turn_id, route_kind, question, asked_at
+                 ) VALUES ('ask_two', 'turn_one', 'user', 'Another?', 2)",
+                [],
+            )
+            .is_err());
+        assert!(conn
+            .execute(
+                "UPDATE ask_exchanges SET answer_text='partial' WHERE id='ask_one'",
+                [],
+            )
+            .is_err());
+        conn.execute(
+            "UPDATE ask_exchanges
+             SET answer_author_kind='user', answer_text='This proof', answered_at=3
+             WHERE id='ask_one'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ask_exchanges (
+                id, turn_id, route_kind, question, asked_at
+             ) VALUES ('ask_two', 'turn_one', 'user', 'Another?', 4)",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]

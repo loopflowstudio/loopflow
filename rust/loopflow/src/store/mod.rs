@@ -956,24 +956,19 @@ mod tests {
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
-    use crate::durable::{
-        AttentionRoute, Author, Containment, ContainmentObservation, ControlCtx, FlowPosition,
-        RunAdvance, SendState, StopCause, WorkStatus,
-    };
+    use crate::durable::{Author, ContainmentObservation, ControlCtx, StopCause, WorkStatus};
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
     use crate::project::{Project, ProjectId};
     use crate::task::{
-        CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr,
-        TaskPrId,
+        GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr, TaskPrId,
     };
-    use crate::trace::{AgentInvocationRow, AgentTurnRow};
     use crate::wave::Wave;
     use std::env;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use time::{Duration, OffsetDateTime};
+    use time::OffsetDateTime;
 
     #[test]
     fn build_provenance_selects_separate_default_store_universes() {
@@ -1215,79 +1210,6 @@ mod tests {
         }
     }
 
-    fn trace_invocation(id: &str) -> AgentInvocationRow {
-        AgentInvocationRow {
-            id: id.to_string(),
-            run_id: format!("run-{id}"),
-            process_id: format!("process-{id}"),
-            started_at: 1,
-            ended_at: None,
-            repo: "/repo".to_string(),
-            worktree: "/repo".to_string(),
-            wave: None,
-            flow: None,
-            skill: None,
-            project: None,
-            task: None,
-            provider: "codex".to_string(),
-            model: None,
-            surface: "headless".to_string(),
-            capture_status: "capturing".to_string(),
-            incomplete_reason: None,
-            outcome: "running".to_string(),
-            artifact_dir: format!("trace/{id}"),
-            conversation_path: format!("trace/{id}/conversation.jsonl"),
-            provider_events_path: None,
-            provider_session_id: None,
-            provider_session_path: None,
-            conversation_event_count: 0,
-            conversation_bytes: 0,
-            supervision: None,
-        }
-    }
-
-    fn trace_turn(
-        id: &str,
-        invocation_id: &str,
-        ordinal: i64,
-        status: &str,
-        basis: crate::durable::Basis,
-    ) -> AgentTurnRow {
-        AgentTurnRow {
-            id: id.to_string(),
-            invocation_id: invocation_id.to_string(),
-            ordinal,
-            provider_turn_id: None,
-            started_at: ordinal,
-            ended_at: (status != "running").then_some(ordinal + 1),
-            status: status.to_string(),
-            input_op: "initial".to_string(),
-            context_coverage: "unknown".to_string(),
-            tokenizer: "unknown".to_string(),
-            system_prompt_path: None,
-            task_prompt_path: format!("trace/{id}/prompt.md"),
-            system_tokens: 0,
-            task_tokens: 0,
-            supplied_context_tokens: 0,
-            provider_input_tokens: None,
-            provider_total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            provider_output_tokens: None,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: None,
-            context_gather_ms: 0,
-            context_render_ms: 0,
-            context_persist_ms: 0,
-            first_event_seq: None,
-            last_event_seq: None,
-            root_output: None,
-            basis: Some(basis),
-        }
-    }
-
     #[tokio::test]
     async fn task_run_reservation_refuses_remote_placement() {
         let directory = tempfile::tempdir().unwrap();
@@ -1410,92 +1332,6 @@ mod tests {
             .await
             .unwrap();
 
-        let task_child_lease = store
-            .reserve_task_process(&task, WorkStatus::Ready)
-            .await
-            .unwrap()
-            .unwrap();
-        store
-            .activate_task_process(&task, &task_child_lease)
-            .await
-            .unwrap();
-        let task_run_lease = store
-            .resolve_run_lease(task_child_lease.run_token.clone())
-            .await
-            .unwrap();
-        let invocation = store
-            .sqlite
-            .open_invocation_for_run(&task_run_lease.run_id)
-            .unwrap()
-            .expect("Task reservation registered its Invocation");
-        assert_eq!(
-            invocation.supervising_run_id,
-            Some(task_run_lease.run_id.clone())
-        );
-        let run = store.current_run(&task_work).await.unwrap().unwrap();
-        assert_eq!(
-            run.containment,
-            Some(Containment::Tmux {
-                name: format!("test-task-{}", task.id)
-            })
-        );
-        let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
-        store
-            .set_flow_position(
-                &task_run_lease,
-                FlowPosition {
-                    work: task_work.clone(),
-                    epoch_id: task_basis.epoch_id,
-                    flow: "task".to_string(),
-                    step: "feedback".to_string(),
-                    step_index: 1,
-                    iteration: 0,
-                    feedback: true,
-                    updated_at: OffsetDateTime::now_utc(),
-                },
-            )
-            .await
-            .unwrap();
-        store
-            .route_feedback(
-                &task_run_lease,
-                &invocation.id,
-                AttentionRoute::Parent(parent_lease.work.clone()),
-            )
-            .await
-            .unwrap();
-        assert!(store.feedback(&task_work).await.unwrap().is_some());
-
-        let turn = store
-            .advance_run(
-                &task_run_lease,
-                RunAdvance::TurnStarting {
-                    invocation_id: invocation.id.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        let crate::durable::AdvanceReceipt::Turn(turn) = turn else {
-            panic!("expected child Turn")
-        };
-        let mut turn_row = store
-            .sqlite
-            .agent_turn(turn.id.as_str())
-            .unwrap()
-            .expect("child Turn is stored");
-        turn_row.root_output = Some("The retry still reuses the failed head.".to_string());
-        store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
-        let attention = store.child_attention(&parent_lease.work).await.unwrap();
-        assert_eq!(attention.len(), 1);
-        assert_eq!(
-            attention[0].latest_output.as_deref(),
-            Some("The retry still reuses the failed head.")
-        );
-        let control_seed = attention[0].render();
-        assert!(control_seed.contains("The retry still reuses the failed head."));
-        assert!(control_seed.contains("lf work steer task"));
-        assert!(control_seed.contains("lf work continue task"));
-
         let receipt = store
             .steer(
                 &ControlCtx::Run(&parent_lease),
@@ -1509,111 +1345,6 @@ mod tests {
             receipt.steer.author,
             Author::Run(parent_lease.run_id.clone())
         );
-        let parked = store
-            .feedback(&task_work)
-            .await
-            .unwrap()
-            .expect("steering does not close Feedback attention");
-        assert!(parked.attention_at.is_none());
-        assert!(store
-            .child_attention(&parent_lease.work)
-            .await
-            .unwrap()
-            .is_empty());
-        store
-            .route_feedback(
-                &task_run_lease,
-                &invocation.id,
-                AttentionRoute::Parent(parent_lease.work.clone()),
-            )
-            .await
-            .unwrap();
-        assert!(
-            store
-                .feedback(&task_work)
-                .await
-                .unwrap()
-                .expect("re-entering the same flow keeps the route")
-                .attention_at
-                .is_none(),
-            "only a later terminal child Turn may re-arm attention"
-        );
-
-        let parent_basis = store
-            .current_epoch(&parent_lease.work)
-            .await
-            .unwrap()
-            .current_basis;
-        turn_row.status = "completed".to_string();
-        turn_row.ended_at = Some(OffsetDateTime::now_utc().unix_timestamp());
-        store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
-        let rearmed = store
-            .feedback(&task_work)
-            .await
-            .unwrap()
-            .expect("the child's next reply keeps the Feedback open");
-        assert!(rearmed.attention_at.is_some());
-        assert_eq!(
-            store
-                .child_attention(&parent_lease.work)
-                .await
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            store
-                .current_epoch(&parent_lease.work)
-                .await
-                .unwrap()
-                .current_basis
-                .revision,
-            parent_basis.revision + 1
-        );
-
-        store.sqlite.finish_agent_turn_capture(&turn_row).unwrap();
-        assert_eq!(
-            store
-                .current_epoch(&parent_lease.work)
-                .await
-                .unwrap()
-                .current_basis
-                .revision,
-            parent_basis.revision + 1,
-            "one child Turn allocates one parent evidence revision"
-        );
-
-        let answered = store
-            .steer(
-                &ControlCtx::Run(&parent_lease),
-                &task_work,
-                "the failed head must be observed fresh",
-                None,
-            )
-            .await
-            .unwrap();
-        assert!(store
-            .child_attention(&parent_lease.work)
-            .await
-            .unwrap()
-            .is_empty());
-        let feedback = store
-            .feedback(&task_work)
-            .await
-            .unwrap()
-            .expect("answering a child parks but does not continue its Feedback");
-        assert!(feedback.attention_at.is_none());
-        assert_eq!(feedback.basis, answered.steer.basis);
-        store
-            .continue_feedback(&ControlCtx::Run(&parent_lease), &task_work, &feedback.basis)
-            .await
-            .unwrap();
-        assert!(store.feedback(&task_work).await.unwrap().is_none());
-        assert!(store
-            .child_attention(&parent_lease.work)
-            .await
-            .unwrap()
-            .is_empty());
 
         store
             .stop_run(
@@ -1641,216 +1372,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_send_never_advances_fixed_turn_basis_or_completion() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        let task = make_task(&wave, &project);
-        store
-            .create_task(&task, &make_task_pr(&task))
-            .await
-            .unwrap();
-        let work = store
-            .work_for_child(&ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        let basis_zero = store.current_epoch(&work).await.unwrap().current_basis;
-        let invocation = trace_invocation("fixed-basis");
-        let completed = trace_turn(
-            "turn-completed",
-            &invocation.id,
-            1,
-            "completed",
-            basis_zero.clone(),
-        );
-        store
-            .sqlite
-            .insert_trace_capture(&invocation, &completed, &[], &[])
-            .unwrap();
-        let running = trace_turn(
-            "turn-running",
-            &invocation.id,
-            2,
-            "running",
-            basis_zero.clone(),
-        );
-        store
-            .sqlite
-            .insert_agent_turn_capture(&running, &[], &[])
-            .unwrap();
-        store
-            .validate_completion_basis(&work, &basis_zero)
-            .await
-            .unwrap();
-
-        let receipt = store
-            .append_steer(&work, Author::User, "change course", Some(&basis_zero))
-            .await
-            .unwrap();
-        let live = store
-            .begin_live_send(&receipt.steer.id, &running.id)
-            .await
-            .unwrap()
-            .expect("the active Turn can receive the Steer");
-        store
-            .finish_send(
-                &live.id,
-                SendState::Unknown,
-                None,
-                Some("provider receipt lost"),
-            )
-            .await
-            .unwrap();
-
-        let stored_turn = store
-            .sqlite
-            .agent_turn(&running.id)
-            .unwrap()
-            .expect("stored Turn");
-        assert_eq!(stored_turn.basis, Some(basis_zero.clone()));
-        assert!(store
-            .validate_completion_basis(&work, &basis_zero)
-            .await
-            .is_err());
-        assert_eq!(store.boundary_seed(&work).await.unwrap().steers.len(), 1);
-
-        let applied = trace_turn(
-            "turn-applied",
-            &invocation.id,
-            3,
-            "completed",
-            receipt.steer.basis.clone(),
-        );
-        store
-            .sqlite
-            .insert_agent_turn_capture(&applied, &[], &[])
-            .unwrap();
-        store
-            .validate_completion_basis(&work, &receipt.steer.basis)
-            .await
-            .unwrap();
-        assert!(store.boundary_seed(&work).await.unwrap().steers.is_empty());
-    }
-
-    #[tokio::test]
-    async fn ci_incident_preserves_recovery_milestones_after_current_pr_state_moves_on() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(directory.path().join("registry.db")))
-            .await
-            .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        let task = make_task(&wave, &project);
-        let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
-
-        let observed_at = task.created_at - Duration::seconds(5);
-        let incident = CiIncident {
-            identity: "github:ci:owner/repo:42:bad-head:digest".to_string(),
-            task_id: task.id.clone(),
-            pr_id: pr.id.clone(),
-            repo: "owner/repo".to_string(),
-            pr_number: 42,
-            failed_head_sha: "bad-head".to_string(),
-            repaired_head_sha: None,
-            failure_set: vec!["test".to_string()],
-            provider_completed_at: None,
-            poll_observed_at: Some(observed_at),
-            webhook_received_at: None,
-            claimed_run_id: None,
-            responded_at: None,
-            green_at: None,
-            merged_at: None,
-            blocked_at: None,
-            blocked_reason: None,
-            created_at: observed_at,
-            updated_at: observed_at,
-        };
-        store.observe_ci_incident(&incident).await.unwrap();
-        store.observe_ci_incident(&incident).await.unwrap();
-
-        let work = store
-            .work_for_child(&ChildRef::Task(task.id.clone()))
-            .await
-            .unwrap();
-        store
-            .append_steer(&work, Author::User, "inspect the failed checks", None)
-            .await
-            .unwrap();
-
-        let running = task.clone();
-        store.update_task(&running).await.unwrap();
-        let lease = store
-            .reserve_task_process(&running, WorkStatus::Ready)
-            .await
-            .unwrap()
-            .unwrap();
-        store.activate_task_process(&running, &lease).await.unwrap();
-        let run = store.current_run(&work).await.unwrap().unwrap();
-        assert!(store
-            .claim_ci_incident(
-                &incident.identity,
-                &run.id,
-                observed_at + Duration::seconds(10),
-            )
-            .await
-            .unwrap());
-        store
-            .mark_ci_incidents_blocked(
-                &pr.id,
-                observed_at + Duration::seconds(20),
-                "waiting for credentials",
-            )
-            .await
-            .unwrap();
-        store
-            .mark_ci_incidents_green(&pr.id, observed_at + Duration::seconds(30))
-            .await
-            .unwrap();
-        store
-            .mark_ci_incidents_merged(&pr.id, observed_at + Duration::seconds(40))
-            .await
-            .unwrap();
-
-        let rows = store
-            .ci_incidents_since(observed_at, None, Some("owner/repo"))
-            .await
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        let row = &rows[0];
-        assert_eq!(row.incident.poll_observed_at, Some(observed_at));
-        assert_eq!(row.incident.claimed_run_id.as_ref(), Some(&run.id));
-        assert_eq!(
-            row.incident.responded_at,
-            Some(observed_at + Duration::seconds(10))
-        );
-        assert_eq!(
-            row.incident.green_at,
-            Some(observed_at + Duration::seconds(30))
-        );
-        assert_eq!(
-            row.incident.merged_at,
-            Some(observed_at + Duration::seconds(40))
-        );
-        assert_eq!(
-            row.incident.blocked_at,
-            Some(observed_at + Duration::seconds(20))
-        );
-        assert_eq!(
-            row.incident.blocked_reason.as_deref(),
-            Some("waiting for credentials")
-        );
-        assert!(row.human_assisted);
-    }
-
-    #[tokio::test]
     async fn task_lifecycle_plan_and_position_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
@@ -1871,10 +1392,6 @@ mod tests {
 
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(persisted.lifecycle.loop_.flow, "code");
-        assert_eq!(
-            persisted.lifecycle.loop_.reviewer,
-            crate::task::FeedbackReviewer::Parent
-        );
         assert_eq!(persisted.lifecycle.first.flow, "task-design");
         assert_eq!(persisted.lifecycle.finally.flow, "ship");
         assert_eq!(persisted.phase_cursor, 2);

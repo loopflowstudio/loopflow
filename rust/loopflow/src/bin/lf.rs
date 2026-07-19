@@ -663,14 +663,13 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
             .unwrap_or("none");
         let body = format_child_body(&task.agent, &task.provider, snapshot.invocation.as_ref());
         println!(
-            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (reviewer {}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             task.plan.identifier,
             work_status_label(&snapshot.status),
             task.id,
             task.lifecycle_phase.as_str(),
             task.lifecycle_cycle(),
             task.phase_plan().flow,
-            task.phase_plan().reviewer.as_str(),
             task.phase_iteration + 1,
             task.phase_cursor + 1,
             body,
@@ -882,7 +881,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             finally,
             stack_on,
             directive,
-            reviewer,
             json,
         } => {
             let task = loopflow::ops::task::task_run(
@@ -897,7 +895,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
-                    reviewer: *reviewer,
                 },
             )?;
             print_task(&task, *json)
@@ -911,7 +908,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             finally,
             stack_on,
             directive,
-            reviewer,
             json,
         } => {
             let task = loopflow::ops::task::task_start(
@@ -928,7 +924,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
-                    reviewer: *reviewer,
                 },
             )?;
             print_task(&task, *json)
@@ -1310,9 +1305,6 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Work { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
-            }
-            Some(Commands::Queue { json }) => {
-                loopflow::lf::commands::work::run_queue(*json)
             }
             Some(Commands::WorkRunner { kind, work_id }) => {
                 let work = match kind.as_str() {

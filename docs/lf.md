@@ -258,11 +258,10 @@ lf project run <linear-project-id>                  # durable Project Work
 lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
-lf task run DES-125 --reviewer parent                # route Feedback to the Project
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
-lf queue                                             # User-attention Feedback, oldest first
-lf work feedback task task_...                       # open the recorded Invocation
+lf work asks project proj_...                          # pending questions from owned Tasks
+lf work answer ask_... "keep the public name"       # answer one exact Ask
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -270,7 +269,6 @@ lf task wait DES-123
 lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
-lf work continue task task_...                      # advance past current Feedback
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
@@ -289,24 +287,15 @@ The Task remains resumable through serial PRs, review, and explicit
 completion.
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
-`--finally` override them only while creating the Task. A flow step declares
-`feedback: true`; the active Invocation routes that Feedback to the User or the
-immediate parent Run.
-Standard Tasks route first and finally Feedback to the User, while the owning
-Project reviews loop steps. `--reviewer user|parent` overrides all future Feedback
-checkpoints without changing provider presentation or skipping their skills.
+`--finally` override them only while creating the Task. A skill that needs judgment runs
+`lf ask "<question>"`; the exchange routes to the immediate parent Run, or to
+the User for a supported interactive root. `lf ask wait` recovers the same
+exchange after shell loss.
 
-Feedback is the current flow step plus its live Invocation and route; there is no
-Feedback id or disposition. `lf task steer` and `lf project steer` append
-durable direction before attempting live delivery. `lf work continue` advances
-past Feedback under its current Basis fence. Interrupt and
-replacement direction stay separate: interrupt the active boundary, then
-Steer normally.
-
-`lf work feedback` opens the current Feedback's recorded Invocation presentation —
-the Invocation's tmux attach route today. Presentation never advances the flow:
-success, failure, signals, and client close all leave Feedback open. Run
-`lf work continue` explicitly to advance it under its current Basis fence.
+Ask/Answer does not move Work Basis or advance the flow. `lf task steer` and
+`lf project steer` remain unsolicited durable direction, appended before live
+delivery is attempted. Interrupt and replacement direction stay separate:
+interrupt the active boundary, then Steer normally.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
@@ -345,9 +334,9 @@ lf invocation handback invocation_... --outcome succeeded
 ```
 
 `present` is the generic presentation adapter for an opaque TUI Invocation: it
-executes that Invocation's attach route but does not create Feedback or become
+executes that Invocation's attach route but does not create an Ask or become
 its identity. The descriptor carries the supervising Run and its stable Work,
-Wave, Home, cwd, and containment alongside provider trace, attention, explicit
+Wave, Home, cwd, and containment alongside provider trace, explicit
 handback evidence, and optional attach argv.
 
 Closing the app or terminal does not end the Invocation. Record the observed
@@ -617,8 +606,8 @@ lf pr submit
 ```
 
 On Task PRs, submit records one User merge request containing the exact head
-and Continue/Complete disposition. Open authored Feedback refuses that request;
-a later Task resume or head-changing Loopflow operation clears it.
+and Continue/Complete disposition. A later Task resume or head-changing
+Loopflow operation clears it.
 
 ### lf pr land
 

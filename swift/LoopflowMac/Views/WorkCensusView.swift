@@ -385,7 +385,7 @@ private struct InvocationAttachSheet: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Text(invocation.attention?.kind == "user" ? "Feedback" : "Interactive launch")
+            Text("Interactive invocation")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             if let fallbackNotice {
@@ -430,14 +430,12 @@ private struct InvocationAttachSheet: View {
     @ViewBuilder
     private var content: some View {
         if let attach, surface == .ghostty {
-            let command = invocation.attention?.kind == "user"
-                ? LaunchTargetLauncher.feedbackCommand(for: attach)
-                : LaunchTargetLauncher.command(for: attach, home: invocation.home)
+            let command = LaunchTargetLauncher.command(for: attach, home: invocation.home)
             GhosttyTerminalView(
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "feedback-\(attach.invocationId)"
+                sessionId: "invocation-\(attach.invocationId)"
             )
             .id(attach.invocationId)
         } else if let surface, let externalNote {
@@ -467,11 +465,6 @@ private struct InvocationAttachSheet: View {
         do {
             let descriptor = try await query.attachInvocation(invocationId: invocation.id)
             attach = descriptor
-            if descriptor.attention?.kind == "user" {
-                surface = .ghostty
-                externalNote = nil
-                return
-            }
             // Consume the descriptor's Home, not a local-only assumption: a remote
             // worktree makes local editors and plain windows unavailable. The
             // provider and session id determine whether an IDE can attach (Claude

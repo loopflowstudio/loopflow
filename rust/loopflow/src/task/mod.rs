@@ -1056,9 +1056,9 @@ pub struct LinearObservationOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, FeedbackReviewer, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase,
-        PrPublication, Task, TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan,
-        TaskObservation, TaskPr, TaskPrId,
+        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
+        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
+        TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskPlan};
 
@@ -1566,38 +1566,10 @@ mod tests {
     }
 
     #[test]
-    fn explicit_reviewer_overrides_every_phase_without_changing_its_flows() {
-        let mut plan = TaskLifecyclePlan::standard("task-design", "code", "ship");
-        assert!(!plan.all_reviewed_by(FeedbackReviewer::Parent));
-        assert_eq!(plan.first.reviewer, FeedbackReviewer::User);
-        assert_eq!(plan.loop_.reviewer, FeedbackReviewer::Parent);
-        assert_eq!(plan.finally.reviewer, FeedbackReviewer::User);
-
-        plan.set_reviewer(FeedbackReviewer::Parent);
-
-        assert!(plan.all_reviewed_by(FeedbackReviewer::Parent));
+    fn standard_lifecycle_pins_each_phase_flow() {
+        let plan = TaskLifecyclePlan::standard("task-design", "code", "ship");
         assert_eq!(plan.first.flow, "task-design");
         assert_eq!(plan.loop_.flow, "code");
         assert_eq!(plan.finally.flow, "ship");
-        assert_eq!(
-            plan,
-            TaskLifecyclePlan::reviewed_by(
-                "task-design",
-                "code",
-                "ship",
-                FeedbackReviewer::Parent,
-            )
-        );
-
-        let user_plan = TaskLifecyclePlan::reviewed_by(
-            "task-design",
-            "code",
-            "ship",
-            FeedbackReviewer::User,
-        );
-        assert!(user_plan.all_reviewed_by(FeedbackReviewer::User));
-        assert_eq!(user_plan.first.flow, "task-design");
-        assert_eq!(user_plan.loop_.flow, "code");
-        assert_eq!(user_plan.finally.flow, "ship");
     }
 }

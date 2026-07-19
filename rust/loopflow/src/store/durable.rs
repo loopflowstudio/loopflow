@@ -2,10 +2,9 @@ use crate::child::ChildRef;
 use crate::durable::{
     AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AskExchange, AskId, Author, Basis,
     BoundarySeed, ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, FlowPosition,
-    Home, HomeId, InterruptReceipt, InvocationSurface,
-    Placement, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId, SendState, SteerId,
-    SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt, ToolResponseWrite, WorkRef,
-    WorkStatus,
+    Home, HomeId, InterruptReceipt, InvocationSurface, Placement, Run, RunAdvance, RunControl,
+    RunLease, RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreError, StoreResult};
@@ -171,13 +170,14 @@ impl Store {
         .await
     }
 
-    pub async fn open_ask(
+    pub(crate) async fn open_ask(
         &self,
         lease: &RunLease,
+        invocation_id: &AgentInvocationId,
         question: &str,
     ) -> StoreResult<AskExchange> {
         let lease = lease.clone();
-        let invocation_id = ambient_invocation_id()?;
+        let invocation_id = invocation_id.clone();
         let question = question.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.open_ask(&lease, &invocation_id, &question)
@@ -185,13 +185,14 @@ impl Store {
         .await
     }
 
-    pub async fn current_ask(
+    pub(crate) async fn current_ask(
         &self,
         lease: &RunLease,
+        invocation_id: &AgentInvocationId,
         ask_id: Option<&AskId>,
     ) -> StoreResult<AskExchange> {
         let lease = lease.clone();
-        let invocation_id = ambient_invocation_id()?;
+        let invocation_id = invocation_id.clone();
         let ask_id = ask_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
             store.current_ask(&lease, &invocation_id, ask_id.as_ref())
@@ -217,10 +218,7 @@ impl Store {
         .await
     }
 
-    pub async fn pending_asks_for_parent(
-        &self,
-        parent: &WorkRef,
-    ) -> StoreResult<Vec<AskExchange>> {
+    pub async fn pending_asks_for_parent(&self, parent: &WorkRef) -> StoreResult<Vec<AskExchange>> {
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.pending_asks_for_parent(&parent)
@@ -230,6 +228,14 @@ impl Store {
 
     pub async fn pending_user_asks(&self) -> StoreResult<Vec<AskExchange>> {
         run_sqlite(&self.sqlite, move |store| store.pending_user_asks()).await
+    }
+
+    pub async fn has_pending_user_ask_for_work(&self, work: &WorkRef) -> StoreResult<bool> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.has_pending_user_ask_for_work(&work)
+        })
+        .await
     }
 
     pub async fn invocation_surface(
@@ -530,15 +536,6 @@ impl Store {
     }
 }
 
-fn ambient_invocation_id() -> StoreResult<AgentInvocationId> {
-    let value = std::env::var(crate::durable::AGENT_INVOCATION_ENV).map_err(|_| {
-        StoreError::InvalidAuthority(
-            "lf ask requires LF_AGENT_INVOCATION_ID from the active agent Turn".to_string(),
-        )
-    })?;
-    AgentInvocationId::parse(&value).map_err(|error| StoreError::InvalidData(error.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -546,9 +543,8 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::durable::{
-        AttentionRoute, AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation,
-        ControlCtx, FlowPosition, InvocationRoute, RunAdvance, RunState, RunTrigger, StopCause,
-        WorkRef, WorkStatus,
+        AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation, ControlCtx,
+        InvocationRoute, RunAdvance, RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
@@ -764,6 +760,20 @@ mod tests {
             Err(StoreError::InvalidAuthority(_))
         ));
 
+        store
+            .stop_run(
+                &child_lease,
+                StopCause::Recovery,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.pending_asks_for_parent(&parent_work).await.unwrap(),
+            vec![ask.clone()],
+            "runner loss must not erase its unanswered Ask"
+        );
+
         let (replacement_lease, _replacement_invocation) =
             start_invocation(&store, &parent_work).await;
         let answer = store
@@ -802,9 +812,19 @@ mod tests {
             .unwrap()
             .is_empty());
 
+        let (recovery_lease, recovery_invocation) = start_invocation(&store, &child_work).await;
+        store
+            .advance_run(
+                &recovery_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: recovery_invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
         let current = store
-            .sqlite
-            .current_ask(&child_lease, &child_invocation.id, Some(&ask.id))
+            .current_ask(&recovery_lease, &recovery_invocation.id, Some(&ask.id))
+            .await
             .unwrap();
         assert_eq!(current.answer, Some(answer));
     }
@@ -981,7 +1001,7 @@ mod tests {
     #[tokio::test]
     async fn invocation_surface_reopens_without_owning_liveness() {
         let (store, work) = wave_work().await;
-        let (lease, invocation) = start_invocation(&store, &work).await;
+        let (_lease, invocation) = start_invocation(&store, &work).await;
 
         let first = store
             .invocation_surface(&invocation.id)

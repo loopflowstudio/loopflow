@@ -681,7 +681,11 @@ pub fn trace(
                 crate::trace::resolve_artifact(&turn.task_prompt_path)?.display()
             );
             for ask in asks.iter().filter(|ask| ask.turn_id.as_str() == turn.id) {
-                println!("      ask     {}  {}", short_id(ask.id.as_str()), ask.question);
+                println!(
+                    "      ask     {}  {}",
+                    short_id(ask.id.as_str()),
+                    ask.question
+                );
                 if let Some(answer) = &ask.answer {
                     println!("      answer  {}", answer.text);
                 }

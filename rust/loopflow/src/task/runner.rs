@@ -13,7 +13,7 @@ use crate::child_control::{
     absorb_run_control, apply_input as apply_child_input, input_is_current,
     send_outstanding_steers, CommandStop, PendingInput,
 };
-use crate::durable::{AttentionRoute, Basis, BoundarySeed, FlowPosition, RunLease};
+use crate::durable::{Basis, BoundarySeed, FlowPosition, RunLease};
 use crate::engine::wave_config::read_wave_config;
 use crate::harness::{
     classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
@@ -27,7 +27,7 @@ use crate::provider_account::recovery::{
 };
 use crate::store::SharedStore;
 use crate::task::{
-    CiCheck, FeedbackReviewer, Observation, PrPhase, Task, TaskEventKind, TaskGateProposal, TaskId,
+    CiCheck, Observation, PrPhase, Task, TaskEventKind, TaskGateProposal, TaskId,
     TaskLifecyclePhase,
 };
 use crate::wave::playhead::{
@@ -38,14 +38,12 @@ use crate::wave::Wave;
 #[derive(Debug)]
 struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
-    attention: Option<AttentionRoute>,
     position: FlowPosition,
     basis: Basis,
 }
 
 #[derive(Debug)]
 struct StartedTaskStep {
-    feedback: bool,
     provider_turn_active: bool,
     basis: Option<Basis>,
 }
@@ -199,7 +197,6 @@ async fn run_task_with(
     };
 
     let mut pending = VecDeque::new();
-    let mut feedback_open = prepared.attention.is_some();
     // Record this body's turns the way `flowloop/wave.rs` does. Without it a
     // Task's spend reaches no store at all: the provider runs in this
     // process, so no child `lf` records on its behalf.
@@ -238,14 +235,6 @@ async fn run_task_with(
     store
         .set_flow_position(lease, prepared.position.clone())
         .await?;
-    if let Some(attention) = prepared.attention.clone() {
-        let capture = capture.as_ref().ok_or_else(|| {
-            anyhow!("interactive Task step requires an observable active AgentInvocation")
-        })?;
-        store
-            .route_feedback(lease, &capture.invocation_id(), attention)
-            .await?;
-    }
     let mut active_basis = prepared.basis.clone();
     let mut flow_turn_active = false;
     let mut provider_turn_active =
@@ -281,8 +270,6 @@ async fn run_task_with(
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
-    // One preempt per provider turn; cleared with `provider_turn_active`.
-    let mut feedback_preempted = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -311,14 +298,6 @@ async fn run_task_with(
                     ).await;
                 }
                 let wake = if provider_turn_active {
-                    if ci_fix_wake.is_none()
-                        && !feedback_preempted
-                        && feedback_open
-                        && current_ci_incident_identity(&store, &task).await?.is_some()
-                    {
-                        harness.interrupt().await?;
-                        feedback_preempted = true;
-                    }
                     None
                 } else if ci_fix_wake.is_none() {
                     arm_ci_fix_wake(&store, &task, lease).await?
@@ -336,9 +315,6 @@ async fn run_task_with(
                         capture.as_ref(),
                     ).await?;
                     ci_fix_wake = Some(wake);
-                    // The bounded repair owns this body's exit. The durable Gate
-                    // feedback stays open for the next Task generation.
-                    feedback_open = false;
                     flow_turn_active = true;
                     provider_turn_active = true;
                     last_text.clear();
@@ -363,20 +339,6 @@ async fn run_task_with(
                         harness.as_mut(),
                         &mut pending,
                     ).await?;
-                }
-                if feedback_open
-                    && !provider_turn_active
-                    && store.feedback(&work).await?.is_none()
-                {
-                    let boundary = store.boundary_seed(&work).await?;
-                    let close = "Feedback continued at the current Basis. \
-        Finish this step from the conversation already conducted.";
-                    if let Some(capture) = &capture {
-                        capture.begin_turn_at("queued", close, Some(boundary.basis.clone()))?;
-                    }
-                    apply_input(&store, &task, lease, harness.as_mut(), close).await?;
-                    active_basis = boundary.basis;
-                    provider_turn_active = true;
                 }
             }
             event = event_rx.recv() => {
@@ -422,7 +384,6 @@ async fn run_task_with(
                             capture.finish_turn(outcome)?;
                         }
                         provider_turn_active = false;
-                        feedback_preempted = false;
                         if status == Lifecycle::Failed {
                             let reason = drain_turn_failure_reason(
                                 &mut event_rx,
@@ -457,8 +418,6 @@ async fn run_task_with(
                                 ci_fix_wake = Some(wake);
                                 // The repair takes the just-released provider
                                 // boundary before Gate or lifecycle progression.
-                                // Its durable feedback remains open for recovery.
-                                feedback_open = false;
                                 flow_turn_active = true;
                                 provider_turn_active = true;
                                 last_text.clear();
@@ -479,21 +438,8 @@ async fn run_task_with(
                         }
                         let resume_interrupted_flow =
                             flow_turn_active && status == Lifecycle::Interrupted;
-                        let feedback_body_completed = feedback_open
-                            && store.feedback(&work).await?.is_none();
-                        if feedback_open && !feedback_body_completed {
-                            // The provider boundary ended, not the interactive
-                            // flow interval. A later Steer starts another Turn;
-                            // only continue_feedback advances the playhead.
-                            flow_turn_active = false;
-                            last_text.clear();
-                            continue 'runner;
-                        }
                         let mut flow_iteration_completed = if flow_turn_active {
                             finish_task_flow_turn(&mut flow, status)?
-                        } else if feedback_body_completed {
-                            feedback_open = false;
-                            finish_task_flow_turn(&mut flow, Lifecycle::Completed)?
                         } else {
                             false
                         };
@@ -514,7 +460,7 @@ async fn run_task_with(
                                 flow_iteration_completed = true;
                             }
                         }
-                        if flow_turn_active || feedback_body_completed {
+                        if flow_turn_active {
                             let latest = store
                                 .get_task(&task.id)
                                 .await?
@@ -594,10 +540,6 @@ async fn run_task_with(
                                 provider_turn_active = true;
                                 continue 'runner;
                             }
-                            if feedback_open {
-                                last_text.clear();
-                                continue 'runner;
-                            }
                             let approved_gate = if flow_iteration_completed
                                 && task.lifecycle_phase == TaskLifecyclePhase::Finally
                             {
@@ -622,7 +564,6 @@ async fn run_task_with(
                                     if let Some(basis) = &started.basis {
                                         active_basis = basis.clone();
                                     }
-                                    feedback_open = started.feedback;
                                     flow_turn_active = true;
                                     provider_turn_active = started.provider_turn_active;
                                     last_text.clear();
@@ -655,7 +596,6 @@ async fn run_task_with(
                                 if let Some(basis) = &started.basis {
                                     active_basis = basis.clone();
                                 }
-                                feedback_open = started.feedback;
                                 flow_turn_active = true;
                                 provider_turn_active = started.provider_turn_active;
                                 continue 'runner;
@@ -689,9 +629,7 @@ async fn run_task_with(
                             iteration_start_head = observed_pr
                                 .as_ref()
                                 .and_then(|pr| pr.head_sha().map(str::to_string));
-                            // Merged, not merely settled: the branch below reports
-                            // this PR as merged and waits on its explicit Task Gate
-                            // Feedback checkpoint, which is false of an abandoned one.
+                            // A completing merge settles the Task and never rotates.
                             let merged_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
                                 pr.phase() == crate::task::PrPhase::Merged
                                     && pr.after_merge()
@@ -718,21 +656,18 @@ async fn run_task_with(
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
                             } else if merged_completing_pr {
-                                // The PR merged to complete the Task, but its authored Task
-                                // Gate Feedback checkpoint is still open. Wait for explicit
-                                // continuation before completion; do not rotate another PR.
                                 let number = observed_pr
                                     .as_ref()
                                     .and_then(|pr| pr.github())
                                     .map(|github| github.number);
                                 let reason = match number {
                                     Some(number) => format!(
-                                        "pull request #{number} merged; awaiting Task Gate Feedback continuation before completion"
+                                        "pull request #{number} merged to complete the Task"
                                     ),
-                                    None => "pull request merged; awaiting Task Gate Feedback continuation before completion"
+                                    None => "pull request merged to complete the Task"
                                         .to_string(),
                                 };
-                                (false, reason)
+                                (true, reason)
                             } else if needs_rotation {
                                 crate::ops::task::ensure_working_pr_for_run(
                                     &store,
@@ -764,7 +699,6 @@ async fn run_task_with(
                                 if let Some(basis) = &started.basis {
                                     active_basis = basis.clone();
                                 }
-                                feedback_open = started.feedback;
                                 flow_turn_active = true;
                                 provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
@@ -817,7 +751,6 @@ async fn run_task_with(
                                     if let Some(basis) = &started.basis {
                                         active_basis = basis.clone();
                                     }
-                                    feedback_open = started.feedback;
                                     flow_turn_active = true;
                                     provider_turn_active = started.provider_turn_active;
                                     last_text.clear();
@@ -878,7 +811,6 @@ async fn run_task_with(
                                 if let Some(basis) = &started.basis {
                                     active_basis = basis.clone();
                                 }
-                                feedback_open = started.feedback;
                                 flow_turn_active = true;
                                 provider_turn_active = started.provider_turn_active;
                                 last_text.clear();
@@ -998,31 +930,6 @@ async fn prepare_task_flow_step(
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(task.agent.clone());
-    let skill = crate::engine::load_skill(&step.step, Path::new(&task.worktree))?;
-    let attention = if step.feedback {
-        let route = match task.phase_plan().reviewer {
-            FeedbackReviewer::User => AttentionRoute::User,
-            FeedbackReviewer::Parent => AttentionRoute::Parent(
-                store
-                    .work_for_child(&ChildRef::Project(task.project_id.clone()))
-                    .await?,
-            ),
-        };
-        prepared.input.push_str("\n\n");
-        prepared.input.push_str(&interactive_step_protocol(
-            &work,
-            &step.step,
-            &route,
-            skill
-                .content
-                .as_deref()
-                .unwrap_or("Follow the named skill."),
-        ));
-        store.update_task_for_run(task, lease).await?;
-        Some(route)
-    } else {
-        None
-    };
     let position = FlowPosition {
         work,
         epoch_id: boundary.basis.epoch_id.clone(),
@@ -1030,35 +937,13 @@ async fn prepare_task_flow_step(
         step: step.step.clone(),
         step_index: step.index,
         iteration: step.iteration,
-        feedback: attention.is_some(),
         updated_at: time::OffsetDateTime::now_utc(),
     };
     Ok(PreparedTaskStep {
         turn: prepared,
-        attention,
         position,
         basis: boundary.basis,
     })
-}
-
-fn interactive_step_protocol(
-    work: &crate::durable::WorkRef,
-    skill: &str,
-    attention: &AttentionRoute,
-    instructions: &str,
-) -> String {
-    let route = match attention {
-        AttentionRoute::User => "the authenticated User",
-        AttentionRoute::Parent(_) => "the immediate parent Run",
-    };
-    format!(
-        "Conduct the `{skill}` Feedback step in this existing Task AgentInvocation. Attention is routed \
-to {route}. Conversation arrives as ordinary Steers addressed to Work `{}`. Ask bounded \
-questions, respond in this same AgentInvocation, and wait when another answer is required. A current \
-Basis Continue advances the flow; there is no approval or changes-requested disposition. Extra \
-findings are ordinary Steers.\n\n{instructions}",
-        work.id()
-    )
 }
 
 fn open_task_flow_body(flow: &mut Playhead, task: &Task) -> Result<()> {
@@ -1098,20 +983,11 @@ async fn start_prepared_task_step(
     store
         .set_flow_position(lease, prepared.position.clone())
         .await?;
-    if let Some(attention) = &prepared.attention {
-        let capture = capture.ok_or_else(|| {
-            anyhow!("interactive Task step requires an observable active AgentInvocation")
-        })?;
-        store
-            .route_feedback(lease, &capture.invocation_id(), attention.clone())
-            .await?;
-    }
     if let Some(capture) = capture {
         capture.begin_turn_at("queued", &prepared.turn.input, Some(prepared.basis.clone()))?;
     }
     start_task_flow_turn(store, task, lease, harness, flow, prepared.turn).await?;
     Ok(StartedTaskStep {
-        feedback: prepared.attention.is_some(),
         provider_turn_active: true,
         basis: Some(prepared.basis),
     })
@@ -1709,17 +1585,6 @@ pub(crate) struct CiFixWake {
     pub failing_checks: Vec<CiCheck>,
 }
 
-/// The identity of the failure this PR reads as *now*. `None` means no wake is
-/// warranted: green, moved on, gone, or not `wake_legal`.
-async fn current_ci_incident_identity(store: &SharedStore, task: &Task) -> Result<Option<String>> {
-    Ok(store
-        .active_task_pr(&task.id)
-        .await?
-        .as_ref()
-        .and_then(crate::ops::task::current_ci_incident)
-        .map(|incident| incident.identity))
-}
-
 async fn arm_ci_fix_wake(
     store: &SharedStore,
     task: &Task,
@@ -1894,7 +1759,7 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {task_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nFeedback reviewer: {reviewer}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {task_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
@@ -1909,7 +1774,6 @@ fn task_seed(
         lifecycle_phase = task.lifecycle_phase.as_str(),
         phase_epoch = task.phase_epoch,
         gate_cycle = task.gate_cycle,
-        reviewer = task.phase_plan().reviewer.as_str(),
         gate_proposal = gate_proposal,
         worktree = task.worktree.display(),
         pr_sequence = pr.sequence,

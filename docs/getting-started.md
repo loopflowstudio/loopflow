@@ -182,8 +182,8 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf queue`, then `lf work feedback <kind> <id>`, for work that
-needs you. Stop a running Wave with `lf stop <name>`.
+Use `lf work asks`, then `lf work answer <ask-id> <text>`, for questions that
+need you. Stop a running Wave with `lf stop <name>`.
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.

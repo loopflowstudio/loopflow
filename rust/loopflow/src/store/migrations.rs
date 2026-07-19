@@ -1895,7 +1895,7 @@ mod tests {
     }
 
     #[test]
-    fn run_launch_attention_does_not_turn_trace_receipts_into_control_launches() {
+    fn capture_terminal_states_repairs_half_control_trace_receipts() {
         let conn = open();
         apply_set(&conn, prefix_before("run_launch_attention")).unwrap();
         conn.execute_batch(
@@ -1910,9 +1910,25 @@ mod tests {
         )
         .unwrap();
 
+        apply_set(&conn, prefix_before("capture_terminal_states")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO agent_launches (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 provider, surface, capture_status, outcome, artifact_dir,
+                 conversation_path, provider_session_id,
+                 conversation_event_count, conversation_bytes, launch_state,
+                 containment_kind, containment_id, resume_token
+             ) VALUES ('control-shaped', 'control-run', 'control-process', 100, 200,
+                 '/repo', '/repo', 'codex', 'headless', 'complete', 'completed',
+                 'control/dir', 'control/conversation.jsonl', 'provider-receipt',
+                 7, 4096, 'ended', 'process_group', 'control-process',
+                 'explicit-resume')",
+        )
+        .unwrap();
+
         apply_sqlite(&conn).unwrap();
 
-        let control = conn
+        let legacy_trace = conn
             .query_row(
                 "SELECT product_run_id, home_id, containment_kind, containment_id,
                         resume_token
@@ -1929,7 +1945,16 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(control, (None, None, None, None, None));
+        assert_eq!(legacy_trace, (None, None, None, None, None));
+        assert_eq!(
+            conn.query_row(
+                "SELECT resume_token FROM agent_launches WHERE id = 'control-shaped'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "explicit-resume"
+        );
     }
 
     #[test]

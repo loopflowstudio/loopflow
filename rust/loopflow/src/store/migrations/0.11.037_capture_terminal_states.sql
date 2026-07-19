@@ -80,7 +80,20 @@ SELECT
     outcome, artifact_dir, conversation_path, provider_events_path,
     provider_session_id, provider_session_path, conversation_event_count,
     conversation_bytes, project, task, product_run_id, home_id, account_id,
-    launch_state, containment_kind, containment_id, resume_token,
+    launch_state, containment_kind, containment_id,
+    -- Durable migration 032 copied every provider receipt into resume_token.
+    -- Clear only the resulting half-control trace shape; real control metadata
+    -- or an independently recorded token survives the rebuild unchanged.
+    CASE
+        WHEN product_run_id IS NULL
+         AND home_id IS NULL
+         AND launch_state IS NULL
+         AND containment_kind IS NULL
+         AND containment_id IS NULL
+         AND resume_token = provider_session_id
+        THEN NULL
+        ELSE resume_token
+    END,
     opaque_epoch_id, opaque_basis_rev, attention_kind, attention_work_kind,
     attention_work_id, attention_at, handback_state
 FROM agent_launches;

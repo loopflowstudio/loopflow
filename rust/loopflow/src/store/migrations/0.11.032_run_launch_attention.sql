@@ -28,8 +28,7 @@ ALTER TABLE agent_launches ADD COLUMN handback_state TEXT CHECK (
 );
 
 UPDATE agent_launches SET resume_token = provider_session_id
-WHERE provider_session_id IS NOT NULL
-  AND product_run_id IS NOT NULL;
+WHERE provider_session_id IS NOT NULL;
 
 -- The Session controller remains the temporary Task/Project executor. Give
 -- every imported live body one product Launch at the process/tmux boundary it

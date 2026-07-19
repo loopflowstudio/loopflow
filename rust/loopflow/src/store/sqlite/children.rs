@@ -25,8 +25,8 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
     AfterMerge, CiObservation, FeedbackReviewer, GithubObservation, GithubPr,
-    LinearObservationApply, LinearObservationOutcome, PrPhase, PrPublication, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
+    LinearObservationApply, LinearObservationOutcome, PrMergeRequest, PrPhase, PrPublication, Task,
+    TaskEvent, TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
     TaskPhasePlan, TaskPr, TaskPrId,
 };
 
@@ -526,10 +526,7 @@ impl SqliteStore {
         validate_task_pr(pr)?;
         if pr.task_id != task.id
             || pr.phase() != PrPhase::Merged
-            || pr
-                .publication
-                .as_ref()
-                .is_none_or(|publication| publication.after_merge != AfterMerge::CompleteTask)
+            || pr.after_merge() != AfterMerge::CompleteTask
         {
             return Err(StoreError::InvalidData(
                 "Task completion after merge requires its merged CompleteTask PR".to_string(),
@@ -561,10 +558,7 @@ impl SqliteStore {
         validate_task_pr(pr)?;
         if pr.task_id != task.id
             || pr.phase() != PrPhase::Merged
-            || pr
-                .publication
-                .as_ref()
-                .is_none_or(|publication| publication.after_merge != AfterMerge::CompleteTask)
+            || pr.after_merge() != AfterMerge::CompleteTask
         {
             return Err(StoreError::InvalidData(
                 "Task completion after merge requires its merged CompleteTask PR".to_string(),
@@ -1549,14 +1543,16 @@ const TASK_PR_COLUMNS: &str = "SELECT
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
-    linear_attachment_id, linear_comment_id, linear_link_error
+    linear_attachment_id, linear_comment_id, linear_link_error,
+    merge_mode, merge_requested_at, merge_head_sha
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
-    linear_attachment_id, linear_comment_id, linear_link_error
+    linear_attachment_id, linear_comment_id, linear_link_error,
+    merge_mode, merge_requested_at, merge_head_sha
     FROM task_prs WHERE id=?1";
 /// Persist one Linear comment as a Steer exactly once. The insert
 /// into `task_linear_ingested_comments` is the guard — the command is written
@@ -1665,6 +1661,7 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
     let publication = pr.publication.as_ref();
     let github = publication.and_then(|publication| publication.github.as_ref());
+    let merge = publication.and_then(|publication| publication.merge.as_ref());
     conn.execute(
         "INSERT INTO task_prs (
             id, task_id, sequence, slug, branch, base_commit,
@@ -1672,8 +1669,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             github_number, github_url, merge_commit, abandoned_at,
             created_at, updated_at, github_head_sha, ci_observation, parent_pr_id,
             github_observation,
-            linear_attachment_id, linear_comment_id, linear_link_error
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+            linear_attachment_id, linear_comment_id, linear_link_error,
+            merge_mode, merge_requested_at, merge_head_sha
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
         params![
             pr.id.as_str(),
             pr.task_id.as_str(),
@@ -1682,8 +1680,8 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             pr.branch,
             pr.base_commit,
             publication.map(|publication| publication.requested_at.unix_timestamp()),
-            publication.map(|publication| publication.after_merge.as_str()),
-            publication.and_then(|publication| publication.next_slug.as_deref()),
+            merge.map(|request| request.after_merge.as_str()),
+            merge.and_then(|request| request.next_slug.as_deref()),
             github.map(|github| i64::from(github.number)),
             github.map(|github| github.url.as_str()),
             pr.merge_commit,
@@ -1697,6 +1695,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             pr.linear_attachment_id.as_deref(),
             pr.linear_comment_id.as_deref(),
             pr.linear_link_error.as_deref(),
+            merge.map(|request| request.mode.as_str()),
+            merge.map(|request| request.requested_at.unix_timestamp()),
+            merge.map(|request| request.head_sha.as_str()),
         ],
     )?;
     Ok(())
@@ -1706,13 +1707,15 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
     validate_task_pr(pr)?;
     let publication = pr.publication.as_ref();
     let github = publication.and_then(|publication| publication.github.as_ref());
+    let merge = publication.and_then(|publication| publication.merge.as_ref());
     conn.execute(
         "UPDATE task_prs SET
             publication_requested_at=?7, after_merge=?8, next_slug=?9,
             github_number=?10, github_url=?11, merge_commit=?12,
             abandoned_at=?13, updated_at=?15, github_head_sha=?16,
             ci_observation=?17, parent_pr_id=?18, github_observation=?19,
-            linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22
+            linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22,
+            merge_mode=?23, merge_requested_at=?24, merge_head_sha=?25
          WHERE id=?1 AND task_id=?2 AND sequence=?3 AND slug=?4
            AND branch=?5 AND base_commit=?6 AND created_at=?14",
         params![
@@ -1723,8 +1726,8 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             pr.branch,
             pr.base_commit,
             publication.map(|publication| publication.requested_at.unix_timestamp()),
-            publication.map(|publication| publication.after_merge.as_str()),
-            publication.and_then(|publication| publication.next_slug.as_deref()),
+            merge.map(|request| request.after_merge.as_str()),
+            merge.and_then(|request| request.next_slug.as_deref()),
             github.map(|github| i64::from(github.number)),
             github.map(|github| github.url.as_str()),
             pr.merge_commit,
@@ -1738,6 +1741,9 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             pr.linear_attachment_id.as_deref(),
             pr.linear_comment_id.as_deref(),
             pr.linear_link_error.as_deref(),
+            merge.map(|request| request.mode.as_str()),
+            merge.map(|request| request.requested_at.unix_timestamp()),
+            merge.map(|request| request.head_sha.as_str()),
         ],
     )
     .map_err(StoreError::from)
@@ -1971,11 +1977,35 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
         .map(|json| serde_json::from_str::<GithubObservation>(&json))
         .transpose()
         .map_err(|error| invalid_column(18, error))?;
-    let publication = match (publication_requested_at, after_merge) {
-        (Some(requested_at), Some(after_merge)) => Some(PrPublication {
+    let merge = match (
+        row.get::<_, Option<String>>(22)?,
+        row.get::<_, Option<i64>>(23)?,
+        row.get::<_, Option<String>>(24)?,
+        after_merge,
+    ) {
+        (Some(mode), Some(requested_at), Some(head_sha), Some(after_merge)) => {
+            Some(PrMergeRequest {
+                mode: mode.parse().map_err(|error| invalid_column(22, error))?,
+                requested_at: crate::store::rows::unix_to_datetime(requested_at),
+                head_sha,
+                after_merge,
+                next_slug: row.get(8)?,
+            })
+        }
+        (None, None, None, None) => None,
+        _ => {
+            return Err(invalid_column(
+                22,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "PR merge request fields must all be present or absent",
+                ),
+            ))
+        }
+    };
+    let publication = match publication_requested_at {
+        Some(requested_at) => Some(PrPublication {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
-            after_merge,
-            next_slug: row.get(8)?,
             github: match (github_number, github_url) {
                 (Some(number), Some(url)) => Some(GithubPr {
                     number,
@@ -1993,17 +2023,9 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
                     ))
                 }
             },
+            merge,
         }),
-        (None, None) => None,
-        _ => {
-            return Err(invalid_column(
-                6,
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "PR publication timestamp and disposition must both be present or absent",
-                ),
-            ))
-        }
+        None => None,
     };
     let pr = TaskPr {
         id: TaskPrId::from_raw(row.get::<_, String>(0)?),

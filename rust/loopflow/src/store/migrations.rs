@@ -518,6 +518,26 @@ const MIGRATIONS: &[Migration] = &[
         name: "task_feedback_reviewers",
         sql: include_str!("migrations/0.12.3.003_task_feedback_reviewers.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 4,
+        },
+        name: "wave_promotion_occurrence",
+        sql: include_str!("migrations/0.12.3.004_wave_promotion_occurrence.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 5,
+        },
+        name: "explicit_pr_merge_requests",
+        sql: include_str!("migrations/0.12.3.005_explicit_pr_merge_requests.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -2743,7 +2763,16 @@ mod tests {
                 "codex".to_string(),
             )
         );
-        let pr: (i64, String, i64, String, i64, String, String, Option<i64>) = conn
+        let pr: (
+            i64,
+            String,
+            i64,
+            Option<String>,
+            i64,
+            String,
+            String,
+            Option<i64>,
+        ) = conn
             .query_row(
                 "SELECT sequence, branch, publication_requested_at, after_merge,
                         github_number, github_url, merge_commit, abandoned_at
@@ -2769,7 +2798,7 @@ mod tests {
                 1,
                 "jack/inf-123".to_string(),
                 20,
-                "complete_task".to_string(),
+                None,
                 101,
                 "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
                 "legacy-unknown".to_string(),
@@ -3006,7 +3035,11 @@ mod tests {
         )
         .unwrap();
 
-        apply_set(&conn, MIGRATIONS).unwrap();
+        let explicit_index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "explicit_pr_merge_requests")
+            .expect("explicit merge request migration is registered");
+        apply_set(&conn, &MIGRATIONS[..explicit_index]).unwrap();
 
         let disposition: String = conn
             .query_row(
@@ -3019,6 +3052,66 @@ mod tests {
         assert!(conn
             .execute(
                 "UPDATE task_prs SET after_merge='review' WHERE id='pr_legacy'",
+                [],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn historical_publications_gain_no_implicit_merge_request() {
+        let conn = open();
+        let migration_index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "explicit_pr_merge_requests")
+            .expect("explicit merge request migration is registered");
+        apply_set(&conn, &MIGRATIONS[..migration_index]).unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute(
+            "INSERT INTO task_prs (
+                id, task_id, sequence, slug, branch, base_commit,
+                publication_requested_at, after_merge, next_slug,
+                github_number, github_url, merge_commit, abandoned_at,
+                created_at, updated_at, github_head_sha
+             ) VALUES (
+                'pr_published', 'task_legacy', 1, 'proof', 'jack/proof', 'base',
+                10, 'continue_task', NULL, 17, 'https://example.test/pull/17',
+                NULL, NULL, 1, 11, 'head-17'
+             )",
+            [],
+        )
+        .unwrap();
+
+        apply_set(&conn, MIGRATIONS).unwrap();
+
+        let merge: (Option<String>, Option<i64>, Option<String>) = conn
+            .query_row(
+                "SELECT merge_mode, merge_requested_at, merge_head_sha
+                 FROM task_prs WHERE id='pr_published'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(merge, (None, None, None));
+        let disposition: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT after_merge, next_slug
+                 FROM task_prs WHERE id='pr_published'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(disposition, (None, None));
+        conn.execute(
+            "UPDATE task_prs
+             SET merge_mode='user', merge_requested_at=12, merge_head_sha='head-17',
+                 after_merge='continue_task'
+             WHERE id='pr_published'",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "UPDATE task_prs SET merge_head_sha='later-head' WHERE id='pr_published'",
                 [],
             )
             .is_err());
@@ -3553,5 +3646,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(parent, ("parent".into(), "parent".into(), "parent".into()));
+    }
+
+    #[test]
+    fn wave_promotion_occurrence_does_not_backfill_existing_ancestry() {
+        let conn = open();
+        apply_set(&conn, prefix_before("wave_promotion_occurrence")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('wave_parent', 'parent', '/repo', 100);
+             INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
+                 VALUES ('wave_child', 'child', '/repo', 101, 'wave_parent');",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        assert!(columns(&conn, "waves").contains(&"promoted_at".to_string()));
+        let promoted_at: Option<i64> = conn
+            .query_row(
+                "SELECT promoted_at FROM waves WHERE id='wave_child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(promoted_at, None, "ancestry is not a promotion occurrence");
     }
 }

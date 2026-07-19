@@ -147,6 +147,7 @@ contracts, evidence loops, Wave goals, and directions.
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
+lf pr submit    # prepare the exact head; you click merge
 lf pr land      # arm auto-merge; GitHub merges after required checks pass
 ```
 

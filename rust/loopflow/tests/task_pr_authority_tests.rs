@@ -416,6 +416,10 @@ fn valid_authority_publishes_and_records_the_pr() {
         pr.publication.is_some(),
         "publication must be recorded under valid authority, not degraded to generic"
     );
+    assert!(
+        pr.publication.as_ref().unwrap().merge.is_none(),
+        "publication alone must not request a merge"
+    );
     let github = pr
         .github()
         .expect("GitHub PR must be attached under valid authority");

@@ -765,8 +765,8 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
 pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsResult<()> {
     wake_project(&task.project_id).await
 }
-/// Complete the mechanical half of an authored project-promotion flow: pin
-/// the registry ancestry, start the child residency, and wait for its endpoint.
+/// Complete the mechanical half of an authored project-promotion flow: record
+/// the promotion and ancestry, start the child residency, and wait for its endpoint.
 pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<String> {
     let origin = crate::engine::wave_context::wave_origin(repo);
     let goal = origin.join("wave").join(child).join("GOAL.md");
@@ -786,7 +786,7 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
                     .to_string(),
             )
         })?;
-        link_parent(&store, &origin, parent, child).await?;
+        record_promotion(&store, &origin, parent, child).await?;
 
         if crate::wave::server::live_endpoint(&origin, child)
             .await
@@ -807,7 +807,7 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
     })
 }
 
-/// Nudge the existing typed observer after the durable parent link is visible.
+/// Nudge the existing typed observer after the durable promotion is visible.
 async fn wake_child_observer(endpoint: &str, parent: &str, wave: &str) {
     let response = reqwest::Client::new()
         .post(format!("http://{endpoint}/observations"))
@@ -829,7 +829,7 @@ async fn wake_child_observer(endpoint: &str, parent: &str, wave: &str) {
     }
 }
 
-async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
+async fn record_promotion(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
     let parent = store
         .get_wave_by_name(parent)
         .await
@@ -843,15 +843,9 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
         Some(wave) => wave,
         None => Wave::new(WaveId::new(), child.to_string(), repo.display().to_string()),
     };
-    if child_wave
-        .parent_wave_id()
-        .is_some_and(|current| current != parent.id())
-    {
-        return Err(OpsError::Message(format!(
-            "child wave '{child}' already belongs to another parent"
-        )));
-    }
-    child_wave.parent_wave_id = Some(parent.id().clone());
+    child_wave
+        .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
+        .map_err(OpsError::Message)?;
     if store
         .get_wave(child_wave.id())
         .await
@@ -861,12 +855,22 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
         store
             .update_wave(&child_wave)
             .await
-            .map_err(|err| OpsError::Message(format!("failed to link child wave: {err}")))?;
+            .map_err(|err| OpsError::Message(format!("failed to record child promotion: {err}")))?;
     } else {
         store
             .create_wave(&child_wave)
             .await
             .map_err(|err| OpsError::Message(format!("failed to register child wave: {err}")))?;
+    }
+    let recorded = store
+        .get_wave(child_wave.id())
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to verify child promotion: {err}")))?
+        .ok_or_else(|| OpsError::Message("promoted child wave disappeared".to_string()))?;
+    if recorded.parent_wave_id() != Some(parent.id()) || recorded.promoted_at().is_none() {
+        return Err(OpsError::Message(format!(
+            "child wave '{child}' promotion did not persist atomically"
+        )));
     }
     Ok(())
 }
@@ -1066,7 +1070,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_parent_registers_the_promoted_wave_as_a_child() {
+    async fn record_promotion_persists_occurrence_and_ancestry() {
         let tmp = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
             .await
@@ -1078,7 +1082,7 @@ mod tests {
         );
         store.create_wave(&parent).await.unwrap();
 
-        link_parent(&store, tmp.path(), "platform", "release-stability")
+        record_promotion(&store, tmp.path(), "platform", "release-stability")
             .await
             .unwrap();
 
@@ -1088,6 +1092,27 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(child.parent_wave_id(), Some(parent.id()));
+        let promoted_at = child.promoted_at().expect("promotion occurrence");
         assert_eq!(child.repo(), tmp.path().display().to_string());
+
+        record_promotion(&store, tmp.path(), "platform", "release-stability")
+            .await
+            .unwrap();
+        let replayed = store
+            .get_wave_by_name("release-stability")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed.promoted_at(), Some(promoted_at));
+
+        let stale = replayed.with_parent(WaveId::new());
+        store.update_wave(&stale).await.unwrap();
+        let preserved = store
+            .get_wave_by_name("release-stability")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(preserved.parent_wave_id(), Some(parent.id()));
+        assert_eq!(preserved.promoted_at(), Some(promoted_at));
     }
 }

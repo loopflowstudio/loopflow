@@ -268,8 +268,8 @@ impl CiCheck {
     /// which is true of every PR carrying its own design doc — i.e. every Task PR
     /// during first and loop, by construction — and
     /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
-    /// body woken to "repair" it could only delete the artifact the reviewer
-    /// reads, to green a check land greens anyway.
+    /// body woken to "repair" it could only delete the Task's design artifact,
+    /// to green a check land greens anyway.
     ///
     /// A name belongs here only when an `lf pr land` step is what resolves it.
     /// This is not a catalogue of CI jobs, and it is not a mute button for checks
@@ -340,9 +340,9 @@ impl CiObservation {
     ///
     /// This is the dual of [`CiObservation::wake_legal`] within the failing
     /// state: such a head holds nothing a Task body could repair (`lf pr land`
-    /// greens it by clearing `scratch/`), so it is *reviewable* rather than owned
-    /// by CI. The action model and Waves supervision read it to stop recommending
-    /// a doomed Resume and to stop labelling the reviewer's turn as "fixing CI".
+    /// greens it by clearing `scratch/`), so it does not belong to CI repair.
+    /// The action model and Waves supervision read it to stop recommending a
+    /// doomed Resume or labelling settlement preparation as "fixing CI".
     ///
     /// False for a passing or pending head, and false the moment any failure is a
     /// real leaf or an unclassified one — the same anti-mute-button rule as
@@ -465,12 +465,50 @@ impl FromStr for AfterMerge {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrMergeMode {
+    User,
+    Auto,
+}
+
+impl PrMergeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+impl FromStr for PrMergeMode {
+    type Err = TaskDataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "user" => Ok(Self::User),
+            "auto" => Ok(Self::Auto),
+            _ => Err(TaskDataError::InvalidInvariant(format!(
+                "invalid PR merge mode: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrMergeRequest {
+    pub mode: PrMergeMode,
+    pub requested_at: OffsetDateTime,
+    pub head_sha: String,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrPublication {
     pub requested_at: OffsetDateTime,
-    pub after_merge: AfterMerge,
-    pub next_slug: Option<String>,
     pub github: Option<GithubPr>,
+    pub merge: Option<PrMergeRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -540,6 +578,24 @@ impl TaskPr {
         self.github().and_then(|github| github.head_sha.as_deref())
     }
 
+    /// The explicit merge request, only while it names the current PR head.
+    pub fn merge_request(&self) -> Option<&PrMergeRequest> {
+        let request = self.publication.as_ref()?.merge.as_ref()?;
+        (self.head_sha() == Some(request.head_sha.as_str())).then_some(request)
+    }
+
+    /// Settlement disposition. A PR merged without an explicit request safely
+    /// continues the Task; only a head-pinned request may complete it.
+    pub fn after_merge(&self) -> AfterMerge {
+        self.merge_request()
+            .map_or(AfterMerge::ContinueTask, |request| request.after_merge)
+    }
+
+    pub fn next_slug(&self) -> Option<&str> {
+        self.merge_request()
+            .and_then(|request| request.next_slug.as_deref())
+    }
+
     /// The CI reading, but only while it still describes the PR's current head.
     /// Once the head moves, the reading is stale and this returns `None` — the
     /// same freshness rule that keeps stale failures from waking work.
@@ -551,8 +607,8 @@ impl TaskPr {
         }
     }
 
-    /// Whether semantic Task review may begin for this published head.
-    pub fn review_ready(&self) -> bool {
+    /// Whether the current published head satisfies its merge checks.
+    pub fn merge_checks_passed(&self) -> bool {
         self.phase() == PrPhase::Open
             && self
                 .fresh_ci()
@@ -584,29 +640,41 @@ impl TaskPr {
             ));
         }
         if let Some(publication) = &self.publication {
-            if publication.next_slug.as_deref().is_some_and(|slug| {
-                slug.split('-').any(|word| {
-                    word.is_empty()
-                        || !word
-                            .bytes()
-                            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-                })
-            }) {
-                return Err(TaskDataError::InvalidInvariant(
-                    "next branch slug must be lowercase kebab-case".to_string(),
-                ));
-            }
-            if publication.after_merge == AfterMerge::CompleteTask
-                && publication.next_slug.is_some()
-            {
-                return Err(TaskDataError::InvalidInvariant(
-                    "a completing pull request cannot name a next branch".to_string(),
-                ));
-            }
             if let Some(github) = &publication.github {
                 if github.number == 0 || github.url.trim().is_empty() {
                     return Err(TaskDataError::InvalidInvariant(
                         "GitHub PR number and URL cannot be empty".to_string(),
+                    ));
+                }
+            }
+            if let Some(request) = &publication.merge {
+                if request.next_slug.as_deref().is_some_and(|slug| {
+                    slug.split('-').any(|word| {
+                        word.is_empty()
+                            || !word
+                                .bytes()
+                                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                    })
+                }) {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "next branch slug must be lowercase kebab-case".to_string(),
+                    ));
+                }
+                if request.after_merge == AfterMerge::CompleteTask && request.next_slug.is_some() {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "a completing pull request cannot name a next branch".to_string(),
+                    ));
+                }
+                let github = publication.github.as_ref().ok_or_else(|| {
+                    TaskDataError::InvalidInvariant(
+                        "merge request requires a GitHub PR".to_string(),
+                    )
+                })?;
+                if request.head_sha.trim().is_empty()
+                    || github.head_sha.as_deref() != Some(request.head_sha.as_str())
+                {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "merge request must name the current GitHub PR head".to_string(),
                     ));
                 }
             }
@@ -714,17 +782,17 @@ impl Task {
     ///
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
-    /// - the active PR is `Publishing` or `Open` — publication was requested
-    ///   and the work must not restart from clarification
-    ///   and belongs to review.
+    /// - publication or merge was explicitly requested. A merely published PR
+    ///   remains ordinary Task continuity and does not bar the supervisor.
     ///
     /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
     /// and carries no live process, so it reads exactly like Work that
     /// merely stopped. A wake therefore launched generation 2, which reopened
     /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
-    /// already open for review. An open PR is not an invitation to start over.
+    /// already awaiting a merge. An explicit merge request is not an invitation
+    /// to start over.
     ///
-    /// A User may still `lf task resume` a submitted Task to answer review;
+    /// A User may still `lf task resume` a submitted Task explicitly;
     /// this bars the supervisor, not the operator.
     pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
@@ -733,7 +801,10 @@ impl Task {
         if let Some(pr) = active_pr {
             match pr.phase() {
                 PrPhase::Publishing => return Some(self.publishing_bar()),
-                PrPhase::Open => return Some(self.open_pr_bar(pr)),
+                PrPhase::Open if pr.merge_request().is_some() => {
+                    return Some(self.open_pr_bar(pr));
+                }
+                PrPhase::Open => {}
                 PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
             }
         }
@@ -759,7 +830,10 @@ impl Task {
                 // An open PR restarts only on a current-head required-check
                 // failure; otherwise it stays barred exactly as the supervisor
                 // bar leaves it.
-                PrPhase::Open if !pr.fresh_ci().is_some_and(CiObservation::wake_legal) => {
+                PrPhase::Open
+                    if pr.merge_request().is_some()
+                        && !pr.fresh_ci().is_some_and(CiObservation::wake_legal) =>
+                {
                     return Some(self.open_pr_bar(pr));
                 }
                 PrPhase::Open | PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
@@ -790,20 +864,29 @@ impl Task {
 
     /// The open-PR restart refusal. Only a *supervisor* (`supervisor_restart_bar`
     /// / a non-wake-legal `ci_fix_restart_bar`) ever reads this — an operator
-    /// resume takes the abandon-only `ExplicitResume` bar and answers review — so
-    /// the text names the real next owner (the reviewer/operator) instead of
-    /// recommending `lf task resume`, which a supervisor re-running would only
-    /// self-loop on.
+    /// resume takes the abandon-only `ExplicitResume` bar. The text names the
+    /// explicit settlement owner instead of recommending `lf task resume`, which
+    /// a supervisor re-running would only self-loop on.
     fn open_pr_bar(&self, pr: &TaskPr) -> String {
         let number = pr.github().expect("open Task PR passed validation").number;
-        format!(
-            "Task {} submitted pull request #{} and is in review. A supervisor \
-             cannot restart a submitted Task — an open PR is not an invitation to \
-             start over. This is the reviewer's to advance: an operator answering \
-             review resumes from a clean operator shell; if review is blocked, \
-             escalate to the owner.",
-            self.directive.identifier, number,
-        )
+        let request = pr
+            .merge_request()
+            .expect("open PR restart bar requires a current merge request");
+        let short = request.head_sha.chars().take(12).collect::<String>();
+        match request.mode {
+            PrMergeMode::User => format!(
+                "Task {} requested a user merge of pull request #{} at head {}. \
+                 The supervisor will not restart it until that explicit merge \
+                 request settles or the head changes.",
+                self.directive.identifier, number, short,
+            ),
+            PrMergeMode::Auto => format!(
+                "Task {} requested GitHub auto-merge of pull request #{} at head {}. \
+                 The supervisor will not restart it until that explicit merge \
+                 request settles or the head changes.",
+                self.directive.identifier, number, short,
+            ),
+        }
     }
 
     pub fn validate(&self) -> Result<(), TaskDataError> {
@@ -942,9 +1025,9 @@ impl TaskEventKind {
         !matches!(self, Self::Started | Self::Progress { .. })
     }
 
-    /// Whether a Project-supervised Task event also belongs in the root Wave.
-    /// Routine decisions stay at the immediate Project boundary; a Project
-    /// escalates by emitting its own `DecisionRequested` event.
+    /// Whether a Project-observable Task event also belongs in the root Wave.
+    /// This currently mirrors the Project boundary; the server-topology design
+    /// must decide whether the duplicate delivery remains necessary.
     pub fn is_root_wave_observable(&self) -> bool {
         self.is_project_observable()
     }
@@ -1145,9 +1228,8 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: now,
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
             github: None,
+            merge: None,
         });
         assert_eq!(pr.phase(), PrPhase::Publishing);
 
@@ -1168,7 +1250,7 @@ mod tests {
     }
 
     #[test]
-    fn publication_contains_its_github_receipt_and_disposition() {
+    fn merge_request_contains_its_disposition() {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
@@ -1180,12 +1262,17 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::ContinueTask,
-                next_slug: Some("released_upgrade".to_string()),
                 github: Some(GithubPr {
                     number: 872,
                     url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
-                    head_sha: None,
+                    head_sha: Some("head".to_string()),
+                }),
+                merge: Some(super::PrMergeRequest {
+                    mode: super::PrMergeMode::User,
+                    requested_at: now,
+                    head_sha: "head".to_string(),
+                    after_merge: AfterMerge::ContinueTask,
+                    next_slug: Some("released_upgrade".to_string()),
                 }),
             }),
             merge_commit: None,
@@ -1200,11 +1287,17 @@ mod tests {
         };
         assert!(pr.validate().is_err());
 
-        let publication = pr.publication.as_mut().unwrap();
-        publication.next_slug = Some("released-upgrade".to_string());
+        let merge = pr.publication.as_mut().unwrap().merge.as_mut().unwrap();
+        merge.next_slug = Some("released-upgrade".to_string());
         assert!(pr.validate().is_ok());
 
-        pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
+        pr.publication
+            .as_mut()
+            .unwrap()
+            .merge
+            .as_mut()
+            .unwrap()
+            .after_merge = AfterMerge::CompleteTask;
         assert!(pr.validate().is_err());
     }
 
@@ -1220,13 +1313,12 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::ContinueTask,
-                next_slug: None,
                 github: Some(GithubPr {
                     number: 900,
                     url: "https://github.com/loopflow/loopflow/pull/900".to_string(),
                     head_sha: Some(head_sha.to_string()),
                 }),
+                merge: None,
             }),
             merge_commit: None,
             abandoned_at: None,
@@ -1264,7 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn review_ready_requires_current_head_passing_checks() {
+    fn merge_checks_require_current_head_passing_checks() {
         let observation = |head: &str, state| super::CiObservation {
             head_sha: head.to_string(),
             state,
@@ -1276,16 +1368,17 @@ mod tests {
             "current",
             Some(observation("current", super::CiState::Passing))
         )
-        .review_ready());
+        .merge_checks_passed());
         assert!(!open_pr(
             "current",
             Some(observation("current", super::CiState::Pending))
         )
-        .review_ready());
+        .merge_checks_passed());
         assert!(
-            !open_pr("current", Some(observation("old", super::CiState::Passing))).review_ready()
+            !open_pr("current", Some(observation("old", super::CiState::Passing)))
+                .merge_checks_passed()
         );
-        assert!(!open_pr("current", None).review_ready());
+        assert!(!open_pr("current", None).merge_checks_passed());
     }
 
     fn failing(head: &str, checks: &[&str]) -> super::CiObservation {
@@ -1301,6 +1394,18 @@ mod tests {
                 .collect(),
             observed_at: time::OffsetDateTime::now_utc(),
         }
+    }
+
+    fn with_merge_request(mut pr: TaskPr, mode: super::PrMergeMode) -> TaskPr {
+        let head_sha = pr.head_sha().expect("test PR has a head").to_string();
+        pr.publication.as_mut().unwrap().merge = Some(super::PrMergeRequest {
+            mode,
+            requested_at: time::OffsetDateTime::now_utc(),
+            head_sha,
+            after_merge: AfterMerge::ContinueTask,
+            next_slug: None,
+        });
+        pr
     }
 
     /// The observation answers legality — is this head failing *now* — and nothing
@@ -1339,7 +1444,7 @@ mod tests {
 
     /// A head red *only* on a land-time precondition is not a repair a body can
     /// perform: `lf pr land` clears `scratch/`, and the only action a woken body
-    /// could take is deleting the design doc under review.
+    /// could take is deleting the Task's design doc.
     ///
     /// The direction that matters is the second half. Suppression fires only when
     /// every named failure is land-resolved — a real leaf alongside it still
@@ -1363,17 +1468,16 @@ mod tests {
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
     }
 
-    /// The reviewable-despite-red predicate the action model and Waves
-    /// supervision adopt: it is the exact dual of `wake_legal` within the failing
-    /// state, so the two must never both refuse the same head.
+    /// The land-resolved predicate is the exact dual of `wake_legal` within the
+    /// failing state, so the two must never both refuse the same head.
     #[test]
     fn only_land_time_preconditions_is_the_dual_of_wake_legal() {
-        // Red only on scratch-clear: reviewable, and no wake.
+        // Red only on scratch-clear: land-resolved, and no wake.
         let scratch = failing("h1", &["scratch-clear"]);
         assert!(scratch.only_land_time_preconditions());
         assert!(!scratch.wake_legal());
 
-        // A real leaf beside it (or alone): not reviewable, wake arms.
+        // A real leaf beside it (or alone): not land-resolved, wake arms.
         for obs in [
             failing("h1", &["scratch-clear", "rust-test"]),
             failing("h1", &["rust-test"]),
@@ -1419,28 +1523,45 @@ mod tests {
     fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
         let task = task(); // status Waiting, no abandon intent
 
+        // Publication alone is not a restart bar.
+        let published = open_pr("h1", None);
+        assert!(task.supervisor_restart_bar(Some(&published)).is_none());
+        assert!(task.ci_fix_restart_bar(Some(&published)).is_none());
+
         // Open PR, fresh failing head: the ci-fix wake is permitted where the plain
         // supervisor restart stays barred.
-        let legal = open_pr("h1", Some(failing("h1", &["build"])));
+        let legal = with_merge_request(
+            open_pr("h1", Some(failing("h1", &["build"]))),
+            super::PrMergeMode::Auto,
+        );
         assert!(task.supervisor_restart_bar(Some(&legal)).is_some());
         assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
 
         // Passing head → not legal → barred.
         let mut green_obs = failing("h1", &[]);
         green_obs.state = super::CiState::Passing;
-        let green = open_pr("h1", Some(green_obs));
+        let green = with_merge_request(open_pr("h1", Some(green_obs)), super::PrMergeMode::Auto);
         assert!(task.ci_fix_restart_bar(Some(&green)).is_some());
 
         // Stale reading (observation head != PR head) → fresh_ci None → barred.
-        let stale = open_pr("h2", Some(failing("h1", &["build"])));
+        let stale = with_merge_request(
+            open_pr("h2", Some(failing("h1", &["build"]))),
+            super::PrMergeMode::Auto,
+        );
         assert!(task.ci_fix_restart_bar(Some(&stale)).is_some());
 
         // Red only on a land-time precondition → no repair exists → barred, and
         // the automated restart is the one path that could have overridden the
         // open-PR bar. A real leaf beside it still permits the wake.
-        let land_only = open_pr("h1", Some(failing("h1", &["scratch-clear"])));
+        let land_only = with_merge_request(
+            open_pr("h1", Some(failing("h1", &["scratch-clear"]))),
+            super::PrMergeMode::Auto,
+        );
         assert!(task.ci_fix_restart_bar(Some(&land_only)).is_some());
-        let mixed = open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"])));
+        let mixed = with_merge_request(
+            open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"]))),
+            super::PrMergeMode::Auto,
+        );
         assert!(task.ci_fix_restart_bar(Some(&mixed)).is_none());
 
         // The bar does not deduplicate. A head that already woke a body still reads
@@ -1478,7 +1599,7 @@ mod tests {
 
         let proposal = TaskGateProposal {
             done: false,
-            reason: "pull request is ready for review".to_string(),
+            reason: "iteration needs another pass".to_string(),
         };
         task.phase_cursor = 2;
         task.phase_iteration = 3;

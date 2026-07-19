@@ -37,13 +37,21 @@ authority; then curate the stale Intelligence memory through that chosen path.
 
 The closed `make-task-gate-approval-the` branch should not be revived: its
 Session/Review authority model is obsolete. Preserve these independent safety
-invariants in the current model:
+invariants without reviving that model:
 
-- pin GitHub auto-merge to the exact prepared head SHA;
-- refuse landing while an explicitly authored Feedback checkpoint is open;
+- represent one shipping choice as mode + exact head + disposition, and clear
+  all of it before later supported work;
+- refuse the shipping choice while an explicitly authored Feedback checkpoint
+  is open;
+- make mutation guards agree with the projected legal action;
 - settle Task completion from durable merged-PR evidence without requiring a
-  live executor or surviving worktree;
-- make mutation guards agree with the projected legal action.
+  live executor or surviving worktree.
+
+The first three belong to this redesign. The fourth remains a server-follow-up
+requirement: current reconciliation still consults local branch/worktree
+evidence before it records a completing merge. GitHub auto-merge is likewise
+only fenced at the arming mutation; exact settlement across an external
+maintainer push still needs one durable server owner.
 
 Do not preserve its blanket ban on managed-Task `submit` or recreate approval
 state. `submit` is an explicitly chosen User merge gate; bare `land` means

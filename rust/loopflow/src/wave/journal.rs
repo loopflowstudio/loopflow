@@ -867,7 +867,7 @@ pub struct ThreadFold {
     pub tasks: HashMap<MessageId, TaskObservation>,
     /// Typed Project observations indexed by their synthetic consumption id.
     pub projects: HashMap<MessageId, ProjectObservation>,
-    /// Promotion wakes indexed by their deterministic parent-link id.
+    /// Promotion wakes indexed by their deterministic occurrence id.
     pub(crate) promotions: HashMap<MessageId, PromotionWake>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these

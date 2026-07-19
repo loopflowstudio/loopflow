@@ -25,11 +25,19 @@ Trace these implementations before proposing a host:
 - `rust/loopflow/src/wave/`
 - the Home resident and `lfd`
 
-In particular, trace one parent-routed checkpoint from the Task event write,
-through best-effort `wake_project`, clean-checkout validation, Run reservation,
-`lf __work project`, and `child_attention`. Name every point where process
-exit, app exit, a dirty checkout, lost nudge, stale lease, or remote Home can
-strand durable input.
+In particular, trace one parent-routed checkpoint through both halves that are
+currently disconnected:
+
+1. opening and re-arming Feedback through `set_flow_position`,
+   `route_feedback`, and `rearm_feedback_attention`;
+2. Project-observable Task events through the child outbox, best-effort
+   `wake_project`, clean-checkout validation, Run reservation,
+   `lf __work project`, and `child_attention`.
+
+The Feedback route does not currently call `wake_project`. A stopped Project
+therefore receives no nudge at all merely because its child opened Feedback.
+Name every point where process exit, app exit, a dirty checkout, absent or lost
+nudge, stale lease, or remote Home can strand durable input.
 
 ## Decisions to make
 
@@ -51,6 +59,15 @@ strand durable input.
    should contribute domain prompt, flow, evidence, and closure policy only.
 7. Name the exact current files, commands, DTOs, fields, and loops that the new
    ownership model deletes or shrinks. Do not retain compatibility launch paths.
+8. Assign one owner to open-PR settlement. `--match-head-commit` fences only
+   the merge/auto-merge request it accompanies; do not assume GitHub permanently
+   pins auto-merge across a later maintainer push. Either make stale-head
+   observation timely and authoritative or replace remote auto-merge with an
+   exact-head merge after requirements clear.
+9. Reconcile a merged Complete request from its stored head, disposition, and
+   GitHub merge fact even when the Task executor and worktree are gone. A local
+   workspace may add safety evidence when it exists; its survival cannot be a
+   prerequisite for observing an already-settled remote fact.
 
 ## Design done when
 
@@ -72,12 +89,18 @@ strand durable input.
 - [ ] Wave-to-Project and Project-to-Task use the same one-hop API and authority
       rule; Wave-to-human uses Chat/Steer rather than Feedback escalation.
 - [ ] CLI, Mac, and unattended review are shown as clients of the same controls.
+- [ ] The design closes or explicitly constrains the later-maintainer-push race
+      between a head-pinned Auto request and stale-head observation.
+- [ ] A merged Complete request settles from durable store/GitHub evidence after
+      the Task worktree is removed; recovery does not skip remote reconciliation
+      merely because local execution state is gone.
 - [ ] The deletion ledger covers the replaced Wave listener/resident and
       Project/Task start, wake, handoff, resume, attach, interrupt, and recovery
       paths down to files and stored fields.
-- [ ] A deterministic behavioral proof starts a Task from an ad hoc CLI, stops
-      its parent, opens parent-routed Feedback, and observes the owning Home wake
-      exactly one Project that can Steer or continue it.
+- [ ] The implementation plan specifies a deterministic behavioral proof that
+      starts a Task from an ad hoc CLI, stops its parent, opens parent-routed
+      Feedback, and observes the owning Home wake exactly one Project that can
+      Steer or continue it.
 - [ ] The implementation plan is sliced so the first change deletes a coherent
       old path and proves behavior; no temporary second lifecycle is required.
 

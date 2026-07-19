@@ -77,21 +77,14 @@ owner each for dispatch, liveness, retry, event streaming, and remote nudge.
 
 ## Feedback protocol
 
-Feedback belongs to the authored Task flow position, not to a Launch or a
-separate review object. Its durable information is the current Work, Basis,
-flow position, and reviewer:
+Feedback belongs to the authored Task flow position, not to a separate review
+object. Today its route is projected from Launch attention plus the current
+Work, Basis, flow position, and reviewer. This slice keeps that representation
+only until the server follow-up decides whether an open checkpoint ends its Run
+in a typed Wait or retains an idle presentation Launch. The target does not add
+a durable `FlowFeedback` row beside Epoch/Run/Wait.
 
-```rust
-enum FeedbackReviewer {
-    User,
-    Parent,
-}
-
-struct FlowFeedback {
-    reviewer: FeedbackReviewer,
-    opened_at: OffsetDateTime,
-}
-```
+`FeedbackReviewer` remains the one domain choice: `User | Parent`.
 
 The parent target is derived from `task.project_id`; it is never copied into a
 route id. Evidence is read live from current Work, PR, CI, and the deliberately
@@ -106,7 +99,15 @@ leave the same checkpoint visible.
 
 PR state is not Feedback. `OpenPr` is a URL affordance. A merged PR either
 continues the Task's serial PR chain or completes the Task, as selected by the
-operator. There is no implicit post-merge Review state.
+operator. Publication creates no wait. Explicit `submit` or `land` records a
+User or Auto merge request that atomically owns the current head and the
+Continue/Complete/next disposition. A supported head mutation or explicit Task
+resume revokes and clears the whole request before later work. Finalization,
+failure rollback, and supported branch pushes are serialized per worktree
+without adding durable PR lifecycle state. There is no implicit post-merge
+Review state. GitHub auto-merge remains an arming fence, not a permanent pin
+across external maintainer pushes; one server owner must close that race in the
+follow-up.
 
 ## Communication and continuity
 
@@ -291,7 +292,8 @@ delete orphan receipts, and rename Work/Launch identities still called Session.
 
 - [x] `ReviewGateState`, `TaskAction::Review`, and `AfterMerge::Review` are absent.
 - [x] `OpenPr` is presentational only.
-- [x] Stored `after_merge` accepts only `continue_task|complete_task`.
+- [x] Only `PrMergeRequest` stores `after_merge`/`next_slug`, and its mode, exact
+      head, and disposition are all present or all absent.
 - [x] Merged `ContinueTask` work proceeds without an approval record.
 
 ### Communication and memory

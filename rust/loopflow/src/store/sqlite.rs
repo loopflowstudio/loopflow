@@ -456,10 +456,10 @@ impl SqliteStore {
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = if repo.is_some() {
-            "SELECT id, name, repo, created_at, parent_wave_id
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
              FROM waves WHERE repo = ?1 ORDER BY created_at DESC"
         } else {
-            "SELECT id, name, repo, created_at, parent_wave_id
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
              FROM waves ORDER BY created_at DESC"
         };
         let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
@@ -489,19 +489,21 @@ impl SqliteStore {
             .unwrap_or_else(now_unix);
 
         tx.execute(
-            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id, promoted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
                repo = excluded.repo,
                created_at = excluded.created_at,
-               parent_wave_id = excluded.parent_wave_id",
+               parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
+               promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
             params![
                 wave.id(),
                 wave.name(),
                 wave.repo(),
                 created_at,
                 wave.parent_wave_id(),
+                wave.promoted_at().map(|at| at.unix_timestamp()),
             ],
         )?;
         durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
@@ -1222,7 +1224,7 @@ impl SqliteStore {
     pub fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
              FROM waves WHERE parent_wave_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
@@ -1236,7 +1238,8 @@ impl SqliteStore {
     pub fn get_wave(&self, wave_id: &WaveId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id FROM waves WHERE id = ?1",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+             FROM waves WHERE id = ?1",
         )?;
         let wave = stmt
             .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
@@ -1247,7 +1250,8 @@ impl SqliteStore {
     pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id FROM waves WHERE name = ?1",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+             FROM waves WHERE name = ?1",
         )?;
         let wave = stmt
             .query_row(params![name], |row| Ok(map_wave_row(row)))

@@ -691,10 +691,13 @@ mod tests {
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(
+        let app = server::router_with_observer(
             runtime.clone(),
             server::ResidentDoor::new("test-token"),
-            None,
+            Arc::new(crate::wave::registry::ObserverSlot::new(
+                runtime.clone(),
+                None,
+            )),
             None,
             server::ShutdownDoor::new(),
         );

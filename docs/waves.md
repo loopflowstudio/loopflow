@@ -209,8 +209,8 @@ Loopflow rotates the worktree onto the next branch. The Task inherits the wave's
 `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
 The wave stays steerable while several independent tasks run — task events
-enter its inbox as typed observations and wake it once. Steering, receipts,
-decisions, resume, and recovery are the same verbs agents use:
+enter its inbox as typed observations and wake it once. Steering, status,
+resume, and recovery are the same verbs agents use:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash

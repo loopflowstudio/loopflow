@@ -50,44 +50,65 @@ surface; ordinary Rust channels and prompt system/task channels are unrelated.
 
 Migration `0.12.001_drop_agent_bus.sql` drops both bus tables. Historical
 schema fixtures retain their old table definitions so the current migration
-is exercised. Project promotion never enters that human thread: an explicit
-promotion nudge asks the existing observer to verify the durable parent link,
-then deliver one typed `PromotionWake`. It is journaled under a deterministic
-parent-link id and replayed through the existing resident inbox. Background
-child-observation polling never infers a fresh promotion from old ancestry. The
-scheduler consumes the wake once; repeated nudges do not append another input
-or start an overlapping pass.
+is exercised. Project promotion never enters that human thread. Migration
+`0.12.003_wave_promotion_occurrence.sql` adds nullable `waves.promoted_at`
+without backfilling existing parent links. `complete_promotion` records the
+parent and first promotion timestamp in one Wave-row write before it starts or
+nudges residency. Ordinary ancestry through `with_parent` leaves the occurrence
+absent.
 
-Reopened promotion repair, July 19: `complete_promotion` nudges the existing
-`/observations` door after the child listener is live. It cannot invoke `lf
-chat` or `/messages`; the observer refuses a nudge that does not match registry
-truth. Once ancestry and residency are durable, transport/refusal failure is a
-best-effort warning rather than a false promotion failure; heartbeat remains
-the fallback. The required `lf code -b -m opencode --max-turns 12 --docs
-scratch/promotion-wake.md` loop exited successfully but made no source change
-and was rejected as evidence.
+`StoreObserver` polls that durable occurrence through the same typed
+`PromotionWake` path as the HTTP request. It constructs a wake only when both
+`parent_wave_id` and `promoted_at` exist, and resolves the parent id and name
+from registry truth. The `/observations` request is now only a latency hint: its
+parent string grants no authority, and a refused or lost request is recovered
+by the next poll. The existing journal identity keeps delivery and consumption
+exactly once across repeated polls and listener reopen; no promotion outbox or
+compatibility reader was added.
+
+The listener owns one late-installable observer slot rather than freezing
+`observer = None` at boot. Its heartbeat, `/observations`, and resident-context
+freshness check all acquire and reuse that slot, so a registry created after
+listener startup recovers the durable occurrence without a restart. Every
+`Wave` field is private and `Wave` is not deserializable: identity is getter-only,
+store hydration is crate-private, `with_parent` can establish ancestry once but
+never records an occurrence or reparents existing Work, and the crate-private
+`record_promotion` transition validates the parent and keeps the first
+timestamp. A promoted clone therefore cannot be renamed into a second row, and
+fresh construction of the same identity carries no occurrence. Generic row
+updates cannot manufacture a wake or change which parent a recorded occurrence
+names.
+
+Reopened durable-occurrence repair, July 19: the earlier nudge-only repair's
+heartbeat claim was false because polling deliberately ignored ancestry. The
+required `lf code -b -m opencode --max-turns 12 --docs
+scratch/durable-promotion-occurrence.md` loop exited successfully but made no
+source change and was rejected as evidence; the repair above was completed and
+reviewed directly.
 
 Proof: the full-wire promotion test proves one typed wake starts exactly one
 three-step child-Wave flow, records one `PromotionObserved`, answers its
-deterministic id, and records no `UserMessage`. The reopen proof consumes that
-id, closes and reopens the journal, and proves a repeated nudge cannot restore
-or duplicate it. The registry proof shows background polling over existing
-ancestry records nothing, while two explicit verified nudges still journal one
-wake. The best-effort transport proof shows a dead observer endpoint cannot
-turn completed ancestry/residency into promotion failure. The human door rejection/acceptance and
-fresh-schema Agent Bus absence tests pass. `Cli::command()` has no Radio
-subcommand, source module, or API; unknown first verbs remain owned by external
-skill/flow discovery, with no Radio tombstone parser branch. Wave journal tests
-pass 12/12, and `cargo check -p loopflow --tests` plus `cargo fmt --check` pass.
-Swift contract tests passed during the original implementation. The first
-migration proof caught and corrected a missing registration and a current
-probe that still queried the dropped table.
-
-Focused repair rerun: typed full-wire pass 1/1, explicit registry verification
-1/1, consumed close/reopen dedupe 1/1, best-effort dead-endpoint nudge 1/1,
-human-door contract 1/1, current-schema absence 1/1, and structural Radio
-absence 1/1. `PromotionWake` and its delivery method remain crate-private; the
-repair adds no public Radio, bus, Message, Session, or generic server API.
+deterministic id, and records no `UserMessage`. The runtime reopen proof consumes
+that id, closes and reopens the journal, and proves polling cannot restore or
+duplicate it. The focused StoreObserver suite passes 6/6: ancestry alone emits
+nothing even when HTTP asks, absent HTTP is recovered from `promoted_at`,
+repeated polls plus consumed reopen stay at one event, and request parent text
+is checked against the registry. It also starts observerless, creates the
+registry and promotion later, and delivers exactly once through the same slot
+without a listener restart. The focused HTTP proof starts the server
+observerless, first returns 503, then acquires the newly created registry on
+the next `/observations` request and keeps two nudges at one wake. Promotion
+row persistence passes 1/1, including first-write preservation. The Wave
+encapsulation proof passes 1/1: reconstruction drops ancestry and occurrence,
+and `with_parent` cannot reparent a promoted clone. The store basic proof passes
+1/1 with repo replacement expressed as a fresh occurrence-free `Wave` carrying
+the same id and name. Migration `0.12.003` passes 1/1 and proves an existing
+parent link remains `promoted_at IS NULL`. The migration order/immutability
+check passes with `0.12.003` in its required position. The touched Rust files
+pass rustfmt checking and library Clippy passes with warnings denied; final
+broad gates remain the completion pass's responsibility. `PromotionWake` and
+its delivery method remain crate-private; the repair adds no public Radio,
+bus, Message, Session, generic server API, or second outbox.
 
 ## Slice 3 — file-only memory
 
@@ -301,6 +322,81 @@ coverage passes 9/9. Exact cited false-Session and retired-projection searches
 are empty. `cargo fmt --check` and library Clippy with warnings denied pass;
 the final broad gates remain the completion pass's responsibility.
 
+## Slice 7 — explicit PR merge requests
+
+Accepted. `PrPublication` is only the publication request, optional GitHub
+receipt, and one optional `PrMergeRequest`. The merge request atomically owns
+`mode`, `requested_at`, exact `head_sha`, `after_merge`, and `next_slug`.
+`lf pr publish` and `lf pr open` leave a fresh publication with no merge
+request; refreshing the same published head preserves an existing request but
+cannot choose or change its settlement. `lf pr submit` persists `User`; `lf pr
+land` persists `Auto`; both record GitHub's current head and disposition before
+assignment or auto-merge. Auto-merge is armed with `--match-head-commit`, which
+refuses a stale head at the arming boundary.
+
+The request is the only open-PR supervisor bar. A published PR with no request
+continues the authored Task flow and derives its owner from Work/Feedback.
+`User` status names the explicit merge click; `Auto` status names CI or GitHub.
+Failing current-head CI still routes through the existing typed repair
+incident. `NextMoveOwner::Review` and
+`OpenPrDisposition::AwaitingReview` are deleted rather than renamed.
+
+A newly observed head clears the entire stale User request, including its
+disposition. For a stale Auto request, Loopflow first reads whether GitHub
+auto-merge is armed, disables it when necessary, then stores the new head
+without merge intent. Before a supported Loopflow operation rebases, commits,
+or otherwise pushes a changed head, it performs the same revoke-before-push
+sequence; `task resume` also revokes the request before restarting authored
+work. That sequence is replay-safe across a crash: an already-disabled request
+is proven inert on the next pass. Repeating `land` may disable and re-arm Auto
+for its newly prepared head; remote arm-count idempotence is not the invariant.
+No approval, interaction-review, `settlement_armed`, generic blockage, or
+compatibility reader was added.
+
+An Auto request never adopts a pre-existing remote auto-merge arm: `land`
+disables that unowned arm and executes its own `--match-head-commit` command.
+If title, readying, assignment, or auto-arming fails after the durable request
+is written, Loopflow revokes any possible Auto arm and clears the request before
+returning the original error. If revocation itself cannot be proved, it keeps
+the durable request and reports both failures rather than projecting a false
+successful handoff. One advisory lock in the worktree Git directory serializes
+request/finalization/rollback with every Loopflow push. A failed command cannot
+clear a later command's request, and a head mutation cannot enter between
+exact-head validation and remote finalization. The lock is process coordination,
+not another durable PR state.
+
+Open authored Feedback refuses both User and Auto merge requests before either
+can become durable. A `scratch-clear`-only failing CI projection stays with the
+chosen merge operator rather than inventing a Task repair turn. Failure to mark
+a PR ready is an error and prevents assignment or auto-merge from continuing.
+
+This is an arming and supported-writer fence, not a claim that GitHub
+permanently pins auto-merge. A maintainer can still push outside Loopflow after
+arming and before the next observation; `--match-head-commit` cannot close that
+later race by itself. Reconciliation and completion also still require the
+Task worktree to exist, because GitHub repository resolution and current
+operational ownership remain worktree-based. External writer-push fencing and
+missing-worktree reconciliation belong to the server follow-up.
+
+Migration `0.12.004_explicit_pr_merge_requests.sql` combines three new nullable
+merge columns with the two former publication disposition columns into one
+all-or-none five-field request, constrained to the recorded GitHub head.
+Historical publication disposition and merge columns migrate to `NULL`; intent
+is never inferred. Rust and Swift DTOs, fixtures, action projections, attention
+ownership, Linear linkage copy, and CLI status use the same optional fact.
+
+Proof: full PR integration coverage passes 18/18 and full submit/land coverage
+passes 18/18. The focused migration, explicit-owner, land-only action/status,
+Feedback refusal, ready failure, same-head refresh, stale-head invalidation,
+resume revocation, and merged-completion proofs pass. The Task-backed land proof
+also observes Auto revocation before the Loopflow-owned push through the bare
+remote's receive hook. Separate Task-backed proofs observe the same ordering for
+`commit -p` and rebase force-push, replacement of a pre-existing external arm,
+and durable-request cleanup after ready or Auto-arm failure. Exact
+retired-symbol searches are empty. A focused contention proof shows a second
+local PR/head writer is refused while the first owns the worktree lock. Format
+and Clippy results below apply to the final content.
+
 ## Final architecture review
 
 Accepted with one intentionally open boundary. The implemented system now maps
@@ -326,13 +422,18 @@ Project daemon in this slice would have created a second lifecycle beside
 Epoch/Run/Wait, so it remains out of scope by design.
 
 The useful independent safety ideas from closed PR #1052 are retained in the
-handoff: exact prepared-head auto-merge pinning, refusal to land across an open
-authored Feedback checkpoint, completion from durable merged-PR evidence, and
-guards that agree with legal actions. Its blanket managed-submit ban and
+handoff: exact-head checking when auto-merge is armed, revoke-before-push for
+supported Loopflow writers, refusal to land across an open authored Feedback
+checkpoint, durable merged-PR settlement evidence, and guards that agree with
+legal actions. Permanent external-writer pinning and worktree-independent
+reconciliation are explicitly not claimed. Its blanket managed-submit ban and
 approval state are rejected because they would restore implicit blockage.
 
-Final proof: `cargo fmt --check`, the Context Lab contract fixture, and all 37
-migration tests pass. Exact searches for the deleted review, Radio, memory,
-ambient-chat, evidence-receipt, escalation, policy, and false Session
-projection symbols are empty. The previously recorded all-target Clippy and
-focused Rust/Swift behavioral suites apply to the same source content.
+Final proof: `cargo fmt --all -- --check`, all-target Clippy with warnings
+denied, `cargo test -p loopflow --all-targets`, the migration order and shipped
+immutability check, and all 193 Swift tests pass. The Rust gate includes 1,369
+library tests, 28 CLI tests, and every integration target; the two network/token
+smokes remain explicitly ignored. Exact searches for the deleted review, Radio,
+live-memory, ambient-chat, evidence-receipt, escalation, policy, and false
+Session projection symbols are empty outside historical release notes and the
+design's explicit deletion ledger.

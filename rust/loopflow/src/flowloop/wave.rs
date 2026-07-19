@@ -1700,10 +1700,13 @@ mod tests {
         let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         std_listener.set_nonblocking(true).unwrap();
         let addr = std_listener.local_addr().unwrap();
-        let app = server::router(
+        let app = server::router_with_observer(
             runtime.clone(),
             door,
-            None,
+            Arc::new(crate::wave::registry::ObserverSlot::new(
+                runtime.clone(),
+                None,
+            )),
             None,
             server::ShutdownDoor::new(),
         );

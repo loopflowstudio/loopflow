@@ -41,7 +41,7 @@ public func nowGroup(for task: RoadmapTask) -> NowGroup? {
         return .unknown
     case .red:
         switch task.attention.nextOwner {
-        case .review, .ci: return .readyForReview
+        case .ci: return .readyForReview
         case .user: return .needsInput
         default: break
         }

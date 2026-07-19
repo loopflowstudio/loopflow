@@ -666,12 +666,12 @@ private struct PrLink: View {
     var body: some View {
         if let github = pr.publication?.github {
             Link(
-                "PR #\(github.number) · \(pr.phase.rawValue)\(pr.publication?.afterMerge == .completeTask ? " · completes Task" : "")",
+                "PR #\(github.number) · \(pr.phase.rawValue)\(pr.publication?.merge?.afterMerge == .completeTask ? " · completes Task" : "")",
                 destination: github.url
             )
             .font(Typography.caption(10))
         } else {
-            Text("PR \(pr.sequence) · \(pr.phase.rawValue)\(pr.publication?.afterMerge == .completeTask ? " · completes Task" : "") · \(pr.branch)")
+            Text("PR \(pr.sequence) · \(pr.phase.rawValue)\(pr.publication?.merge?.afterMerge == .completeTask ? " · completes Task" : "") · \(pr.branch)")
                 .font(Typography.caption(10))
                 .foregroundStyle(palette.textSecondary)
         }

@@ -65,10 +65,11 @@
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
-//! - `POST /observations` optionally accepts an explicit promotion nudge,
-//!   verifies it against registry parentage, drains the authoritative
-//!   child-observation outbox, and journals each typed input idempotently before
-//!   waking or queueing the resident.
+//! - `POST /observations` optionally accepts a promotion latency nudge, verifies
+//!   it against the durable occurrence and registry parentage, drains the same
+//!   durable promotion through polling when the request is lost, and journals
+//!   it plus authoritative child observations idempotently before waking or
+//!   queueing the resident.
 //!   Loopback-only internal door; child Work never writes the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
@@ -96,7 +97,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::chat::turns::ChatTurn;
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
-use crate::wave::registry::{process_alive, StoreObserver};
+use crate::wave::registry::{process_alive, ObserverSlot, StoreObserver};
 use crate::wave::runtime::{InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
@@ -282,31 +283,43 @@ struct PostMessageResponse {
     state: String,
 }
 
-/// Server state: the runtime, the resident door, the store observer (for the
+/// Server state: the runtime, the resident door, the shared observer slot (for the
 /// context door's freshness poll), the supervisor handle (to signal an
 /// attach), and when the server started (for uptime).
 #[derive(Clone)]
 struct ServerState {
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
-    observer: Option<Arc<StoreObserver>>,
+    observer: Arc<ObserverSlot>,
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
     started_at: OffsetDateTime,
 }
 
-/// Build the router over a running [`WaveRuntime`]. `observer` is the store
-/// poller when this server is registered — `GET /resident/context` freshens
-/// it before serving. `supervisor` lets the attach door stand the respawn
-/// ladder down (`None` in tests without a supervisor).
 /// Request-body ceiling for the wave routes. Loopback + token gate this, but
 /// an unbounded body is a needless same-user allocation.
 const MAX_BODY_BYTES: usize = 1_048_576;
 
+/// Build the router over a running [`WaveRuntime`].
+///
+/// `observer` seeds the late-installable store poller. `GET /resident/context`
+/// freshens it before serving. `supervisor` lets the attach door stand the
+/// respawn ladder down (`None` in tests without a supervisor).
 pub fn router(
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
     observer: Option<Arc<StoreObserver>>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+) -> Router {
+    let observer = Arc::new(ObserverSlot::new(runtime.clone(), observer));
+    router_with_observer(runtime, resident, observer, supervisor, shutdown)
+}
+
+pub(crate) fn router_with_observer(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Arc<ObserverSlot>,
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
 ) -> Router {
@@ -337,7 +350,7 @@ async fn observations_handler(
     State(state): State<ServerState>,
     request: Option<Json<ObservationRequest>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let observer = state.observer.as_ref().ok_or_else(|| {
+    let observer = state.observer.acquire().await.ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
             "child observations require the shared Loopflow registry".to_string(),
@@ -457,9 +470,7 @@ async fn resident_context_handler(
 ) -> Result<Json<ContextResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
     // Drain child observations before the resident captures its next turn.
-    if let Some(observer) = &state.observer {
-        observer.poll_once().await;
-    }
+    state.observer.poll_once().await;
     let playhead = state
         .runtime
         .ensure_playhead()
@@ -831,7 +842,10 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 mod tests {
     use super::*;
     use crate::chat::turns::ChatTurn;
+    use crate::id::WaveId;
+    use crate::store::{open_store, SharedStore};
     use crate::wave::journal::{journal_path, read_events, EventKind, JournalAppendStage};
+    use crate::wave::Wave;
 
     fn whole_broadcast(id: &str) -> TurnBroadcast {
         let turn = ChatTurn::user(id.to_string(), "hi".to_string());
@@ -934,7 +948,14 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
         let shutdown = ShutdownDoor::new();
         let requested = shutdown.clone();
-        let app = router(runtime, ResidentDoor::new("resident"), None, None, shutdown);
+        let observer = Arc::new(ObserverSlot::new(runtime.clone(), None));
+        let app = router_with_observer(
+            runtime,
+            ResidentDoor::new("resident"),
+            observer,
+            None,
+            shutdown,
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -955,10 +976,10 @@ mod tests {
     async fn message_write_failures_are_not_accepted_and_can_be_retried() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-        let app = router(
+        let app = router_with_observer(
             runtime.clone(),
             ResidentDoor::new("resident"),
-            None,
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
             None,
             ShutdownDoor::new(),
         );
@@ -1031,13 +1052,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observation_nudge_fails_loudly_without_the_shared_registry() {
+    #[allow(clippy::await_holding_lock)] // the env guard serializes the shared registry path
+    async fn observation_nudge_acquires_registry_that_appears_after_server_start() {
+        let _env = crate::journal::TestLedgerGuard::new();
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-        let app = router(
-            runtime,
+        let observer = Arc::new(ObserverSlot::new(runtime.clone(), None));
+        let app = router_with_observer(
+            runtime.clone(),
             ResidentDoor::new("resident"),
-            None,
+            observer,
             None,
             ShutdownDoor::new(),
         );
@@ -1054,6 +1078,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+        let store: SharedStore = Arc::new(
+            open_store(&crate::store::storage_config_from_env().expect("store config"))
+                .await
+                .expect("create registry"),
+        );
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let mut child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        );
+        child
+            .record_promotion(parent.id(), OffsetDateTime::now_utc())
+            .expect("record promotion");
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+
+        for _ in 0..2 {
+            let response = reqwest::Client::new()
+                .post(format!("http://{addr}/observations"))
+                .json(&serde_json::json!({"promotion": {"parent": "platform"}}))
+                .send()
+                .await
+                .expect("promotion nudge");
+            assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+        }
+        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(
+            read_events(&journal_path(tmp.path(), "ship"))
+                .iter()
+                .filter(|event| matches!(&event.kind, EventKind::PromotionObserved { .. }))
+                .count(),
+            1
+        );
         server.abort();
     }
 

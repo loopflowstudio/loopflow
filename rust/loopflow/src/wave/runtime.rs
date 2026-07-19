@@ -146,7 +146,7 @@ pub enum InboxItem {
     Task(TaskObservation),
     /// A typed Project ledger observation.
     Project(ProjectObservation),
-    /// The one-time typed wake derived from this Wave's durable parent link.
+    /// The one-time typed wake derived from this Wave's durable promotion occurrence.
     Promotion {
         parent_wave_id: crate::id::WaveId,
         parent: String,
@@ -897,7 +897,7 @@ impl WaveRuntime {
         true
     }
 
-    /// Journal and queue the typed promotion wake exactly once per parent link.
+    /// Journal and queue the typed promotion wake exactly once per durable occurrence.
     pub(crate) fn deliver_promotion_wake(&self, wake: PromotionWake) -> bool {
         let mut inner = self.inner();
         let pending = promotion_wake_message(&wake);

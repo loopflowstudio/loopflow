@@ -35,7 +35,7 @@ opening it via Steer, continue past the boundary, or resume a stopped process
 through the same Task Work:
 
 ```bash
-lf task steer INF-123 "address the latest review"
+lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
@@ -109,10 +109,11 @@ lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 
-Typical owners are a pending decision, an active child Task, PR review, CI, or
-merge. Steer, decide, or resume the named Project or Task. A relevant child
-observation wakes its Project Work automatically; there is no runtime knob
-or PR-limit counter to clear.
+Typical owners are a Feedback checkpoint, an active child Task, CI, or an
+explicitly requested merge. Steer, decide, or resume the named Project or Task.
+Task lifecycle observations wake Project Work when their typed route allows it.
+Parent-routed Task Feedback currently requires a live Project Run; if its
+Project is stopped, resume the Project. There is no PR-limit counter to clear.
 
 ## Context too large
 

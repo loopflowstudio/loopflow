@@ -4,9 +4,15 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 
+use loopflow::child::ChildRef;
+use loopflow::durable::{
+    AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance, RunTrigger,
+};
 use loopflow::engine::worktrees::create_named_worktree;
-use loopflow::ops::{land, submit, LandOptions, NullProgress, OpsError};
-use loopflow::task::{AfterMerge, PrPhase};
+use loopflow::ops::{
+    create_or_update_pr, land, submit, LandOptions, NullProgress, OpsError, PrOptions,
+};
+use loopflow::task::{AfterMerge, PrMergeMode, PrPhase};
 use loopflow_test_support::TestRepo;
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
@@ -54,6 +60,19 @@ if [ "$1 $2" = "pr create" ]; then
   exit 0
 fi
 
+if [ "$1 $2" = "pr view" ]; then
+  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
+    echo 'false'
+  else
+    echo 'https://example.com/pr/1'
+  fi
+  exit 0
+fi
+
+if [ "$1 $2" = "pr merge" ]; then
+  exit 0
+fi
+
 exit 0
 "#
 }
@@ -65,6 +84,7 @@ fn noop_open_script() -> &'static str {
 fn gh_land_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
+auto_state="{log_path}.auto"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
@@ -81,7 +101,16 @@ if [ "$1 $2" = "pr create" ]; then
 fi
 
 if [ "$1 $2" = "pr view" ]; then
+  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
+    if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+    exit 0
+  fi
   echo "https://example.com/pr/1"
+  exit 0
+fi
+
+if [ "$1 $2" = "pr merge" ]; then
+  touch "$auto_state"
   exit 0
 fi
 
@@ -93,17 +122,88 @@ exit 0
 fn gh_existing_pr_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
+auto_state="{log_path}.auto"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "pr list" ]; then
-  echo '[{{"url":"https://example.com/pr/912","state":"OPEN","isDraft":false,"number":912,"mergeCommit":null}}]'
+  head="$(git rev-parse HEAD)"
+  echo "[{{\"url\":\"https://example.com/pr/912\",\"state\":\"OPEN\",\"isDraft\":false,\"number\":912,\"mergeCommit\":null,\"headRefOid\":\"$head\"}}]"
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
+  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
+    if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+    exit 0
+  fi
   echo 'https://example.com/pr/912'
   exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+  rm -f "$auto_state"
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then
+  touch "$auto_state"
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
+fn gh_ready_failure_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+if [ "$1 $2" = "pr create" ]; then
+  echo 'https://example.com/pr/1'
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'https://example.com/pr/1'
+  exit 0
+fi
+if [ "$1 $2" = "pr ready" ]; then
+  echo 'ready failed' >&2
+  exit 1
+fi
+exit 0
+"#
+    )
+}
+
+fn gh_auto_failure_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+if [ "$1 $2" = "pr list" ]; then
+  head="$(git rev-parse HEAD)"
+  echo "[{{\"url\":\"https://example.com/pr/912\",\"state\":\"OPEN\",\"isDraft\":false,\"number\":912,\"mergeCommit\":null,\"headRefOid\":\"$head\"}}]"
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
+    echo 'false'
+  else
+    echo 'https://example.com/pr/912'
+  fi
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then
+  echo 'auto arm failed' >&2
+  exit 1
 fi
 exit 0
 "#
@@ -586,7 +686,7 @@ fn land_uses_cached_pr_copy_when_available() {
     )
     .expect("land with cached copy");
 
-    let log = fs::read_to_string(log_path).expect("read gh log");
+    let log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(log.contains("--title cached title"));
     assert!(log.contains("--body cached body"));
 }
@@ -708,12 +808,115 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
     .expect("submit");
 
     // submit prepares but never merges — that click is the human's.
-    let log = fs::read_to_string(log_path).expect("read gh log");
+    let log = fs::read_to_string(&log_path).expect("read gh log");
     // Assigns the PR to the current user for a required, manual merge.
     assert!(log.contains("pr edit --add-assignee @me"));
     // Marks the PR ready, but does NOT arm auto-merge.
     assert!(log.contains("pr ready"));
     assert!(!log.contains("merge --auto"));
+}
+
+#[test]
+fn submit_surfaces_ready_failure_before_assignment() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-ready-failure";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, branch);
+
+    let log_path = repo.bare_path().join("gh.log");
+    let script = gh_ready_failure_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    let result = submit(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: true,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(matches!(result, Err(OpsError::CommandFailed { .. })));
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(
+        pr.merge_request().is_none(),
+        "failed remote finalization must not leave a false settlement owner"
+    );
+    let log = fs::read_to_string(&log_path).expect("read gh log");
+    assert!(log.contains("pr ready"));
+    assert!(!log.contains("pr edit --add-assignee @me"));
+}
+
+#[test]
+fn land_clears_the_durable_request_when_auto_arm_fails() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-auto-failure";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, branch);
+
+    let log_path = home.path().join("gh.log");
+    let script = gh_auto_failure_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(matches!(result, Err(OpsError::CommandFailed { .. })));
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(
+        pr.merge_request().is_none(),
+        "a failed Auto handoff must not leave GitHub as a false owner"
+    );
+    let log = fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("pr merge --squash --auto --match-head-commit"));
 }
 
 #[test]
@@ -734,6 +937,8 @@ fn latest_land_disposition_wins_before_merge() {
     repo.commit("feature work");
     repo.push_new_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
+    fs::write(format!("{}.auto", log_path.display()), "armed externally")
+        .expect("seed external auto-merge state");
 
     land(
         repo.path(),
@@ -752,6 +957,42 @@ fn latest_land_disposition_wins_before_merge() {
         &NullProgress,
     )
     .expect("land as completing PR");
+    let head = repo.head_sha();
+
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: Some("refresh published PR".to_string()),
+            body: Some("same head".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("refresh same-head publication");
+
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    let preserved = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    let preserved = preserved.merge_request().expect("preserved merge request");
+    assert_eq!(preserved.after_merge, AfterMerge::CompleteTask);
+    assert_eq!(preserved.head_sha, head);
+
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display()
+        ),
+    )
+    .expect("write remote push hook");
+    let mut permissions = fs::metadata(&hook)
+        .expect("read hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make push hook executable");
 
     land(
         repo.path(),
@@ -770,17 +1011,195 @@ fn latest_land_disposition_wins_before_merge() {
         &NullProgress,
     )
     .expect("revise land disposition");
+    let revised_head = repo.head_sha();
 
-    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
         .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Open);
     let publication = pr.publication.expect("publication");
-    assert_eq!(publication.after_merge, AfterMerge::ContinueTask);
-    assert_eq!(publication.next_slug.as_deref(), Some("follow-up-proof"));
     assert_eq!(publication.github.map(|pr| pr.number), Some(912));
+    let merge = publication.merge.expect("explicit merge request");
+    assert_eq!(merge.mode, PrMergeMode::Auto);
+    assert_eq!(merge.head_sha, revised_head);
+    assert_eq!(merge.after_merge, AfterMerge::ContinueTask);
+    assert_eq!(merge.next_slug.as_deref(), Some("follow-up-proof"));
+    let log = fs::read_to_string(&log_path).expect("read gh log");
+    assert!(log.contains(&format!(
+        "pr merge --squash --auto --match-head-commit {revised_head}"
+    )));
+    let first_disable = log
+        .find("pr merge 912 --disable")
+        .expect("pre-existing Auto is replaced");
+    let first_arm = log
+        .find("pr merge --squash --auto --match-head-commit")
+        .expect("land arms the exact prepared head");
+    assert!(
+        first_disable < first_arm,
+        "external Auto must be replaced by the exact-head command:\n{log}"
+    );
+    let disable = log
+        .rfind("pr merge 912 --disable")
+        .expect("second land revokes prior Auto request");
+    let push = log
+        .find("git-push")
+        .expect("second land pushes its new head");
+    assert!(
+        disable < push,
+        "Auto intent must be revoked before the LF-owned head-changing push:\n{log}"
+    );
+
+    submit(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("replace auto merge with user merge request");
+    let submitted_head = repo.head_sha();
+
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    let request = pr.merge_request().expect("user merge request");
+    assert_eq!(request.mode, PrMergeMode::User);
+    assert_eq!(request.head_sha, submitted_head);
+    let log = fs::read_to_string(&log_path).expect("read gh log");
+    assert!(log.contains("pr merge 912 --disable"));
+    assert!(log.contains("pr edit --add-assignee @me"));
+}
+
+#[test]
+fn land_refuses_to_request_merge_while_task_feedback_is_open() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let log_path = home.path().join("gh.log");
+    let script = gh_existing_pr_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("open", noop_open_script())],
+        home.path(),
+    );
+    let base = repo.head_sha();
+    let branch = "jack/task-feedback-proof";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime.block_on(async {
+        let work = task
+            .store
+            .work_for_child(&ChildRef::Task(task.task.id.clone()))
+            .await
+            .expect("resolve Task Work");
+        let (_, lease) = task
+            .store
+            .reserve_run(&work, RunTrigger::User)
+            .await
+            .expect("reserve Task Run");
+        let receipt = task
+            .store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchStarting {
+                    route: LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: Containment::Tmux {
+                        name: "feedback-proof".to_string(),
+                    },
+                    cwd: repo.path().to_path_buf(),
+                    surface: "tui".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .expect("start Task Launch");
+        let loopflow::durable::AdvanceReceipt::Launch(launch) = receipt else {
+            panic!("expected Launch receipt")
+        };
+        task.store
+            .advance_run(
+                &lease,
+                RunAdvance::LaunchLive {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("make Task Launch live");
+        let basis = task
+            .store
+            .current_epoch(&work)
+            .await
+            .expect("read Task Epoch")
+            .current_basis;
+        task.store
+            .set_flow_position(
+                &lease,
+                FlowPosition {
+                    work: work.clone(),
+                    epoch_id: basis.epoch_id,
+                    flow: "task".to_string(),
+                    step: "gate".to_string(),
+                    step_index: 0,
+                    iteration: 0,
+                    feedback: true,
+                    updated_at: time::OffsetDateTime::now_utc(),
+                },
+            )
+            .await
+            .expect("set Feedback position");
+        task.store
+            .route_feedback(&lease, &launch.id, AttentionRoute::User)
+            .await
+            .expect("open Task Feedback");
+    });
+
+    let result = land(
+        repo.path(),
+        &LandOptions {
+            strict: true,
+            local: false,
+            create_pr: false,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("test title".to_string()),
+            pr_body: Some("test body".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    let error = result.expect_err("open Feedback must refuse merge intent");
+    assert!(error
+        .to_string()
+        .contains("cannot request a pull request merge"));
+    let pr = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(pr.merge_request().is_none());
+    let log = fs::read_to_string(&log_path).expect("read gh log");
+    assert!(!log.contains("pr merge --squash --auto"));
 }
 
 #[test]

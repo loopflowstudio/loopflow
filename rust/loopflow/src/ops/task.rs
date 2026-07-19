@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{File, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -31,9 +32,11 @@ use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionMo
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, FeedbackReviewer, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
+    PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
+    TaskPrId,
 };
 use crate::wave::Wave;
+use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1194,15 +1197,7 @@ async fn resolve_task_authority(repo: &Path) -> OpsResult<TaskAuthority> {
     }
 }
 
-pub(crate) fn request_task_pr_publication(
-    repo: &Path,
-    after_merge: AfterMerge,
-    next_slug: Option<&str>,
-) -> OpsResult<bool> {
-    let next_slug = next_slug.map(parse_pr_slug).transpose()?;
-    if after_merge == AfterMerge::CompleteTask && next_slug.is_some() {
-        return Err(task_error("--complete and --next cannot be used together"));
-    }
+pub(crate) fn request_task_pr_publication(repo: &Path) -> OpsResult<bool> {
     block_on_task(async move {
         let TaskAuthority::Authority { store, task, lease } = resolve_task_authority(repo).await?
         else {
@@ -1227,14 +1222,25 @@ pub(crate) fn request_task_pr_publication(
             )));
         }
         let now = time::OffsetDateTime::now_utc();
+        let github = pr.github().cloned();
+        let merge = pr
+            .publication
+            .as_ref()
+            .and_then(|publication| publication.merge.as_ref())
+            .filter(|request| {
+                github
+                    .as_ref()
+                    .and_then(|github| github.head_sha.as_deref())
+                    == Some(request.head_sha.as_str())
+            })
+            .cloned();
         pr.publication = Some(PrPublication {
             requested_at: pr
                 .publication
                 .as_ref()
                 .map_or(now, |publication| publication.requested_at),
-            after_merge,
-            next_slug,
-            github: pr.github().cloned(),
+            github,
+            merge,
         });
         pr.updated_at = now;
         match lease.as_ref() {
@@ -1242,6 +1248,206 @@ pub(crate) fn request_task_pr_publication(
             None => store.update_task_pr(&pr).await,
         }
         .map_err(|error| task_error(format!("failed to request PR publication: {error}")))?;
+        Ok(true)
+    })
+}
+
+/// Clear settlement intent before a Loopflow-owned operation can move the PR
+/// head. Auto-merge is revoked remotely first; a crash between the two steps is
+/// replay-safe because the next attempt observes it already disabled.
+pub(crate) fn clear_task_pr_merge_before_head_mutation(
+    repo: &Path,
+    mutation_is_unconditional: bool,
+) -> OpsResult<bool> {
+    block_on_task(async move {
+        let TaskAuthority::Authority { store, task, lease } = resolve_task_authority(repo).await?
+        else {
+            return Ok(false);
+        };
+        clear_task_pr_merge(
+            &store,
+            &task,
+            lease.as_ref(),
+            repo,
+            mutation_is_unconditional,
+        )
+        .await
+    })
+}
+
+/// Serialize the local operations that may change a Task PR head or its merge
+/// request. The file descriptor owns the advisory lock until this guard drops.
+#[derive(Debug)]
+pub(crate) struct TaskPrMutationGuard {
+    _file: File,
+}
+
+pub(crate) fn lock_task_pr_mutation(repo: &Path) -> OpsResult<TaskPrMutationGuard> {
+    let path = crate::engine::git::absolute_git_dir(repo)?.join("lf-pr-mutation.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    match FileExt::try_lock_exclusive(&file) {
+        Ok(()) => Ok(TaskPrMutationGuard { _file: file }),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Err(OpsError::Message(
+            "another PR or branch-head mutation is already running for this worktree".to_string(),
+        )),
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn clear_task_pr_merge(
+    store: &SharedStore,
+    task: &Task,
+    lease: Option<&RunLease>,
+    repo: &Path,
+    mutation_is_unconditional: bool,
+) -> OpsResult<bool> {
+    let mut pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task {} has no active PR",
+                task.directive.identifier
+            ))
+        })?;
+    let Some(request) = pr
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.merge.as_ref())
+        .cloned()
+    else {
+        return Ok(false);
+    };
+    if !mutation_is_unconditional {
+        let head = rev_parse(repo, "HEAD")?;
+        if is_clean(repo)? && head == request.head_sha {
+            return Ok(false);
+        }
+    }
+    if request.mode == PrMergeMode::Auto {
+        let number = pr
+            .github()
+            .expect("merge request validation requires GitHub PR")
+            .number;
+        crate::ops::pr::disable_auto_merge(repo, number)?;
+    }
+    pr.publication
+        .as_mut()
+        .expect("merge request requires publication")
+        .merge = None;
+    pr.updated_at = time::OffsetDateTime::now_utc();
+    match lease {
+        Some(lease) => store.update_task_pr_for_run(&pr, lease).await,
+        None => store.update_task_pr(&pr).await,
+    }
+    .map_err(|error| task_error(format!("failed to clear stale PR merge request: {error}")))?;
+    Ok(true)
+}
+
+/// Persist the explicit merge request before `submit` assigns or `land` arms
+/// GitHub. Repeating the same mode/head request preserves its first timestamp.
+pub(crate) fn request_task_pr_merge(
+    repo: &Path,
+    mode: PrMergeMode,
+    head_sha: Option<&str>,
+    after_merge: AfterMerge,
+    next_slug: Option<&str>,
+) -> OpsResult<bool> {
+    let head_sha = head_sha.map(str::to_string);
+    let next_slug = next_slug.map(parse_pr_slug).transpose()?;
+    if after_merge == AfterMerge::CompleteTask && next_slug.is_some() {
+        return Err(task_error("--complete and --next cannot be used together"));
+    }
+    block_on_task(async move {
+        let TaskAuthority::Authority { store, task, lease } = resolve_task_authority(repo).await?
+        else {
+            return Ok(false);
+        };
+        let feedback = feedback_gate(&store, &task).await?;
+        if !feedback.satisfied {
+            return Err(task_error(format!(
+                "Task {} cannot request a pull request merge while {}",
+                task.directive.identifier,
+                feedback.reason()
+            )));
+        }
+        let head_sha = head_sha
+            .filter(|head| !head.trim().is_empty())
+            .ok_or_else(|| {
+                task_error(format!(
+                    "GitHub did not report the current head for Task {}; refusing to request a merge without an exact commit",
+                    task.directive.identifier
+                ))
+            })?;
+        let mut pr = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!(
+                    "Task {} has no active PR",
+                    task.directive.identifier
+                ))
+            })?;
+        let publication = pr.publication.as_mut().ok_or_else(|| {
+            task_error(format!(
+                "Task {} has no durable PR publication request",
+                task.directive.identifier
+            ))
+        })?;
+        let github_head = publication
+            .github
+            .as_ref()
+            .and_then(|github| github.head_sha.as_deref());
+        if github_head != Some(head_sha.as_str()) {
+            return Err(task_error(format!(
+                "Task {} stored GitHub head {:?}, not requested merge head {}; refusing an unpinned settlement",
+                task.directive.identifier, github_head, head_sha
+            )));
+        }
+        if publication
+            .merge
+            .as_ref()
+            .is_some_and(|request| request.mode == PrMergeMode::Auto)
+            && mode == PrMergeMode::User
+        {
+            let number = publication
+                .github
+                .as_ref()
+                .expect("merge request validation requires GitHub PR")
+                .number;
+            crate::ops::pr::disable_auto_merge(repo, number)?;
+        }
+        let now = time::OffsetDateTime::now_utc();
+        let requested_at = publication
+            .merge
+            .as_ref()
+            .filter(|request| {
+                request.mode == mode
+                    && request.head_sha == head_sha
+                    && request.after_merge == after_merge
+                    && request.next_slug == next_slug
+            })
+            .map_or(now, |request| request.requested_at);
+        publication.merge = Some(PrMergeRequest {
+            mode,
+            requested_at,
+            head_sha,
+            after_merge,
+            next_slug,
+        });
+        pr.updated_at = now;
+        match lease.as_ref() {
+            Some(lease) => store.update_task_pr_for_run(&pr, lease).await,
+            None => store.update_task_pr(&pr).await,
+        }
+        .map_err(|error| task_error(format!("failed to request PR merge: {error}")))?;
         Ok(true)
     })
 }
@@ -1725,6 +1931,7 @@ pub(crate) fn attach_task_github_pr(
                 task.directive.identifier
             ))
         })?;
+        invalidate_stale_merge_request(repo, publication, github_pr)?;
         publication.github = Some(GithubPr {
             number,
             url: url.clone(),
@@ -1761,6 +1968,38 @@ pub(crate) fn attach_task_github_pr(
     })
 }
 
+/// A merge request belongs to one exact head. Revoke an armed auto-merge before
+/// forgetting a stale request so a later push cannot inherit settlement intent.
+fn invalidate_stale_merge_request(
+    repo: &Path,
+    publication: &mut PrPublication,
+    github_pr: &crate::ops::pr::PrInfo,
+) -> OpsResult<()> {
+    let Some(request) = publication.merge.as_ref() else {
+        return Ok(());
+    };
+    let observed_head = github_pr.head_sha.as_deref().ok_or_else(|| {
+        task_error(format!(
+            "GitHub did not report the current head for pull request #{}; refusing to change its head-pinned merge request",
+            github_pr.number
+        ))
+    })?;
+    if observed_head == request.head_sha {
+        return Ok(());
+    }
+    if request.mode == PrMergeMode::Auto && matches!(github_pr.state.as_str(), "open" | "draft") {
+        let number = u32::try_from(github_pr.number).map_err(|_| {
+            task_error(format!(
+                "pull request #{} exceeds supported range",
+                github_pr.number
+            ))
+        })?;
+        crate::ops::pr::disable_auto_merge(repo, number)?;
+    }
+    publication.merge = None;
+    Ok(())
+}
+
 pub(crate) fn abandon_task_pr(
     repo: &Path,
     force: bool,
@@ -1771,6 +2010,7 @@ pub(crate) fn abandon_task_pr(
         else {
             return Ok(false);
         };
+        let _mutation = lock_task_pr_mutation(repo)?;
         let mut pr = store
             .active_task_pr(&task.id)
             .await
@@ -2034,7 +2274,10 @@ async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<
         .active_task_pr(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?;
-    if active.as_ref().is_none_or(|pr| pr.phase() == PrPhase::Open) {
+    if active
+        .as_ref()
+        .is_none_or(|pr| pr.phase() == PrPhase::Open && pr.merge_request().is_some())
+    {
         return Ok(());
     }
     // Do not write a human instruction into a durable field and stop. This line
@@ -2111,13 +2354,9 @@ pub(crate) async fn reconcile_project_tasks(
             false
         };
         let settled = observed.as_ref().is_some_and(TaskPr::is_settled) || no_active_pr;
-        let completing = observed.as_ref().is_some_and(|pr| {
-            pr.is_settled()
-                && pr
-                    .publication
-                    .as_ref()
-                    .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-        });
+        let completing = observed
+            .as_ref()
+            .is_some_and(|pr| pr.is_settled() && pr.after_merge() == AfterMerge::CompleteTask);
         if settled && !completing {
             ensure_working_pr(store, task).await?;
             if !matches!(
@@ -2130,19 +2369,16 @@ pub(crate) async fn reconcile_project_tasks(
             let Some(pr) = observed.as_ref() else {
                 continue;
             };
-            if pr.review_ready()
-                && task.lifecycle_phase == crate::task::TaskLifecyclePhase::Finally
-                && task.phase_cursor == 0
-                && task.phase_iteration == 0
-            {
-                if !matches!(
+            route_ci_incident(store, task, pr).await?;
+            if pr.merge_request().is_none()
+                && !matches!(
                     task_work_status(store, task).await?,
                     WorkStatus::Running { .. }
-                ) {
-                    relaunch_inactive_process(store, task).await?;
-                }
-            } else {
-                route_ci_incident(store, task, pr).await?;
+                )
+            {
+                // Publication is not settlement. Keep executing the authored
+                // Task flow unless submit/land requested a merge for this head.
+                relaunch_inactive_process(store, task).await?;
             }
         }
     }
@@ -2197,11 +2433,9 @@ pub(crate) enum OpenPrDisposition {
     /// GitHub observation is degraded, so the PR's real state is unknown.
     /// Resolved by the capability recovering, not by anyone authoring anything.
     ObservationDegraded,
-    /// CI is failing and the body did not move the head. Only new authored
-    /// direction or a human review can move this.
+    /// CI is failing and the body did not move the head. New authored direction
+    /// is required before another repair can be useful.
     NeedsDirection,
-    /// The PR is open and healthy; the Task waits on external review or merge.
-    AwaitingReview,
 }
 
 /// Triage an open PR into the exact thing it is waiting for.
@@ -2213,14 +2447,14 @@ pub(crate) fn decide_open_pr_status(
     pr: &TaskPr,
     github_degraded: Option<&str>,
     head_advanced: bool,
-) -> (OpenPrDisposition, String) {
+) -> (Option<OpenPrDisposition>, String) {
     let number = pr
         .github()
         .expect("open Task PR requires a GitHub PR record")
         .number;
     if let Some(reason) = github_degraded {
         return (
-            OpenPrDisposition::ObservationDegraded,
+            Some(OpenPrDisposition::ObservationDegraded),
             format!(
                 "ci-fix blocked by github-observation: {reason}. Resume when GitHub recovers; pull request #{number} stays attached."
             ),
@@ -2232,16 +2466,24 @@ pub(crate) fn decide_open_pr_status(
         .is_some_and(|observation| observation.state == CiState::Failing);
     if failing && !head_advanced {
         return (
-            OpenPrDisposition::NeedsDirection,
+            Some(OpenPrDisposition::NeedsDirection),
             format!(
-                "CI failing on pull request #{number}; the Task body did not repair the head. Needs a new directive or human review; pull request #{number} stays attached."
+                "CI failing on pull request #{number}; the Task body did not repair the head. Needs a new directive; pull request #{number} stays attached."
             ),
         );
     }
-    (
-        OpenPrDisposition::AwaitingReview,
-        format!("pull request #{number} is open for review"),
-    )
+    let reason = match pr.merge_request() {
+        Some(request) if request.mode == PrMergeMode::User => {
+            let short = request.head_sha.chars().take(12).collect::<String>();
+            format!("pull request #{number} awaits the user's explicit merge of head {short}")
+        }
+        Some(request) => {
+            let short = request.head_sha.chars().take(12).collect::<String>();
+            format!("pull request #{number} awaits GitHub auto-merge of head {short}")
+        }
+        None => format!("pull request #{number} is published; no merge was requested"),
+    };
+    (None, reason)
 }
 
 /// The incident this PR's current reading warrants, if any.
@@ -2325,8 +2567,8 @@ pub(crate) async fn reconcile_task_pr_fresh_for_run(
 }
 
 /// Read the open PR's required checks and classify them for `head_sha`. Returns
-/// `None` — CI state unknown, status falls back to plain review waiting — when
-/// GitHub reports no head, there are no required checks, or gh is unavailable.
+/// `None` — no current-head CI owner can be derived — when GitHub reports no
+/// head, there are no required checks, or gh is unavailable.
 /// Failure dominates: any failing required check makes the head `Failing` even
 /// while others are still pending.
 fn observe_required_checks(
@@ -2469,6 +2711,10 @@ async fn reconcile_task_pr_with_authority(
     lease: Option<&RunLease>,
     freshness: crate::ops::pr::PrReadFreshness,
 ) -> OpsResult<Option<TaskPr>> {
+    // Reconciliation updates the same projection as publication/finalization.
+    // Refuse overlap so a remote read begun before a push cannot overwrite the
+    // request or head recorded by the command that completed after it.
+    let _mutation = lock_task_pr_mutation(&task.worktree)?;
     let Some(mut pr) = reconcile_subject(store, task).await? else {
         return Ok(None);
     };
@@ -2552,10 +2798,10 @@ async fn reconcile_task_pr_with_authority(
     let previous_pm_writeback = task.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
-        after_merge: AfterMerge::ContinueTask,
-        next_slug: None,
         github: None,
+        merge: None,
     });
+    invalidate_stale_merge_request(&task.worktree, publication, &github_pr)?;
     publication.github = Some(GithubPr {
         number,
         url: url.clone(),
@@ -2582,10 +2828,7 @@ async fn reconcile_task_pr_with_authority(
             // while the branch holds follow-up committed past the merged tip,
             // which another serial PR still owes. The PR is settling in flight and
             // is not on disk yet, so its range is read from it directly.
-            let completes = pr
-                .publication
-                .as_ref()
-                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+            let completes = pr.after_merge() == AfterMerge::CompleteTask
                 && matches!(
                     committed_follow_up_range(&task.worktree, &pr)?,
                     CommittedFollowUp::ProvenEmpty
@@ -2729,12 +2972,7 @@ async fn reconcile_task_pr_with_authority(
 fn next_pr_slug(settled: &TaskPr, slug_override: Option<&str>) -> String {
     slug_override
         .map(str::to_string)
-        .or_else(|| {
-            settled
-                .publication
-                .as_ref()
-                .and_then(|publication| publication.next_slug.clone())
-        })
+        .or_else(|| settled.next_slug().map(str::to_string))
         .unwrap_or_else(|| (settled.sequence + 1).to_string())
 }
 
@@ -3177,10 +3415,7 @@ async fn ensure_working_pr_with_authority(
     // independently authorize one more serial PR: follow-up committed past the
     // merged tip, which the completion gate refuses to settle over, and a
     // pending directive, which the successor exists to incorporate.
-    if settled
-        .publication
-        .as_ref()
-        .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
+    if settled.after_merge() == AfterMerge::CompleteTask
         && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
     {
         return Ok(None);
@@ -3300,6 +3535,7 @@ async fn ensure_working_pr_with_authority(
     // and left completion unable to prove the successor empty (W2-300).
     let base_commit = fork_point(&task.worktree, &base_ref, &branch)?;
 
+    let _mutation = lock_task_pr_mutation(&task.worktree)?;
     push_with_upstream(&task.worktree, "origin", &branch)
         .map_err(|error| task_error(format!("failed to push next PR branch: {error}")))?;
 
@@ -3569,14 +3805,16 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
         PrPhase::Merged => "Merged".to_string(),
         PrPhase::Abandoned => "Abandoned".to_string(),
         _ => {
-            let completes = pr
-                .publication
-                .as_ref()
-                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask);
+            let completes = pr.after_merge() == AfterMerge::CompleteTask;
             if completes {
                 "Open · completes task on merge".to_string()
+            } else if let Some(request) = pr.merge_request() {
+                match request.mode {
+                    PrMergeMode::User => "Open · user merge requested".to_string(),
+                    PrMergeMode::Auto => "Open · auto-merge requested".to_string(),
+                }
             } else {
-                "Open · in review".to_string()
+                "Open · published".to_string()
             }
         }
     }
@@ -3801,12 +4039,7 @@ pub(crate) async fn task_completion_gate(
     // keeps today's refusal.
     let has_merged_predecessor = prs.iter().any(|pr| pr.phase() == PrPhase::Merged);
     if let Some(newest) = prs.last() {
-        if newest.phase() == PrPhase::Merged
-            && newest
-                .publication
-                .as_ref()
-                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-        {
+        if newest.phase() == PrPhase::Merged && newest.after_merge() == AfterMerge::CompleteTask {
             let number = newest
                 .github()
                 .map(|github| github.number)
@@ -3839,7 +4072,7 @@ pub(crate) async fn task_completion_gate(
             .unwrap_or_else(|| format!("sequence {}", pr.sequence));
         match pr.phase() {
             PrPhase::Open => gate.blockers.push(format!(
-                "pull request {which} is open for review; merge it or run `lf pr abandon`"
+                "pull request {which} is open; merge it or run `lf pr abandon`"
             )),
             PrPhase::Publishing => gate.blockers.push(format!(
                 "pull request {which} is still publishing; wait for it to land or run `lf pr abandon`"
@@ -3877,13 +4110,9 @@ async fn merged_completing_pr(store: &SharedStore, task: &Task) -> OpsResult<Opt
         .task_prs(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
-    Ok(prs.into_iter().find(|pr| {
-        pr.phase() == PrPhase::Merged
-            && pr
-                .publication
-                .as_ref()
-                .is_some_and(|publication| publication.after_merge == AfterMerge::CompleteTask)
-    }))
+    Ok(prs
+        .into_iter()
+        .find(|pr| pr.phase() == PrPhase::Merged && pr.after_merge() == AfterMerge::CompleteTask))
 }
 
 async fn advance_completion_after_gate(
@@ -4048,8 +4277,9 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             status: work_status.clone(),
             latest_pr_phase: latest.map(|pr| pr.phase()),
             latest_pr_after_merge: latest
-                .and_then(|pr| pr.publication.as_ref())
-                .map(|p| p.after_merge),
+                .filter(|pr| pr.phase() == PrPhase::Merged)
+                .map(TaskPr::after_merge),
+            latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
@@ -4517,6 +4747,10 @@ pub(crate) async fn resume_task_async(
     if let Some(refusal) = no_active_pr_resume_refusal(&task.directive.identifier, active, latest) {
         return Err(task_error(refusal));
     }
+    {
+        let _mutation = lock_task_pr_mutation(&task.worktree)?;
+        clear_task_pr_merge(&store, &task, None, &task.worktree, true).await?;
+    }
     // Reconcile may settle an active PR that merged out of band, moving the
     // worktree into a between-PR state; refuse a dirty between-PR before the
     // lease is reaped or a successor body is launched.
@@ -4602,8 +4836,8 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_task_flow_override, resolve_task_lifecycle, resolve_task_start_input,
-        TaskFlowOverrides,
+        ensure_task_flow_override, lock_task_pr_mutation, resolve_task_lifecycle,
+        resolve_task_start_input, TaskFlowOverrides,
     };
     use crate::pm::ProjectFlowPlan;
 
@@ -4632,7 +4866,7 @@ mod tests {
             ..TaskFlowOverrides::default()
         };
 
-        let plan = resolve_task_lifecycle(repo.path(), &project, &overrides, false)
+        let plan = resolve_task_lifecycle(repo.path(), &project, &overrides, None)
             .expect("resolve lifecycle");
 
         assert_eq!(plan.first.flow, "incident");
@@ -4657,7 +4891,7 @@ mod tests {
         };
 
         let error =
-            resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default(), false)
+            resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default(), None)
                 .expect_err("reject unsafe finally flow");
 
         assert!(error
@@ -4678,5 +4912,19 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Task INF-123 already pins loop flow \"slice\""));
+
+    #[test]
+    fn pr_mutation_lock_refuses_a_concurrent_writer() {
+        let repo = tempfile::tempdir().expect("temporary repository");
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repo.path())
+            .status()
+            .expect("initialize repository");
+        assert!(status.success());
+
+        let _first = lock_task_pr_mutation(repo.path()).expect("first mutation lock");
+        let error = lock_task_pr_mutation(repo.path()).expect_err("second writer must be refused");
+        assert!(error.to_string().contains("already running"));
     }
 }

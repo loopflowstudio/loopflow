@@ -6,8 +6,8 @@
 //! - holds the mind's one journal pen;
 //! - serves the doors: `/messages`, `/events`, `/health`,
 //!   and the token-gated resident door ([`server`]);
-//! - verifies explicit promotion nudges and drains typed Project/Task
-//!   observations ([`registry::StoreObserver`]);
+//! - polls durable promotion occurrences and typed Project/Task observations,
+//!   with HTTP promotion nudges only reducing latency ([`registry::StoreObserver`]);
 //! - keeps the Wave row and discovery pointer current;
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
@@ -42,9 +42,10 @@
 //! `.wave-resident-token`.
 //!
 //! The listener also uses the local [`registry`] for a store-polling observer
-//! that carries explicitly nudged promotion and Project/Task inputs into the Wave journal. The endpoint
-//! file enforces one live listener per Wave. No registry store on the machine
-//! means no child observations; the listener remains otherwise functional.
+//! that carries durable promotion and Project/Task inputs into the Wave journal.
+//! The endpoint file enforces one live listener per Wave. While no registry
+//! exists on the machine, child observations wait durably; the listener remains
+//! functional and acquires the registry when it appears.
 
 pub mod journal;
 pub(crate) mod memory;
@@ -164,8 +165,9 @@ pub(crate) async fn request_stop(repo_root: &Path, wave: &str) -> Result<bool> {
 /// the row when the store has never seen the wave — the db IS the registry,
 /// so a reachable store always yields a registered boot (see
 /// [`registry::ensure_wave_row`]). `None` (with one warning) only when the
-/// store itself is missing or unusable: the server runs without child
-/// observations. Endpoint discovery still prevents a second listener.
+/// store itself is missing or unusable: the server starts without child
+/// observations and its observer acquires the registry later. Endpoint
+/// discovery still prevents a second listener.
 async fn resolve_registry(main_repo: &Path, wave: &str) -> Option<registry::RegistryConfig> {
     let Some(store) = open_existing_store().await else {
         tracing::warn!(
@@ -350,17 +352,15 @@ pub(crate) async fn run_listener(
     // the record; make it honest and forensically legible).
     runtime.journal_server_started(std::process::id(), &addr.to_string());
 
-    let mut observer: Option<Arc<registry::StoreObserver>> = None;
-    let mut observer_task: Option<tokio::task::JoinHandle<()>> = None;
-    if let Some((store, wave_id)) = registered {
-        let obs = Arc::new(registry::StoreObserver::new(
+    let observer = registered.map(|(store, wave_id)| {
+        Arc::new(registry::StoreObserver::new(
             runtime.clone(),
-            store.clone(),
+            store,
             wave_id,
-        ));
-        observer_task = Some(tokio::spawn(Arc::clone(&obs).run(registry::POLL_CADENCE)));
-        observer = Some(obs);
-    }
+        ))
+    });
+    let observer = Arc::new(registry::ObserverSlot::new(runtime.clone(), observer));
+    let observer_task = tokio::spawn(Arc::clone(&observer).run(registry::POLL_CADENCE));
 
     // The resident door: a per-boot token, published beside the endpoint
     // pointer so the resident can attach (same trust domain).
@@ -429,7 +429,7 @@ pub(crate) async fn run_listener(
             _ = shutdown_request.wait() => {}
         }
     };
-    let app = server::router(
+    let app = server::router_with_observer(
         runtime.clone(),
         door.clone(),
         observer,
@@ -449,9 +449,7 @@ pub(crate) async fn run_listener(
     if let Some(pid) = door.seat_pid() {
         supervisor::terminate_resident(pid).await;
     }
-    if let Some(task) = observer_task {
-        task.abort();
-    }
+    observer_task.abort();
     if let Some((store, lease)) = wave_run.take() {
         if let Err(error) = store
             .stop_run(
@@ -551,10 +549,10 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(
+        let app = server::router_with_observer(
             runtime.clone(),
             ResidentDoor::new("test-token"),
-            None,
+            Arc::new(registry::ObserverSlot::new(runtime.clone(), None)),
             None,
             server::ShutdownDoor::new(),
         );
@@ -1267,10 +1265,10 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("reopen");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(
+        let app = server::router_with_observer(
             runtime.clone(),
             ResidentDoor::new("test-token"),
-            None,
+            Arc::new(registry::ObserverSlot::new(runtime.clone(), None)),
             None,
             server::ShutdownDoor::new(),
         );
@@ -1309,10 +1307,10 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), origin).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(
+        let app = server::router_with_observer(
             runtime.clone(),
             ResidentDoor::new("test-token"),
-            None,
+            Arc::new(registry::ObserverSlot::new(runtime.clone(), None)),
             None,
             server::ShutdownDoor::new(),
         );

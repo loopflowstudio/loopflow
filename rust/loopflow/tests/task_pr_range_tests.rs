@@ -20,7 +20,7 @@ use loopflow::ops::{
     create_or_update_pr, land, rebase_with_recovery, submit, LandOptions, NullProgress, PrOptions,
     RebaseOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrPublication};
+use loopflow::task::{AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 use time::OffsetDateTime;
@@ -46,16 +46,44 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
 fn gh_open_pr_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
+auto_state="{log_path}.auto"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "pr list" ]; then
-  echo '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null}}]'
+  echo '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null,"headRefOid":"head-925"}}]'
   exit 0
 fi
 if [ "$1 $2" = "pr view" ]; then
+  if [ "$4" = "--json" ] && [ "$5" = "autoMergeRequest" ]; then
+    if [ -f "$auto_state" ]; then echo 'true'; else echo 'false'; fi
+    exit 0
+  fi
   echo 'https://example.com/pr/925'
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then
+  touch "$auto_state"
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
+fn gh_auto_enabled_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+echo "$@" >> "{log_path}"
+if [ "$1 $2" = "pr view" ]; then
+  echo 'true'
+  exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
   exit 0
 fi
 exit 0
@@ -306,6 +334,90 @@ fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
     assert_eq!(
         pr.base_commit, stale_base,
         "a failed remote postcondition must not advance durable Task metadata"
+    );
+}
+
+#[test]
+fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let stale_base = repo.head_sha();
+    let log_path = home.path().join("rebase.log");
+    let script = gh_auto_enabled_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+
+    let branch = "jack/rebase-revokes-auto";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &stale_base);
+    let old_head = repo.head_sha();
+    let now = OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(old_head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: old_head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store Auto request");
+
+    repo.checkout("main");
+    repo.create_file("upstream.txt", "upstream advance\n");
+    repo.stage_all();
+    repo.commit("upstream advance");
+    repo.push();
+    repo.checkout(branch);
+
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display()
+        ),
+    )
+    .expect("write push hook");
+    let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
+
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: true,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .expect("rebase and push Task head");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(persisted.merge_request().is_none());
+    let log = fs::read_to_string(log_path).expect("read operation log");
+    let disable = log.find("pr merge 912 --disable").expect("Auto is revoked");
+    let push = log.find("git-push").expect("rebased head is pushed");
+    assert!(
+        disable < push,
+        "Auto must be revoked before rebase push:\n{log}"
     );
 }
 
@@ -735,13 +847,12 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
             .expect("active PR exists");
         pr.publication = Some(PrPublication {
             requested_at: OffsetDateTime::now_utc(),
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
             github: Some(GithubPr {
                 number: 925,
                 url: "https://example.com/pr/925".to_string(),
                 head_sha: None,
             }),
+            merge: None,
         });
         pr.updated_at = OffsetDateTime::now_utc();
         task.store

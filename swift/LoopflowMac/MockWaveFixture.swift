@@ -198,11 +198,11 @@ enum MockWaveFixture {
                 "work_id": "ts_22222222222222222222222222222222",
                 "project_id": "ps_11111111111111111111111111111111",
                 "status": "ready",
-                "reason": "waiting for review",
+                "reason": "waiting for user merge",
                 "updated_at": "2026-07-13T19:00:00Z",
                 "provider": "codex",
                 "process_alive": false,
-                "observation": {"category": "needs_input", "reason": "waiting for review", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
+                "observation": {"category": "needs_input", "reason": "waiting for user merge", "owner": "user", "controls": ["decide", "resume", "abandon"], "progress_age_secs": null, "deadline_in_secs": null, "step": "iterate"}
               },
               "directive": {
                 "version": 2,
@@ -212,14 +212,14 @@ enum MockWaveFixture {
                 "incorporated_at": "2026-07-13T18:31:00Z",
                 "incorporated_summary": "Verification failures are now first."
               },
-              "next_move": {"owner": "review", "reason": "waiting for review"},
+              "next_move": {"owner": "user", "reason": "merge pull request head 333333333333 on GitHub"},
               "attention": {
                 "level": "red",
-                "reason": "waiting for review",
+                "reason": "merge pull request head 333333333333 on GitHub",
                 "observed_at": "2026-07-13T21:00:00Z",
                 "evidence_age_secs": 7200,
-                "next_owner": "review",
-                "actions":{"recommended":"open_pr","reason":"checks passed; open the PR"},
+                "next_owner": "user",
+                "actions":{"recommended":"open_pr","reason":"merge head 333333333333 on GitHub"},
                 "pm_completed": false,
                 "work_status": "ready",
                 "process": {"state": "not_expected", "alive": null, "reason": null},
@@ -236,11 +236,16 @@ enum MockWaveFixture {
                 "empty": false,
                 "publication": {
                   "requested_at": "2026-07-13T18:45:00Z",
-                  "after_merge": "complete_task",
-                  "next_slug": null,
                   "github": {
                     "number": 912,
                     "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+                  },
+                  "merge": {
+                    "mode": "user",
+                    "requested_at": "2026-07-13T18:46:00Z",
+                    "head_sha": "3333333333333333333333333333333333333333",
+                    "after_merge": "complete_task",
+                    "next_slug": null
                   }
                 },
                 "merge_commit": null,
@@ -327,8 +332,8 @@ enum MockWaveFixture {
             "kind": "task",
             "id": "ts_22222222222222222222222222222222",
             "subject": "INF-123",
-            "owner": "review",
-            "reason": "waiting for review",
+            "owner": "user",
+            "reason": "merge pull request head 333333333333 on GitHub",
             "since": "2026-07-13T19:00:00Z",
             "age_secs": 7200
           }

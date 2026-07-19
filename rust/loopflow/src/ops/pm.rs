@@ -3984,7 +3984,7 @@ mod tests {
 
         let outcome = link_pr_with_client(
             &client,
-            &link_request("Open · in review"),
+            &link_request("Open · published"),
             &PrLinkageIds::default(),
         )
         .await;
@@ -4068,7 +4068,7 @@ mod tests {
 
         let degraded = link_pr_with_client(
             &client,
-            &link_request("Open · in review"),
+            &link_request("Open · published"),
             &PrLinkageIds::default(),
         )
         .await;
@@ -4088,7 +4088,7 @@ mod tests {
         let client = linear_test_ctx(base_url, "initiative-1").client;
 
         let healed =
-            link_pr_with_client(&client, &link_request("Open · in review"), &degraded.ids).await;
+            link_pr_with_client(&client, &link_request("Open · published"), &degraded.ids).await;
 
         assert!(healed.error.is_none());
         assert_eq!(healed.ids.attachment_id.as_deref(), Some("att-1"));

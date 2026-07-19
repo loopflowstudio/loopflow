@@ -703,13 +703,8 @@ async fn run_task_with(
                             // Feedback checkpoint, which is false of an abandoned one.
                             let merged_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
                                 pr.phase() == crate::task::PrPhase::Merged
-                                    && pr
-                                        .publication
-                                        .as_ref()
-                                        .is_some_and(|publication| {
-                                            publication.after_merge
-                                                == crate::task::AfterMerge::CompleteTask
-                                        })
+                                    && pr.after_merge()
+                                        == crate::task::AfterMerge::CompleteTask
                             });
                             let needs_rotation = if merged_completing_pr {
                                 // A completing PR settles the Task, never rotates to a next PR.
@@ -846,7 +841,9 @@ async fn run_task_with(
                                 && status != Lifecycle::Interrupted
                             {
                                 let waiting_for_ci = observed_pr.as_ref().is_some_and(|pr| {
-                                    pr.phase() == PrPhase::Open && !pr.review_ready()
+                                    pr.phase() == PrPhase::Open
+                                        && pr.merge_request().is_some()
+                                        && !pr.merge_checks_passed()
                                 });
                                 task.enter_finally(TaskGateProposal {
                                     done: stopped_done,
@@ -859,9 +856,9 @@ async fn run_task_with(
                                         .map(|github| github.number);
                                     let reason = match number {
                                         Some(number) => format!(
-                                            "pull request #{number} is waiting for fresh passing required checks before Task review"
+                                            "pull request #{number} is waiting for fresh passing required checks before its requested merge"
                                         ),
-                                        None => "pull request is waiting for fresh passing required checks before Task review"
+                                        None => "pull request is waiting for fresh passing required checks before its requested merge"
                                             .to_string(),
                                     };
                                     tracing::info!(task = %task.id, %reason, "Task waiting for CI");
@@ -1798,8 +1795,8 @@ async fn settle_ci_fix_turn(
                 crate::ops::task::decide_open_pr_status(pr, degraded, head_advanced);
             if matches!(
                 disposition,
-                crate::ops::task::OpenPrDisposition::ObservationDegraded
-                    | crate::ops::task::OpenPrDisposition::NeedsDirection
+                Some(crate::ops::task::OpenPrDisposition::ObservationDegraded)
+                    | Some(crate::ops::task::OpenPrDisposition::NeedsDirection)
             ) {
                 store
                     .mark_ci_incidents_blocked(&pr.id, time::OffsetDateTime::now_utc(), &reason)

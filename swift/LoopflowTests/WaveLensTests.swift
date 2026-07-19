@@ -70,10 +70,10 @@ struct WaveLensTests {
 
     @Test("task lens is the shared level and reason, verbatim")
     func taskLensIsVerbatim() throws {
-        let attention = try makeAttention(level: "red", reason: "checks passed; awaiting review")
+        let attention = try makeAttention(level: "red", reason: "merge head abc1234 on GitHub")
         let lens = WaveLens.forTask(attention)
         #expect(lens.color == .red)
-        #expect(lens.reason == "checks passed; awaiting review")
+        #expect(lens.reason == "merge head abc1234 on GitHub")
     }
 
     @Test("unavailable task evidence stays unknown with its reason, never black")

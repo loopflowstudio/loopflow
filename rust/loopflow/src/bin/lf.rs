@@ -1485,7 +1485,7 @@ mod tests {
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
-    use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
+    use loopflow::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     fn published_pr() -> TaskPr {
         let now = time::OffsetDateTime::now_utc();
@@ -1499,13 +1499,12 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::ContinueTask,
-                next_slug: None,
                 github: Some(GithubPr {
                     number: 931,
                     url: "https://github.com/loopflowstudio/loopflow/pull/931".to_string(),
                     head_sha: None,
                 }),
+                merge: None,
             }),
             merge_commit: None,
             abandoned_at: None,
@@ -2014,34 +2013,26 @@ mod tests {
     }
 
     #[test]
-    fn reorder_args_keeps_valid_parent_flags_on_the_parent() {
-        let args: Vec<String> = ["lf", "memory", "--wave", "systems", "add", "fact"]
+    fn reorder_args_keeps_memory_targeting_on_show() {
+        let args: Vec<String> = ["lf", "memory", "show", "--wave", "systems"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
-            vec!["lf", "memory", "--wave", "systems", "add", "fact"]
+            vec!["lf", "memory", "show", "--wave", "systems"]
         );
     }
 
     /// `lf chat --wave X text` must reach the chat subcommand untouched —
     /// hoisting `--wave` to the top level silently retargets the publish.
     #[test]
-    fn reorder_args_leaves_chat_and_memory_targeting_alone() {
+    fn reorder_args_leaves_explicit_targeting_alone() {
         let args: Vec<String> = ["lf", "chat", "--wave", "systems", "shipped it"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
             vec!["lf", "chat", "--wave", "systems", "shipped it"]
-        );
-
-        let args: Vec<String> = ["lf", "memory", "add", "fact", "--wave", "systems"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            reorder_args(args),
-            vec!["lf", "memory", "add", "fact", "--wave", "systems"]
         );
 
         let args: Vec<String> = ["lf", "pm", "show", "--wave", "systems"]

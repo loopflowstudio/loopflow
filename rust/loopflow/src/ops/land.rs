@@ -36,7 +36,7 @@ enum Finalize {
     AutoMerge,
     /// Assign the PR to the current user and leave it for a required, manual
     /// merge click. Used by `submit` — nothing merges without that one click.
-    AssignForReview,
+    UserMerge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +78,10 @@ fn prepare_pr(
     // Prove the Task PR range before preparing the exact local tree. Submit and
     // land make no remote mutation until the owned integration pushes once.
     crate::ops::task::verify_task_pr_range(&repo_root)?;
+    {
+        let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
+        crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+    }
     match integration {
         Integration::Required => prepare_land(&repo_root, options, progress)?,
         Integration::Completed if !is_clean(&repo_root)? => {
@@ -130,15 +134,11 @@ fn prepare_pr(
         return Ok(None);
     }
 
-    crate::ops::task::request_task_pr_publication(
-        &repo_root,
-        if options.complete {
-            crate::task::AfterMerge::CompleteTask
-        } else {
-            crate::task::AfterMerge::ContinueTask
-        },
-        options.next_slug.as_deref(),
-    )?;
+    // Keep the publication read, exact-head request, remote finalization, and
+    // any failure rollback atomic with respect to other Loopflow PR commands
+    // and pushes in this worktree.
+    let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
+    crate::ops::task::request_task_pr_publication(&repo_root)?;
     let created_pr = ensure_pr(
         &repo_root,
         pr_exists,
@@ -153,13 +153,43 @@ fn prepare_pr(
         None => crate::ops::pr::current_pr(&repo_root)?,
     };
     crate::ops::task::attach_task_github_pr(&repo_root, pr.as_ref())?;
-    finalize_remote(
+    crate::ops::task::request_task_pr_merge(
+        &repo_root,
+        match finalize {
+            Finalize::AutoMerge => crate::task::PrMergeMode::Auto,
+            Finalize::UserMerge => crate::task::PrMergeMode::User,
+        },
+        pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
+        if options.complete {
+            crate::task::AfterMerge::CompleteTask
+        } else {
+            crate::task::AfterMerge::ContinueTask
+        },
+        options.next_slug.as_deref(),
+    )?;
+    if let Err(finalize_error) = finalize_remote(
         &repo_root,
         pr_title.as_deref(),
         pr_body.as_deref(),
         finalize,
+        pr.as_ref().map(|pr| pr.number),
+        pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
         progress,
-    )?;
+    ) {
+        // The durable request is written before its remote executor. If any
+        // later step fails, revoke a possibly-armed Auto request and clear the
+        // local request so status never claims GitHub owns settlement when this
+        // command did not complete. A failed revocation leaves the durable
+        // request intact and reports both failures rather than guessing.
+        if let Err(clear_error) =
+            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)
+        {
+            return Err(OpsError::Message(format!(
+                "{finalize_error}; failed to reconcile the durable merge request: {clear_error}"
+            )));
+        }
+        return Err(finalize_error);
+    }
     Ok(pr)
 }
 
@@ -207,7 +237,7 @@ pub fn submit(
     prepare_pr(
         repo,
         options,
-        Finalize::AssignForReview,
+        Finalize::UserMerge,
         Integration::Required,
         progress,
     )
@@ -221,7 +251,7 @@ pub(crate) fn finish_submit_after_rebase(
     prepare_pr(
         repo,
         options,
-        Finalize::AssignForReview,
+        Finalize::UserMerge,
         Integration::Completed,
         progress,
     )
@@ -432,6 +462,8 @@ fn finalize_remote(
     pr_title: Option<&str>,
     pr_body: Option<&str>,
     finalize: Finalize,
+    number: Option<u64>,
+    head_sha: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<()> {
     if let Some(title) = pr_title {
@@ -443,10 +475,22 @@ fn finalize_remote(
 
     match finalize {
         Finalize::AutoMerge => {
+            let number = number.ok_or_else(|| {
+                OpsError::Message(
+                    "GitHub did not report the current PR number; refusing to arm auto-merge"
+                        .to_string(),
+                )
+            })?;
+            let head_sha = head_sha.ok_or_else(|| {
+                OpsError::Message(
+                    "GitHub did not report the current PR head; refusing to arm unpinned auto-merge"
+                        .to_string(),
+                )
+            })?;
             progress.status("Enabling auto-merge...");
-            enable_auto_merge(repo_root, pr_title, pr_body)?;
+            enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
         }
-        Finalize::AssignForReview => {
+        Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");
             assign_to_me(repo_root)?;
         }
@@ -459,8 +503,8 @@ fn finalize_remote(
     Ok(())
 }
 
-/// Assign the open PR to the authenticated user so it lands in their review
-/// queue. Nothing merges until they click merge — the required gate.
+/// Assign the open PR to the authenticated user. Nothing merges until they
+/// explicitly click merge.
 fn assign_to_me(repo: &Path) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr")
@@ -596,13 +640,38 @@ fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
 pub fn mark_ready(repo: &Path) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
-    let _ = run_command(&mut cmd);
+    if let Err(err) = run_command(&mut cmd) {
+        return Err(OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        });
+    }
     Ok(())
 }
 
-fn enable_auto_merge(repo: &Path, title: Option<&str>, body: Option<&str>) -> OpsResult<()> {
+fn enable_auto_merge(
+    repo: &Path,
+    number: u64,
+    title: Option<&str>,
+    body: Option<&str>,
+    head_sha: &str,
+) -> OpsResult<()> {
+    if crate::ops::pr::auto_merge_enabled(repo, number)? {
+        let number = u32::try_from(number).map_err(|_| {
+            OpsError::Message(format!("pull request #{number} exceeds supported range"))
+        })?;
+        // A pre-existing remote arm carries no durable Loopflow head binding.
+        // Replace it so every accepted Auto request crosses our exact-head
+        // command boundary, even when GitHub already reports auto-merge.
+        crate::ops::pr::disable_auto_merge(repo, number)?;
+    }
     let mut cmd = Command::new("gh");
-    cmd.arg("pr").arg("merge").arg("--squash").arg("--auto");
+    cmd.arg("pr")
+        .arg("merge")
+        .arg("--squash")
+        .arg("--auto")
+        .arg("--match-head-commit")
+        .arg(head_sha);
     if let Some(title) = title {
         cmd.arg("--subject").arg(title);
     }

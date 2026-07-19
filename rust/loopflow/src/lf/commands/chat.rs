@@ -781,7 +781,8 @@ mod tests {
         let endpoint = resolved.require_endpoint().expect("live endpoint");
         assert_eq!(endpoint, addr);
 
-        // The thread door takes no bylines or machine-only operations.
+        // The thread door's schema has no bylines or machine-only operations.
+        // Axum rejects the retired enum value before the handler runs.
         let refused = reqwest::Client::new()
             .post(format!("http://{endpoint}/messages"))
             .json(&serde_json::json!({
@@ -792,7 +793,7 @@ mod tests {
             .send()
             .await
             .expect("post");
-        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
 
         // A human standing in the child steers the parent: unattributed, like
         // every human turn.

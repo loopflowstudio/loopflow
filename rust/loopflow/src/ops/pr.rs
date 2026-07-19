@@ -104,21 +104,28 @@ pub fn create_or_update_pr(
     crate::ops::commit::push_with_upstream_if_needed(repo)?;
 
     let copy = resolve_pr_copy(repo, options, progress)?;
-    let current_branch = current_branch(repo)?;
+    let current_branch_state = current_branch(repo)?;
     let current_head = rev_parse(repo, "HEAD")?;
-    if current_branch.as_deref() != Some(branch.as_str()) || current_head != published_head {
+    if current_branch_state.as_deref() != Some(branch.as_str()) || current_head != published_head {
         return Err(OpsError::Message(format!(
             "PR copy generation changed the published branch/HEAD; expected {branch} at {published_head}"
         )));
     }
     crate::ops::commit::verify_remote_branch_head(repo, &branch, &published_head)?;
+    // Keep publication and its durable GitHub projection atomic with respect
+    // to later Loopflow pushes and shipping requests in this worktree.
+    let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    let locked_branch = current_branch(repo)?;
+    let locked_head = rev_parse(repo, "HEAD")?;
+    if locked_branch.as_deref() != Some(branch.as_str()) || locked_head != published_head {
+        return Err(OpsError::Message(format!(
+            "branch changed before PR publication; expected {branch} at {published_head}"
+        )));
+    }
+    crate::ops::commit::verify_remote_branch_head(repo, &branch, &published_head)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
-    crate::ops::task::request_task_pr_publication(
-        repo,
-        crate::task::AfterMerge::ContinueTask,
-        None,
-    )?;
+    crate::ops::task::request_task_pr_publication(repo)?;
 
     let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");
@@ -346,6 +353,55 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
     }
 
     Ok(None)
+}
+
+pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
+    let observation = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "autoMergeRequest",
+            "--jq",
+            ".autoMergeRequest != null",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !observation.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!(
+                "gh pr view {number} --json autoMergeRequest --jq .autoMergeRequest!=null"
+            ),
+            stderr: stderr_from_output(&observation),
+        });
+    }
+    match String::from_utf8_lossy(&observation.stdout).trim() {
+        "false" => Ok(false),
+        "true" => Ok(true),
+        value => Err(OpsError::Message(format!(
+            "could not determine whether pull request #{number} has auto-merge enabled: {value:?}"
+        ))),
+    }
+}
+
+/// Revoke GitHub auto-merge for one PR before a stored request can be cleared.
+/// The read makes replay idempotent after a prior disable succeeded.
+pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
+    if !auto_merge_enabled(repo, u64::from(number))? {
+        return Ok(());
+    }
+    let output = Command::new("gh")
+        .args(["pr", "merge", &number.to_string(), "--disable"])
+        .current_dir(repo)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(OpsError::CommandFailed {
+        command: format!("gh pr merge {number} --disable"),
+        stderr: stderr_from_output(&output),
+    })
 }
 
 /// The outcome of a bounded, single-PR remote observation. GitHub is a

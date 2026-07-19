@@ -180,6 +180,13 @@ Several prerequisites now match the target:
 17. Radio, channel identity, live memory events, recent Wave chat prompt
     context, Feedback escalation, implicit PR Review state, and the evidence
     Receipt resolver are deleted.
+18. PR publication is ordinary Task evidence. Only explicit `submit` or `land`
+    writes one merge request containing `User | Auto`, current GitHub head, and
+    Continue/Complete/next disposition. Supported later work revokes and clears
+    that whole request instead of transferring any part of it.
+19. Wave promotion stores a first-write occurrence separately from
+    `parent_wave_id`. Existing chord ancestry emits no wake; a lost HTTP nudge
+    is retried from the durable occurrence by the child observer.
 
 ## Target contract
 
@@ -847,9 +854,27 @@ read-only. A dirty canonical checkout remains visible evidence but cannot block
 parent control or child Feedback. Writable repository changes still belong
 only to Task Workspaces.
 
-Task PR rows store evidence rather than a mutable phase label: publication
-request, nested GitHub PR record, merge, abandonment, and `after_merge`. Serial
-PRs remain inside one Task; concurrent dependency nodes are separate Tasks.
+Task PR rows store evidence rather than a mutable phase label: publication,
+nested GitHub PR record, optional exact-head merge request, merge, and
+abandonment. Publication owns no disposition. The merge request atomically owns
+`User | Auto`, head SHA, and `ContinueTask | CompleteTask` plus an optional next
+slug. `publish` and `pr open` create no merge wait. `submit` records User;
+`land` records Auto before arming GitHub with the same head SHA. A supported
+Loopflow head mutation or explicit Task resume revokes Auto remotely before it
+clears the whole request, so neither mode nor disposition transfers to later
+work. `land` replaces any unowned remote auto-merge arm rather than adopting
+it, and a failed remote handoff clears the request unless revocation itself is
+unprovable. One per-worktree advisory lock serializes Loopflow finalization,
+rollback, and branch pushes; it adds no durable lifecycle state. The observed
+merge remains the settlement fact. Serial PRs remain inside one Task;
+concurrent dependency nodes are separate Tasks.
+
+This is currently an observation fence, not permanent remote head pinning.
+GitHub does not promise to disable auto-merge after every maintainer push, so
+the server follow-up must own timely stale-head observation or replace remote
+auto-merge with exact-head settlement after requirements clear. That follow-up
+must also reconcile a merged Complete request from durable GitHub/store evidence
+when its Task worktree no longer survives.
 
 **Current.** Workspace identity belongs to stable Task Work. Pursuit-specific
 authority belongs to Epoch. Historical PRs remain attributed; recovering an

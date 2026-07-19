@@ -1,13 +1,16 @@
 mod support;
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
+use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
-    create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
+    commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
+    NullProgress, OpsError, PrOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication};
+use loopflow::task::{AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
@@ -69,6 +72,53 @@ if [ "$1" = "api" ]; then
 fi
 exit 0
 "#
+}
+
+fn gh_changed_head_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+echo "$@" >> "{log_path}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  echo '{{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"new-head"}}}}'
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'true'
+  exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
+fn gh_open_auto_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+echo "$@" >> "{log_path}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  head="$(git rev-parse HEAD)"
+  printf '{{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'true'
+  exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+  exit 0
+fi
+exit 0
+"#
+    )
 }
 
 fn push_branch(repo: &TestRepo, name: &str) {
@@ -297,8 +347,8 @@ fn github_failure_leaves_publication_intent_observable() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
     let publication = pr.publication.expect("durable publication request");
-    assert_eq!(publication.after_merge, AfterMerge::ContinueTask);
     assert!(publication.github.is_none());
+    assert!(publication.merge.is_none());
 }
 
 #[test]
@@ -314,13 +364,12 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::ContinueTask,
-        next_slug: None,
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
             head_sha: None,
         }),
+        merge: None,
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     runtime
@@ -344,7 +393,7 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
     let publication = prs[0].publication.as_ref().expect("adopted publication");
-    assert_eq!(publication.after_merge, AfterMerge::ContinueTask);
+    assert_eq!(prs[0].after_merge(), AfterMerge::ContinueTask);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
     let work = runtime
         .block_on(
@@ -409,6 +458,179 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
 }
 
 #[test]
+fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("gh.log");
+    let script = gh_changed_head_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some("old-head".to_string()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: "old-head".to_string(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store auto-merge request");
+
+    task_status("INF-123").expect("reconcile changed head");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(persisted.head_sha(), Some("new-head"));
+    assert!(persisted.merge_request().is_none());
+    assert_eq!(persisted.after_merge(), AfterMerge::ContinueTask);
+    let log = std::fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("pr merge 912 --disable"));
+}
+
+#[test]
+fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("gh.log");
+    let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("tmux", noop_script())],
+        home.path(),
+    );
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-resume-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let now = time::OffsetDateTime::now_utc();
+    let head = repo.head_sha();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store auto merge request");
+
+    task_resume("INF-123", None, None).expect("resume Task authored work");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(persisted.merge_request().is_none());
+    let log = std::fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("pr merge 912 --disable"));
+}
+
+#[test]
+fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("push.log");
+    let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-commit-push";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "first head");
+    repo.stage_all();
+    repo.commit("first head");
+    push_branch(&repo, branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(repo.head_sha()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: repo.head_sha(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store Auto request");
+
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display()
+        ),
+    )
+    .expect("write push hook");
+    let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
+
+    repo.create_file("follow-up.txt", "new head");
+    commit_workflow(
+        repo.path(),
+        &CommitOptions {
+            add: true,
+            push: true,
+            create_draft_pr: false,
+            task: "commit".to_string(),
+            flow_parents: Vec::new(),
+            message: Some("new Task head".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("commit and push new head");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(persisted.merge_request().is_none());
+    let log = fs::read_to_string(log_path).expect("read operation log");
+    let disable = log.find("pr merge 912 --disable").expect("Auto is revoked");
+    let push = log.find("git-push").expect("new head is pushed");
+    assert!(disable < push, "Auto must be revoked before push:\n{log}");
+}
+
+#[test]
 fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
@@ -418,15 +640,22 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
     repo.create_branch(branch);
     point_origin_at_github(&repo);
     let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
-        requested_at: time::OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::CompleteTask,
-        next_slug: None,
+        requested_at: now,
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
-            head_sha: None,
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
-use crate::task::{AfterMerge, CiObservation, CiState, PrPhase};
+use crate::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,6 +49,7 @@ pub struct TaskActionEvidence<'a> {
     pub status: WorkStatus,
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_after_merge: Option<AfterMerge>,
+    pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
     pub completion_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
@@ -72,11 +73,24 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
 fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
         Some(PrPhase::Open) => match evidence.ci {
-            Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
-                action(TaskAction::OpenPr, "checks passed; open the PR")
-            }
-            Some(ci) if ci.state == CiState::Failing => {
+            Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
                 action(TaskAction::Resume, ci_failure_reason(ci))
+            }
+            _ if evidence.latest_pr_merge_request.is_none() => body_action(evidence),
+            Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
+                let request = evidence
+                    .latest_pr_merge_request
+                    .expect("checked merge request above");
+                let short = request.head_sha.chars().take(12).collect::<String>();
+                match request.mode {
+                    PrMergeMode::User => {
+                        action(TaskAction::OpenPr, format!("merge head {short} on GitHub"))
+                    }
+                    PrMergeMode::Auto => action(
+                        TaskAction::NoAction,
+                        format!("GitHub auto-merge is settling head {short}"),
+                    ),
+                }
             }
             Some(_) => action(TaskAction::NoAction, "required checks still running"),
             None => action(
@@ -174,7 +188,7 @@ mod tests {
 
     use super::{derive_task_actions, TaskAction, TaskActionEvidence};
     use crate::durable::WorkStatus;
-    use crate::task::{AfterMerge, CiObservation, CiState, PrPhase};
+    use crate::task::{AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
 
     fn evidence<'a>(
         phase: PrPhase,
@@ -185,6 +199,7 @@ mod tests {
             status: WorkStatus::Ready,
             latest_pr_phase: Some(phase),
             latest_pr_after_merge: after_merge,
+            latest_pr_merge_request: None,
             completion_refusal: None,
             resume_refusal: None,
             ci,
@@ -208,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn passing_open_pr_only_recommends_opening_the_pr() {
+    fn passing_published_pr_continues_the_task() {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Passing,
@@ -219,7 +234,81 @@ mod tests {
 
         let model = derive_task_actions(&evidence);
 
+        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert_eq!(model.reason, "resume the parked Task");
+    }
+
+    #[test]
+    fn user_merge_request_recommends_the_exact_merge() {
+        let ci = CiObservation {
+            head_sha: "head-1234567890".to_string(),
+            state: CiState::Passing,
+            failing_checks: Vec::new(),
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let request = PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: OffsetDateTime::now_utc(),
+            head_sha: ci.head_sha.clone(),
+            after_merge: AfterMerge::ContinueTask,
+            next_slug: None,
+        };
+        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::ContinueTask), Some(&ci));
+        evidence.latest_pr_merge_request = Some(&request);
+
+        let model = derive_task_actions(&evidence);
+
         assert_eq!(model.recommended, Some(TaskAction::OpenPr));
-        assert_eq!(model.reason, "checks passed; open the PR");
+        assert_eq!(model.reason, "merge head head-1234567 on GitHub");
+    }
+
+    #[test]
+    fn auto_merge_request_is_owned_by_github() {
+        let ci = CiObservation {
+            head_sha: "head".to_string(),
+            state: CiState::Passing,
+            failing_checks: Vec::new(),
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let request = PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: OffsetDateTime::now_utc(),
+            head_sha: ci.head_sha.clone(),
+            after_merge: AfterMerge::ContinueTask,
+            next_slug: None,
+        };
+        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::ContinueTask), Some(&ci));
+        evidence.latest_pr_merge_request = Some(&request);
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "GitHub auto-merge is settling head head");
+    }
+
+    #[test]
+    fn land_only_failure_does_not_reopen_the_task_body() {
+        let ci = CiObservation {
+            head_sha: "head".to_string(),
+            state: CiState::Failing,
+            failing_checks: vec![crate::task::CiCheck {
+                name: "scratch-clear".to_string(),
+                url: None,
+            }],
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let request = PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: OffsetDateTime::now_utc(),
+            head_sha: ci.head_sha.clone(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        };
+        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::CompleteTask), Some(&ci));
+        evidence.latest_pr_merge_request = Some(&request);
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::OpenPr));
     }
 }

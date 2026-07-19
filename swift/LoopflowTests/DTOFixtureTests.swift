@@ -70,7 +70,7 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].tasks.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.projects[0].tasks[0].prs.compactMap(\.publication?.github?.number) == [912])
         #expect(detail.projects[0].tasks[0].activePr == "pr_33333333333333333333333333333333")
-        #expect(detail.projects[0].tasks[0].prs[0].publication?.afterMerge == .completeTask)
+        #expect(detail.projects[0].tasks[0].prs[0].publication?.merge?.afterMerge == .completeTask)
         #expect(detail.projects[0].directive?.version == 1)
         #expect(detail.projects[0].tasks[0].directive?.version == 2)
         #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)
@@ -90,11 +90,11 @@ struct DTOFixtureTests {
         #expect(detail.runs.items[0].suppliedContextTokens == 3000)
         #expect(detail.runs.items[0].status == "ok")
         #expect(detail.attention.items[0].subject == "INF-123")
-        #expect(detail.attention.items[0].owner == .review)
-        #expect(detail.attention.items[0].reason == "waiting for review")
+        #expect(detail.attention.items[0].owner == .user)
+        #expect(detail.attention.items[0].reason == "merge pull request head 333333333333 on GitHub")
         #expect(detail.attention.items[0].ageSeconds == 7200)
         #expect(detail.projects[0].tasks[0].attention.level == .red)
-        #expect(detail.projects[0].tasks[0].attention.reason == "waiting for review")
+        #expect(detail.projects[0].tasks[0].attention.reason == "merge pull request head 333333333333 on GitHub")
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")

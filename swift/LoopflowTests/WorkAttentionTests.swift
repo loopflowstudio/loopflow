@@ -12,8 +12,8 @@ struct WorkAttentionTests {
 
         // Running with a live process → Working.
         #expect(nowGroup(for: tasks[0]) == .working)
-        // Idle Work with an open PR → the PR is what waits, so Ready for review.
-        #expect(nowGroup(for: tasks[1]) == .readyForReview)
+        // An explicit User merge request is input only that User can supply.
+        #expect(nowGroup(for: tasks[1]) == .needsInput)
         // No Work record at all → Available, not a NOW row.
         #expect(nowGroup(for: tasks[2]) == nil)
         // Completed → done, not a NOW row.
@@ -26,13 +26,13 @@ struct WorkAttentionTests {
         let sections = nowSections(from: snapshot.waves)
 
         // Only the two non-empty groups survive, in canonical order.
-        #expect(sections.map(\.group) == [.readyForReview, .working])
+        #expect(sections.map(\.group) == [.needsInput, .working])
         // The unavailable `context` wave contributes no rows.
         #expect(sections.flatMap(\.rows).allSatisfy { $0.wave.name == "product" })
         // Rows carry their Wave/Project as context.
-        let review = try #require(sections.first)
-        #expect(review.rows.first?.task.task.identifier == "W2-131")
-        #expect(review.rows.first?.projectName == "Loopflow API")
+        let input = try #require(sections.first)
+        #expect(input.rows.first?.task.task.identifier == "W2-131")
+        #expect(input.rows.first?.projectName == "Loopflow API")
     }
 
     @Test("Age order is oldest updated_at first within a group")

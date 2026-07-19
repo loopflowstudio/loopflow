@@ -16,8 +16,8 @@ struct RoadmapViewTests {
         #expect(roadmapTaskAction(tasks[0]) == .attach)
         #expect(roadmapTaskCanInterrupt(tasks[0]))
 
-        // A publishable PR advertises Open PR, not Resume: the server recommends
-        // the exact next action, and the app must not re-derive it from status.
+        // An explicit User merge request advertises Open PR: the server
+        // recommends the exact head, and the app does not re-derive it.
         #expect(tasks[1].attention.actions.recommended == .openPr)
         #expect(roadmapTaskAction(tasks[1]) == .openPr)
         #expect(!roadmapTaskCanInterrupt(tasks[1]))
@@ -34,7 +34,7 @@ struct RoadmapViewTests {
         let openingPR = project.tasks[1].attention.actions
 
         #expect(openingPR.recommended == .openPr)
-        #expect(openingPR.reason == "checks passed; open the PR")
+        #expect(openingPR.reason == "merge head abc1234 on GitHub")
     }
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {

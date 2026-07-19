@@ -965,8 +965,8 @@ mod tests {
     use crate::profile::EmailAddress;
     use crate::project::{Project, ProjectId};
     use crate::task::{
-        AfterMerge, CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId,
-        TaskPr, TaskPrId,
+        CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr,
+        TaskPrId,
     };
     use crate::trace::{AgentLaunchRow, AgentTurnRow};
     use crate::wave::Wave;
@@ -2075,13 +2075,12 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
             github: Some(GithubPr {
                 number: 902,
                 url: "https://github.com/loopflow/loopflow/pull/902".to_string(),
                 head_sha: Some("sha-abc".to_string()),
             }),
+            merge: None,
         });
         pr.ci_observation = Some(crate::task::CiObservation {
             head_sha: "sha-abc".to_string(),
@@ -2151,13 +2150,12 @@ mod tests {
 
         first.publication = Some(PrPublication {
             requested_at: first.updated_at,
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
             github: Some(GithubPr {
                 number: 101,
                 url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
                 head_sha: None,
             }),
+            merge: None,
         });
         first.merge_commit = Some("merge-101".to_string());
         first.updated_at = OffsetDateTime::now_utc();
@@ -2289,13 +2287,12 @@ mod tests {
         // The parent is published but not merged — the child stacks on it.
         parent.publication = Some(PrPublication {
             requested_at: parent.updated_at,
-            after_merge: AfterMerge::ContinueTask,
-            next_slug: None,
             github: Some(GithubPr {
                 number: 200,
                 url: "https://github.com/loopflowstudio/loopflow/pull/200".to_string(),
                 head_sha: Some("parent-tip".to_string()),
             }),
+            merge: None,
         });
         store.update_task_pr(&parent).await.unwrap();
 
@@ -2392,9 +2389,8 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
             github: None,
+            merge: None,
         });
         store.update_task_pr(&pr).await.unwrap();
 
@@ -2554,12 +2550,17 @@ mod tests {
     }
 
     async fn run_store_basic_suite(store: &super::Store) {
-        let mut wave = make_wave("/repo");
+        let wave = make_wave("/repo");
         store.create_wave(&wave).await.expect("create wave");
         assert!(store.get_wave(wave.id()).await.expect("get wave").is_some());
 
-        wave.repo = "/repo-updated".to_string();
-        store.update_wave(&wave).await.expect("update wave");
+        let updated = Wave::new(
+            wave.id().clone(),
+            wave.name().to_string(),
+            "/repo-updated".to_string(),
+        );
+        assert!(updated.promoted_at().is_none());
+        store.update_wave(&updated).await.expect("update wave");
         let loaded = store
             .get_wave(wave.id())
             .await

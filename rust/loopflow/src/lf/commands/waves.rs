@@ -28,7 +28,9 @@ use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject, ProjectFlowPlan};
 use crate::project::Project;
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{AfterMerge, CiObservation, CiState, PrPhase, Task, TaskPr};
+use crate::task::{
+    AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
+};
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
@@ -174,7 +176,6 @@ pub enum NextMoveOwner {
     Wave,
     Project,
     Task,
-    Review,
     Ci,
     External,
 }
@@ -351,9 +352,17 @@ pub struct PrSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrPublicationSnapshot {
     pub requested_at: String,
+    pub github: Option<GithubPrSnapshot>,
+    pub merge: Option<PrMergeRequestSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrMergeRequestSnapshot {
+    pub mode: PrMergeMode,
+    pub requested_at: String,
+    pub head_sha: String,
     pub after_merge: AfterMerge,
     pub next_slug: Option<String>,
-    pub github: Option<GithubPrSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,12 +387,21 @@ impl PrSnapshot {
                 .map(|publication| PrPublicationSnapshot {
                     requested_at: format_time(publication.requested_at)
                         .expect("PR publication timestamp formats as RFC 3339"),
-                    after_merge: publication.after_merge,
-                    next_slug: publication.next_slug.clone(),
                     github: publication.github.as_ref().map(|github| GithubPrSnapshot {
                         number: github.number,
                         url: github.url.clone(),
                     }),
+                    merge: publication
+                        .merge
+                        .as_ref()
+                        .map(|request| PrMergeRequestSnapshot {
+                            mode: request.mode,
+                            requested_at: format_time(request.requested_at)
+                                .expect("PR merge request timestamp formats as RFC 3339"),
+                            head_sha: request.head_sha.clone(),
+                            after_merge: request.after_merge,
+                            next_slug: request.next_slug.clone(),
+                        }),
                 }),
             merge_commit: pr.merge_commit.clone(),
             abandoned_at: pr.abandoned_at.and_then(format_time),
@@ -1319,6 +1337,7 @@ async fn snapshot_task_detail(
                 .status,
             active.map(TaskPr::phase),
             active.and_then(|pr| pr.fresh_ci()),
+            active.and_then(TaskPr::merge_request),
         ),
         None if item.completed => NextMove {
             owner: NextMoveOwner::Project,
@@ -1359,8 +1378,9 @@ async fn snapshot_task_detail(
                     status: work_status,
                     latest_pr_phase: latest.map(TaskPr::phase),
                     latest_pr_after_merge: latest
-                        .and_then(|pr| pr.publication.as_ref())
-                        .map(|p| p.after_merge),
+                        .filter(|pr| pr.phase() == PrPhase::Merged)
+                        .map(TaskPr::after_merge),
+                    latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
                     ci: active.and_then(|pr| pr.fresh_ci()),
@@ -1568,7 +1588,7 @@ fn derive_task_attention(
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
     let live = process.alive == Some(true);
-    let user_attention = matches!(next_move.owner, NextMoveOwner::User | NextMoveOwner::Review);
+    let user_attention = next_move.owner == NextMoveOwner::User;
     let (level, reason) = if user_feedback {
         (
             TaskAttentionLevel::Blue,
@@ -1753,52 +1773,47 @@ fn next_move_for_task(
     status: &WorkStatus,
     pr_phase: Option<PrPhase>,
     ci: Option<&CiObservation>,
+    merge: Option<&PrMergeRequest>,
 ) -> NextMove {
-    // An open PR's next move is CI-derived. Review begins only once a fresh
-    // current-head reading proves required checks passed.
     if pr_phase == Some(PrPhase::Open) {
         if let Some(ci) = ci {
-            // A head red only on land-time preconditions (`scratch-clear`) holds
-            // nothing a body can repair — `lf pr land` greens it. It is
-            // reviewable, not owned by CI, and a live body sitting on it is the
-            // reviewer's turn, not "fixing CI". Every Task PR is red this way
-            // pre-land, so this is the common case, not the exception.
-            if ci.only_land_time_preconditions() {
-                return NextMove {
-                    owner: NextMoveOwner::Review,
-                    reason: "checks passed except scratch-clear; awaiting review".to_string(),
-                };
-            }
-            // A live ci-fix generation (Running/Starting) owns the next move:
-            // the Task is actively repairing a real failing check, not waiting
-            // for an external CI fix. Failing + idle → Ci (the wake will fire);
-            // Passing → Review regardless of process state.
-            let fixing = work_status_is_running(status) && ci.state == CiState::Failing;
+            let repairable_failure =
+                ci.state == CiState::Failing && !ci.only_land_time_preconditions();
+            let fixing = work_status_is_running(status) && repairable_failure;
             if fixing {
                 return NextMove {
                     owner: NextMoveOwner::Task,
                     reason: "fixing CI".to_string(),
                 };
             }
-            return match ci.state {
-                CiState::Pending => NextMove {
-                    owner: NextMoveOwner::Ci,
-                    reason: "required checks are still running".to_string(),
-                },
-                CiState::Failing => NextMove {
+            if repairable_failure {
+                return NextMove {
                     owner: NextMoveOwner::Ci,
                     reason: ci_failure_reason(ci),
+                };
+            }
+        }
+        if let Some(request) = merge {
+            if ci
+                .is_none_or(|ci| ci.state == CiState::Pending && !ci.only_land_time_preconditions())
+            {
+                return NextMove {
+                    owner: NextMoveOwner::Ci,
+                    reason: "required checks have not passed for the requested merge".to_string(),
+                };
+            }
+            let short = request.head_sha.chars().take(12).collect::<String>();
+            return match request.mode {
+                PrMergeMode::User => NextMove {
+                    owner: NextMoveOwner::User,
+                    reason: format!("merge pull request head {short} on GitHub"),
                 },
-                CiState::Passing => NextMove {
-                    owner: NextMoveOwner::Review,
-                    reason: "checks passed; awaiting review".to_string(),
+                PrMergeMode::Auto => NextMove {
+                    owner: NextMoveOwner::External,
+                    reason: format!("GitHub auto-merge is settling head {short}"),
                 },
             };
         }
-        return NextMove {
-            owner: NextMoveOwner::Ci,
-            reason: "required checks have not been observed for the current head".to_string(),
-        };
     }
     let owner = match status {
         WorkStatus::Running { .. } => NextMoveOwner::Task,
@@ -2280,7 +2295,6 @@ fn owner_label(owner: &NextMoveOwner) -> &'static str {
         NextMoveOwner::Wave => "wave",
         NextMoveOwner::Project => "project",
         NextMoveOwner::Task => "task",
-        NextMoveOwner::Review => "review",
         NextMoveOwner::Ci => "ci",
         NextMoveOwner::External => "external",
     }
@@ -2305,4 +2319,80 @@ fn truncate(value: &str, width: usize) -> String {
     }
     let head: String = value.chars().take(width.saturating_sub(1)).collect();
     format!("{head}\u{2026}")
+}
+
+#[cfg(test)]
+mod tests {
+    use time::OffsetDateTime;
+
+    use super::{next_move_for_task, NextMoveOwner};
+    use crate::durable::WorkStatus;
+    use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+
+    #[test]
+    fn only_an_explicit_merge_request_owns_a_healthy_open_pr() {
+        let passing = CiObservation {
+            head_sha: "head-1234567890".to_string(),
+            state: CiState::Passing,
+            failing_checks: Vec::new(),
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let published = next_move_for_task(
+            &WorkStatus::Ready,
+            Some(PrPhase::Open),
+            Some(&passing),
+            None,
+        );
+        assert_eq!(published.owner, NextMoveOwner::Project);
+
+        for (mode, owner) in [
+            (PrMergeMode::User, NextMoveOwner::User),
+            (PrMergeMode::Auto, NextMoveOwner::External),
+        ] {
+            let request = PrMergeRequest {
+                mode,
+                requested_at: OffsetDateTime::now_utc(),
+                head_sha: passing.head_sha.clone(),
+                after_merge: crate::task::AfterMerge::ContinueTask,
+                next_slug: None,
+            };
+            let next = next_move_for_task(
+                &WorkStatus::Ready,
+                Some(PrPhase::Open),
+                Some(&passing),
+                Some(&request),
+            );
+            assert_eq!(next.owner, owner);
+            assert!(next.reason.contains("head-1234567"));
+        }
+    }
+
+    #[test]
+    fn land_only_failure_leaves_the_requested_merge_with_its_operator() {
+        let ci = CiObservation {
+            head_sha: "head".to_string(),
+            state: CiState::Failing,
+            failing_checks: vec![crate::task::CiCheck {
+                name: "scratch-clear".to_string(),
+                url: None,
+            }],
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let request = PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: OffsetDateTime::now_utc(),
+            head_sha: ci.head_sha.clone(),
+            after_merge: crate::task::AfterMerge::ContinueTask,
+            next_slug: None,
+        };
+
+        let next = next_move_for_task(
+            &WorkStatus::Ready,
+            Some(PrPhase::Open),
+            Some(&ci),
+            Some(&request),
+        );
+
+        assert_eq!(next.owner, NextMoveOwner::User);
+    }
 }

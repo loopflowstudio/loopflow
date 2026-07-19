@@ -1,19 +1,20 @@
 //! Wave registry identity and child-observation delivery.
 //!
-//! `lf wave <name>` ensures the Wave has a durable row, then drains typed
-//! Project and Task observations addressed to it. Listener presence and
-//! one-brain enforcement live in the Wave's endpoint file; there is no global
-//! process registry.
+//! `lf wave <name>` ensures the Wave has a durable row, then drains its durable
+//! promotion occurrence and typed Project/Task observations. Listener presence
+//! and one-brain enforcement live in the Wave's endpoint file; there is no
+//! global process registry.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::process::Command;
+use tokio::sync::RwLock;
 
 use crate::id::WaveId;
-use crate::store::{SharedStore, StoreResult};
+use crate::store::{open_existing_store, SharedStore, StoreResult};
 use crate::task::TaskObservation;
 use crate::wave::runtime::WaveRuntime;
 use crate::wave::Wave;
@@ -57,7 +58,7 @@ pub async fn ensure_wave_row(
     if is_new {
         tracing::info!(
             wave = name,
-            wave_id = %wave.id,
+            wave_id = %wave.id(),
             "wave was not in the registry; created its row"
         );
     }
@@ -109,10 +110,89 @@ pub(crate) async fn process_alive(pid: u32) -> bool {
 
 // -- Observation ---------------------------------------------------------
 
-/// Polls the durable child-observation outbox for this wave.
+/// The listener's single late-installable observer reference.
+///
+/// A Wave listener may outlive the absence of the machine registry. Both its
+/// heartbeat and request-time freshness checks use this slot, so the first
+/// successful registry open installs exactly one observer without restarting
+/// the listener.
+pub(crate) struct ObserverSlot {
+    runtime: Arc<WaveRuntime>,
+    main_repo: PathBuf,
+    wave: String,
+    observer: RwLock<Option<Arc<StoreObserver>>>,
+}
+
+impl fmt::Debug for ObserverSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ObserverSlot")
+            .field("main_repo", &self.main_repo)
+            .field("wave", &self.wave)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ObserverSlot {
+    pub(crate) fn new(runtime: Arc<WaveRuntime>, observer: Option<Arc<StoreObserver>>) -> Self {
+        Self {
+            main_repo: runtime.repo_root().to_path_buf(),
+            wave: runtime.name().to_string(),
+            runtime,
+            observer: RwLock::new(observer),
+        }
+    }
+
+    /// Return the installed observer, acquiring the registry if it appeared
+    /// after listener boot.
+    pub(crate) async fn acquire(&self) -> Option<Arc<StoreObserver>> {
+        if let Some(observer) = self.observer.read().await.as_ref() {
+            return Some(Arc::clone(observer));
+        }
+
+        let store: SharedStore = Arc::new(open_existing_store().await?);
+        let wave = ensure_wave_row(&store, &self.main_repo, &self.wave)
+            .await
+            .map_err(|error| {
+                tracing::debug!(wave = self.wave, %error, "late registry acquisition failed")
+            })
+            .ok()?;
+        let candidate = Arc::new(StoreObserver::new(
+            Arc::clone(&self.runtime),
+            store,
+            wave.id().clone(),
+        ));
+        let mut installed = self.observer.write().await;
+        if let Some(observer) = installed.as_ref() {
+            return Some(Arc::clone(observer));
+        }
+        tracing::info!(
+            wave = self.wave,
+            "Wave listener acquired the local registry"
+        );
+        *installed = Some(Arc::clone(&candidate));
+        Some(candidate)
+    }
+
+    pub(crate) async fn poll_once(&self) {
+        if let Some(observer) = self.acquire().await {
+            observer.poll_once().await;
+        }
+    }
+
+    /// Poll forever on `cadence`. Runs until aborted at server shutdown.
+    pub(crate) async fn run(self: Arc<Self>, cadence: Duration) {
+        loop {
+            self.poll_once().await;
+            tokio::time::sleep(cadence).await;
+        }
+    }
+}
+
+/// Polls durable typed input for this Wave.
 ///
 /// Project and Task lifecycle owners reconcile their own process liveness.
-/// This observer has one job: carry their typed events into the Wave journal.
+/// This observer carries their typed events and the Wave row's one-time
+/// promotion occurrence into the Wave journal.
 pub struct StoreObserver {
     runtime: Arc<WaveRuntime>,
     store: SharedStore,
@@ -136,33 +216,45 @@ impl StoreObserver {
         }
     }
 
-    /// Poll forever on `cadence`. Runs until aborted at server shutdown.
-    pub async fn run(self: Arc<Self>, cadence: Duration) {
-        loop {
-            self.poll_once().await;
-            tokio::time::sleep(cadence).await;
-        }
-    }
-
-    /// Deliver every pending typed child observation. Store errors are logged
-    /// and retried on the next poll.
+    /// Deliver the durable promotion occurrence and every pending typed child
+    /// observation. Store errors are logged and retried on the next poll.
     pub async fn poll_once(&self) {
+        self.poll_promotion().await;
         self.poll_child_observations().await;
     }
 
-    /// Verify an explicit promotion nudge against registry parentage, then
-    /// deliver its typed wake idempotently. Ordinary polling never infers a
-    /// fresh promotion occurrence from a pre-existing parent link.
+    /// Verify an HTTP latency nudge against the durable promotion and registry
+    /// parentage, then deliver its typed wake idempotently. The request string
+    /// identifies no occurrence and grants no authority.
     pub async fn deliver_promotion(&self, expected_parent: &str) -> StoreResult<bool> {
+        let wake = self.durable_promotion().await?.ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!(
+                "Wave {} has no durable promotion occurrence",
+                self.wave_id
+            ))
+        })?;
+        if wake.parent != expected_parent {
+            return Err(crate::store::StoreError::InvalidData(format!(
+                "Wave {} belongs to '{}', not expected parent '{expected_parent}'",
+                self.wave_id, wake.parent
+            )));
+        }
+        Ok(self.runtime.deliver_promotion_wake(wake))
+    }
+
+    async fn durable_promotion(&self) -> StoreResult<Option<crate::wave::PromotionWake>> {
         let wave = self.store.get_wave(&self.wave_id).await?.ok_or_else(|| {
             crate::store::StoreError::InvalidData(format!(
                 "Wave {} disappeared from the registry",
                 self.wave_id
             ))
         })?;
+        if wave.promoted_at().is_none() {
+            return Ok(None);
+        }
         let parent_wave_id = wave.parent_wave_id().cloned().ok_or_else(|| {
             crate::store::StoreError::InvalidData(format!(
-                "Wave '{}' has no promotion parent",
+                "Wave '{}' records promotion without a parent",
                 wave.name()
             ))
         })?;
@@ -171,19 +263,22 @@ impl StoreObserver {
                 "promotion parent {parent_wave_id} is absent"
             ))
         })?;
-        if parent.name() != expected_parent {
-            return Err(crate::store::StoreError::InvalidData(format!(
-                "Wave '{}' belongs to '{}', not expected parent '{expected_parent}'",
-                wave.name(),
-                parent.name()
-            )));
+        Ok(Some(crate::wave::PromotionWake {
+            parent_wave_id,
+            parent: parent.name().to_string(),
+        }))
+    }
+
+    async fn poll_promotion(&self) {
+        match self.durable_promotion().await {
+            Ok(Some(wake)) => {
+                self.runtime.deliver_promotion_wake(wake);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::debug!(%error, "wave observer promotion read failed");
+            }
         }
-        Ok(self
-            .runtime
-            .deliver_promotion_wake(crate::wave::PromotionWake {
-                parent_wave_id,
-                parent: parent.name().to_string(),
-            }))
     }
 
     async fn poll_child_observations(&self) {
@@ -257,6 +352,7 @@ impl StoreObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::Lifecycle;
     use crate::store::{open_store, StorageConfig};
 
     async fn temp_store(tmp: &std::path::Path) -> SharedStore {
@@ -288,13 +384,13 @@ mod tests {
             .await
             .expect("lookup")
             .expect("row exists");
-        assert_eq!(stored.id, wave.id);
+        assert_eq!(stored.id(), wave.id());
         assert_eq!(stored.repo(), repo.display().to_string());
 
         let again = ensure_wave_row(&store, &repo, "ship")
             .await
             .expect("idempotent");
-        assert_eq!(again.id, wave.id, "ensure reuses the existing row");
+        assert_eq!(again.id(), wave.id(), "ensure reuses the existing row");
     }
 
     /// No GOAL.md at all: the registry still creates the identity row.
@@ -309,7 +405,62 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_promotion_nudge_verifies_parent_and_delivers_once() {
+    #[allow(clippy::await_holding_lock)] // the env guard serializes the shared registry path
+    async fn observerless_listener_acquires_late_registry_and_delivers_once() {
+        let _env = crate::journal::TestLedgerGuard::new();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime =
+            WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf()).expect("open runtime");
+        let observer = ObserverSlot::new(runtime.clone(), None);
+
+        observer.poll_once().await;
+        assert_eq!(promotion_event_count(tmp.path()), 0);
+
+        let store: SharedStore = Arc::new(
+            open_store(&crate::store::storage_config_from_env().expect("store config"))
+                .await
+                .expect("create registry"),
+        );
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let mut child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        );
+        child
+            .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
+            .expect("record promotion");
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+
+        observer.poll_once().await;
+        observer.poll_once().await;
+
+        assert_eq!(promotion_event_count(tmp.path()), 1);
+        assert_eq!(runtime.pending_messages().len(), 1);
+    }
+
+    fn promotion_event_count(repo: &std::path::Path) -> usize {
+        let (_, events) =
+            crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(repo, "ship"))
+                .expect("read Wave journal");
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.kind,
+                    crate::wave::journal::EventKind::PromotionObserved { .. }
+                )
+            })
+            .count()
+    }
+
+    #[tokio::test]
+    async fn parent_link_without_occurrence_never_promotes() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let parent = Wave::new(
@@ -330,17 +481,96 @@ mod tests {
         let observer = StoreObserver::new(runtime, store, child.id().clone());
 
         observer.poll_once().await;
-        let (_, before_nudge) = crate::wave::journal::Journal::open(
-            &crate::wave::journal::journal_path(tmp.path(), "ship"),
-        )
-        .expect("read journal before nudge");
         assert!(
-            !before_nudge.iter().any(|event| matches!(
-                &event.kind,
-                crate::wave::journal::EventKind::PromotionObserved { .. }
-            )),
-            "background observation polling must not infer a new promotion from old ancestry"
+            observer.deliver_promotion("platform").await.is_err(),
+            "an HTTP request cannot turn ancestry into a promotion occurrence"
         );
+        assert_eq!(promotion_event_count(tmp.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn polling_recovers_recorded_promotion_once_across_reopen() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let mut child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        )
+        .with_parent(parent.id().clone());
+        child
+            .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
+            .expect("record promotion");
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+
+        let runtime =
+            WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf()).expect("open runtime");
+        let observer = StoreObserver::new(runtime.clone(), store.clone(), child.id().clone());
+
+        // No HTTP request: the heartbeat reconstructs the wake from registry truth.
+        observer.poll_once().await;
+        observer.poll_once().await;
+        assert_eq!(promotion_event_count(tmp.path()), 1);
+        assert_eq!(runtime.pending_messages().len(), 1);
+
+        let id = format!("promotion:{}", parent.id());
+        runtime.apply_resident_delta(crate::wave::wire::ResidentDelta::TurnOpened {
+            answers: vec![id],
+        });
+        runtime.apply_resident_delta(crate::wave::wire::ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: None,
+            reason: None,
+        });
+        assert!(runtime.pending_messages().is_empty());
+        drop(observer);
+        drop(runtime);
+
+        let reopened = WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf())
+            .expect("reopen runtime");
+        let observer = StoreObserver::new(reopened.clone(), store, child.id().clone());
+        observer.poll_once().await;
+
+        assert!(reopened.pending_messages().is_empty());
+        assert_eq!(promotion_event_count(tmp.path()), 1);
+    }
+
+    #[tokio::test]
+    async fn explicit_promotion_nudge_verifies_registry_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let mut child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        )
+        .with_parent(parent.id().clone());
+        child
+            .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
+            .expect("record promotion");
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+        let runtime =
+            WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf()).expect("open runtime");
+        let observer = StoreObserver::new(runtime, store, child.id().clone());
+
+        let error = observer
+            .deliver_promotion("wrong-parent")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("not expected parent"));
+        assert_eq!(promotion_event_count(tmp.path()), 0);
         assert!(observer.deliver_promotion("platform").await.unwrap());
         assert!(!observer.deliver_promotion("platform").await.unwrap());
 
@@ -349,17 +579,7 @@ mod tests {
             "ship",
         ))
         .expect("read journal");
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(
-                    &event.kind,
-                    crate::wave::journal::EventKind::PromotionObserved { .. }
-                ))
-                .count(),
-            1,
-            "observer retries do not duplicate the durable promotion input"
-        );
+        assert_eq!(promotion_event_count(tmp.path()), 1);
         assert!(!events.iter().any(|event| matches!(
             &event.kind,
             crate::wave::journal::EventKind::UserMessage { .. }

@@ -607,6 +607,19 @@ page in the browser. The explicit, human-initiated review action; agents use
 `publish`, `submit`, or `land`. If launching the browser fails, only `open`
 fails — the PR is already published and its URL printed.
 
+### lf pr submit
+
+Prepare the exact PR head, assign it to you, and stop for your merge click.
+Nothing merges automatically.
+
+```bash
+lf pr submit
+```
+
+On Task PRs, submit records one User merge request containing the exact head
+and Continue/Complete disposition. Open authored Feedback refuses that request;
+a later Task resume or head-changing Loopflow operation clears it.
+
 ### lf pr land
 
 Arm auto-merge. GitHub merges when required checks and repository rules pass.
@@ -616,6 +629,11 @@ lf pr land                    # land one PR; the Task stays open
 lf pr land -c                 # land, then complete the owning Task
 lf pr land --next parser-proof  # name the next serial Task PR
 ```
+
+On Task PRs, land records the same head-and-disposition request with Auto as
+the operator. `--match-head-commit` fences the arming command; Loopflow revokes
+Auto before its own later head mutation. Concurrent Loopflow finalization and
+push commands in one worktree are refused rather than interleaved.
 
 Submit and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned

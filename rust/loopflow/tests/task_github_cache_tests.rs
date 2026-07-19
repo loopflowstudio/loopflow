@@ -5,7 +5,7 @@ use std::process::Command;
 
 use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_interrupt, task_status, task_steer};
-use loopflow::task::{AfterMerge, GithubPr, Observation, PrPublication};
+use loopflow::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_active_task, EnvGuard, RegisteredTask};
 use time::{Duration, OffsetDateTime};
@@ -13,13 +13,12 @@ use time::{Duration, OffsetDateTime};
 fn publish_task(task: &mut RegisteredTask) {
     task.pr.publication = Some(PrPublication {
         requested_at: OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::ContinueTask,
-        next_slug: None,
         github: Some(GithubPr {
             number: 928,
             url: "https://github.com/loopflowstudio/loopflow/pull/928".to_string(),
             head_sha: None,
         }),
+        merge: None,
     });
     task.pr.updated_at = OffsetDateTime::now_utc() - Duration::hours(1);
     let runtime = tokio::runtime::Runtime::new().expect("test runtime");

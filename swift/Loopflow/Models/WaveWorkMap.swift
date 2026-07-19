@@ -244,7 +244,6 @@ public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
     case wave
     case project
     case task
-    case review
     case ci
     case external
 }
@@ -360,13 +359,30 @@ public struct PrSnapshot: Decodable, Sendable, Identifiable, Hashable {
 
 public struct PrPublicationSnapshot: Decodable, Sendable, Hashable {
     public let requestedAt: String
-    public let afterMerge: PrAfterMerge
-    public let nextSlug: String?
     public let github: GithubPrSnapshot?
+    public let merge: PrMergeRequestSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case github
+        case github, merge
         case requestedAt = "requested_at"
+    }
+}
+
+public enum PrMergeMode: String, Decodable, Sendable, Hashable {
+    case user, auto
+}
+
+public struct PrMergeRequestSnapshot: Decodable, Sendable, Hashable {
+    public let mode: PrMergeMode
+    public let requestedAt: String
+    public let headSha: String
+    public let afterMerge: PrAfterMerge
+    public let nextSlug: String?
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case requestedAt = "requested_at"
+        case headSha = "head_sha"
         case afterMerge = "after_merge"
         case nextSlug = "next_slug"
     }

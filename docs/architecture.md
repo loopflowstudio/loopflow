@@ -5,7 +5,7 @@ title: Architecture
 
 # Architecture
 
-> **Moment of transparency — July 18, 2026**
+> **Moment of transparency — July 19, 2026**
 >
 > The durable model is coherent: Wave, Project, and Task are stable Work;
 > Epoch/Run/Wait derive lifecycle; Basis orders input; Launch and Turn own

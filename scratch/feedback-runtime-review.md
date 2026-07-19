@@ -96,3 +96,23 @@ definition affecting the next Task view without rewriting its directive. Exact
 retired-type/copied-parent and Task SQL projection searches are empty;
 `cargo check --all-targets`, `cargo fmt --check`, and all-target Clippy with
 warnings denied pass.
+
+## Slice 6A — explicit Feedback continuation
+
+Accepted. `lf work feedback` resolves User-attention Feedback and presents its
+recorded Launch. Presentation success, failure, process exit, and signal
+handling cannot mutate the Feedback or advance the flow. `lf work continue` is
+the only command that closes the current checkpoint, under User or immediate
+parent Run authority and fenced by the checkpoint Basis.
+
+The continuation-on-exit flags, hidden guard process, exit policy, retry/lock
+state, conditional presentation callback, and Feedback escalation command,
+transition, and receipt are deleted. A Feedback route is chosen when the
+checkpoint opens and cannot be changed afterward.
+
+Proof: the parser accepts the surviving presentation and continuation commands
+and rejects both retired flags and `work escalate`; exact retired-symbol
+searches are empty. The focused parser and durable-store suites and Swift local
+launcher tests pass from implementation; `cargo fmt --check` and all-target
+Clippy with warnings denied pass. The automated `lf code` wrapper again made no
+source change and was rejected as evidence.

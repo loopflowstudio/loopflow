@@ -196,7 +196,7 @@ enum LocalWaveAgentLauncher {
     }
 
     static func taskFeedbackCommand(lfPath: String, taskId: String) -> [String] {
-        [lfPath, "work", "feedback", "task", taskId, "--continue-on-exit"]
+        [lfPath, "work", "feedback", "task", taskId]
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`

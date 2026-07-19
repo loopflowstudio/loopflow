@@ -1,20 +1,15 @@
-use std::io::{self, BufRead, BufReader, Write};
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
-use std::time::Duration;
+use std::process::{Command, ExitStatus};
 
 use anyhow::{anyhow, Context};
-use fs2::FileExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::durable::{
-    AuthenticatedRequest, Basis, ControlCtx, EpochId, EpochReceipt, Feedback, InterruptReceipt,
-    LaunchId, Placement, ProjectId, Run, SteerReceipt, TaskId, UserFeedback, WorkRef, WorkStatus,
+    AuthenticatedRequest, ControlCtx, EpochReceipt, Feedback, InterruptReceipt, Placement,
+    ProjectId, Run, SteerReceipt, TaskId, UserFeedback, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
-use crate::store::{open_store, storage_config_from_env, Store, StoreError};
+use crate::store::{open_store, storage_config_from_env, Store};
 
 #[derive(Debug, Serialize)]
 struct WorkProjection {
@@ -31,7 +26,6 @@ enum WorkReceipt {
     Placed(Placement),
     Steer(SteerReceipt),
     FeedbackContinued { status: WorkStatus },
-    FeedbackEscalated { feedback: Feedback },
     Interrupted(InterruptReceipt),
     Abandoned(EpochReceipt),
 }
@@ -82,21 +76,9 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
             };
             print_receipt(&WorkReceipt::Steer(receipt), *json)?;
         }
-        WorkCommand::Feedback {
-            kind,
-            id,
-            continue_on_success,
-            continue_on_exit,
-        } => {
+        WorkCommand::Feedback { kind, id } => {
             let work = parse_work(kind, id)?;
-            let policy = if *continue_on_exit {
-                FeedbackExitPolicy::AnyExit
-            } else if *continue_on_success {
-                FeedbackExitPolicy::Success
-            } else {
-                FeedbackExitPolicy::Explicit
-            };
-            run_feedback(&store, &work, policy).await?;
+            run_feedback(&store, &work).await?;
         }
         WorkCommand::Continue { kind, id, json } => {
             let work = parse_work(kind, id)?;
@@ -115,20 +97,6 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
                     .await?
             };
             print_receipt(&WorkReceipt::FeedbackContinued { status }, *json)?;
-        }
-        WorkCommand::Escalate { kind, id, json } => {
-            let work = parse_work(kind, id)?;
-            let lease = crate::ops::ambient_run_lease(&store)
-                .await?
-                .ok_or_else(|| anyhow!("Feedback escalation requires an active parent Run"))?;
-            let feedback = store
-                .feedback(&work)
-                .await?
-                .ok_or_else(|| anyhow!("{} {} has no current Feedback", work.kind(), work.id()))?;
-            let feedback = store
-                .escalate_feedback(&lease, &work, &feedback.basis)
-                .await?;
-            print_receipt(&WorkReceipt::FeedbackEscalated { feedback }, *json)?;
         }
         WorkCommand::Interrupt { kind, id, json } => {
             let work = parse_work(kind, id)?;
@@ -193,214 +161,10 @@ pub fn run_queue(json: bool) -> anyhow::Result<()> {
     })
 }
 
-pub fn run_exit_guard(
-    kind: &str,
-    id: &str,
-    launch_id: &str,
-    epoch_id: &str,
-    revision: u64,
-) -> anyhow::Result<()> {
-    let work = parse_work(kind, id)?;
-    let launch_id = LaunchId::parse(launch_id)?;
-    let epoch_id = EpochId::parse(epoch_id)?;
-    let basis = Basis { epoch_id, revision };
-    tokio::runtime::Runtime::new()?.block_on(run_exit_guard_async(work, launch_id, basis))
-}
-
-async fn run_exit_guard_async(
-    work: WorkRef,
-    launch_id: LaunchId,
-    basis: Basis,
-) -> anyhow::Result<()> {
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
-    let _lock = match feedback_guard_lock(&launch_id) {
-        Ok(lock) => lock,
-        Err(error) => {
-            write_guard_reply(
-                &mut output,
-                &FeedbackGuardReply::Error {
-                    message: error.to_string(),
-                },
-            )?;
-            return Ok(());
-        }
-    };
-    let store = match open_exit_guard_store().await {
-        Ok(store) => store,
-        Err(error) => {
-            write_guard_reply(
-                &mut output,
-                &FeedbackGuardReply::Error {
-                    message: error.to_string(),
-                },
-            )?;
-            return Ok(());
-        }
-    };
-    write_guard_reply(&mut output, &FeedbackGuardReply::Ready)?;
-    drop(output);
-    io::copy(&mut io::stdin().lock(), &mut io::sink())?;
-    continue_guarded_feedback(&store, &work, &launch_id, &basis).await
-}
-
-fn feedback_guard_lock(launch_id: &LaunchId) -> anyhow::Result<std::fs::File> {
-    let lock_directory = std::env::temp_dir().join("loopflow-feedback-guards");
-    std::fs::create_dir_all(&lock_directory)?;
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(lock_directory.join(format!("{}.lock", launch_id.as_str())))?;
-    lock.try_lock_exclusive().map_err(|error| {
-        anyhow!("another --continue-on-exit client already owns this Feedback: {error}")
-    })?;
-    Ok(lock)
-}
-
-async fn open_exit_guard_store() -> anyhow::Result<Store> {
-    for attempt in 0..20 {
-        match open_shared_store().await {
-            Ok(store) => return Ok(store),
-            Err(error) if attempt < 19 => {
-                tracing::debug!(%error, "Feedback exit guard is retrying store open");
-                tokio::time::sleep(Duration::from_millis(250)).await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    unreachable!("Feedback exit guard store loop returns on its last attempt")
-}
-
-async fn continue_guarded_feedback(
-    store: &Store,
-    work: &WorkRef,
-    launch_id: &LaunchId,
-    basis: &Basis,
-) -> anyhow::Result<()> {
-    for attempt in 0..20 {
-        match store
-            .continue_feedback_if_current(work, launch_id, basis)
-            .await
-        {
-            Ok(_) | Err(StoreError::NotFound | StoreError::InvalidAuthority(_)) => return Ok(()),
-            Err(StoreError::StaleBasis { .. }) => return Ok(()),
-            Err(StoreError::Sqlite(error)) if attempt < 19 => {
-                tracing::debug!(%error, "Feedback exit guard is retrying SQLite");
-                tokio::time::sleep(Duration::from_millis(250)).await;
-            }
-            Err(error) => return Err(anyhow!(error)),
-        }
-    }
-    unreachable!("Feedback exit guard retry loop returns on its last attempt")
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FeedbackExitPolicy {
-    Explicit,
-    Success,
-    AnyExit,
-}
-
-impl FeedbackExitPolicy {
-    fn continues(self, presentation_succeeded: bool) -> bool {
-        match self {
-            Self::Explicit => false,
-            Self::Success => presentation_succeeded,
-            Self::AnyExit => true,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum FeedbackGuardReply {
-    Ready,
-    Error { message: String },
-}
-
-struct FeedbackExitGuard {
-    input: ChildStdin,
-    child: Child,
-}
-
-impl FeedbackExitGuard {
-    fn spawn(work: &WorkRef, feedback: &Feedback) -> anyhow::Result<Self> {
-        let mut command = Command::new(std::env::current_exe()?);
-        command
-            .arg("__feedback-exit-guard")
-            .arg(work.kind())
-            .arg(work.id())
-            .arg(feedback.launch_id.as_str())
-            .arg(feedback.basis.epoch_id.as_str())
-            .arg(feedback.basis.revision.to_string())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-        #[cfg(unix)]
-        // SAFETY: the closure only starts a new session before exec and does not
-        // touch memory shared with the parent process.
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let mut child = command.spawn().context("start Feedback exit guard")?;
-        let input = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow!("Feedback exit guard did not open stdin"))?;
-        let output = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("Feedback exit guard did not open stdout"))?;
-        let mut output = BufReader::new(output);
-        let mut line = String::new();
-        if output.read_line(&mut line)? == 0 {
-            return Err(anyhow!("Feedback exit guard exited unexpectedly"));
-        }
-        match serde_json::from_str(&line).context("parse Feedback exit guard reply")? {
-            FeedbackGuardReply::Ready => Ok(Self { input, child }),
-            FeedbackGuardReply::Error { message } => Err(anyhow!(message)),
-        }
-    }
-
-    fn continue_now(self) -> anyhow::Result<()> {
-        let Self { input, mut child } = self;
-        drop(input);
-        let status = child.wait().context("wait for Feedback exit guard")?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(anyhow!("Feedback exit guard exited with {status}"))
-        }
-    }
-}
-
-fn write_guard_reply(output: &mut impl Write, reply: &FeedbackGuardReply) -> anyhow::Result<()> {
-    serde_json::to_writer(&mut *output, reply)?;
-    output.write_all(b"\n")?;
-    output.flush()?;
-    Ok(())
-}
-
-async fn run_feedback(
-    store: &Store,
-    work: &WorkRef,
-    policy: FeedbackExitPolicy,
-) -> anyhow::Result<()> {
+async fn run_feedback(store: &Store, work: &WorkRef) -> anyhow::Result<()> {
     let item = find_user_feedback(store, work)
         .await?
         .ok_or_else(|| anyhow!("{} {} has no current User Feedback", work.kind(), work.id()))?;
-    let guard = if policy == FeedbackExitPolicy::AnyExit {
-        Some(FeedbackExitGuard::spawn(work, &item.feedback)?)
-    } else {
-        None
-    };
     println!(
         "Opening Feedback for {} {} at {}:{} ({})",
         item.feedback.work.kind(),
@@ -410,16 +174,6 @@ async fn run_feedback(
         item.feedback.position.step,
     );
     let status = present_feedback(&item.feedback)?;
-    let should_continue = policy.continues(status.success());
-    if should_continue {
-        if let Some(guard) = guard {
-            guard.continue_now()?;
-        } else {
-            continue_guarded_feedback(store, work, &item.feedback.launch_id, &item.feedback.basis)
-                .await?;
-        }
-        println!("Continued Feedback.");
-    }
     if status.success() {
         Ok(())
     } else {
@@ -511,29 +265,9 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
             ),
             WorkReceipt::Steer(receipt) => println!("steered {}", receipt.steer.id),
             WorkReceipt::FeedbackContinued { status } => println!("continued Feedback: {status:?}"),
-            WorkReceipt::FeedbackEscalated { feedback } => println!(
-                "escalated {} {} Feedback to User attention",
-                feedback.work.kind(),
-                feedback.work.id()
-            ),
             WorkReceipt::Interrupted(receipt) => println!("interrupted {}", receipt.run_id),
             WorkReceipt::Abandoned(receipt) => println!("abandoned {}", receipt.epoch.id),
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::FeedbackExitPolicy;
-
-    #[test]
-    fn feedback_exit_policies_match_the_presentation_contract() {
-        assert!(!FeedbackExitPolicy::Explicit.continues(true));
-        assert!(!FeedbackExitPolicy::Explicit.continues(false));
-        assert!(FeedbackExitPolicy::Success.continues(true));
-        assert!(!FeedbackExitPolicy::Success.continues(false));
-        assert!(FeedbackExitPolicy::AnyExit.continues(true));
-        assert!(FeedbackExitPolicy::AnyExit.continues(false));
-    }
 }

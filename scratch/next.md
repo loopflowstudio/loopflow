@@ -13,8 +13,8 @@
 
 ## Done when
 
-- [ ] presentation cannot advance flow on any process exit or signal.
-- [ ] explicit `work continue` is the only close path.
-- [ ] escalation API/state is absent.
-- [ ] parser rejects retired flags/commands and focused Rust/Swift tests, fmt,
+- [x] presentation cannot advance flow on any process exit or signal.
+- [x] explicit `work continue` is the only close path.
+- [x] escalation API/state is absent.
+- [x] parser rejects retired flags/commands and focused Rust/Swift tests, fmt,
       and clippy pass.

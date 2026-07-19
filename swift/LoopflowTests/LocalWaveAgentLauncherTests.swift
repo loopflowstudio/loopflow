@@ -4,6 +4,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+@testable import Loopflow
 @testable import LoopflowMac
 
 @Suite("Local wave launcher")
@@ -90,7 +91,18 @@ struct LocalWaveAgentLauncherTests {
             lf, "task", "interrupt", "W2-131",
         ])
         #expect(LocalWaveAgentLauncher.taskFeedbackCommand(lfPath: lf, taskId: "task_131") == [
-            lf, "work", "feedback", "task", "task_131", "--continue-on-exit",
+            lf, "work", "feedback", "task", "task_131",
+        ])
+    }
+
+    @Test("Feedback presentation never requests continuation")
+    func feedbackPresentationCommandShape() throws {
+        let data = try loadFixtureData("launch_surface.json")
+        let surface = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: data)
+        let command = LaunchTargetLauncher.feedbackCommand(for: surface)
+
+        #expect(Array(command.argv.dropFirst()) == [
+            "work", "feedback", "task", "task_00000000000000000000000000000005",
         ])
     }
 
@@ -104,6 +116,17 @@ struct LocalWaveAgentLauncherTests {
         #expect(command == [lf, "pr", "open"])
         #expect(!command.contains { $0.contains("github.com") })
         #expect(!command.contains { $0.hasPrefix("http") })
+    }
+
+    private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
+        let testFile = URL(fileURLWithPath: sourceFile)
+        let fixtures = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto")
+            .appendingPathComponent(name)
+        return try Data(contentsOf: fixtures)
     }
 
     @Test("Task start uses the exact CLI receipt as workspace identity")

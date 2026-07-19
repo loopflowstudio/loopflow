@@ -322,16 +322,6 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Internal: continue Feedback if its presentation client exits unexpectedly
-    #[command(name = "__feedback-exit-guard", hide = true)]
-    FeedbackExitGuard {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-        launch_id: String,
-        epoch_id: String,
-        revision: u64,
-    },
     /// Internal: run a Project or Task body holding the ambient Run lease
     #[command(name = "__work", hide = true)]
     WorkRunner {
@@ -699,23 +689,9 @@ pub enum WorkCommand {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
-        /// Continue when the presentation exits successfully
-        #[arg(long, conflicts_with = "continue_on_exit")]
-        continue_on_success: bool,
-        /// Continue whenever the presentation exits, including signals or crashes
-        #[arg(long, conflicts_with = "continue_on_success")]
-        continue_on_exit: bool,
     },
     /// Continue past the current Feedback boundary
     Continue {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Escalate immediate child Feedback from this parent Run to the User
-    Escalate {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
         id: String,
@@ -2594,24 +2570,12 @@ mod tests {
             }) if kind == "project" && id == "project_1"
         ));
 
-        let feedback = Cli::try_parse_from([
-            "lf",
-            "work",
-            "feedback",
-            "task",
-            "task_1",
-            "--continue-on-exit",
-        ])
-        .expect("parse Feedback presentation exit policy");
+        let feedback = Cli::try_parse_from(["lf", "work", "feedback", "task", "task_1"])
+            .expect("parse Feedback presentation");
         assert!(matches!(
             feedback.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Feedback {
-                    kind,
-                    id,
-                    continue_on_success: false,
-                    continue_on_exit: true,
-                }
+                cmd: WorkCommand::Feedback { kind, id }
             }) if kind == "task" && id == "task_1"
         ));
         assert!(Cli::try_parse_from([
@@ -2621,9 +2585,18 @@ mod tests {
             "task",
             "task_1",
             "--continue-on-success",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "lf",
+            "work",
+            "feedback",
+            "task",
+            "task_1",
             "--continue-on-exit",
         ])
         .is_err());
+        assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
 
         let place = Cli::try_parse_from([
             "lf",

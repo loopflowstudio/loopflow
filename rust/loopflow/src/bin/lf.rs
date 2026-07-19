@@ -1309,19 +1309,6 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Queue { json }) => {
                 loopflow::lf::commands::work::run_queue(*json)
             }
-            Some(Commands::FeedbackExitGuard {
-                kind,
-                id,
-                launch_id,
-                epoch_id,
-                revision,
-            }) => loopflow::lf::commands::work::run_exit_guard(
-                kind,
-                id,
-                launch_id,
-                epoch_id,
-                *revision,
-            ),
             Some(Commands::WorkRunner { kind, work_id }) => {
                 let work = match kind.as_str() {
                     "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),

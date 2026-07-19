@@ -263,8 +263,6 @@ lf task run DES-124 --stack-on DES-123
 lf task status DES-123
 lf queue                                             # User-attention Feedback, oldest first
 lf work feedback task task_...                       # open the recorded Launch
-lf work feedback task task_... --continue-on-success # clean exit advances
-lf work feedback task task_... --continue-on-exit   # every exit advances
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -306,10 +304,9 @@ replacement direction stay separate: interrupt the active boundary, then
 Steer normally.
 
 `lf work feedback` opens the current Feedback's recorded Launch presentation —
-the Launch's tmux attach route today. Bare mode leaves Feedback open when that
-presentation exits. `--continue-on-success`
-advances after exit status zero; `--continue-on-exit` advances after any exit or
-client crash, but only while the same Launch and Basis still own User attention.
+the Launch's tmux attach route today. Presentation never advances the flow:
+success, failure, signals, and client close all leave Feedback open. Run
+`lf work continue` explicitly to advance it under its current Basis fence.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the

@@ -949,45 +949,6 @@ impl SqliteStore {
         Ok(items)
     }
 
-    pub fn escalate_feedback(
-        &self,
-        lease: &RunLease,
-        child: &WorkRef,
-        if_basis: &Basis,
-    ) -> StoreResult<Feedback> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let run = validate_run_lease(&tx, lease)?;
-        let feedback = feedback_in(&tx, child)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&feedback.basis, if_basis)?;
-        if feedback.attention != AttentionRoute::Parent(run.work.clone()) {
-            return Err(StoreError::InvalidAuthority(
-                "Run may escalate only its own immediate child Feedback".to_string(),
-            ));
-        }
-        if tx.execute(
-            "UPDATE agent_launches SET attention_kind='user',
-                attention_work_kind=NULL, attention_work_id=NULL, attention_at=?3
-             WHERE id=?1 AND attention_kind='parent' AND attention_at=?2
-               AND attention_work_kind=?4 AND attention_work_id=?5",
-            params![
-                feedback.launch_id.as_str(),
-                feedback.opened_at.unix_timestamp(),
-                now_unix(),
-                run.work.kind(),
-                run.work.id(),
-            ],
-        )? == 0
-        {
-            return Err(StoreError::InvalidAuthority(
-                "child Feedback attention changed before escalation".to_string(),
-            ));
-        }
-        let escalated = feedback_in(&tx, child)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok(escalated)
-    }
-
     pub fn continue_feedback(
         &self,
         caller: Option<&RunLease>,
@@ -999,27 +960,6 @@ impl SqliteStore {
         let feedback = feedback_in(&tx, work)?.ok_or(StoreError::NotFound)?;
         validate_basis(&feedback.basis, if_basis)?;
         validate_feedback_caller(&tx, caller, &feedback)?;
-        advance_feedback_in(&tx, &feedback)?;
-        let status = work_status_in(&tx, work)?;
-        tx.commit()?;
-        Ok(status)
-    }
-
-    pub(crate) fn continue_feedback_if_current(
-        &self,
-        work: &WorkRef,
-        launch_id: &LaunchId,
-        if_basis: &Basis,
-    ) -> StoreResult<WorkStatus> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let feedback = feedback_in(&tx, work)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&feedback.basis, if_basis)?;
-        if feedback.launch_id != *launch_id || feedback.attention != AttentionRoute::User {
-            return Err(StoreError::InvalidAuthority(
-                "Feedback is no longer the current User-attention boundary".to_string(),
-            ));
-        }
         advance_feedback_in(&tx, &feedback)?;
         let status = work_status_in(&tx, work)?;
         tx.commit()?;

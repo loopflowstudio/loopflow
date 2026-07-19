@@ -47,7 +47,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .block_on(task.store.task_linear_observation(&task.task.id))
         .expect("cursor read")
         .expect("cursor seeded at creation");
-    assert_eq!(seeded.last_title, task.task.directive.title);
+    assert_eq!(seeded.last_title, task.task.plan.title);
     assert_eq!(seeded.last_revision, "");
 
     // 1. A user edits title + description → one Steer.
@@ -121,8 +121,8 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
             &persisted_task,
             edit(
                 "2026-07-15T00:30:00.000Z",
-                &task.task.directive.title,
-                &task.task.directive.description,
+                &task.task.plan.title,
+                &task.task.plan.description,
             ),
             VIEWER,
             now,

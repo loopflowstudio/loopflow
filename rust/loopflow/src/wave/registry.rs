@@ -301,7 +301,7 @@ impl StoreObserver {
                     Ok(Some(task)) => {
                         self.runtime.deliver_task_observation(TaskObservation {
                             task_id,
-                            issue_identifier: task.directive.identifier,
+                            issue_identifier: task.plan.identifier,
                             event_id: observation.event_id,
                             event,
                         });
@@ -321,7 +321,7 @@ impl StoreObserver {
                         self.runtime.deliver_project_observation(
                             crate::project::ProjectObservation {
                                 project_id,
-                                project: project.definition.slug,
+                                project: project.plan.slug,
                                 event_id: observation.event_id,
                                 event,
                             },

@@ -172,7 +172,7 @@ Several prerequisites now match the target:
     executor commands are deleted.
 14. Roadmap and Swift surfaces consume `WorkStatus` directly. The action model
     is `recommended + reason`; the exhaustive blocked-action matrix is gone.
-15. Project owns `ProjectDefinition`; Task owns `TaskDirective` plus
+15. Project owns `ProjectPlan`; Task owns `TaskPlan` plus
     `project_id`. Task does not copy parent Project planning truth.
 16. Task phase plans use `FeedbackReviewer::{User, Parent}`. The standard route
     is User for clarify, Parent for pursue, and User for mutate; an override
@@ -928,8 +928,8 @@ The core reduction is implemented:
 - completion flows only through the successful-boundary Basis fence;
 - roadmap/Swift use `WorkStatus` and Work-shaped fields;
 - Task attention projects one next legal action plus its reason;
-- Project/Task planning state is `ProjectDefinition`, `TaskDirective`, and a
-  live `project_id` relation rather than copied parent snapshots;
+- Project/Task planning state is `ProjectPlan`, `TaskPlan`, and a live
+  `project_id` relation rather than copied parent snapshots;
 - Feedback presentation, continuation, and reviewer choice are separate APIs;
 - Radio, channel identity, live memory, recent-chat prompt context, implicit PR
   Review state, policy-based reviewer routing, and evidence Receipts are gone.

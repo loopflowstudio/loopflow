@@ -2676,7 +2676,7 @@ mod tests {
     use super::*;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::test_server::{self, json_response, QueuedResponse};
     use crate::project::{Project, ProjectId};
     use crate::task::{
@@ -2849,7 +2849,7 @@ mod tests {
             "/repo".to_string(),
         );
         store.create_wave(&wave).await.expect("create wave");
-        let project_definition = ProjectDefinition {
+        let project_definition = ProjectPlan {
             id: LinearProjectId::new("project-uuid").expect("project id"),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
@@ -2858,7 +2858,7 @@ mod tests {
         };
         let project = Project {
             id: ProjectId::new(),
-            definition: project_definition,
+            plan: project_definition,
             wave_id: wave.id().clone(),
             iteration: 1,
             observation_cursor: 0,
@@ -2878,7 +2878,7 @@ mod tests {
         let task_id = TaskId::new();
         let task = Task {
             id: task_id.clone(),
-            directive: TaskDirective {
+            plan: TaskPlan {
                 id: LinearIssueId::new(issue_id).expect("issue id"),
                 identifier: identifier.to_string(),
                 title: format!("Task {identifier}"),
@@ -3496,7 +3496,7 @@ mod tests {
                 .await
                 .expect("read task")
                 .expect("task exists")
-                .directive
+                .plan
                 .identifier,
             "W2-9"
         );
@@ -3537,7 +3537,7 @@ mod tests {
                 .await
                 .expect("read task")
                 .expect("task exists")
-                .directive
+                .plan
                 .identifier,
             "PRD-9"
         );
@@ -3609,7 +3609,7 @@ mod tests {
                 .await
                 .expect("read task")
                 .expect("task exists")
-                .directive
+                .plan
                 .identifier,
             "PRD-10"
         );

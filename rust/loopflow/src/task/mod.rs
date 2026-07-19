@@ -14,7 +14,7 @@ use crate::child::{prefixed_uuid_id, AbandonIntent};
 use crate::durable::RunId;
 pub use crate::durable::TaskId;
 use crate::id::WaveId;
-use crate::planning::TaskDirective;
+use crate::planning::TaskPlan;
 use crate::project::ProjectId;
 
 pub mod actions;
@@ -736,8 +736,8 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Current planning directive from the PM system.
-    pub directive: TaskDirective,
+    /// Current planning facts from the PM system.
+    pub plan: TaskPlan,
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
@@ -848,7 +848,7 @@ impl Task {
         if let Some(intent) = &self.abandon_intent {
             return Some(format!(
                 "Task {} is being abandoned: {}",
-                self.directive.identifier, intent.reason
+                self.plan.identifier, intent.reason
             ));
         }
         None
@@ -858,7 +858,7 @@ impl Task {
         format!(
             "Task {} requested PR publication but has no GitHub PR record; \
              resume it explicitly with `lf task resume {}` to retry publication",
-            self.directive.identifier, self.directive.identifier,
+            self.plan.identifier, self.plan.identifier,
         )
     }
 
@@ -878,13 +878,13 @@ impl Task {
                 "Task {} requested a user merge of pull request #{} at head {}. \
                  The supervisor will not restart it until that explicit merge \
                  request settles or the head changes.",
-                self.directive.identifier, number, short,
+                self.plan.identifier, number, short,
             ),
             PrMergeMode::Auto => format!(
                 "Task {} requested GitHub auto-merge of pull request #{} at head {}. \
                  The supervisor will not restart it until that explicit merge \
                  request settles or the head changes.",
-                self.directive.identifier, number, short,
+                self.plan.identifier, number, short,
             ),
         }
     }
@@ -1125,13 +1125,13 @@ mod tests {
         PrPublication, Task, TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan,
         TaskObservation, TaskPr, TaskPrId,
     };
-    use crate::planning::{LinearIssueId, TaskDirective};
+    use crate::planning::{LinearIssueId, TaskPlan};
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::new(),
-            directive: TaskDirective {
+            plan: TaskPlan {
                 id: LinearIssueId::new("issue-1").unwrap(),
                 identifier: "INF-123".to_string(),
                 title: "Ship it".to_string(),

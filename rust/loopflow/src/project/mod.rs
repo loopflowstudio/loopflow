@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::planning::ProjectDefinition;
+use crate::planning::ProjectPlan;
 use crate::task::{TaskEventKind, TaskId};
 
 pub mod runner;
@@ -26,8 +26,8 @@ pub enum ProjectDataError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
-    /// Current planning definition from the PM system.
-    pub definition: ProjectDefinition,
+    /// Current planning facts from the PM system.
+    pub plan: ProjectPlan,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     pub iteration: u32,
@@ -52,7 +52,7 @@ impl Project {
         self.abandon_intent.as_ref().map(|intent| {
             format!(
                 "Project {} is being abandoned: {}",
-                self.definition.slug, intent.reason
+                self.plan.slug, intent.reason
             )
         })
     }

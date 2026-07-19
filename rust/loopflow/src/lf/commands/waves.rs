@@ -1171,14 +1171,14 @@ async fn snapshot_projects(
         let status = child_work_status(store, &ChildRef::Project(project.id.clone())).await?;
         let Some(index) = work_project_index(
             &details,
-            project.definition.id.as_str(),
-            &project.definition.slug,
+            project.plan.id.as_str(),
+            &project.plan.slug,
             work_status_is_terminal(&status),
             wave.name(),
             &format!("Project {}", project.id),
             &format!(
                 "lf project abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                project.definition.slug
+                project.plan.slug
             ),
         )?
         else {
@@ -1204,7 +1204,7 @@ async fn snapshot_projects(
         })?;
         let index = project_index(&details, project_slug, project_slug)?;
         let runtime_task = tasks.iter().find(|task| {
-            task.directive.id.as_str() == item.id || task.directive.identifier == item.identifier
+            task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
         details[index]
             .tasks
@@ -1225,34 +1225,34 @@ async fn snapshot_projects(
             })?;
         let Some(project_index) = work_project_index(
             &details,
-            parent.definition.id.as_str(),
-            &parent.definition.slug,
+            parent.plan.id.as_str(),
+            &parent.plan.slug,
             work_status_is_terminal(&status),
             wave.name(),
             &format!("Task {}", runtime_task.id),
             &format!(
                 "lf task abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                runtime_task.directive.identifier
+                runtime_task.plan.identifier
             ),
         )?
         else {
             continue;
         };
         if details[project_index].tasks.iter().any(|detail| {
-            detail.task.id == runtime_task.directive.id.as_str()
-                || detail.task.identifier == runtime_task.directive.identifier
+            detail.task.id == runtime_task.plan.id.as_str()
+                || detail.task.identifier == runtime_task.plan.identifier
         }) {
             continue;
         }
         let item = PmItem {
-            id: runtime_task.directive.id.as_str().to_string(),
-            identifier: runtime_task.directive.identifier.clone(),
+            id: runtime_task.plan.id.as_str().to_string(),
+            identifier: runtime_task.plan.identifier.clone(),
             url: None,
-            name: runtime_task.directive.title.clone(),
-            description: runtime_task.directive.description.clone(),
+            name: runtime_task.plan.title.clone(),
+            description: runtime_task.plan.description.clone(),
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
-            project: Some(parent.definition.slug.clone()),
+            project: Some(parent.plan.slug.clone()),
             assignee: None,
         };
         details[project_index].tasks.push(
@@ -1353,11 +1353,11 @@ async fn snapshot_task_detail(
     let completion_refusal = match task {
         Some(task) => crate::ops::task::task_completion_gate(store, task)
             .await?
-            .refusal(&task.directive.identifier),
+            .refusal(&task.plan.identifier),
         None => None,
     };
     let resume_refusal = task.and_then(|task| {
-        crate::ops::task::no_active_pr_resume_refusal(&task.directive.identifier, active, latest)
+        crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
     });
     let (action_evidence, user_feedback) = match task {
         Some(task) => {

@@ -14,7 +14,7 @@ use crate::engine::process::{
 };
 use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
-use crate::planning::{LinearProjectId, ProjectDefinition};
+use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::project::{Project, ProjectId};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::task::Task;
@@ -124,7 +124,7 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
         if directive.is_some() {
             return Err(project_error(format!(
                 "Project {} already exists; use `lf project steer {} <new-direction>`",
-                existing.definition.slug, existing.definition.slug,
+                existing.plan.slug, existing.plan.slug,
             )));
         }
         Ok(Some((existing, status)))
@@ -205,7 +205,7 @@ pub(crate) fn reserve_project(
                 .as_ref()
                 .map(|project| project.id.clone())
                 .unwrap_or_else(ProjectId::new),
-            definition: ProjectDefinition {
+            plan: ProjectPlan {
                 id: LinearProjectId::new(resolved.project.id.clone())
                     .map_err(|error| project_error(error.to_string()))?,
                 slug: resolved.project.slug,
@@ -237,7 +237,7 @@ pub(crate) fn reserve_project(
         };
         if let Err(error) = reserved {
             if let Some(existing) = store
-                .get_project_by_project(project.definition.id.as_str())
+                .get_project_by_project(project.plan.id.as_str())
                 .await
                 .map_err(|read_error| project_error(read_error.to_string()))?
             {
@@ -363,7 +363,7 @@ pub(crate) async fn launch_project_process(
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
     let tmux_name = format!(
         "lf-project-{}-{}-{}",
-        tmux_session_slug(&project.definition.slug),
+        tmux_session_slug(&project.plan.slug),
         &project.id.as_str()[3..11],
         &run.id.as_str()[4..12]
     );
@@ -405,7 +405,7 @@ async fn wait_until_project_running(
             WorkStatus::Done | WorkStatus::Abandoned => {
                 return Err(project_error(format!(
                     "Project {} ended during startup",
-                    project.definition.slug
+                    project.plan.slug
                 )))
             }
             WorkStatus::Ready | WorkStatus::Waiting { .. } => {}
@@ -413,7 +413,7 @@ async fn wait_until_project_running(
         if tokio::time::Instant::now() >= deadline {
             return Err(project_error(format!(
                 "Project {} did not become running within 10s",
-                project.definition.slug
+                project.plan.slug
             )));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -527,9 +527,9 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
-            external_project_id: project.definition.id.as_str().to_string(),
-            project_slug: project.definition.slug,
-            project_name: project.definition.name,
+            external_project_id: project.plan.id.as_str().to_string(),
+            project_slug: project.plan.slug,
+            project_name: project.plan.name,
             wave: wave.name().to_string(),
             status,
             iteration: project.iteration,
@@ -567,7 +567,7 @@ fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectContr
         }
         Ok(ProjectControlResult {
             id: project.id.to_string(),
-            external_project_id: project.definition.id.as_str().to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
             receipt: super::child::WorkControlReceipt::Steer { receipt },
         })
     })
@@ -602,7 +602,7 @@ pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectControlResult {
             id: project.id.to_string(),
-            external_project_id: project.definition.id.as_str().to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
             receipt: super::child::WorkControlReceipt::Interrupt { receipt },
         })
     })
@@ -621,7 +621,7 @@ pub fn project_resume(
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
         reconcile_project_liveness(&store, &mut project).await?;
-        let external_project_id = project.definition.id.as_str().to_string();
+        let external_project_id = project.plan.id.as_str().to_string();
         let id = project.id.to_string();
         let run = super::child::resume_child(
             &store,
@@ -662,7 +662,7 @@ pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectContro
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectControlResult {
             id: project.id.to_string(),
-            external_project_id: project.definition.id.as_str().to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
             receipt: super::child::WorkControlReceipt::Abandon { receipt },
         })
     })
@@ -705,8 +705,8 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
     if !matches!(status, WorkStatus::Running { .. }) {
         return Err(project_error(format!(
             "Project {} is not running; run `lf project resume {}` first",
-            project.definition.slug,
-            project.definition.id.as_str()
+            project.plan.slug,
+            project.plan.id.as_str()
         )));
     }
     let launch = block_on_project(async {
@@ -1018,7 +1018,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let mut project = Project {
             id: ProjectId::new(),
-            definition: ProjectDefinition {
+            plan: ProjectPlan {
                 id: LinearProjectId::new("project-no-pin").unwrap(),
                 slug: "no-pin".to_string(),
                 name: "No pin".to_string(),

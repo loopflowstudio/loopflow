@@ -2630,7 +2630,7 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, project: &Project) -> S
     let project_id = tx
         .query_row(
             "SELECT id FROM projects WHERE external_project_id=?1",
-            [project.definition.id.as_str()],
+            [project.plan.id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -2642,7 +2642,7 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, project: &Project) -> S
         params![
             project_id,
             project.wave_id.as_str(),
-            project.definition.id.as_str(),
+            project.plan.id.as_str(),
             project.created_at.unix_timestamp(),
         ],
     )?;
@@ -2676,11 +2676,11 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, project: &Project) -> S
         tx,
         &epoch_id,
         serde_json::json!({
-            "external_project_id": project.definition.id.as_str(),
-            "slug": project.definition.slug,
-            "name": project.definition.name,
-            "prompt_context": project.definition.prompt_context,
-            "pm_snapshot_synced_at": project.definition.pm_snapshot_synced_at,
+            "external_project_id": project.plan.id.as_str(),
+            "slug": project.plan.slug,
+            "name": project.plan.name,
+            "prompt_context": project.plan.prompt_context,
+            "pm_snapshot_synced_at": project.plan.pm_snapshot_synced_at,
         }),
         project.updated_at,
     )?;
@@ -2692,7 +2692,7 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, task: &Task) -> StoreResul
     let task_id = tx
         .query_row(
             "SELECT id FROM tasks WHERE external_issue_id=?1",
-            [task.directive.id.as_str()],
+            [task.plan.id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -2704,8 +2704,8 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, task: &Task) -> StoreResul
         params![
             task_id,
             project_id,
-            task.directive.id.as_str(),
-            task.directive.identifier,
+            task.plan.id.as_str(),
+            task.plan.identifier,
             task.created_at.unix_timestamp(),
         ],
     )?;
@@ -2734,11 +2734,11 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, task: &Task) -> StoreResul
         tx,
         &epoch_id,
         serde_json::json!({
-            "external_issue_id": task.directive.id.as_str(),
-            "identifier": task.directive.identifier,
-            "title": task.directive.title,
-            "description": task.directive.description,
-            "pm_snapshot_synced_at": task.directive.pm_snapshot_synced_at,
+            "external_issue_id": task.plan.id.as_str(),
+            "identifier": task.plan.identifier,
+            "title": task.plan.title,
+            "description": task.plan.description,
+            "pm_snapshot_synced_at": task.plan.pm_snapshot_synced_at,
         }),
         task.updated_at,
     )?;

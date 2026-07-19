@@ -17,7 +17,7 @@ use crate::child::{
 };
 use crate::durable::{Author, RunLease};
 use crate::id::WaveId;
-use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
+use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::project::{
     ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
@@ -313,7 +313,7 @@ impl SqliteStore {
         let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
         validate_handoff_state(
             "Task",
-            &task.directive.identifier,
+            &task.plan.identifier,
             &work_status_in(&transaction, &work)?,
             task.abandon_intent.as_ref(),
         )?;
@@ -1000,7 +1000,7 @@ impl SqliteStore {
         let work = work_for_child_in(&transaction, &ChildRef::Project(project.id.clone()))?;
         validate_handoff_state(
             "Project",
-            &project.definition.slug,
+            &project.plan.slug,
             &work_status_in(&transaction, &work)?,
             project.abandon_intent.as_ref(),
         )?;
@@ -1422,8 +1422,8 @@ fn seed_task_linear_observation(conn: &Connection, task: &Task) -> StoreResult<(
          ) VALUES (?1, '', ?2, ?3, ?4, NULL, ?4)",
         params![
             task.id.as_str(),
-            task.directive.title,
-            task.directive.description,
+            task.plan.title,
+            task.plan.description,
             now_unix(),
         ],
     )?;
@@ -1584,11 +1584,11 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(task.id.as_str().to_string()),
         Box::new(task.project_id.as_str().to_string()),
-        Box::new(task.directive.id.as_str().to_string()),
-        Box::new(task.directive.identifier.clone()),
-        Box::new(task.directive.title.clone()),
-        Box::new(task.directive.description.clone()),
-        Box::new(task.directive.pm_snapshot_synced_at),
+        Box::new(task.plan.id.as_str().to_string()),
+        Box::new(task.plan.identifier.clone()),
+        Box::new(task.plan.title.clone()),
+        Box::new(task.plan.description.clone()),
+        Box::new(task.plan.pm_snapshot_synced_at),
         Box::new(
             serde_json::to_string(&task.pm_writeback)
                 .expect("Task PM writeback state must serialize"),
@@ -1898,7 +1898,7 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     };
     Ok(Task {
         id: TaskId::from_raw(row.get::<_, String>(0)?),
-        directive: TaskDirective {
+        plan: TaskPlan {
             id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
             identifier: row.get(2)?,
             title: row.get(3)?,
@@ -2128,11 +2128,11 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(project.id.as_str().to_string()),
         Box::new(project.wave_id.clone()),
-        Box::new(project.definition.id.as_str().to_string()),
-        Box::new(project.definition.slug.clone()),
-        Box::new(project.definition.name.clone()),
-        Box::new(project.definition.prompt_context.clone()),
-        Box::new(project.definition.pm_snapshot_synced_at),
+        Box::new(project.plan.id.as_str().to_string()),
+        Box::new(project.plan.slug.clone()),
+        Box::new(project.plan.name.clone()),
+        Box::new(project.plan.prompt_context.clone()),
+        Box::new(project.plan.pm_snapshot_synced_at),
         Box::new(i64::from(project.iteration)),
         Box::new(project.observation_cursor),
         Box::new(project.last_state_fingerprint.clone()),
@@ -2186,7 +2186,7 @@ fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     };
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
-        definition: ProjectDefinition {
+        plan: ProjectPlan {
             id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
             slug: row.get(2)?,
             name: row.get(3)?,

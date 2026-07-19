@@ -41,7 +41,7 @@ validated_string_id!(LinearIssueId, "Linear issue id");
 validated_string_id!(LinearProjectId, "Linear project id");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectDefinition {
+pub struct ProjectPlan {
     pub id: LinearProjectId,
     pub slug: String,
     pub name: String,
@@ -51,7 +51,7 @@ pub struct ProjectDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskDirective {
+pub struct TaskPlan {
     pub id: LinearIssueId,
     pub identifier: String,
     pub title: String,

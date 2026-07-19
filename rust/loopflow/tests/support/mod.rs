@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
+use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectId};
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
 use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
@@ -261,7 +261,7 @@ fn register_task_with_process(
     );
     let project = Project {
         id: ProjectId::new(),
-        definition: ProjectDefinition {
+        plan: ProjectPlan {
             id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
             slug: "task-pr-tests".to_string(),
             name: "Task PR tests".to_string(),
@@ -281,7 +281,7 @@ fn register_task_with_process(
     };
     let task = Task {
         id: TaskId::new(),
-        directive: TaskDirective {
+        plan: TaskPlan {
             id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
             identifier: "INF-123".to_string(),
             title: "Prove Task PR transitions".to_string(),

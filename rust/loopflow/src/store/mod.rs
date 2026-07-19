@@ -961,7 +961,7 @@ mod tests {
         RunAdvance, SendState, StopCause, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
     use crate::project::{Project, ProjectId};
     use crate::task::{
@@ -1139,7 +1139,7 @@ mod tests {
         let id = TaskId::new();
         Task {
             id: id.clone(),
-            directive: TaskDirective {
+            plan: TaskPlan {
                 id: LinearIssueId::new("issue-uuid").unwrap(),
                 identifier: "INF-123".to_string(),
                 title: "Add hello world".to_string(),
@@ -1195,7 +1195,7 @@ mod tests {
             .expect("current unix time");
         Project {
             id: ProjectId::new(),
-            definition: ProjectDefinition {
+            plan: ProjectPlan {
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
@@ -1991,14 +1991,14 @@ mod tests {
             .await
             .unwrap();
 
-        project.definition.prompt_context = "Definition:\nCurrent proof".to_string();
-        project.definition.pm_snapshot_synced_at += 1;
+        project.plan.prompt_context = "Definition:\nCurrent proof".to_string();
+        project.plan.pm_snapshot_synced_at += 1;
         store.update_project(&project).await.unwrap();
 
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(stored_project.definition, project.definition);
-        assert_eq!(stored_task.directive, task.directive);
+        assert_eq!(stored_project.plan, project.plan);
+        assert_eq!(stored_task.plan, task.plan);
         assert_eq!(stored_task.project_id, stored_project.id);
     }
 
@@ -2029,7 +2029,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .directive
+                .plan
                 .identifier,
             "PRD-8"
         );
@@ -2039,8 +2039,8 @@ mod tests {
             .unwrap());
 
         let mut running = make_task(&wave, &project);
-        running.directive.id = LinearIssueId::new("issue-running").unwrap();
-        running.directive.identifier = "W2-9".to_string();
+        running.plan.id = LinearIssueId::new("issue-running").unwrap();
+        running.plan.identifier = "W2-9".to_string();
         running.worktree = PathBuf::from("/repo.running");
         store
             .create_task(&running, &make_task_pr(&running))
@@ -2297,8 +2297,8 @@ mod tests {
         store.update_task_pr(&parent).await.unwrap();
 
         let mut child = make_task(&wave, &project);
-        child.directive.id = LinearIssueId::new("issue-child").unwrap();
-        child.directive.identifier = "INF-124".to_string();
+        child.plan.id = LinearIssueId::new("issue-child").unwrap();
+        child.plan.identifier = "INF-124".to_string();
         child.worktree = PathBuf::from("/repo.child-task");
         let now = OffsetDateTime::now_utc();
         let child_pr = TaskPr {

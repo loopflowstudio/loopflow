@@ -19,7 +19,7 @@ use crate::harness::{
     classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
     RecoveryDecision,
 };
-use crate::planning::ProjectDefinition;
+use crate::planning::ProjectPlan;
 use crate::project::Project;
 use crate::provider_account::recovery::{
     capability_key, plan_run_route_recovery, settle_route_recovery, stop_launch_for_recovery,
@@ -286,7 +286,7 @@ async fn run_task_with(
     });
     println!(
         "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
-        task.directive.identifier
+        task.plan.identifier
     );
     let mut command_poll = tokio::time::interval(Duration::from_millis(200));
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1003,7 +1003,7 @@ async fn prepare_task_flow_step(
                 task.id
             )
         }
-        _ => task_seed(task, &project.definition, &pr, wave_name, &boundary),
+        _ => task_seed(task, &project.plan, &pr, wave_name, &boundary),
     };
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
@@ -1332,7 +1332,7 @@ async fn handle_attachment(
             .await?;
         println!(
             "{}  {:?}",
-            task.directive.identifier,
+            task.plan.identifier,
             store.work_status(&work).await?
         );
         return Ok(());
@@ -1863,7 +1863,7 @@ fn ci_fix_seed(task: &Task, pr: &crate::task::TaskPr, wake: &CiFixWake, wave_nam
          PR #{number}: {url}\nBranch: {branch}\nHead commit: {head}\nFailing required checks:\n{failing}\n\n\
          Wave: {wave}\nTask: {task_id}\nWorktree: {worktree}\n\n\
          Push fixes to the same branch; do not open a new PR or rotate the serial branch. When the push lands, the Task returns to waiting on the new head.",
-        identifier = task.directive.identifier,
+        identifier = task.plan.identifier,
         number = number,
         url = url,
         branch = pr.branch,
@@ -1877,7 +1877,7 @@ fn ci_fix_seed(task: &Task, pr: &crate::task::TaskPr, wake: &CiFixWake, wave_nam
 
 fn task_seed(
     task: &Task,
-    project: &ProjectDefinition,
+    project: &ProjectPlan,
     pr: &crate::task::TaskPr,
     wave_name: &str,
     boundary: &BoundarySeed,
@@ -1900,14 +1900,14 @@ fn task_seed(
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
         "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {task_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nFeedback reviewer: {reviewer}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
-        identifier = task.directive.identifier,
-        title = task.directive.title,
-        description = task.directive.description,
+        identifier = task.plan.identifier,
+        title = task.plan.title,
+        description = task.plan.description,
         project = project.name,
         project_id = project.id.as_str(),
         project_context = project.prompt_context,
         direction = boundary.render(),
-        task_snapshot_synced_at = task.directive.pm_snapshot_synced_at,
+        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
         project_snapshot_synced_at = project.pm_snapshot_synced_at,
         wave = wave_name,
         task_id = task.id,
@@ -1939,7 +1939,7 @@ fn progress_summary(text: &str) -> String {
 mod planning_tests {
     use super::task_seed;
     use crate::durable::{Basis, BoundarySeed, EpochId};
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::task::{
         Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
         TaskPrId,
@@ -1950,7 +1950,7 @@ mod planning_tests {
         let now = time::OffsetDateTime::UNIX_EPOCH;
         let task = Task {
             id: TaskId::new(),
-            directive: TaskDirective {
+            plan: TaskPlan {
                 id: LinearIssueId::new("issue-1").unwrap(),
                 identifier: "INF-123".to_string(),
                 title: "Ship it".to_string(),
@@ -1996,7 +1996,7 @@ mod planning_tests {
             created_at: now,
             updated_at: now,
         };
-        let project = ProjectDefinition {
+        let project = ProjectPlan {
             id: LinearProjectId::new("project-1").unwrap(),
             slug: "runtime".to_string(),
             name: "Current project name".to_string(),

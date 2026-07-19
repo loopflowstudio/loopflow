@@ -60,8 +60,8 @@ impl Child {
 
     fn label(&self) -> String {
         match self {
-            Self::Project(project) => format!("Project {}", project.definition.slug),
-            Self::Task(task) => format!("Task {}", task.directive.identifier),
+            Self::Project(project) => format!("Project {}", project.plan.slug),
+            Self::Task(task) => format!("Task {}", task.plan.identifier),
         }
     }
 

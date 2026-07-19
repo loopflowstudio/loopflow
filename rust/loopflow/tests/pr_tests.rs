@@ -163,8 +163,8 @@ fn task_snapshot_reads_its_current_parent_project() {
         .block_on(task.store.get_project(&task.task.project_id))
         .expect("read parent Project")
         .expect("parent Project exists");
-    project.definition.slug = "current-project".to_string();
-    project.definition.pm_snapshot_synced_at += 1;
+    project.plan.slug = "current-project".to_string();
+    project.plan.pm_snapshot_synced_at += 1;
     runtime
         .block_on(task.store.update_project(&project))
         .expect("update parent Project");
@@ -172,10 +172,10 @@ fn task_snapshot_reads_its_current_parent_project() {
     let snapshot = task_snapshot(&task.task).expect("snapshot Task");
 
     assert_eq!(snapshot.project, "current-project");
-    assert_eq!(snapshot.external_project_id, project.definition.id.as_str());
+    assert_eq!(snapshot.external_project_id, project.plan.id.as_str());
     assert_eq!(
         snapshot.pm_snapshot_synced_at,
-        task.task.directive.pm_snapshot_synced_at
+        task.task.plan.pm_snapshot_synced_at
     );
 }
 

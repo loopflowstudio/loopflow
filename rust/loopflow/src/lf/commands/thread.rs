@@ -144,8 +144,6 @@ impl Renderer {
             // A state transition is loop bookkeeping; the conversation shows
             // motion through the turns themselves.
             "state" => Vec::new(),
-            "memory" => vec![format!("memory curated: {}", ellipsize(&frame.data, 70))],
-            "memory-add" => vec![format!("memory added: {}", frame.data)],
             "turn" => {
                 let Ok(turn) = serde_json::from_str::<ChatTurn>(&frame.data) else {
                     return vec![format!(
@@ -455,11 +453,11 @@ mod tests {
 
     #[test]
     fn sse_parser_handles_crlf_comments_and_multiline_data() {
-        let out = frames(": ping\r\n\r\nevent: memory-add\r\ndata: first\r\ndata: second\r\n\r\n");
+        let out = frames(": ping\r\n\r\nevent: note\r\ndata: first\r\ndata: second\r\n\r\n");
         assert_eq!(
             out,
             vec![Frame {
-                event: "memory-add".into(),
+                event: "note".into(),
                 data: "first\nsecond".into()
             }]
         );
@@ -580,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn conversation_renders_chat_and_memory_without_backend_state() {
+    fn conversation_renders_chat_without_backend_state() {
         let mut renderer = Renderer::new();
         assert_eq!(
             renderer.lines_for(&Frame {
@@ -588,15 +586,6 @@ mod tests {
                 data: "turning".into()
             }),
             Vec::<String>::new()
-        );
-        assert_eq!(
-            renderer.lines_for(&Frame {
-                event: "memory-add".into(),
-                data: "child progress arrives as typed Work observations with full detail".into()
-            }),
-            vec![
-                "memory added: child progress arrives as typed Work observations with full detail"
-            ]
         );
         let user = turn_json("turn-1", "user", "how goes it?", "completed", "[]");
         assert_eq!(
@@ -721,13 +710,6 @@ mod tests {
         runtime
             .deliver(crate::wave::journal::MessageOp::Message, "replayed".into())
             .expect("user turn");
-        runtime
-            .append_memory(
-                "child progress arrives as typed Work observations with full useful detail",
-                vec![],
-            )
-            .unwrap();
-
         let seen: Arc<Mutex<Vec<Frame>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
         let endpoint = addr.to_string();
@@ -739,7 +721,7 @@ mod tests {
             let _ = stream_events(&endpoint, "", &mut on_frame).await;
         });
 
-        // Wait for the replay to land, then publish a live fact.
+        // Wait for the replay to land, then publish a live turn.
         for _ in 0..200 {
             if seen
                 .lock()
@@ -754,14 +736,17 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         runtime
-            .append_memory("a fact published after subscribe", vec![])
-            .unwrap();
+            .deliver(
+                crate::wave::journal::MessageOp::Message,
+                "live after subscribe".into(),
+            )
+            .expect("live user turn");
         for _ in 0..200 {
             if seen
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|f| f.event == "memory-add" && f.data.contains("after subscribe"))
+                .any(|f| f.event == "turn" && f.data.contains("live after subscribe"))
             {
                 break;
             }
@@ -785,21 +770,14 @@ mod tests {
         );
         assert_eq!(
             frames.iter().filter(|f| f.event == "turn").count(),
-            12,
-            "human subscriptions replay the recent 12 turns"
-        );
-        assert!(
-            frames.iter().any(|f| {
-                f.event == "memory-add"
-                    && f.data == "child progress arrives as typed Work observations with full useful detail"
-            }),
-            "replayed memory-add frame arrives with the full fact: {frames:?}"
+            13,
+            "human subscriptions replay 12 turns, then stream the live turn"
         );
         assert!(
             frames
                 .iter()
-                .any(|f| f.event == "memory-add" && f.data == "a fact published after subscribe"),
-            "live memory-add frame arrives: {frames:?}"
+                .any(|f| f.event == "turn" && f.data.contains("live after subscribe")),
+            "live turn arrives: {frames:?}"
         );
     }
 }

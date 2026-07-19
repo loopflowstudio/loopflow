@@ -1623,8 +1623,8 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              - design rationale → scratch/ or wave plan\n\
              - session-specific notes → nowhere (let them die)\n\n\
              How to update:\n\
-             - Through the server: `lf memory add \"<fact>\"` for one entry, `lf memory update`\n\
-             (stdin) to rewrite — never edit the file directly.\n\
+             - Edit the file through the ordinary repository workflow; no live Wave is required.\n\
+             - `update-wave` owns deliberate end-of-work curation.\n\
              - Correct or remove entries that are wrong or stale.\n\
              - Use absolute dates, not \"today\" or \"recently\".\n\
              - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\
@@ -2094,7 +2094,7 @@ mod tests {
         assert!(prompt.contains("all relevant recorded evidence"));
         assert!(prompt.contains("Treat unexpected tool, test, or user output as a"));
         assert!(prompt.contains("lf pr land"));
-        assert!(prompt.contains("lf memory add"));
+        assert!(prompt.contains("edit\n`wave/<name>/MEMORY.md`"));
         assert!(!prompt.contains("## Prompt layers"));
         assert!(!prompt.contains("## Search portfolios"));
         assert!(!prompt.contains("lf pm show"));

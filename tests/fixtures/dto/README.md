@@ -10,11 +10,6 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
-`receipt.json` is one `MemoryFact` (the `lf memory log --json` shape): a curated
-fact plus its evidence `receipts`, covering every `EvidenceKind`. Pinned in Rust
-(`memory_fact_fixture_round_trips_every_evidence_kind`) and Swift
-(`memoryFactFixturePreservesReceipts`).
-
 `launch_surface.json` pins the normalized `lf launch list|attach --json` shape: one Launch, stable Work and Wave identity, Home route, optional User/parent attention, explicit handback evidence, and a generic attach argv.
 `task_attention_states.json` pins the Rust-owned desktop attention fold for
 live advancing, live human wait, dead dirty, dead authored commits, clean

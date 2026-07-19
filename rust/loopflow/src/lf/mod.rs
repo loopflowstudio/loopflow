@@ -550,12 +550,10 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
-    /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
+    /// Read a Wave's origin MEMORY.md
     Memory {
         #[command(subcommand)]
-        cmd: Option<MemoryCommand>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
+        cmd: MemoryCommand,
     },
     /// Resolve one evidence receipt to its canonical local record
     Receipt {
@@ -768,7 +766,7 @@ fn reject_retired_op(sub: &str) -> Result<String, String> {
     Err(format!("`lf op {sub}` was removed; {hint}"))
 }
 
-/// Wave targeting shared by `lf chat` and `lf memory`: default is the
+/// Wave targeting shared by `lf chat` and `lf memory show`: default is the
 /// invoking context's wave (`LF_WAVE_ID` env, else the worktree name).
 #[derive(Args, Debug, Clone, Default)]
 pub struct WaveTargetArgs {
@@ -782,36 +780,8 @@ pub struct WaveTargetArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum MemoryCommand {
-    /// Print the wave's MEMORY.md
+    /// Print the Wave's origin MEMORY.md
     Show {
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Print memory facts added since the last update
-    Log {
-        /// Emit facts with their evidence receipts as JSON
-        #[arg(long)]
-        json: bool,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Replace MEMORY.md from stdin (written by the live server, journaled)
-    Update {
-        /// One-line summary journaled with the update (default: first line)
-        #[arg(long)]
-        summary: Option<String>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Publish one fact to the replayable memory stream
-    Add {
-        /// The fact to publish
-        fact: String,
-        /// Evidence receipt binding the fact to its raw record, written as
-        /// `kind:reference` (e.g. `chat_turn:turn-3`, `run:<run_id>`,
-        /// `pr:owner/repo#N`). Repeatable for many-to-one evidence.
-        #[arg(long = "receipt")]
-        receipts: Vec<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -2984,52 +2954,34 @@ mod tests {
     }
 
     #[test]
-    fn memory_parses_bare_show_update_and_add() {
-        let cli = Cli::try_parse_from(["lf", "memory", "--wave", "goals"]).expect("parse");
-        let Some(Commands::Memory { cmd, target }) = cli.command else {
-            panic!("expected memory command");
+    fn memory_exposes_only_explicit_show() {
+        let cli =
+            Cli::try_parse_from(["lf", "memory", "show", "--wave", "goals"]).expect("parse show");
+        let Some(Commands::Memory {
+            cmd: MemoryCommand::Show { target },
+        }) = cli.command
+        else {
+            panic!("expected memory show");
         };
-        assert!(cmd.is_none(), "bare memory is show");
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
-        let cli =
-            Cli::try_parse_from(["lf", "memory", "update", "--summary", "learned"]).expect("parse");
-        let Some(Commands::Memory {
-            cmd: Some(MemoryCommand::Update { summary, .. }),
-            ..
-        }) = cli.command
-        else {
-            panic!("expected memory update");
-        };
-        assert_eq!(summary.as_deref(), Some("learned"));
+        let mut memory = Cli::command()
+            .find_subcommand("memory")
+            .expect("memory command")
+            .clone();
+        let help = memory.render_long_help().to_string();
+        assert!(help.contains("show"), "{help}");
+        for removed in ["add", "log", "update"] {
+            assert!(
+                !help.contains(removed),
+                "removed `{removed}` remains:\n{help}"
+            );
+        }
 
-        let cli = Cli::try_parse_from([
-            "lf",
-            "memory",
-            "add",
-            "one fact",
-            "--receipt",
-            "chat_turn:turn-3",
-            "--receipt",
-            "run:run-9",
-            "--parent",
-        ])
-        .expect("parse");
-        let Some(Commands::Memory {
-            cmd:
-                Some(MemoryCommand::Add {
-                    fact,
-                    receipts,
-                    target,
-                }),
-            ..
-        }) = cli.command
-        else {
-            panic!("expected memory add");
-        };
-        assert_eq!(fact, "one fact");
-        assert_eq!(receipts, vec!["chat_turn:turn-3", "run:run-9"]);
-        assert!(target.parent);
+        assert!(Cli::try_parse_from(["lf", "memory"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "memory", "add", "fact"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "memory", "log"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "memory", "update"]).is_err());
     }
 
     #[test]

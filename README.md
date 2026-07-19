@@ -62,9 +62,12 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf start designer                           # serve it from this Home's one keeper
 lf chat --steer "ship the button audit first"
-lf memory add "buttons: variants unified" --receipt chat_turn:turn-3
+lf memory show                              # read wave/designer/MEMORY.md
 lf stop designer
 ```
+
+Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
+reviewed repository file, not live server state.
 
 Delegate durable work — the same verbs whether the caller is you or the wave:
 

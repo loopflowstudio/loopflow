@@ -16,12 +16,9 @@
 //! migrated.
 //!
 //! `RunObserved`/`RunCompleted` remain readable for journals written before
-//! Project and Tasks replaced generic workers. New child lifecycle
-//! facts arrive as typed Project and Task observations. `MemoryUpdated` and
-//! `MemoryAdded` are produced by the server's memory routes (`lf memory
-//! update`/`add` — the server holds MEMORY.md's pen). `ServerStarted` is
-//! appended once per boot, after replay — restarts are forensically visible
-//! in the record.
+//! Project and Tasks replaced generic workers. New child lifecycle facts arrive
+//! as typed Project and Task observations. `ServerStarted` is appended once per
+//! boot, after replay — restarts are forensically visible in the record.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -34,7 +31,6 @@ use time::OffsetDateTime;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
-use crate::receipt::Receipt;
 use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
@@ -220,25 +216,6 @@ pub enum EventKind {
     },
     ProjectObserved {
         observation: ProjectObservation,
-    },
-    // -- memory --
-    /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
-    /// replayable add delta because the checkpoint is now the seed.
-    MemoryUpdated {
-        summary: String,
-    },
-    /// A fact published to the stream (`lf memory add`). Accumulates into the
-    /// replayable delta until the next `MemoryUpdated`.
-    MemoryAdded {
-        fact: String,
-        /// Evidence receipts binding the fact to the raw records that justify
-        /// it. `#[serde(default)]` is deliberate replayed-log evolution: a
-        /// `MemoryAdded` row written before receipts existed lacks the field,
-        /// and `read_events` stops the whole fold on the first parse error — so
-        /// an absent list must decode as empty, not truncate the journal. The
-        /// `Receipt` type itself stays default-free as a wire DTO.
-        #[serde(default)]
-        receipts: Vec<Receipt>,
     },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
@@ -550,12 +527,6 @@ impl Narrator {
                 observation.event_id,
                 ellipsize(&observation.prompt(), 70)
             )),
-            EventKind::MemoryUpdated { summary } => {
-                info(format!("memory curated: {}", ellipsize(summary, 70)))
-            }
-            EventKind::MemoryAdded { fact, .. } => {
-                info(format!("memory added: {}", ellipsize(fact, 70)))
-            }
             EventKind::ServerStarted { pid, endpoint } => {
                 info(format!("server started · pid {pid} · {endpoint}"))
             }
@@ -889,37 +860,6 @@ pub struct ThreadFold {
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
     pub open_claims: Vec<MessageId>,
-    /// Memory facts added this server life — the replayable stream a fresh
-    /// subscriber gets before going live. Rebuilt from the journal on restart.
-    pub memory_adds: Vec<String>,
-}
-
-/// One curated memory fact with its evidence receipts. Wire type for
-/// `lf memory log --json`: both fields required, no serde defaults.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MemoryFact {
-    pub fact: String,
-    pub receipts: Vec<Receipt>,
-}
-
-/// The curated facts (with receipts) live in the current replayable delta —
-/// every `MemoryAdded` since the last `MemoryUpdated` checkpoint, oldest first.
-/// This is the receipt-bearing view behind `lf memory log --json`; the plain
-/// `memory_adds` fold above drops receipts because the live stream never needed
-/// them.
-pub fn memory_facts(events: &[Event]) -> Vec<MemoryFact> {
-    let mut facts = Vec::new();
-    for event in events {
-        match &event.kind {
-            EventKind::MemoryAdded { fact, receipts } => facts.push(MemoryFact {
-                fact: fact.clone(),
-                receipts: receipts.clone(),
-            }),
-            EventKind::MemoryUpdated { .. } => facts.clear(),
-            _ => {}
-        }
-    }
-    facts
 }
 
 /// The thread-visible turn a `RunCompleted` observation materializes: the
@@ -988,7 +928,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
-    let mut memory_adds: Vec<String> = Vec::new();
 
     for event in events {
         match &event.kind {
@@ -1127,12 +1066,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             } => {
                 turns.push(run_completed_turn(event, run_id, *outcome, summary));
             }
-            EventKind::MemoryAdded { fact, .. } => {
-                memory_adds.push(fact.clone());
-            }
-            EventKind::MemoryUpdated { .. } => {
-                memory_adds.clear();
-            }
             EventKind::RunObserved { .. } | EventKind::ServerStarted { .. } => {}
         }
     }
@@ -1154,7 +1087,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         tasks,
         projects,
         open_claims,
-        memory_adds,
     }
 }
 
@@ -1191,90 +1123,6 @@ fn mark_consumed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipt::EvidenceKind;
-
-    #[test]
-    fn memory_fact_fixture_round_trips_every_evidence_kind() {
-        let fixture = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/dto/receipt.json"
-        ));
-        let fact: MemoryFact = serde_json::from_str(fixture).expect("decode receipt fixture");
-        let kinds: Vec<EvidenceKind> = fact.receipts.iter().map(|r| r.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                EvidenceKind::ChatTurn,
-                EvidenceKind::WorkerReport,
-                EvidenceKind::Trace,
-                EvidenceKind::Pm,
-                EvidenceKind::Pr,
-            ],
-        );
-        // A PR reference keeps its `@sha` and its wave differs from the others —
-        // the cross-wave case doctor detects downstream.
-        let pr = fact.receipts.last().expect("pr receipt");
-        assert_eq!(pr.reference, "loopflow/loopflow#912@abc1234");
-        assert_eq!(pr.wave, "auditability");
-
-        let reencoded = serde_json::to_string(&fact).expect("serialize");
-        let decoded: MemoryFact = serde_json::from_str(&reencoded).expect("re-decode");
-        assert_eq!(fact, decoded);
-    }
-
-    #[test]
-    fn memory_facts_keep_receipts_and_reset_at_each_checkpoint() {
-        let events = vec![
-            Event {
-                v: FORMAT_VERSION,
-                seq: 1,
-                at: OffsetDateTime::UNIX_EPOCH,
-                kind: EventKind::MemoryAdded {
-                    fact: "pre-checkpoint fact".into(),
-                    receipts: vec![Receipt::new(EvidenceKind::ChatTurn, "turn-1", "ship")],
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 2,
-                at: OffsetDateTime::UNIX_EPOCH,
-                kind: EventKind::MemoryUpdated {
-                    summary: "compiled".into(),
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 3,
-                at: OffsetDateTime::UNIX_EPOCH,
-                kind: EventKind::MemoryAdded {
-                    fact: "post-checkpoint fact".into(),
-                    receipts: vec![Receipt::new(EvidenceKind::Pr, "o/r#5", "ship")],
-                },
-            },
-        ];
-        let facts = memory_facts(&events);
-        assert_eq!(facts.len(), 1, "the checkpoint cleared the earlier delta");
-        assert_eq!(facts[0].fact, "post-checkpoint fact");
-        assert_eq!(
-            facts[0].receipts,
-            vec![Receipt::new(EvidenceKind::Pr, "o/r#5", "ship")]
-        );
-    }
-
-    /// A `MemoryAdded` row written before receipts existed decodes with an empty
-    /// list, so `read_events` never truncates an old journal at the first fact.
-    #[test]
-    fn legacy_memory_added_without_receipts_decodes_empty() {
-        let line = r#"{"v":1,"seq":4,"at":"2026-07-04T00:00:00Z","kind":{"type":"memory_added","fact":"legacy fact"}}"#;
-        let event: Event = serde_json::from_str(line).expect("decode legacy MemoryAdded");
-        match event.kind {
-            EventKind::MemoryAdded { fact, receipts } => {
-                assert_eq!(fact, "legacy fact");
-                assert!(receipts.is_empty());
-            }
-            other => panic!("expected MemoryAdded, got {other:?}"),
-        }
-    }
 
     fn open_tmp() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1375,7 +1223,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,
-            "{\"v\":2,\"seq\":1,\"at\":\"2026-07-04T00:00:00Z\",\"kind\":{\"type\":\"memory_added\",\"fact\":\"x\"}}\n",
+            "{\"v\":2,\"seq\":1,\"at\":\"2026-07-04T00:00:00Z\",\"kind\":{\"type\":\"server_started\",\"pid\":1,\"endpoint\":\"127.0.0.1:1\"}}\n",
         )
         .unwrap();
         assert!(Journal::open(&path).is_err());
@@ -1433,13 +1281,6 @@ mod tests {
             },
             EventKind::TaskObserved {
                 observation: task_observation(),
-            },
-            EventKind::MemoryUpdated {
-                summary: "learned the fold".into(),
-            },
-            EventKind::MemoryAdded {
-                fact: "learned a fact".into(),
-                receipts: Vec::new(),
             },
             EventKind::ServerStarted {
                 pid: 4242,
@@ -1622,8 +1463,8 @@ mod tests {
 
     /// A fixed event sequence renders the console a human would want to read:
     /// chat with bylines and ops, turn open/close with items and usage, the
-    /// prose gist once at INFO with the rest at DEBUG, legacy worker observations,
-    /// memory curation.
+    /// prose gist once at INFO with the rest at DEBUG, and legacy worker
+    /// observations.
     #[test]
     fn narration_demo_reads_like_a_console() {
         let mut narrator = Narrator::default();
@@ -1763,23 +1604,6 @@ mod tests {
         assert_eq!(
             n.line,
             "observed run run-8c1d completed · narration tap landed, suite green"
-        );
-
-        let n = render(EventKind::MemoryAdded {
-            fact: "workers report through the memory stream".into(),
-            receipts: Vec::new(),
-        });
-        assert_eq!(
-            n.line,
-            "memory added: workers report through the memory stream"
-        );
-
-        let n = render(EventKind::MemoryUpdated {
-            summary: "journal is the console's source of truth".into(),
-        });
-        assert_eq!(
-            n.line,
-            "memory curated: journal is the console's source of truth"
         );
 
         let n = render(EventKind::ServerStarted {

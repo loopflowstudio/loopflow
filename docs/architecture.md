@@ -74,7 +74,7 @@ interactive flow + Launch attention -> Feedback projection / Swift surface
 `lf` is the machine-wide CLI and JSON interface. `lf start` routes each Wave to
 its placed Home and asks one Home-local keeper to serve it; `lf wave <name>`
 keeps the foreground development path. Each served Wave still has its own
-listener, journal, cadence, memory, and resident body. Project and Task
+listener, journal, cadence, and resident body. Project and Task
 executors are local child processes sharing SQLite. They enter through
 `lf __work <kind> <id>`, resolve the exact ambient Run lease once, and dispatch
 to typed Project or Task domain policy. There is no central service.
@@ -85,6 +85,7 @@ Current decentralized truth is deliberately split by substrate:
 | --- | --- |
 | local SQLite | this Home's runtime, credentials, receipts, and Work state |
 | append-only journals | Wave conversation and durable run narrative |
+| repository files | Wave goals and memory |
 | Linear | shared Wave/Project/Task planning truth |
 | GitHub | branches, PRs, checks, and merges |
 | SSH | reach to another Home without a central Loopflow coordinator |
@@ -688,6 +689,14 @@ User and opens the Launch by `LaunchId`, including after Swift was closed. An
 external agent using the User API can conduct the same Feedback without becoming
 a Loopflow parent Run. A parent-routed Feedback appears only in that parent's
 control lane. Interaction and Handoff ids disappear.
+
+## Wave memory
+
+**Current.** `wave/<name>/MEMORY.md` is the one Wave memory truth. Prompt
+assembly reads applicable ancestor files directly, oldest ancestor first.
+There is no memory event stream, write endpoint, replay buffer, or export
+workflow. Agents edit the reviewed file through ordinary repository changes;
+`lf memory show` is read-only convenience and works while the Wave is stopped.
 
 ## Decentralized Home
 

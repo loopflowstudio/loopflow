@@ -218,8 +218,9 @@ hand.
 lf design: plan infrastructure hardening for the runtime
 ```
 
-Don't author `MEMORY.md` beyond a seed: it is server-owned, written by the
-wave as it works. Curate it through `lf memory add --receipt`, not the file.
+Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
+agents edit the same reviewed file through the ordinary repository workflow;
+`update-wave` owns deliberate end-of-work curation.
 
 ## Adaptation
 

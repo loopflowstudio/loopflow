@@ -51,8 +51,8 @@ struct Special {
     /// 0 or downstream error, not a resolution error. Roadmap and `pm status`
     /// behave this way.
     global_default: bool,
-    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber).
-    /// `memory add` and `chat post` drop silently instead of erroring.
+    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). `chat post`
+    /// drops silently instead of erroring.
     silent_drop: bool,
     /// Blocks (server or subscriber); needs a kill timeout.
     long_running: bool,
@@ -137,25 +137,9 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     Cmd {
-        id: "memory bare",
-        path: &["memory"],
-        base_args: &["memory"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "memory show",
         path: &["memory", "show"],
         base_args: &["memory", "show"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "memory log",
-        path: &["memory", "log"],
-        base_args: &["memory", "log"],
         wave_form: WaveForm::Target,
         kind: Kind::Read,
         special: Special::NONE,
@@ -198,29 +182,6 @@ const COMMANDS: &[Cmd] = &[
     // ── Mutations ────────────────────────────────────────────────────────
     // `chat post` uses stdin for text: its `trailing_var_arg` would swallow
     // `--wave` if text were on the command line.
-    Cmd {
-        id: "memory add",
-        path: &["memory", "add"],
-        base_args: &["memory", "add", "matrix-test-fact"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "memory update",
-        path: &["memory", "update"],
-        base_args: &["memory", "update"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            stdin: Some("replacement memory\n"),
-            ..Special::NONE
-        },
-    },
     Cmd {
         id: "chat post",
         path: &["chat"],
@@ -759,8 +720,8 @@ fn matrix_every_command_every_environment() {
 
         for cmd in reads.iter().chain(mutations.iter()) {
             // `lf project start` calls `ensure_clean_main` before wave
-            // resolution. Earlier mutations (memory add, chat post) dirty
-            // the repo; reset so project start reaches the resolver.
+            // resolution. Earlier mutations can dirty the repo; reset so
+            // project start reaches the resolver.
             if cmd.id == "project start" {
                 let _ = std::process::Command::new("git")
                     .args(["reset", "--hard", "HEAD"])

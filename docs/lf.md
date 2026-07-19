@@ -368,12 +368,8 @@ lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
 lf chat --follow -w intelligence            # watch and speak from one terminal pane
 lf chat --history --json -w intelligence    # read the saved tail while stopped
-lf memory                                   # print the wave's MEMORY.md
-lf memory add "buttons: variants unified"   # publish one replayable fact
-lf memory add "workers report via stream" --receipt chat_turn:turn-3
-lf memory log                               # print facts added since the last update
-lf memory log --json                        # facts with their evidence receipts
-lf memory update < MEMORY.md                # replace it from stdin
+lf memory show                              # print the wave's MEMORY.md
+lf memory show -w intelligence              # read a named Wave while it is stopped
 lf receipt show chat_turn:turn-3            # drill one receipt to its record
 lf receipt show pr:loopflow/loopflow#912 --json
 ```
@@ -381,7 +377,7 @@ lf receipt show pr:loopflow/loopflow#912 --json
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
-| `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `log --json` emits facts with their evidence receipts; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact, with repeatable `--receipt kind:reference` evidence bindings |
+| `lf memory show` | Read the selected Wave's origin `MEMORY.md` directly; no listener or provider is required |
 | `lf receipt show TOKEN` | Drill one evidence receipt (`kind:reference`) to its canonical local record — a journal turn, run-events report, trace turn, PM snapshot item, or Task PR. `--json` emits the resolved record |
 
 Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
@@ -479,13 +475,6 @@ that PR. `--wave` and `--repo owner/repo` filter the same local report.
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
-The `receipts` check sweeps every wave's memory facts for receipt health:
-missing (zero receipts), orphaned (reference resolves to no known record),
-cross-wave (receipt wave differs from the claim's wave), and inaccessible
-(the evidence source couldn't be read this run, so the receipt can't be
-judged — surfaced with the read error, never silently called orphaned).
-During the post-contract grace window all findings are warnings, not failures.
-
 ## Measuring Codebase Weight
 
 ```bash

@@ -4,7 +4,7 @@
 //! hear / check / fold / tell, vendor-free:
 //!
 //! - holds the mind's one journal pen;
-//! - serves the doors: `/messages`, `/events`, `/memory`, `/health`,
+//! - serves the doors: `/messages`, `/events`, `/health`,
 //!   and the token-gated resident door ([`server`]);
 //! - drains typed Project/Task observations ([`registry::StoreObserver`]) and
 //!   typed Project/Task observations;
@@ -690,62 +690,6 @@ mod tests {
         }
 
         assert!(runtime.thread_snapshot().is_empty(), "nothing journaled");
-    }
-
-    /// The memory routes: GET serves the origin file; POST update writes it,
-    /// and POST add publishes one replayable fact without mutating the compiled
-    /// file (covered in depth by the runtime and `lf memory` tests — this pins
-    /// the HTTP shape).
-    #[tokio::test]
-    async fn memory_routes_read_and_write_through_the_server() {
-        let (base, runtime, _tmp) = boot().await;
-        let body: serde_json::Value = reqwest::get(format!("{base}/memory"))
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(body["content"], "Goal: ship the reactive server.\n");
-
-        let client = reqwest::Client::new();
-
-        let body: serde_json::Value = client
-            .post(format!("{base}/memory"))
-            .json(&serde_json::json!({
-                "op": "update",
-                "content": "Rewritten.\n",
-                "summary": null,
-                "receipts": [],
-            }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(body["summary"], "Rewritten.");
-        assert_eq!(runtime.memory().read(), "Rewritten.\n");
-
-        // An empty add is refused; a real one echoes and leaves MEMORY.md alone.
-        let empty = client
-            .post(format!("{base}/memory"))
-            .json(&serde_json::json!({ "op": "add", "content": "  ", "summary": null, "receipts": [] }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(empty.status(), reqwest::StatusCode::BAD_REQUEST);
-
-        let body: serde_json::Value = client
-            .post(format!("{base}/memory"))
-            .json(&serde_json::json!({ "op": "add", "content": "one fact", "summary": null, "receipts": [] }))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        assert_eq!(body["summary"], "one fact");
-        assert_eq!(runtime.memory().read(), "Rewritten.\n");
     }
 
     #[tokio::test]

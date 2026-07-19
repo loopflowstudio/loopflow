@@ -36,11 +36,6 @@
 //!     is re-sent whole as it grows and finalization sends the terminal turn
 //!     under the same id — each frame replaces the client's previous state
 //!     for that id (upsert, never append-if-seen).
-//!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
-//!     curation. Live-only, no replay — MEMORY.md itself is the durable
-//!     state.
-//!   - `memory-add`: data is the full added fact. Replays on connect for the
-//!     facts since the last curation, then streams live.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
 //!     is an [`InboxFrame`] — a resident-directed message, typed Task
 //!     observation, or control op. The pending queue (journaled inputs not yet named in any `answers`) replays on
@@ -75,16 +70,6 @@
 //!   door; child sessions never write the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
-//! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
-//!   origin repo.
-//! - `GET /memory/log` → `{facts}` — add-stream facts since the last
-//!   curation, oldest first. Wave-level only.
-//! - `POST /memory {op, content, summary, receipts}` → `{summary}`. `op` is `"update"`
-//!   (full replacement) or `"add"` (publish one fact; `content` must be
-//!   non-empty). `summary` is explicitly Optional — null falls back to the
-//!   content's first non-empty line. The server is the sole writer of the
-//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`;
-//!   add-only facts journal `MemoryAdded` and broadcast `memory-add`.
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
@@ -107,7 +92,6 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
-use crate::receipt::Receipt;
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, StoreObserver};
@@ -275,44 +259,6 @@ struct EventsQuery {
 
 pub(crate) const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
 
-/// `GET /memory` response.
-#[derive(Debug, Serialize)]
-struct MemoryBody {
-    content: String,
-}
-
-/// `GET /memory/log` response.
-#[derive(Debug, Serialize)]
-struct MemoryLogBody {
-    facts: Vec<String>,
-}
-
-/// `POST /memory` op — full replacement or one published fact.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum MemoryOp {
-    Update,
-    Add,
-}
-
-/// `POST /memory` request body. `summary` is explicitly Optional — null falls
-/// back to the content's first non-empty line. `receipts` are the parsed
-/// evidence bindings for an `add`; the client stamps each with its wave and
-/// always sends the list (empty for `update`), so no serde default is needed.
-#[derive(Debug, Deserialize)]
-struct PostMemory {
-    op: MemoryOp,
-    content: String,
-    summary: Option<String>,
-    receipts: Vec<Receipt>,
-}
-
-/// `POST /memory` response: the summary that was journaled.
-#[derive(Debug, Serialize)]
-struct PostMemoryResponse {
-    summary: String,
-}
-
 /// `POST /messages` response. `turn` is the appended user turn; null for a
 /// bare interrupt, which appends nothing. `state` is the loop-state name at
 /// acceptance time.
@@ -366,8 +312,6 @@ pub fn router(
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/observations", post(observations_handler))
-        .route("/memory", get(memory_handler).post(memory_write_handler))
-        .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
@@ -543,66 +487,14 @@ async fn messages_handler(
     }))
 }
 
-async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {
-    Json(MemoryBody {
-        content: state.runtime.memory().read(),
-    })
-}
-
-async fn memory_log_handler(State(state): State<ServerState>) -> Json<MemoryLogBody> {
-    Json(MemoryLogBody {
-        facts: state.runtime.memory_adds(),
-    })
-}
-
-async fn memory_write_handler(
-    State(state): State<ServerState>,
-    Json(body): Json<PostMemory>,
-) -> Result<Json<PostMemoryResponse>, (StatusCode, String)> {
-    let summary = body
-        .summary
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| first_line(&body.content))
-        .unwrap_or_else(|| "memory cleared".to_string());
-    let result = match body.op {
-        MemoryOp::Update => state.runtime.update_memory(&body.content, &summary),
-        MemoryOp::Add => {
-            let fact = body.content.trim();
-            if fact.is_empty() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "content is required for the add op".to_string(),
-                ));
-            }
-            state.runtime.append_memory(fact, body.receipts.clone())
-        }
-    };
-    match result {
-        Ok(()) => Ok(Json(PostMemoryResponse { summary })),
-        Err(err) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("memory write failed: {err}"),
-        )),
-    }
-}
-
-fn first_line(content: &str) -> Option<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(str::to_string)
-}
-
 /// The served mind's thread as SSE: the loop state, the thread on connect
 /// (open turn included, status `running`), then live frames — `state` on every
 /// transition; `turn` (whole turn, replace-by-id) when a turn opens or
 /// finalizes, with `turn-delta` (one increment, absorb-by-id) for in-turn
 /// growth so a per-token turn does not re-serialize whole each frame; `resync`
 /// when the turn broadcast lagged (the client reconnects for a fresh atomic
-/// snapshot); `memory` on every curation (live-only; the file is the durable
-/// state); and `memory-add` for replayable facts. Snapshot and subscription are
-/// atomic in the runtime (broadcasts share the append lock), so no live frame is
+/// snapshot). Snapshot and subscription are atomic in the runtime (broadcasts
+/// share the append lock), so no live frame is
 /// ever older than the replayed snapshot, and the client's delta reconstruction
 /// picks up exactly where the snapshot's open turn left off.
 ///
@@ -647,11 +539,6 @@ async fn events_handler(
         std::iter::once(Ok(state_event(&sub.state)))
             .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
             .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
-            .chain(
-                sub.memory_adds
-                    .into_iter()
-                    .map(|fact| Ok(memory_add_event(&fact))),
-            )
             .chain(inbox_replay),
     );
     // Whole turns ride `turn` frames, in-turn growth rides `turn-delta` frames,
@@ -662,16 +549,9 @@ async fn events_handler(
     // Lagged: fine — the next transition carries the current state.
     let live_states = live_stream(sub.state_rx, |s| state_event(&s));
     let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
-    // Lagged: reconnect gets a fresh add snapshot.
-    let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
-    // Lagged: fine — MEMORY.md itself is the durable state.
-    let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
     let mut live: BoxedEventStream = Box::pin(stream::select(
         live_turns,
-        stream::select(
-            stream::select(live_states, live_playhead),
-            stream::select(live_memory, live_memory_adds),
-        ),
+        stream::select(live_states, live_playhead),
     ));
     if include_inbox {
         // Lagged: the pending fold is the durable queue; a resident that
@@ -775,14 +655,6 @@ fn playhead_event(playhead: &PlayheadView) -> Event {
 
 fn state_event(state: &LoopState) -> Event {
     Event::default().event("state").data(state.name())
-}
-
-fn memory_event(summary: &str) -> Event {
-    Event::default().event("memory").data(summary)
-}
-
-fn memory_add_event(fact: &str) -> Event {
-    Event::default().event("memory-add").data(fact)
 }
 
 fn inbox_event(frame: &InboxFrame) -> Event {

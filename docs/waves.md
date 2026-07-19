@@ -10,7 +10,7 @@ Two files author a wave, both living in your repo and reviewed like code:
 | File | Holds |
 |------|-------|
 | **`wave/<name>/GOAL.md`** | The wave's intent and loop prompt — what it's for, how it judges progress |
-| **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — written by the wave agent |
+| **`wave/<name>/MEMORY.md`** | What the wave remembers between loops — curated through reviewed file edits |
 
 Waves live in **Loopflow** (macOS): open the repository, select the wave, and
 start it beside its conversation and work map. The same controls exist from
@@ -86,18 +86,21 @@ craft — is covered in [Authoring → Goals](authoring.md#goals).
 
 ### Memory
 
-`MEMORY.md` is durable working context the wave agent writes as it goes —
-decisions, dead ends, what a downstream task should know. Workers inherit it
-read-only; only the wave agent writes it, through the server:
+`MEMORY.md` is durable working context agents curate as Wave work moves —
+decisions, dead ends, what a downstream task should know. It is an ordinary
+reviewed repository file:
 
 ```bash
 lf memory show -w shipper
-lf memory add "buttons: variants unified" --receipt chat_turn:turn-3
+$EDITOR wave/shipper/MEMORY.md
 ```
 
-Never edit the file directly; it is server-owned. When a task ships, its
-context folds forward into memory and the remaining Linear tasks — fold, don't
-drop.
+`lf memory show` is read-only convenience and does not require a running Wave.
+Edit the file directly when the active work calls for it. `update-wave` owns
+deliberate end-of-work curation: merge durable context into the existing
+structure, correct stale entries, and drop session detail. When a task ships,
+its context folds forward into memory and the remaining Linear tasks — fold,
+don't drop.
 
 ### Home
 

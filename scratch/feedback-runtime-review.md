@@ -41,3 +41,22 @@ migration tests, 7 Wave journal tests, and 3 Wave resolution-matrix tests pass;
 Swift contract tests and `cargo check -p loopflow` passed during implementation;
 `cargo fmt --check` passes. The first migration proof caught and corrected a
 missing registration and a current probe that still queried the dropped table.
+
+## Slice 3 — file-only memory
+
+Accepted. `wave/<name>/MEMORY.md` is the only memory truth. Prompt assembly
+reads applicable ancestor files oldest-first. The journal has no memory event,
+the runtime has no memory state or broadcast, the listener has no memory route
+or SSE frame, Swift has no memory stream state, and `lf memory` exposes exactly
+the required `show` subcommand. The read path does not require a server.
+
+The export-memory builtin and all add/log/update, evidence, Doctor, cron,
+golden, and server-owned-curation guidance are deleted. Historical migrations
+remain historical; generic mutation result types named `*Receipt` are not part
+of this slice.
+
+Proof: journal 12/12, runtime 24/24, Wave context 17/17, thread 9/9, CLI memory
+3/3, parser 1/1, Doctor 15/15, resolution matrix 3/3, builtins 9/9, prompt
+81/81, cron 7/7, golden parity 1/1, Swift Wave chat 24/24, and Swift DTO fixture
+7/7 pass. Exact current-source searches are empty; `cargo fmt --check` and
+all-target Clippy with warnings denied pass.

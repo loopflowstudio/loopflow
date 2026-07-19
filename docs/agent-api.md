@@ -100,19 +100,19 @@ worktree.
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.
 
-## Remember, with receipts
+## Memory and evidence
 
 ```bash
-lf memory add "workers report via stream" --receipt chat_turn:turn-3
+lf memory show -w infrastructure
 lf receipt show chat_turn:turn-3 --json
 lf receipt show pr:acme/app#42 --json
 ```
 
-`lf memory add` records a durable wave learning bound to evidence. A receipt
-token (`kind:reference` — `chat_turn:`, `run:`, `pr:`, …) resolves to the
-canonical local record, so a claim in memory can always be drilled to what
-actually happened. `wave/<name>/MEMORY.md` is server-owned; agents write
-through the API, never the file.
+`wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
+the ordinary repository workflow; `lf memory show` is a read-only convenience
+that also works while the Wave is stopped. Keep evidence in its canonical
+record. A receipt token (`kind:reference` — `chat_turn:`, `run:`, `pr:`, …)
+drills into that record without creating a second memory store.
 
 ## Ship
 

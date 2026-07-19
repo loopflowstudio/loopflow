@@ -315,9 +315,6 @@ public final class WaveChatConnection {
     public private(set) var loopState: WaveLoopState = .idle
     /// Durable invocation stack, current step, local queue, and return point.
     public private(set) var playhead: PlayheadView?
-    /// Last `memory` frame's summary — the wave's most recent MEMORY.md
-    /// curation. Live-only (no replay); exposed for the UI to adopt later.
-    public private(set) var memorySummary: String?
     private var currentEndpoint: String?
     private var loop: Task<Void, Never>?
     private let session: URLSession
@@ -477,10 +474,9 @@ public final class WaveChatConnection {
     /// `turn-delta` carries one in-turn increment absorbed into the matching
     /// turn (so a per-token turn does not re-send whole each frame); `resync`
     /// (handled in `stream`, not here) means the turn stream lagged and the
-    /// connection reconnects; `memory` carries a MEMORY.md curation summary
-    /// (live-only, parsed and exposed, no UI yet). Unknown events drop. A turn
-    /// payload that fails to decode is a hole in the transcript: logged always,
-    /// asserted in debug — never silent. Internal for tests.
+    /// connection reconnects. Unknown events drop. A turn payload that fails
+    /// to decode is a hole in the transcript: logged always, asserted in debug
+    /// — never silent. Internal for tests.
     func handle(event: String, data: String) {
         if event == "state" {
             guard let state = WaveLoopState(rawValue: data) else { return }
@@ -491,10 +487,6 @@ public final class WaveChatConnection {
             guard let json = data.data(using: .utf8),
                   let snapshot = try? decoder.decode(PlayheadView.self, from: json) else { return }
             playhead = snapshot
-            return
-        }
-        if event == "memory" {
-            memorySummary = data
             return
         }
         if event == "turn-delta" {

@@ -141,9 +141,10 @@ borrow the origin's short-lived credential lease.
 Answer a human message in your turn text. Tasks, Projects, and Waves communicate
 through typed Work observations and explicit Feedback points.
 
-`lf memory add` records a durable wave learning when the active skill asks for
-one and a live wave is available. A stopped server must not block the assigned
-work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
+When the active skill calls for a durable Wave learning, edit
+`wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it
+curated rather than appending a transcript. `update-wave` owns deliberate
+end-of-work memory curation; no live Wave is required.
 
 `lf chat` is the User surface. Work Steer is the live correction path.
 
@@ -207,8 +208,8 @@ What belongs elsewhere:
 - session-specific notes → nowhere (let them die)
 
 How to update:
-- Through the server: `lf memory add "<fact>"` for one entry, `lf memory update`
-(stdin) to rewrite — never edit the file directly.
+- Edit the file through the ordinary repository workflow; no live Wave is required.
+- `update-wave` owns deliberate end-of-work curation.
 - Correct or remove entries that are wrong or stale.
 - Use absolute dates, not "today" or "recently".
 - When a section grows large, promote stable entries to wave docs or explicit docs and trim.

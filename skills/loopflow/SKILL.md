@@ -119,12 +119,13 @@ one:
 
 ```bash
 lf radio pub --channel <channel> "landed PR #91, tests green"
-lf memory add "<durable learning>" --receipt pr:owner/repo#42
 ```
 
-Outside any wave, a publish prints a drop note and exits 0, so these verbs
-are safe in every prompt. `wave/<name>/MEMORY.md` is server-owned — write
-through `lf memory add`, never the file.
+Outside any wave, a publish prints a drop note and exits 0. When the active
+skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md` through
+the ordinary repository workflow. Keep it curated rather than appending a
+transcript. `update-wave` owns deliberate end-of-work memory curation; no live
+Wave is required.
 
 ## Where To Write
 

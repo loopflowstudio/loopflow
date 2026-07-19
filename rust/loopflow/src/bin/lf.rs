@@ -1446,9 +1446,7 @@ fn main() -> anyhow::Result<()> {
                 unreachable!("install dispatches before home routing")
             }
             Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
-            Some(Commands::Memory { cmd, target }) => {
-                loopflow::lf::commands::memory::run(cmd.as_ref(), target)
-            }
+            Some(Commands::Memory { cmd }) => loopflow::lf::commands::memory::run(cmd),
             Some(Commands::Receipt { cmd }) => match cmd {
                 loopflow::lf::ReceiptCommand::Show { token, wave, json } => {
                     loopflow::lf::commands::receipt::run(token, wave.as_deref(), *json)

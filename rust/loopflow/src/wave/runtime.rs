@@ -33,7 +33,6 @@ use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::project::ProjectObservation;
-use crate::receipt::Receipt;
 use crate::task::TaskObservation;
 #[cfg(test)]
 use crate::wave::journal::JournalAppendStage;
@@ -42,7 +41,6 @@ use crate::wave::journal::{
     task_observation_message, EventKind, Journal, JournalAppendError, MessageId, MessageOp,
     PendingMessage, Usage,
 };
-use crate::wave::memory::Memory;
 use crate::wave::playhead::{
     now_rfc3339, BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation,
     StepOutcome,
@@ -62,10 +60,6 @@ const STATE_BROADCAST_CAPACITY: usize = 64;
 /// Capacity of playhead snapshots. Every cursor mutation is durable; a lagged
 /// client reconnects and receives the current snapshot before live frames.
 const PLAYHEAD_BROADCAST_CAPACITY: usize = 64;
-
-/// Capacity of the live memory broadcast. Curation is deliberate and rare;
-/// a lagged subscriber reads MEMORY.md itself.
-const MEMORY_BROADCAST_CAPACITY: usize = 64;
 
 /// Capacity of the live inbox broadcast (resident-directed ops → the
 /// `/events?inbox=true` frames and the supervisor). The journal is the
@@ -142,7 +136,7 @@ impl TurnBroadcast {
 /// (`inbox` SSE frames) and the supervisor.
 #[derive(Debug, Clone)]
 pub enum InboxItem {
-    /// A journaled user message (`message`, `steer`, `say`, or `interrupt`
+    /// A journaled user message (`message`, `steer`, or `interrupt`
     /// carrying text — "interrupt & send"), awaiting consumption (named in a
     /// `TurnStarted.answers` or `TurnSteered.answers`).
     Message(PendingMessage),
@@ -173,13 +167,6 @@ pub struct Subscription {
     pub state_rx: broadcast::Receiver<LoopState>,
     pub playhead: Option<PlayheadView>,
     pub playhead_rx: broadcast::Receiver<PlayheadView>,
-    /// Live `MemoryUpdated` summaries — fired on every curation, no replay
-    /// (the file itself is the durable state).
-    pub memory_rx: broadcast::Receiver<String>,
-    /// Memory facts added this server life, replayed on
-    /// subscribe before the live stream continues.
-    pub memory_adds: Vec<String>,
-    pub memory_add_rx: broadcast::Receiver<String>,
     /// The pending queue as of the snapshot: journaled user messages not yet
     /// named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
@@ -234,9 +221,6 @@ struct Inner {
     messages: HashMap<MessageId, PendingMessage>,
     tasks: HashMap<MessageId, TaskObservation>,
     projects: HashMap<MessageId, ProjectObservation>,
-    /// Memory facts added since the last externalization. The compiled
-    /// checkpoint lives in MEMORY.md; this is the replayable delta after it.
-    memory_adds: Vec<String>,
 }
 
 /// The whole live state of one running wave server.
@@ -257,12 +241,6 @@ pub struct WaveRuntime {
     state_tx: broadcast::Sender<LoopState>,
     /// Fans the complete playhead view after every journaled transition.
     playhead_tx: broadcast::Sender<PlayheadView>,
-    /// Fans `MemoryUpdated` summaries out to live SSE subscribers.
-    memory_tx: broadcast::Sender<String>,
-    /// Fans `MemoryAdded` facts out to live SSE subscribers.
-    memory_add_tx: broadcast::Sender<String>,
-    /// Durable shared brain (read-only here; the loop curates it deliberately).
-    memory: Memory,
     /// Fans resident-directed ops out to the resident's `/events?inbox=true`
     /// subscription and the supervisor. Liveness only — the journal's pending
     /// fold is the durable queue.
@@ -353,10 +331,7 @@ impl WaveRuntime {
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
         let (playhead_tx, _) = broadcast::channel(PLAYHEAD_BROADCAST_CAPACITY);
-        let (memory_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
-        let (memory_add_tx, _) = broadcast::channel(MEMORY_BROADCAST_CAPACITY);
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
-        let memory = Memory::for_wave(&repo_root, &name);
         Ok(Arc::new(Self {
             name,
             repo_root,
@@ -372,14 +347,10 @@ impl WaveRuntime {
                 messages: fold.messages,
                 tasks: fold.tasks,
                 projects: fold.projects,
-                memory_adds: fold.memory_adds,
             }),
             turn_tx,
             state_tx,
             playhead_tx,
-            memory_tx,
-            memory_add_tx,
-            memory,
             inbox_tx,
             resident_expected: AtomicBool::new(false),
         }))
@@ -402,10 +373,6 @@ impl WaveRuntime {
         read_wave_config(&self.repo_root, &self.name)
             .and_then(|config| config.paused)
             .unwrap_or(false)
-    }
-
-    pub fn memory(&self) -> &Memory {
-        &self.memory
     }
 
     fn inner(&self) -> MutexGuard<'_, Inner> {
@@ -642,51 +609,6 @@ impl WaveRuntime {
         self.resident_expected.store(true, Ordering::Relaxed);
     }
 
-    // -- Memory (the server holds MEMORY.md's pen) --
-    //
-    // `update` writes the compiled ORIGIN repo's wave/<name>/MEMORY.md; `add`
-    // publishes a raw fact to the replayable delta. Both journal under the
-    // same lock as every other append, so the file checkpoint and the stream
-    // fold agree.
-
-    /// Replace MEMORY.md wholesale and journal `MemoryUpdated {summary}`.
-    ///
-    /// # Errors
-    /// File I/O only; the journal append is best-effort like every append.
-    pub fn update_memory(&self, content: &str, summary: &str) -> std::io::Result<()> {
-        let mut inner = self.inner();
-        self.memory.write(content)?;
-        inner.journal.append(|_| EventKind::MemoryUpdated {
-            summary: summary.to_string(),
-        });
-        inner.memory_adds.clear();
-        // A send error just means no live subscribers.
-        let _ = self.memory_tx.send(summary.to_string());
-        Ok(())
-    }
-
-    /// Publish one fact and its evidence receipts to the replayable memory
-    /// stream and journal `MemoryAdded`. The live string stream carries only the
-    /// prose (receipts ride the journal for the `--json` view).
-    ///
-    /// # Errors
-    /// Journal I/O only.
-    pub fn append_memory(&self, fact: &str, receipts: Vec<Receipt>) -> std::io::Result<()> {
-        let mut inner = self.inner();
-        inner.journal.append(|_| EventKind::MemoryAdded {
-            fact: fact.to_string(),
-            receipts,
-        });
-        inner.memory_adds.push(fact.to_string());
-        let _ = self.memory_add_tx.send(fact.to_string());
-        Ok(())
-    }
-
-    /// Facts added since the last externalization, oldest to newest.
-    pub fn memory_adds(&self) -> Vec<String> {
-        self.inner().memory_adds.clone()
-    }
-
     /// Journal this boot's `ServerStarted` — once, after replay, when the
     /// listener is bound. Folds ignore it; the record gains a restart marker.
     pub fn journal_server_started(&self, pid: u32, endpoint: &str) {
@@ -712,9 +634,6 @@ impl WaveRuntime {
             state_rx: self.state_tx.subscribe(),
             playhead: inner.playhead.as_ref().map(Playhead::view),
             playhead_rx: self.playhead_tx.subscribe(),
-            memory_rx: self.memory_tx.subscribe(),
-            memory_adds: inner.memory_adds.clone(),
-            memory_add_rx: self.memory_add_tx.subscribe(),
             pending: inner.pending_messages.clone(),
             tasks: inner.tasks.clone(),
             projects: inner.projects.clone(),
@@ -1503,16 +1422,6 @@ mod tests {
     }
 
     #[test]
-    fn narrated_turns_no_longer_blob_memory() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        rt.append_finalized_turn(progress_turn("landed the parser"), Vec::new());
-        // The journal carries raw history; MEMORY.md stays untouched until
-        // the loop curates it deliberately.
-        assert_eq!(rt.memory().read(), "");
-    }
-
-    #[test]
     fn deliver_appends_user_turn_and_broadcasts() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
@@ -1631,81 +1540,6 @@ mod tests {
         assert_eq!(
             replayed.projects.get(&MessageId(observation.inbox_id())),
             Some(&observation)
-        );
-    }
-
-    #[test]
-    fn update_memory_writes_the_origin_file_and_add_publishes_delta() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-
-        rt.update_memory("# Ship\n\n- fold is truth\n", "fold is truth")
-            .expect("update");
-        rt.append_memory("fold is truth", vec![]).expect("append");
-        rt.append_memory("bullets append", vec![]).expect("append");
-        assert_eq!(
-            rt.memory().read(),
-            "# Ship\n\n- fold is truth\n",
-            "adds do not accrete raw facts into the compiled ORIGIN file"
-        );
-
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let summaries: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match &e.kind {
-                EventKind::MemoryUpdated { summary } => Some(summary.as_str()),
-                _ => None,
-            })
-            .collect();
-        let facts: Vec<&str> = events
-            .iter()
-            .filter_map(|e| match &e.kind {
-                EventKind::MemoryAdded { fact, .. } => Some(fact.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(summaries, vec!["fold is truth"]);
-        assert_eq!(facts, vec!["fold is truth", "bullets append"]);
-    }
-
-    #[test]
-    fn subscription_replays_full_memory_facts_in_order() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let long_fact = "workers report through typed Work observations with full useful detail";
-
-        rt.append_memory(long_fact, vec![]).expect("append");
-        rt.append_memory("second fact", vec![]).expect("append");
-
-        let sub = rt.subscribe_with_snapshot(None);
-        assert_eq!(
-            sub.memory_adds,
-            vec![long_fact.to_string(), "second fact".to_string()]
-        );
-        assert!(
-            sub.memory_add_rx.is_empty(),
-            "snapshot facts do not replay live"
-        );
-    }
-
-    #[test]
-    fn memory_add_replay_buffer_rebuilds_from_journal() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        {
-            let rt = open_runtime(tmp.path());
-            rt.append_memory("first", vec![]).expect("append");
-            rt.append_memory("second", vec![]).expect("append");
-            rt.update_memory("# Ship\n\ncompiled\n", "compiled")
-                .expect("update");
-            rt.append_memory("third", vec![]).expect("append");
-        }
-
-        let rt = open_runtime(tmp.path());
-        let sub = rt.subscribe_with_snapshot(None);
-        assert_eq!(
-            sub.memory_adds,
-            vec!["third".to_string()],
-            "the replay buffer rebuilds adds since the last externalization"
         );
     }
 

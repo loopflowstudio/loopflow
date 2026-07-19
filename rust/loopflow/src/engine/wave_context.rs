@@ -379,9 +379,7 @@ pub fn gather_wave_chat(repo_root: &Path, wave: &str) -> Option<String> {
     render_wave_chat(&turns)
 }
 
-/// The wave's prompt memory: recent stream facts layered above the compiled
-/// `MEMORY.md` base. Stream facts are newest first for prompt recency; the
-/// `lf memory log` command still prints oldest to newest.
+/// The Wave's prompt memory, read directly from applicable `MEMORY.md` files.
 pub fn gather_wave_memory(repo_root: &Path, wave: &str) -> Option<String> {
     let origin = wave_origin(repo_root);
     let chain = memory_wave_chain(wave).unwrap_or_else(|| vec![wave.to_string()]);
@@ -443,10 +441,7 @@ fn gather_memory_chain(origin: &Path, chain: &[String]) -> Option<String> {
         .iter()
         .filter_map(|wave| {
             let base = crate::wave::memory::Memory::for_wave(origin, wave).read();
-            let adds = live_memory_adds(origin, wave)
-                .or_else(|| journal_memory_adds(origin, wave))
-                .unwrap_or_default();
-            let memory = render_wave_memory(adds, &base)?;
+            let memory = render_wave_memory(&base)?;
             if chain.len() == 1 {
                 return Some(memory);
             }
@@ -490,49 +485,9 @@ fn live_turns(origin: &Path, wave: &str) -> Option<Vec<ChatTurn>> {
         .map(|payload| payload.turns)
 }
 
-fn live_memory_adds(origin: &Path, wave: &str) -> Option<Vec<String>> {
-    #[derive(Debug, Deserialize)]
-    struct MemoryLogBody {
-        facts: Vec<String>,
-    }
-
-    let addr = read_endpoint_pointer(origin, wave)?;
-    let body = http_get(format!("http://{addr}/memory/log"))?;
-    serde_json::from_str::<MemoryLogBody>(&body)
-        .ok()
-        .map(|payload| payload.facts)
-}
-
-fn journal_memory_adds(origin: &Path, wave: &str) -> Option<Vec<String>> {
-    let events = read_events(&journal_path(origin, wave));
-    if events.is_empty() {
-        return None;
-    }
-    Some(fold_thread(&events).memory_adds)
-}
-
-fn render_wave_memory(mut adds: Vec<String>, base: &str) -> Option<String> {
+fn render_wave_memory(base: &str) -> Option<String> {
     let base = base.trim();
-    let has_base = !base.is_empty();
-    adds.retain(|fact| !fact.trim().is_empty());
-    if adds.is_empty() && !has_base {
-        return None;
-    }
-
-    let mut sections = Vec::new();
-    if !adds.is_empty() {
-        adds.reverse();
-        sections.push(
-            adds.into_iter()
-                .map(|fact| format!("- {}", fact.trim()))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
-    }
-    if has_base {
-        sections.push(base.to_string());
-    }
-    Some(sections.join("\n\n"))
+    (!base.is_empty()).then(|| base.to_string())
 }
 
 /// Read-only fold over the wave's journal: finalized thread plus any open
@@ -876,36 +831,26 @@ mod tests {
     }
 
     #[test]
-    fn render_wave_memory_layers_recent_above_base_newest_first() {
-        let rendered = render_wave_memory(
-            vec![
-                "first fact".to_string(),
-                " ".to_string(),
-                "second fact".to_string(),
-            ],
-            "# Memory\n\ncompiled base\n",
-        )
-        .expect("memory renders");
+    fn render_wave_memory_uses_only_the_file() {
         assert_eq!(
-            rendered,
-            "- second fact\n- first fact\n\n# Memory\n\ncompiled base"
+            render_wave_memory("# Memory\n\ncompiled base\n").as_deref(),
+            Some("# Memory\n\ncompiled base")
         );
+        assert!(render_wave_memory("  \n").is_none());
     }
 
     #[test]
-    fn gather_wave_memory_uses_journal_delta_since_update() {
+    fn gather_wave_memory_reads_the_file_without_a_server() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let runtime =
-            crate::wave::runtime::WaveRuntime::open("goals".to_string(), tmp.path().to_path_buf())
-                .expect("runtime");
-        runtime
-            .update_memory("# Goals\n\ncompiled\n", "compiled")
-            .expect("update");
-        runtime.append_memory("oldest", vec![]).expect("append");
-        runtime.append_memory("newest", vec![]).expect("append");
+        std::fs::create_dir_all(tmp.path().join("wave/goals")).unwrap();
+        std::fs::write(
+            tmp.path().join("wave/goals/MEMORY.md"),
+            "# Goals\n\ncompiled\n",
+        )
+        .unwrap();
 
         let memory = gather_wave_memory(tmp.path(), "goals").expect("memory");
-        assert_eq!(memory, "- newest\n- oldest\n\n# Goals\n\ncompiled");
+        assert_eq!(memory, "# Goals\n\ncompiled");
     }
 
     #[tokio::test]

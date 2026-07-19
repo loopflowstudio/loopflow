@@ -116,26 +116,6 @@ struct DTOFixtureTests {
         #expect(roadmap.waves[1].projects.unavailableReason?.contains("lf pm sync") == true)
     }
 
-    @Test("memory fact fixture preserves every evidence-kind receipt")
-    func memoryFactFixturePreservesReceipts() throws {
-        let data = try loadFixtureData("receipt.json")
-        let fact = try JSONDecoder().decode(MemoryFact.self, from: data)
-
-        #expect(fact.fact == "Workers report through the memory stream, not the journal.")
-        #expect(fact.receipts.map(\.kind) == [.chatTurn, .workerReport, .trace, .pm, .pr])
-        // A PR reference keeps its `@sha`; its wave differs from the others (the
-        // cross-wave case doctor detects downstream).
-        let pr = try #require(fact.receipts.last)
-        #expect(pr.reference == "loopflow/loopflow#912@abc1234")
-        #expect(pr.wave == "auditability")
-        #expect(pr.token == "pr:loopflow/loopflow#912@abc1234")
-
-        // Round-trips: re-encode and decode to the same value.
-        let reencoded = try JSONEncoder().encode(fact)
-        let decoded = try JSONDecoder().decode(MemoryFact.self, from: reencoded)
-        #expect(decoded == fact)
-    }
-
     @Test("child activity preserves typed delivery evidence")
     func childActivityPreservesTypedDeliveryEvidence() throws {
         let data = try loadFixtureData("child_control_activity.json")

@@ -922,7 +922,7 @@ mod tests {
             "the skill seed carries the loopflow operating document once"
         );
         assert!(seed.contains("Execute Here First"));
-        assert!(seed.contains("lf memory add"));
+        assert!(seed.contains("edit\n`wave/<name>/MEMORY.md`"));
         assert!(!seed.contains("lf pm show"));
         assert!(!seed.contains("--detach"));
     }

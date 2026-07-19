@@ -58,11 +58,13 @@ migrates the untouched copied store, then runs
 `lf runs reconcile --all --apply --json` twice and `lf doctor --json`. The first
 reconcile removes 777 unclaimed directories, interrupts 78 intact stale
 captures, marks 10 intact ENOSPC partials lost, and prunes zero intact captures.
-The second reports zero transitions and zero removals. Doctor reports 78
-interrupted, 10 lost, zero capture failures, and exits zero. Direct queries of
-the copied `agent_launches` and `agent_turns` prove the terminal state and reason
-invariants; each command's store report names the copied Home, never
-`~/.lf/loopflow.db`.
+Because eligibility is a moving 48-hour boundary, record any additional intact
+captures that cross the guard after the reviewed 78-row snapshot as a separate
+delta rather than freezing time or suppressing them. The second pass reports
+zero transitions and zero removals. Doctor reports every interrupted and lost
+capture, zero capture failures, and exits zero. Direct queries of the copied
+`agent_launches` and `agent_turns` prove the terminal state and reason invariants;
+each command's store report names the copied Home, never `~/.lf/loopflow.db`.
 
 ## Approach
 
@@ -187,9 +189,13 @@ run events, and trace-directory metadata. It preserves the 48-hour default
 guard and performs no provider subprocess or transcript reconstruction. The
 production-shaped proof runs only with `LF_HOME` and `LF_DB_PATH` resolved
 inside a disposable clone; command-reported paths are asserted before any
-`--apply`. The live database may continue changing under normal Loopflow work,
-so proof of isolation is target-path containment rather than comparing its
-incidental size or modification time.
+`--apply`. Before the pending durable-input migration, copied Project and Task
+lease rows are marked `finished`: the point-in-time clone cannot own the live
+processes named by the source, and the migration correctly requires quiescence.
+That is the only pre-migration copy mutation; capture, Turn, event, and artifact
+evidence remain untouched. The live database may continue changing under normal
+Loopflow work, so proof of isolation is target-path containment rather than
+comparing its incidental size or modification time.
 
 ## De-risking
 
@@ -289,11 +295,12 @@ lines against that failure.
   without the incomplete-control-Launch error.
 - On cloned production state, published `1a3079a94` records the 787-failure
   baseline. The fixed binary's first `lf runs reconcile --all --apply` removes
-  777 unclaimed directories, transitions 78 intact stale captures to
-  `interrupted`, and transitions 10 acknowledged intact ENOSPC partials to
-  `lost`. It transitions zero intact captures to `pruned`. A second identical
-  command reports zero changes; `lf doctor` reports 78 interrupted, 10 lost,
-  zero capture failures, and exits zero.
+  777 unclaimed directories, transitions the reviewed 78 intact stale captures
+  plus any explicitly partitioned rows that crossed the 48-hour guard after the
+  snapshot to `interrupted`, and transitions 10 acknowledged intact ENOSPC
+  partials to `lost`. It transitions zero intact captures to `pruned`. A second
+  identical command reports zero changes; `lf doctor` reports every
+  interrupted capture, 10 lost, zero capture failures, and exits zero.
 - Every mutating proof command reports a database and trace root inside the
   disposable Home; no fixed-binary command with `--apply` targets the live
   database or trace root.
@@ -320,9 +327,20 @@ Target:
 
 - Doctor capture failures after acknowledged reconciliation: 0.
 - Unclaimed directories after reconciliation: 0 (777 removed).
-- Intact interrupted captures after reconciliation: 78.
+- Intact interrupted captures after reconciliation: the reviewed 78-row cohort
+  plus only rows demonstrably crossing the 48-hour boundary before execution.
 - Intact acknowledged-loss captures after reconciliation: 10.
 - Intact captures mislabeled `pruned`: 0.
 - Reconciliation mutations on the second pass: 0.
 - New partial rows produced by failed/interrupted lifecycle reconciliation: 0.
 - Unacknowledged fresh-loss fixtures detected by doctor: 100%.
+
+Proof at 2026-07-19 09:58 UTC used a fresh online backup at 2,383 launches and
+2,393 turns. Four additional intact captures (two Claude, two Codex, started
+between 07:03 and 08:59 UTC on 2026-07-17) had crossed the unchanged 48-hour
+guard after the 78-row review snapshot. The first pass therefore removed 777
+orphans, interrupted 82, marked 10 ENOSPC captures lost, and pruned zero. The
+second pass changed zero rows and removed zero artifacts. Doctor reported 82
+interrupted and 10 lost with zero capture failures and exit zero; the live
+database remained at `0.11.029_ci_incident_repaired_head` with its 10 partial
+rows untouched.

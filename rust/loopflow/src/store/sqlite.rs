@@ -1807,7 +1807,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        tx.execute(
+        let updated = tx.execute(
             "UPDATE agent_launches
              SET capture_status = 'pruned', incomplete_reason = ?2,
                  ended_at = COALESCE(ended_at, ?3),
@@ -1822,9 +1822,14 @@ impl SqliteStore {
                  END,
                  attention_kind = NULL, attention_work_kind = NULL,
                  attention_work_id = NULL, attention_at = NULL
-             WHERE id = ?1",
+             WHERE id = ?1 AND capture_status != 'pruned'",
             params![launch_id, incomplete_reason, ended_at_fallback],
         )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidData(format!(
+                "capture {launch_id} is already pruned or missing"
+            )));
+        }
         tx.execute(
             "UPDATE agent_turns
              SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
@@ -1876,11 +1881,7 @@ impl SqliteStore {
 
     /// Acknowledge an aged intact capture write loss without discarding its
     /// original `incomplete_reason` or artifact references.
-    pub fn lose_launch_capture(
-        &self,
-        launch_id: &str,
-        ended_at_fallback: i64,
-    ) -> StoreResult<()> {
+    pub fn lose_launch_capture(&self, launch_id: &str, ended_at_fallback: i64) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(

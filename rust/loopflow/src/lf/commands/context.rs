@@ -302,7 +302,15 @@ fn validate_query(query: &SessionSetQuery) -> Result<()> {
     validate_values(
         "capture state",
         &query.capture_states,
-        &["capturing", "complete", "partial", "prompt_only"],
+        &[
+            "capturing",
+            "complete",
+            "partial",
+            "prompt_only",
+            "interrupted",
+            "lost",
+            "pruned",
+        ],
     )
 }
 

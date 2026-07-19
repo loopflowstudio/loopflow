@@ -1796,31 +1796,122 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Reconcile a launch's capture lifecycle from `lf runs reconcile`: either
-    /// tombstone a terminal launch whose artifact is gone (`pruned`) or
-    /// finalize an orphaned `capturing` launch (`partial`). `ended_at` is
-    /// preserved when already set and filled from `ended_at_fallback`
-    /// otherwise (an orphaned `capturing` launch has no `ended_at` yet).
-    pub fn reconcile_launch_capture(
+    /// Record that a launch's referenced conversation artifact is known absent.
+    /// If capture loss also exposed an unclosed owner, close the launch and its
+    /// running Turns in the same transaction.
+    pub fn prune_launch_capture(
         &self,
         launch_id: &str,
-        capture_status: &str,
-        incomplete_reason: Option<&str>,
+        incomplete_reason: &str,
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
             "UPDATE agent_launches
-             SET capture_status = ?2, incomplete_reason = ?3,
-                 ended_at = COALESCE(ended_at, ?4)
+             SET capture_status = 'pruned', incomplete_reason = ?2,
+                 ended_at = COALESCE(ended_at, ?3),
+                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END,
+                 launch_state = CASE
+                     WHEN product_run_id IS NULL THEN launch_state ELSE 'ended'
+                 END,
+                 handback_state = CASE
+                     WHEN product_run_id IS NULL THEN handback_state
+                     WHEN outcome = 'running' THEN 'interrupted'
+                     ELSE handback_state
+                 END,
+                 attention_kind = NULL, attention_work_kind = NULL,
+                 attention_work_id = NULL, attention_at = NULL
              WHERE id = ?1",
-            params![
-                launch_id,
-                capture_status,
-                incomplete_reason,
-                ended_at_fallback
-            ],
+            params![launch_id, incomplete_reason, ended_at_fallback],
         )?;
+        tx.execute(
+            "UPDATE agent_turns
+             SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
+             WHERE launch_id = ?1 AND status = 'running'",
+            params![launch_id, ended_at_fallback],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Close an intact capture whose owner ended before capture finalization.
+    pub fn interrupt_launch_capture(
+        &self,
+        launch_id: &str,
+        incomplete_reason: &str,
+        ended_at_fallback: i64,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let updated = tx.execute(
+            "UPDATE agent_launches
+             SET capture_status = 'interrupted', incomplete_reason = ?2,
+                 ended_at = COALESCE(ended_at, ?3), outcome = 'interrupted',
+                 launch_state = CASE
+                     WHEN product_run_id IS NULL THEN launch_state ELSE 'ended'
+                 END,
+                 handback_state = CASE
+                     WHEN product_run_id IS NULL THEN handback_state ELSE 'interrupted'
+                 END,
+                 attention_kind = NULL, attention_work_kind = NULL,
+                 attention_work_id = NULL, attention_at = NULL
+             WHERE id = ?1 AND capture_status = 'capturing'",
+            params![launch_id, incomplete_reason, ended_at_fallback],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidData(format!(
+                "capture {launch_id} is no longer capturing"
+            )));
+        }
+        tx.execute(
+            "UPDATE agent_turns
+             SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
+             WHERE launch_id = ?1 AND status = 'running'",
+            params![launch_id, ended_at_fallback],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Acknowledge an aged intact capture write loss without discarding its
+    /// original `incomplete_reason` or artifact references.
+    pub fn lose_launch_capture(
+        &self,
+        launch_id: &str,
+        ended_at_fallback: i64,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let updated = tx.execute(
+            "UPDATE agent_launches
+             SET capture_status = 'lost', ended_at = COALESCE(ended_at, ?2),
+                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END,
+                 launch_state = CASE
+                     WHEN product_run_id IS NULL THEN launch_state ELSE 'ended'
+                 END,
+                 handback_state = CASE
+                     WHEN product_run_id IS NULL THEN handback_state
+                     WHEN outcome = 'running' THEN 'interrupted'
+                     ELSE handback_state
+                 END,
+                 attention_kind = NULL, attention_work_kind = NULL,
+                 attention_work_id = NULL, attention_at = NULL
+             WHERE id = ?1 AND capture_status = 'partial'",
+            params![launch_id, ended_at_fallback],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidData(format!(
+                "capture {launch_id} is no longer partial"
+            )));
+        }
+        tx.execute(
+            "UPDATE agent_turns
+             SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
+             WHERE launch_id = ?1 AND status = 'running'",
+            params![launch_id, ended_at_fallback],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

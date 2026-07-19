@@ -405,6 +405,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "delete_sessions",
         sql: include_str!("migrations/0.11.036_delete_sessions.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 37,
+        },
+        name: "capture_terminal_states",
+        sql: include_str!("migrations/0.11.037_capture_terminal_states.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

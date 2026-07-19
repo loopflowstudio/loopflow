@@ -1,22 +1,21 @@
-# Slice 6B: name Task Feedback reviewers
+# Slice 6C: delete producerless evidence Receipts
 
 ## Implement
 
-- Replace Task feedback-policy vocabulary with `FeedbackReviewer::{User, Parent}`.
-- Store the reviewer on each `TaskPhasePlan` and expose `lf task ... --reviewer
-  user|parent`; delete the overloaded `--headless` spelling.
-- Preserve the standard phase reviewers: clarify by User, pursue by Parent,
-  mutate by User. An explicit reviewer override affects future checkpoints only.
-- Rename persisted columns and values from require/defer policy language to
-  reviewer and user/parent in one migration, with no compatibility readers.
-- Delete `InteractionPolicy`, feedback-only `FlowAction` policy variants, and
-  dead next-action policy helpers.
+- Delete the evidence `Receipt` model, kinds, parser, and `lf receipt` resolver
+  command. No current feature authors these pointers after memory became a file.
+- Delete receipt-only resolved-record DTOs, docs, tests, and authored-flow
+  dispatch.
+- Delete receipt-only PR reference/identity helpers and the all-Task-PR store
+  query. Keep the CI repository identity path directly on current Task PR data.
+- Retain generic mutation result types named `*Receipt`; those are operation
+  outcomes, not evidence pointers.
+- Add no tombstone command or compatibility alias.
 
 ## Done when
 
-- [x] help and parser expose only `--reviewer user|parent`.
-- [x] default mixed reviewers and explicit overrides are behaviorally proved.
-- [x] an already-open Feedback keeps its recorded route.
-- [x] stored Task phase plans contain reviewer/user|parent with no dual reader.
-- [x] retired policy/headless symbols are absent; migration, focused behavior,
-      fmt, and all-target clippy pass.
+- [ ] the evidence Receipt module and CLI command are absent.
+- [ ] no current producer, parser, resolver, DTO, or docs remain.
+- [ ] PR/CI behavior uses direct Task PR fields without receipt identity types.
+- [ ] authored flows reject `receipt` as a command and focused behavior, fmt,
+      and all-target clippy pass.

@@ -309,10 +309,10 @@ delete orphan receipts, and rename Work/Launch identities still called Session.
 
 ### Planning data
 
-- [ ] Project exposes `definition`; Task exposes `directive` and `project_id`.
-- [ ] LaunchReceipt/snapshot wrappers and Task's copied Project data are absent.
-- [ ] Task SQL projects no parent PM metadata into Task.
-- [ ] Project definition updates change the next Task prompt/status without a
+- [x] Project exposes `definition`; Task exposes `directive` and `project_id`.
+- [x] LaunchReceipt/snapshot wrappers and Task's copied Project data are absent.
+- [x] Task SQL projects no parent PM metadata into Task.
+- [x] Project definition updates change the next Task prompt/status without a
       Task rewrite.
 
 ### Feedback and API safety

@@ -76,3 +76,23 @@ the unrelated conversation are absent while `MEMORY.md` is present.
 Proof: Wave context 7/7, prompt 81/81, run 35/35, and context integration 22/22
 pass. Exact forbidden-symbol/tag search is empty; `cargo fmt --check` and
 all-target Clippy with warnings denied pass.
+
+## Slice 5 — planning truth
+
+Accepted. `launch_context.rs`, Project/Task launch receipts, and Linear snapshot
+wrappers are replaced by `planning.rs` with `ProjectDefinition` and
+`TaskDirective`. Project exposes `definition`; Task exposes `directive` and
+`project_id`. Task SQL selects no parent Project PM metadata. Prompt, status,
+roadmap, journal, and diagnostic paths resolve the current parent deliberately.
+
+No migration or compatibility layer was added: existing normalized columns
+already express the facts, and the change removes Rust-level duplication.
+Runtime agent/provider/provider-session, abandon intent, and handoff fields are
+preserved for the server-topology slice.
+
+Proof: focused Task seed, status, store-normalization, and parent-update tests
+pass; they show separate Task/Project snapshot timestamps and a changed Project
+definition affecting the next Task view without rewriting its directive. Exact
+retired-type/copied-parent and Task SQL projection searches are empty;
+`cargo check --all-targets`, `cargo fmt --check`, and all-target Clippy with
+warnings denied pass.

@@ -1,22 +1,31 @@
-# Slice 1: remove implicit PR review state
+# Slice 2: delete Radio and channel identity
 
 ## Implement
 
-- Delete `ReviewGateState` and every requested/active/approved/change-requested
-  branch.
-- Rename `TaskAction::Review` to presentational `OpenPr`.
-- Rename `AfterMerge::Review` to `ContinueTask`.
-- Add the next migration mapping stored `review` to `continue_task` and tighten
-  the current check to `continue_task|complete_task`.
-- Make a merged `ContinueTask` PR proceed through serial Task continuation with
-  no approval record.
-- Remove any dead directive or review state exposed only by the deleted gate.
-- Update Rust/Swift/JSON/help/docs/tests with no compatibility alias.
+- Delete the Radio CLI, bus store/schema/runtime/listener/retention, and the
+  channel-family identity model.
+- Delete `LF_CHANNEL`, dotted channel placement helpers, `MessageOp::Say`, and
+  machine-authored bylines on chat/message DTOs.
+- Add the next migration dropping agent-bus tables.
+- Remove hidden compatibility commands and the legacy channel-open event.
+- Replace project-promotion and builtin uses with typed evidence already owned
+  by Work/Project/Wave.
+- Update Rust, Swift, fixtures, help, docs, prompts, and command-resolution
+  matrices with no alias or dual reader.
+
+## Preserve
+
+- Human Wave conversation and generic Work Steer/Turn behavior.
+- `lf chat` as the current human surface pending the server-topology design.
+- Durable parent/child Work relationships; do not replace Radio with another
+  mailbox.
 
 ## Done when
 
-- [ ] exact old-symbol search is zero in current source;
-- [ ] `OpenPr` contributes to no WorkStatus, Run, Wait, completion, or Feedback;
-- [ ] current schema accepts only the two honest dispositions;
-- [ ] migration and merged-continuation tests pass;
-- [ ] fmt and all-target clippy pass.
+- [ ] Radio/channel modules, commands, exports, store APIs, and current tables
+      are absent.
+- [ ] `LF_CHANNEL`, channel roles/positions, `MessageOp::Say`, and machine
+      bylines are absent.
+- [ ] Project promotion and builtin prompts use typed evidence, not Radio.
+- [ ] Exact current-source search is zero outside historical migrations.
+- [ ] Focused CLI/migration/Wave/Swift proofs, fmt, and clippy pass.

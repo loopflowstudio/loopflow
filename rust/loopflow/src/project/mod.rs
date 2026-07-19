@@ -10,24 +10,24 @@ use time::OffsetDateTime;
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
 pub use crate::durable::ProjectId;
 use crate::id::WaveId;
-use crate::launch_context::ProjectLaunchReceipt;
+use crate::planning::ProjectDefinition;
 use crate::task::{TaskEventKind, TaskId};
 
 pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProjectDataError {
-    #[error("invalid project-session id: {0}")]
+    #[error("invalid Project id: {0}")]
     InvalidId(String),
-    #[error("invalid project session: {0}")]
+    #[error("invalid Project: {0}")]
     InvalidInvariant(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
-    /// Immutable PM evidence from before the first Project turn.
-    pub launch: ProjectLaunchReceipt,
+    /// Current planning definition from the PM system.
+    pub definition: ProjectDefinition,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     pub iteration: u32,
@@ -52,7 +52,7 @@ impl Project {
         self.abandon_intent.as_ref().map(|intent| {
             format!(
                 "Project {} is being abandoned: {}",
-                self.launch.project.slug, intent.reason
+                self.definition.slug, intent.reason
             )
         })
     }

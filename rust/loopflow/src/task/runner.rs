@@ -20,6 +20,8 @@ use crate::harness::{
     classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
     RecoveryDecision,
 };
+use crate::planning::ProjectDefinition;
+use crate::project::Project;
 use crate::provider_account::recovery::{
     capability_key, plan_run_route_recovery, settle_route_recovery, stop_launch_for_recovery,
     ExactRoute, RecoveryChoice, RecoverySettlement, RecoveryStopOutcome,
@@ -68,6 +70,13 @@ async fn owning_wave(store: &SharedStore, session: &Task) -> Result<Wave> {
         .get_wave(&session.wave_id)
         .await?
         .ok_or_else(|| anyhow!("owning Wave {} is not registered", session.wave_id))
+}
+
+async fn owning_project(store: &SharedStore, session: &Task) -> Result<Project> {
+    store
+        .get_project(&session.project_id)
+        .await?
+        .ok_or_else(|| anyhow!("owning Project {} is not registered", session.project_id))
 }
 
 async fn spawn_failover(
@@ -278,7 +287,7 @@ async fn run_task_with(
     });
     println!(
         "task {}> attached; /status, /interrupt, /detach, or type a message/instruction",
-        session.launch.issue.identifier
+        session.directive.identifier
     );
     let mut command_poll = tokio::time::interval(Duration::from_millis(200));
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -982,6 +991,7 @@ async fn prepare_task_flow_step(
         .active_task_pr(&session.id)
         .await?
         .ok_or_else(|| anyhow!("Task {} has no active PR", session.id))?;
+    let project = owning_project(store, session).await?;
     // The `ci-fix` step gets the failure seed from the typed incident claimed by
     // this Run; every other Task-flow step gets the standard task seed. The flow
     // and incident are chosen together, so a `ci-fix` step without one is invalid.
@@ -997,7 +1007,7 @@ async fn prepare_task_flow_step(
                 session.id
             )
         }
-        _ => task_seed(session, &pr, wave_name, &boundary),
+        _ => task_seed(session, &project.definition, &pr, wave_name, &boundary),
     };
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
@@ -1326,7 +1336,7 @@ async fn handle_attachment(
             .await?;
         println!(
             "{}  {:?}",
-            session.launch.issue.identifier,
+            session.directive.identifier,
             store.work_status(&work).await?
         );
         return Ok(());
@@ -1868,7 +1878,7 @@ fn ci_fix_seed(
          PR #{number}: {url}\nBranch: {branch}\nHead commit: {head}\nFailing required checks:\n{failing}\n\n\
          Wave: {wave}\nTask: {session_id}\nWorktree: {worktree}\n\n\
          Push fixes to the same branch; do not open a new PR or rotate the serial branch. When the push lands, the Task returns to waiting on the new head.",
-        identifier = session.launch.issue.identifier,
+        identifier = session.directive.identifier,
         number = number,
         url = url,
         branch = pr.branch,
@@ -1882,6 +1892,7 @@ fn ci_fix_seed(
 
 fn task_seed(
     session: &Task,
+    project: &ProjectDefinition,
     pr: &crate::task::TaskPr,
     wave_name: &str,
     boundary: &BoundarySeed,
@@ -1903,15 +1914,16 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
-        identifier = session.launch.issue.identifier,
-        title = session.launch.issue.title,
-        description = session.launch.issue.description,
-        project = session.launch.project.name,
-        project_id = session.launch.project.id.as_str(),
-        project_context = session.launch.project.prompt_context,
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        identifier = session.directive.identifier,
+        title = session.directive.title,
+        description = session.directive.description,
+        project = project.name,
+        project_id = project.id.as_str(),
+        project_context = project.prompt_context,
         direction = boundary.render(),
-        snapshot_synced_at = session.launch.pm_snapshot_synced_at,
+        task_snapshot_synced_at = session.directive.pm_snapshot_synced_at,
+        project_snapshot_synced_at = project.pm_snapshot_synced_at,
         wave = wave_name,
         session_id = session.id,
         lifecycle_phase = session.lifecycle_phase.as_str(),
@@ -1936,4 +1948,89 @@ fn progress_summary(text: &str) -> String {
     let mut summary: String = text.chars().take(MAX_CHARS - 1).collect();
     summary.push('…');
     summary
+}
+
+#[cfg(test)]
+mod planning_tests {
+    use super::task_seed;
+    use crate::durable::{Basis, BoundarySeed, EpochId};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
+    use crate::task::{
+        Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
+        TaskPrId,
+    };
+
+    #[test]
+    fn task_seed_uses_the_current_parent_project_definition() {
+        let now = time::OffsetDateTime::UNIX_EPOCH;
+        let task = Task {
+            id: TaskId::new(),
+            directive: TaskDirective {
+                id: LinearIssueId::new("issue-1").unwrap(),
+                identifier: "INF-123".to_string(),
+                title: "Ship it".to_string(),
+                description: "Task direction".to_string(),
+                pm_snapshot_synced_at: 11,
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: crate::id::WaveId::new(),
+            project_id: crate::project::ProjectId::new(),
+            worktree: "/tmp/task".into(),
+            workspace_slug: "ship-it".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("task"),
+            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: "ship-it".to_string(),
+            branch: "jack/ship-it".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let project = ProjectDefinition {
+            id: LinearProjectId::new("project-1").unwrap(),
+            slug: "runtime".to_string(),
+            name: "Current project name".to_string(),
+            prompt_context: "Current project definition".to_string(),
+            pm_snapshot_synced_at: 22,
+        };
+        let boundary = BoundarySeed {
+            basis: Basis {
+                epoch_id: EpochId::new(),
+                revision: 0,
+            },
+            steers: Vec::new(),
+        };
+
+        let seed = task_seed(&task, &project, &pr, "wave", &boundary);
+
+        assert!(seed.contains("Current project name"));
+        assert!(seed.contains("Current project definition"));
+        assert!(seed.contains("Task directive snapshot synced at: 11"));
+        assert!(seed.contains("Project definition snapshot synced at: 22"));
+    }
 }

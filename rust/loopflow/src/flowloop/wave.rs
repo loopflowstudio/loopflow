@@ -1775,7 +1775,7 @@ mod tests {
     async fn feedback_rig(tmp: &tempfile::TempDir, route: bool) -> FeedbackRig {
         use crate::child::ChildRef;
         use crate::durable::{AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance};
-        use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+        use crate::planning::{LinearProjectId, ProjectDefinition};
         use crate::project::{Project, ProjectId};
 
         let store = Arc::new(
@@ -1794,13 +1794,11 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let project = Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-uuid").unwrap(),
-                    slug: "delivery".to_string(),
-                    name: "Delivery".to_string(),
-                    prompt_context: "Prove child control ordering.".to_string(),
-                },
+            definition: ProjectDefinition {
+                id: LinearProjectId::new("project-uuid").unwrap(),
+                slug: "delivery".to_string(),
+                name: "Delivery".to_string(),
+                prompt_context: "Prove child control ordering.".to_string(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: wave.id().clone(),

@@ -664,7 +664,7 @@ fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> 
         let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
             "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
-            session.launch.issue.identifier,
+            session.directive.identifier,
             work_status_label(&snapshot.status),
             session.id,
             session.lifecycle_phase.as_str(),
@@ -758,7 +758,7 @@ fn print_project(session: &loopflow::project::Project, json: bool) -> anyhow::Re
         let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
             "{}  {}\n  session: {}\n  body: {}\n  iteration: {}\n  reason: {}",
-            session.launch.project.slug,
+            session.definition.slug,
             work_status_label(&snapshot.status),
             session.id,
             body,

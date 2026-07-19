@@ -4,10 +4,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::id::WaveId;
-use loopflow::launch_context::{
-    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-    ProjectLaunchReceipt, TaskLaunchReceipt,
-};
+use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
 use loopflow::project::{Project, ProjectId};
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
 use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
@@ -264,13 +261,11 @@ fn register_task_with_process(
     );
     let project = Project {
         id: ProjectId::new(),
-        launch: ProjectLaunchReceipt {
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
-                slug: "task-pr-tests".to_string(),
-                name: "Task PR tests".to_string(),
-                prompt_context: "Keep Task PR transitions durable.".to_string(),
-            },
+        definition: ProjectDefinition {
+            id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            slug: "task-pr-tests".to_string(),
+            name: "Task PR tests".to_string(),
+            prompt_context: "Keep Task PR transitions durable.".to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
@@ -286,14 +281,11 @@ fn register_task_with_process(
     };
     let session = Task {
         id: TaskId::new(),
-        launch: TaskLaunchReceipt {
-            issue: LinearIssueSnapshot {
-                id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
-                identifier: "INF-123".to_string(),
-                title: "Prove Task PR transitions".to_string(),
-                description: "Exercise the persisted lifecycle.".to_string(),
-            },
-            project: project.launch.project.clone(),
+        directive: TaskDirective {
+            id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            identifier: "INF-123".to_string(),
+            title: "Prove Task PR transitions".to_string(),
+            description: "Exercise the persisted lifecycle.".to_string(),
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         pm_writeback: PmWritebackState::Current,

@@ -170,7 +170,7 @@ impl StoreObserver {
                     Ok(Some(session)) => {
                         self.runtime.deliver_task_observation(TaskObservation {
                             task_id: session_id,
-                            issue_identifier: session.launch.issue.identifier,
+                            issue_identifier: session.directive.identifier,
                             event_id: observation.event_id,
                             event,
                         });
@@ -190,7 +190,7 @@ impl StoreObserver {
                         self.runtime.deliver_project_observation(
                             crate::project::ProjectObservation {
                                 project_id: session_id,
-                                project: session.launch.project.slug,
+                                project: session.definition.slug,
                                 event_id: observation.event_id,
                                 event,
                             },

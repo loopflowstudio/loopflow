@@ -2690,7 +2690,7 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
     let project_id = tx
         .query_row(
             "SELECT id FROM projects WHERE external_project_id=?1",
-            [session.launch.project.id.as_str()],
+            [session.definition.id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -2702,7 +2702,7 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
         params![
             project_id,
             session.wave_id.as_str(),
-            session.launch.project.id.as_str(),
+            session.definition.id.as_str(),
             session.created_at.unix_timestamp(),
         ],
     )?;
@@ -2736,11 +2736,11 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
         tx,
         &epoch_id,
         serde_json::json!({
-            "external_project_id": session.launch.project.id.as_str(),
-            "slug": session.launch.project.slug,
-            "name": session.launch.project.name,
-            "prompt_context": session.launch.project.prompt_context,
-            "pm_snapshot_synced_at": session.launch.pm_snapshot_synced_at,
+            "external_project_id": session.definition.id.as_str(),
+            "slug": session.definition.slug,
+            "name": session.definition.name,
+            "prompt_context": session.definition.prompt_context,
+            "pm_snapshot_synced_at": session.definition.pm_snapshot_synced_at,
         }),
         session.updated_at,
     )?;
@@ -2748,15 +2748,11 @@ pub(crate) fn create_project_spine(tx: &Transaction<'_>, session: &Project) -> S
 }
 
 pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreResult<()> {
-    let project_id: String = tx.query_row(
-        "SELECT id FROM projects WHERE external_project_id=?1",
-        [session.launch.project.id.as_str()],
-        |row| row.get(0),
-    )?;
+    let project_id = session.project_id.as_str().to_string();
     let task_id = tx
         .query_row(
             "SELECT id FROM tasks WHERE external_issue_id=?1",
-            [session.launch.issue.id.as_str()],
+            [session.directive.id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?
@@ -2768,8 +2764,8 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreRe
         params![
             task_id,
             project_id,
-            session.launch.issue.id.as_str(),
-            session.launch.issue.identifier,
+            session.directive.id.as_str(),
+            session.directive.identifier,
             session.created_at.unix_timestamp(),
         ],
     )?;
@@ -2803,11 +2799,11 @@ pub(crate) fn create_task_spine(tx: &Transaction<'_>, session: &Task) -> StoreRe
         tx,
         &epoch_id,
         serde_json::json!({
-            "external_issue_id": session.launch.issue.id.as_str(),
-            "identifier": session.launch.issue.identifier,
-            "title": session.launch.issue.title,
-            "description": session.launch.issue.description,
-            "pm_snapshot_synced_at": session.launch.pm_snapshot_synced_at,
+            "external_issue_id": session.directive.id.as_str(),
+            "identifier": session.directive.identifier,
+            "title": session.directive.title,
+            "description": session.directive.description,
+            "pm_snapshot_synced_at": session.directive.pm_snapshot_synced_at,
         }),
         session.updated_at,
     )?;

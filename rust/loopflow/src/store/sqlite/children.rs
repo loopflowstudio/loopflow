@@ -18,9 +18,7 @@ use crate::child::{
 use crate::durable::{Author, RunLease};
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::launch_context::{
-    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-};
+use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
 use crate::project::{
     ChildEventPayload, ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId,
 };
@@ -315,7 +313,7 @@ impl SqliteStore {
         let work = work_for_child_in(&transaction, &ChildRef::Task(session.id.clone()))?;
         validate_handoff_state(
             "Task",
-            &session.launch.issue.identifier,
+            &session.directive.identifier,
             &work_status_in(&transaction, &work)?,
             session.abandon_intent.as_ref(),
         )?;
@@ -1027,7 +1025,7 @@ impl SqliteStore {
         let work = work_for_child_in(&transaction, &ChildRef::Project(session.id.clone()))?;
         validate_handoff_state(
             "Project",
-            &session.launch.project.slug,
+            &session.definition.slug,
             &work_status_in(&transaction, &work)?,
             session.abandon_intent.as_ref(),
         )?;
@@ -1436,10 +1434,10 @@ fn insert_initial_task(
     seed_task_linear_observation(conn, session)
 }
 
-/// Seed the Linear observation cursor from the launch snapshot, in the Task's
+/// Seed the Linear observation cursor from the planning directive, in the Task's
 /// creation transaction. Webhooks only fire for changes *after* subscription, so
 /// there is no cursor to build lazily on a first poll — seeding here means the
-/// first issue-edit webhook diffs against the launch title/description instead of
+/// first issue-edit webhook diffs against the directive title/description instead of
 /// baselining (and swallowing) it. The revision seeds empty so any real Linear
 /// `updatedAt` wins the monotonic guard.
 fn seed_task_linear_observation(conn: &Connection, session: &Task) -> StoreResult<()> {
@@ -1450,8 +1448,8 @@ fn seed_task_linear_observation(conn: &Connection, session: &Task) -> StoreResul
          ) VALUES (?1, '', ?2, ?3, ?4, NULL, ?4)",
         params![
             session.id.as_str(),
-            session.launch.issue.title,
-            session.launch.issue.description,
+            session.directive.title,
+            session.directive.description,
             now_unix(),
         ],
     )?;
@@ -1461,21 +1459,21 @@ fn seed_task_linear_observation(conn: &Connection, session: &Task) -> StoreResul
 fn validate_task_project(conn: &Connection, session: &Task) -> StoreResult<()> {
     let owner = conn
         .query_row(
-            "SELECT external_project_id, wave_id FROM projects WHERE id=?1",
+            "SELECT wave_id FROM projects WHERE id=?1",
             params![session.project_id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| row.get::<_, String>(0),
         )
         .optional()?;
-    let Some((project_id, wave_id)) = owner else {
+    let Some(wave_id) = owner else {
         return Err(StoreError::InvalidData(format!(
             "Task {} requires Project {}",
             session.id, session.project_id
         )));
     };
-    if project_id != session.launch.project.id.as_str() || wave_id != session.wave_id.as_str() {
+    if wave_id != session.wave_id.as_str() {
         return Err(StoreError::InvalidData(format!(
-            "Project {} does not own Task {}/{}",
-            session.project_id, session.wave_id, session.launch.project.slug
+            "Project {} does not belong to Task {}'s Wave {}",
+            session.project_id, session.id, session.wave_id
         )));
     }
     Ok(())
@@ -1502,7 +1500,6 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
-    p.external_project_id, p.project_slug, p.project_name, p.project_prompt_context,
     p.wave_id, t.worktree, t.workspace_slug,
     t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
     t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
@@ -1513,7 +1510,6 @@ const TASK_COLUMNS: &str = "SELECT
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_SELECT: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
-    p.external_project_id, p.project_slug, p.project_name, p.project_prompt_context,
     p.wave_id, t.worktree, t.workspace_slug,
     t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
     t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
@@ -1612,11 +1608,11 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(task.id.as_str().to_string()),
         Box::new(task.project_id.as_str().to_string()),
-        Box::new(task.launch.issue.id.as_str().to_string()),
-        Box::new(task.launch.issue.identifier.clone()),
-        Box::new(task.launch.issue.title.clone()),
-        Box::new(task.launch.issue.description.clone()),
-        Box::new(task.launch.pm_snapshot_synced_at),
+        Box::new(task.directive.id.as_str().to_string()),
+        Box::new(task.directive.identifier.clone()),
+        Box::new(task.directive.title.clone()),
+        Box::new(task.directive.description.clone()),
+        Box::new(task.directive.pm_snapshot_synced_at),
         Box::new(
             serde_json::to_string(&task.pm_writeback)
                 .expect("Task PM writeback state must serialize"),
@@ -1911,8 +1907,8 @@ fn invalid_column(
 
 pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let abandon_intent = match (
-        row.get::<_, Option<i64>>(20)?,
-        row.get::<_, Option<String>>(21)?,
+        row.get::<_, Option<i64>>(16)?,
+        row.get::<_, Option<String>>(17)?,
     ) {
         (Some(requested_at), Some(reason)) => Some(AbandonIntent {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
@@ -1922,67 +1918,59 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     };
     Ok(Task {
         id: TaskId::from_raw(row.get::<_, String>(0)?),
-        launch: crate::launch_context::TaskLaunchReceipt {
-            issue: LinearIssueSnapshot {
-                id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
-                identifier: row.get(2)?,
-                title: row.get(3)?,
-                description: row.get(4)?,
-            },
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::from_raw(row.get::<_, String>(5)?),
-                slug: row.get(6)?,
-                name: row.get(7)?,
-                prompt_context: row.get(8)?,
-            },
-            pm_snapshot_synced_at: row.get(17)?,
+        directive: TaskDirective {
+            id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
+            identifier: row.get(2)?,
+            title: row.get(3)?,
+            description: row.get(4)?,
+            pm_snapshot_synced_at: row.get(13)?,
         },
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(18)?)
-            .map_err(|error| invalid_column(18, error))?,
-        wave_id: row.get(9)?,
-        project_id: ProjectId::from_raw(row.get::<_, String>(19)?),
-        worktree: PathBuf::from(row.get::<_, String>(10)?),
-        workspace_slug: row.get(11)?,
+        pm_writeback: serde_json::from_str(&row.get::<_, String>(14)?)
+            .map_err(|error| invalid_column(14, error))?,
+        wave_id: row.get(5)?,
+        project_id: ProjectId::from_raw(row.get::<_, String>(15)?),
+        worktree: PathBuf::from(row.get::<_, String>(6)?),
+        workspace_slug: row.get(7)?,
         lifecycle: TaskLifecyclePlan {
             first: TaskPhasePlan {
-                flow: row.get(26)?,
-                interaction_policy: row
-                    .get::<_, String>(27)?
-                    .parse::<InteractionPolicy>()
-                    .map_err(|error| invalid_column(27, error))?,
-            },
-            loop_: TaskPhasePlan {
                 flow: row.get(22)?,
                 interaction_policy: row
                     .get::<_, String>(23)?
                     .parse::<InteractionPolicy>()
                     .map_err(|error| invalid_column(23, error))?,
             },
-            finally: TaskPhasePlan {
-                flow: row.get(28)?,
+            loop_: TaskPhasePlan {
+                flow: row.get(18)?,
                 interaction_policy: row
-                    .get::<_, String>(29)?
+                    .get::<_, String>(19)?
                     .parse::<InteractionPolicy>()
-                    .map_err(|error| invalid_column(29, error))?,
+                    .map_err(|error| invalid_column(19, error))?,
+            },
+            finally: TaskPhasePlan {
+                flow: row.get(24)?,
+                interaction_policy: row
+                    .get::<_, String>(25)?
+                    .parse::<InteractionPolicy>()
+                    .map_err(|error| invalid_column(25, error))?,
             },
         },
-        lifecycle_phase: TaskLifecyclePhase::from_storage_str(&row.get::<_, String>(30)?)
-            .map_err(|error| invalid_column(30, error))?,
-        phase_epoch: row.get::<_, i64>(31)? as u32,
-        phase_cursor: row.get::<_, i64>(24)? as u32,
-        phase_iteration: row.get::<_, i64>(25)? as u32,
-        gate_cycle: row.get::<_, i64>(32)? as u32,
+        lifecycle_phase: TaskLifecyclePhase::from_storage_str(&row.get::<_, String>(26)?)
+            .map_err(|error| invalid_column(26, error))?,
+        phase_epoch: row.get::<_, i64>(27)? as u32,
+        phase_cursor: row.get::<_, i64>(20)? as u32,
+        phase_iteration: row.get::<_, i64>(21)? as u32,
+        gate_cycle: row.get::<_, i64>(28)? as u32,
         gate_proposal: row
-            .get::<_, Option<String>>(33)?
+            .get::<_, Option<String>>(29)?
             .map(|json| serde_json::from_str(&json))
             .transpose()
-            .map_err(|error| invalid_column(33, error))?,
-        agent: row.get(12)?,
-        provider: row.get(13)?,
-        provider_session_id: row.get(14)?,
+            .map_err(|error| invalid_column(29, error))?,
+        agent: row.get(8)?,
+        provider: row.get(9)?,
+        provider_session_id: row.get(10)?,
         abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(15)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(16)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(11)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(12)?),
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::task::Observation::NotRequired,
@@ -2144,11 +2132,11 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
         Box::new(project.id.as_str().to_string()),
         Box::new(project.wave_id.clone()),
-        Box::new(project.launch.project.id.as_str().to_string()),
-        Box::new(project.launch.project.slug.clone()),
-        Box::new(project.launch.project.name.clone()),
-        Box::new(project.launch.project.prompt_context.clone()),
-        Box::new(project.launch.pm_snapshot_synced_at),
+        Box::new(project.definition.id.as_str().to_string()),
+        Box::new(project.definition.slug.clone()),
+        Box::new(project.definition.name.clone()),
+        Box::new(project.definition.prompt_context.clone()),
+        Box::new(project.definition.pm_snapshot_synced_at),
         Box::new(i64::from(project.iteration)),
         Box::new(project.observation_cursor),
         Box::new(project.last_state_fingerprint.clone()),
@@ -2202,13 +2190,11 @@ fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     };
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
-        launch: crate::launch_context::ProjectLaunchReceipt {
-            project: LinearProjectSnapshot {
-                id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
-                slug: row.get(2)?,
-                name: row.get(3)?,
-                prompt_context: row.get(4)?,
-            },
+        definition: ProjectDefinition {
+            id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
+            slug: row.get(2)?,
+            name: row.get(3)?,
+            prompt_context: row.get(4)?,
             pm_snapshot_synced_at: row.get(6)?,
         },
         wave_id: row.get(5)?,

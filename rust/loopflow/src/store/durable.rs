@@ -515,7 +515,7 @@ mod tests {
         StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::planning::{LinearProjectId, ProjectDefinition};
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
@@ -539,13 +539,11 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-feedback").unwrap(),
-                    slug: "feedback-runtime".to_string(),
-                    name: "Feedback Runtime".to_string(),
-                    prompt_context: "Definition".to_string(),
-                },
+            definition: ProjectDefinition {
+                id: LinearProjectId::new("project-feedback").unwrap(),
+                slug: "feedback-runtime".to_string(),
+                name: "Feedback Runtime".to_string(),
+                prompt_context: "Definition".to_string(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id,

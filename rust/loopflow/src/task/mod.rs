@@ -15,7 +15,7 @@ use crate::durable::RunId;
 pub use crate::durable::TaskId;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::launch_context::TaskLaunchReceipt;
+use crate::planning::TaskDirective;
 use crate::project::ProjectId;
 
 pub mod actions;
@@ -23,9 +23,9 @@ pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
-    #[error("invalid task id: {0}")]
+    #[error("invalid Task id: {0}")]
     InvalidId(String),
-    #[error("invalid task session: {0}")]
+    #[error("invalid Task: {0}")]
     InvalidInvariant(String),
 }
 
@@ -660,8 +660,8 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Immutable PM evidence captured before placement.
-    pub launch: TaskLaunchReceipt,
+    /// Current planning directive from the PM system.
+    pub directive: TaskDirective,
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
@@ -766,7 +766,7 @@ impl Task {
         if let Some(intent) = &self.abandon_intent {
             return Some(format!(
                 "Task {} is being abandoned: {}",
-                self.launch.issue.identifier, intent.reason
+                self.directive.identifier, intent.reason
             ));
         }
         None
@@ -776,7 +776,7 @@ impl Task {
         format!(
             "Task {} requested PR publication but has no GitHub receipt; \
              resume it explicitly with `lf task resume {}` to retry publication",
-            self.launch.issue.identifier, self.launch.issue.identifier,
+            self.directive.identifier, self.directive.identifier,
         )
     }
 
@@ -794,7 +794,7 @@ impl Task {
              start over. This is the reviewer's to advance: an operator answering \
              review resumes from a clean operator shell; if review is blocked, \
              escalate to the owner.",
-            self.launch.issue.identifier, number,
+            self.directive.identifier, number,
         )
     }
 
@@ -1034,28 +1034,17 @@ mod tests {
         TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
         TaskPrId,
     };
-    use crate::launch_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        TaskLaunchReceipt,
-    };
+    use crate::planning::{LinearIssueId, TaskDirective};
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new("issue-1").unwrap(),
-                    identifier: "INF-123".to_string(),
-                    title: "Ship it".to_string(),
-                    description: String::new(),
-                },
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-1").unwrap(),
-                    slug: "runtime".to_string(),
-                    name: "Runtime".to_string(),
-                    prompt_context: "Definition".to_string(),
-                },
+            directive: TaskDirective {
+                id: LinearIssueId::new("issue-1").unwrap(),
+                identifier: "INF-123".to_string(),
+                title: "Ship it".to_string(),
+                description: String::new(),
                 pm_snapshot_synced_at: 1,
             },
             pm_writeback: PmWritebackState::Current,

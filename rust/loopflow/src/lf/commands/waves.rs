@@ -1153,14 +1153,14 @@ async fn snapshot_projects(
         let status = child_work_status(store, &ChildRef::Project(project.id.clone())).await?;
         let Some(index) = session_project_index(
             &details,
-            project.launch.project.id.as_str(),
-            &project.launch.project.slug,
+            project.definition.id.as_str(),
+            &project.definition.slug,
             work_status_is_terminal(&status),
             wave.name(),
             &format!("Project {}", project.id),
             &format!(
                 "lf project abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                project.launch.project.slug
+                project.definition.slug
             ),
         )?
         else {
@@ -1186,8 +1186,8 @@ async fn snapshot_projects(
         })?;
         let index = project_index(&details, project_slug, project_slug)?;
         let runtime_session = tasks.iter().find(|session| {
-            session.launch.issue.id.as_str() == item.id
-                || session.launch.issue.identifier == item.identifier
+            session.directive.id.as_str() == item.id
+                || session.directive.identifier == item.identifier
         });
         details[index].tasks.push(
             snapshot_task_detail(store, item, runtime_session, liveness, probe_pr_empty).await?,
@@ -1196,36 +1196,46 @@ async fn snapshot_projects(
 
     for runtime_task in &tasks {
         let status = child_work_status(store, &ChildRef::Task(runtime_task.id.clone())).await?;
+        let parent = projects
+            .iter()
+            .find(|project| project.id == runtime_task.project_id)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Task {} requires owning Project {}",
+                    runtime_task.id,
+                    runtime_task.project_id
+                )
+            })?;
         let Some(project_index) = session_project_index(
             &details,
-            runtime_task.launch.project.id.as_str(),
-            &runtime_task.launch.project.slug,
+            parent.definition.id.as_str(),
+            &parent.definition.slug,
             work_status_is_terminal(&status),
             wave.name(),
             &format!("Task {}", runtime_task.id),
             &format!(
                 "lf task abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                runtime_task.launch.issue.identifier
+                runtime_task.directive.identifier
             ),
         )?
         else {
             continue;
         };
         if details[project_index].tasks.iter().any(|detail| {
-            detail.task.id == runtime_task.launch.issue.id.as_str()
-                || detail.task.identifier == runtime_task.launch.issue.identifier
+            detail.task.id == runtime_task.directive.id.as_str()
+                || detail.task.identifier == runtime_task.directive.identifier
         }) {
             continue;
         }
         let item = PmItem {
-            id: runtime_task.launch.issue.id.as_str().to_string(),
-            identifier: runtime_task.launch.issue.identifier.clone(),
+            id: runtime_task.directive.id.as_str().to_string(),
+            identifier: runtime_task.directive.identifier.clone(),
             url: None,
-            name: runtime_task.launch.issue.title.clone(),
-            description: runtime_task.launch.issue.description.clone(),
+            name: runtime_task.directive.title.clone(),
+            description: runtime_task.directive.description.clone(),
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
-            project: Some(runtime_task.launch.project.slug.clone()),
+            project: Some(parent.definition.slug.clone()),
             assignee: None,
         };
         details[project_index].tasks.push(
@@ -1325,15 +1335,11 @@ async fn snapshot_task_detail(
     let completion_refusal = match session {
         Some(session) => crate::ops::task::task_completion_gate(store, session)
             .await?
-            .refusal(&session.launch.issue.identifier),
+            .refusal(&session.directive.identifier),
         None => None,
     };
     let resume_refusal = session.and_then(|session| {
-        crate::ops::task::no_active_pr_resume_refusal(
-            &session.launch.issue.identifier,
-            active,
-            latest,
-        )
+        crate::ops::task::no_active_pr_resume_refusal(&session.directive.identifier, active, latest)
     });
     let (action_evidence, user_feedback) = match session {
         Some(session) => {

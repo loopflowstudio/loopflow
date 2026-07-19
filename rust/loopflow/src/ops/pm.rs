@@ -2675,11 +2675,8 @@ fn pm_to_ops(err: PmError) -> OpsError {
 mod tests {
     use super::*;
     use crate::id::WaveId;
-    use crate::launch_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        ProjectLaunchReceipt, TaskLaunchReceipt,
-    };
     use crate::ops::NullProgress;
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
     use crate::pm::test_server::{self, json_response, QueuedResponse};
     use crate::project::{Project, ProjectId};
     use crate::task::{
@@ -2852,18 +2849,16 @@ mod tests {
             "/repo".to_string(),
         );
         store.create_wave(&wave).await.expect("create wave");
-        let project_snapshot = LinearProjectSnapshot {
+        let project_definition = ProjectDefinition {
             id: LinearProjectId::new("project-uuid").expect("project id"),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
             prompt_context: "Keep development fast.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
         };
         let project = Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: project_snapshot.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
+            definition: project_definition,
             wave_id: wave.id().clone(),
             iteration: 1,
             observation_cursor: 0,
@@ -2883,14 +2878,11 @@ mod tests {
         let session_id = TaskId::new();
         let session = Task {
             id: session_id.clone(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(issue_id).expect("issue id"),
-                    identifier: identifier.to_string(),
-                    title: format!("Task {identifier}"),
-                    description: String::new(),
-                },
-                project: project_snapshot,
+            directive: TaskDirective {
+                id: LinearIssueId::new(issue_id).expect("issue id"),
+                identifier: identifier.to_string(),
+                title: format!("Task {identifier}"),
+                description: String::new(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             pm_writeback: PmWritebackState::Current,
@@ -3504,8 +3496,7 @@ mod tests {
                 .await
                 .expect("read session")
                 .expect("session exists")
-                .launch
-                .issue
+                .directive
                 .identifier,
             "W2-9"
         );
@@ -3546,8 +3537,7 @@ mod tests {
                 .await
                 .expect("read session")
                 .expect("session exists")
-                .launch
-                .issue
+                .directive
                 .identifier,
             "PRD-9"
         );
@@ -3619,8 +3609,7 @@ mod tests {
                 .await
                 .expect("read session")
                 .expect("session exists")
-                .launch
-                .issue
+                .directive
                 .identifier,
             "PRD-10"
         );

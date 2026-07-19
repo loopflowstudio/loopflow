@@ -106,7 +106,7 @@ pub(crate) fn plan_apply(
 #[cfg(test)]
 mod tests {
     use super::{is_human_comment, plan_apply};
-    use crate::launch_context::{LinearIssueId, LinearIssueSnapshot, LinearProjectSnapshot};
+    use crate::planning::{LinearIssueId, TaskDirective};
     use crate::pm::{IssueComment, IssueObservation};
     use crate::task::{Task, TaskId, TaskLinearObservation};
 
@@ -137,19 +137,11 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::from_raw("ts_plan"),
-            launch: crate::launch_context::TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new("issue-1").unwrap(),
-                    identifier: "INF-123".to_string(),
-                    title: "Old title".to_string(),
-                    description: "Old body".to_string(),
-                },
-                project: LinearProjectSnapshot {
-                    id: crate::launch_context::LinearProjectId::new("project-1").unwrap(),
-                    slug: "runtime".to_string(),
-                    name: "Runtime".to_string(),
-                    prompt_context: "Definition".to_string(),
-                },
+            directive: TaskDirective {
+                id: LinearIssueId::new("issue-1").unwrap(),
+                identifier: "INF-123".to_string(),
+                title: "Old title".to_string(),
+                description: "Old body".to_string(),
                 pm_snapshot_synced_at: 1,
             },
             pm_writeback: crate::task::PmWritebackState::Current,

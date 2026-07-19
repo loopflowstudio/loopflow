@@ -1,12 +1,9 @@
-//! Linear context captured when Project or Task Work starts.
-//!
-//! These immutable launch facts make Work resumable without another provider
-//! read. Current Project/KR/Task truth remains in the Wave's atomic PM snapshot.
+//! Durable planning facts for Project and Task Work.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum LaunchContextError {
+pub enum PlanningError {
     #[error("invalid Linear id: {0}")]
     InvalidId(String),
 }
@@ -18,10 +15,10 @@ macro_rules! validated_string_id {
         pub struct $name(String);
 
         impl $name {
-            pub fn new(value: impl Into<String>) -> Result<Self, LaunchContextError> {
+            pub fn new(value: impl Into<String>) -> Result<Self, PlanningError> {
                 let value = value.into();
                 if value.trim().is_empty() {
-                    return Err(LaunchContextError::InvalidId(format!(
+                    return Err(PlanningError::InvalidId(format!(
                         "{} cannot be empty",
                         $label
                     )));
@@ -44,31 +41,20 @@ validated_string_id!(LinearIssueId, "Linear issue id");
 validated_string_id!(LinearProjectId, "Linear project id");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinearIssueSnapshot {
-    pub id: LinearIssueId,
-    pub identifier: String,
-    pub title: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LinearProjectSnapshot {
+pub struct ProjectDefinition {
     pub id: LinearProjectId,
     pub slug: String,
     pub name: String,
-    /// Definition and proof-shaped KRs captured when Project Work starts.
+    /// Definition and proof-shaped KRs from the latest PM snapshot.
     pub prompt_context: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProjectLaunchReceipt {
-    pub project: LinearProjectSnapshot,
     pub pm_snapshot_synced_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskLaunchReceipt {
-    pub issue: LinearIssueSnapshot,
-    pub project: LinearProjectSnapshot,
+pub struct TaskDirective {
+    pub id: LinearIssueId,
+    pub identifier: String,
+    pub title: String,
+    pub description: String,
     pub pm_snapshot_synced_at: i64,
 }

@@ -41,13 +41,13 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 
-    // The cursor is seeded from the launch snapshot when the Session is created,
+    // The cursor is seeded from the Task directive when the Task is created,
     // so the first edit diffs against launch content rather than baselining it.
     let seeded = rt
         .block_on(task.store.task_linear_observation(&task.session.id))
         .expect("cursor read")
         .expect("cursor seeded at creation");
-    assert_eq!(seeded.last_title, task.session.launch.issue.title);
+    assert_eq!(seeded.last_title, task.session.directive.title);
     assert_eq!(seeded.last_revision, "");
 
     // 1. A user edits title + description → one Steer.
@@ -121,8 +121,8 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
             &session,
             edit(
                 "2026-07-15T00:30:00.000Z",
-                &task.session.launch.issue.title,
-                &task.session.launch.issue.description,
+                &task.session.directive.title,
+                &task.session.directive.description,
             ),
             VIEWER,
             now,

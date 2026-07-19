@@ -3,7 +3,7 @@ mod support;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{task_complete, task_status};
+use loopflow::ops::task::{task_complete, task_snapshot, task_status};
 use loopflow::ops::{
     create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
 };
@@ -97,6 +97,36 @@ fn point_origin_at_github(repo: &TestRepo) {
         .status()
         .expect("set GitHub origin");
     assert!(status.success());
+}
+
+#[test]
+fn task_snapshot_reads_its_current_parent_project() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let mut project = runtime
+        .block_on(task.store.get_project(&task.session.project_id))
+        .expect("read parent Project")
+        .expect("parent Project exists");
+    project.definition.slug = "current-project".to_string();
+    project.definition.pm_snapshot_synced_at += 1;
+    runtime
+        .block_on(task.store.update_project(&project))
+        .expect("update parent Project");
+
+    let snapshot = task_snapshot(&task.session).expect("snapshot Task");
+
+    assert_eq!(snapshot.project, "current-project");
+    assert_eq!(snapshot.external_project_id, project.definition.id.as_str());
+    assert_eq!(
+        snapshot.pm_snapshot_synced_at,
+        task.session.directive.pm_snapshot_synced_at
+    );
 }
 
 #[test]

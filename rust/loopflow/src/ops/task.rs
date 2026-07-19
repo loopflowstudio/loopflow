@@ -21,10 +21,8 @@ use crate::engine::worktrees::{
     create_from_placement_plan, plan_placement, PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{expand_flow, load_flow, ConcreteStep};
-use crate::launch_context::{
-    LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot, TaskLaunchReceipt,
-};
 use crate::ops::error::{OpsError, OpsResult};
+use crate::planning::{LinearIssueId, TaskDirective};
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
     StoreError,
@@ -162,7 +160,7 @@ struct TaskWorkspace<'a> {
 impl<'a> TaskWorkspace<'a> {
     fn new(session: &'a Task, pr: &'a TaskPr) -> Self {
         Self {
-            issue_identifier: &session.launch.issue.identifier,
+            issue_identifier: &session.directive.identifier,
             session_id: &session.id,
             worktree: &session.worktree,
             base_commit: &pr.base_commit,
@@ -344,7 +342,7 @@ fn _refuse_current_user_feedback(session: &Task, feedback: Option<&Feedback>) ->
     if feedback.is_some_and(|feedback| feedback.attention == AttentionRoute::User) {
         return Err(task_error(format!(
             "Task {} routes current Feedback to the User; continue it before changing interaction policy",
-            session.launch.issue.identifier
+            session.directive.identifier
         )));
     }
     Ok(())
@@ -390,27 +388,27 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 if requested.as_str() != session.workspace_slug {
                     return Err(task_error(format!(
                         "Task {} already uses workspace name {:?}",
-                        session.launch.issue.identifier, session.workspace_slug
+                        session.directive.identifier, session.workspace_slug
                     )));
                 }
             }
             ensure_task_flow_override(
                 &session.worktree,
-                &session.launch.issue.identifier,
+                &session.directive.identifier,
                 "first",
                 flows.first.as_deref(),
                 &session.lifecycle.first.flow,
             )?;
             ensure_task_flow_override(
                 &session.worktree,
-                &session.launch.issue.identifier,
+                &session.directive.identifier,
                 "loop",
                 flows.loop_.as_deref(),
                 &session.lifecycle.loop_.flow,
             )?;
             ensure_task_flow_override(
                 &session.worktree,
-                &session.launch.issue.identifier,
+                &session.directive.identifier,
                 "finally",
                 flows.finally.as_deref(),
                 &session.lifecycle.finally.flow,
@@ -424,7 +422,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 let parent_id = active.parent_pr_id.as_ref().ok_or_else(|| {
                     task_error(format!(
                         "Task {} is rooted on main, not stacked on {requested}",
-                        session.launch.issue.identifier
+                        session.directive.identifier
                     ))
                 })?;
                 let parent = store
@@ -437,19 +435,19 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     .await
                     .map_err(|error| task_error(error.to_string()))?
                     .ok_or_else(|| task_error("stack parent Task is missing"))?;
-                if requested != parent_session.launch.issue.identifier
-                    && requested != parent_session.launch.issue.id.as_str()
+                if requested != parent_session.directive.identifier
+                    && requested != parent_session.directive.id.as_str()
                 {
                     return Err(task_error(format!(
                         "Task {} is stacked on {}, not {requested}",
-                        session.launch.issue.identifier, parent_session.launch.issue.identifier
+                        session.directive.identifier, parent_session.directive.identifier
                     )));
                 }
             }
             if directive.is_some() {
                 return Err(task_error(format!(
                     "Task {} already exists; use `lf task steer {} <new-direction>`",
-                    session.launch.issue.identifier, session.launch.issue.identifier,
+                    session.directive.identifier, session.directive.identifier,
                 )));
             }
             if headless && !session.lifecycle.all_interactions_deferred() {
@@ -465,7 +463,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 if matches!(status, WorkStatus::Running { .. }) {
                     return Err(task_error(format!(
                         "Task {} has an active Run; interrupt it before marking the Task headless",
-                        session.launch.issue.identifier
+                        session.directive.identifier
                     )));
                 }
             }
@@ -479,7 +477,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         Ok((existing, None))
     })?;
     if let Some(existing) = existing {
-        return task_status(existing.launch.issue.id.as_str());
+        return task_status(existing.directive.id.as_str());
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
@@ -527,7 +525,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                             "stack parent {parent_issue:?} has no Task; run it first"
                         ))
                     })?;
-                if parent_session.launch.issue.id.as_str() == resolved.item.id {
+                if parent_session.directive.id.as_str() == resolved.item.id {
                     return Err(task_error("a Task cannot stack on itself"));
                 }
                 let parent = store
@@ -629,21 +627,12 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         };
         let mut session = Task {
             id: task_id,
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(resolved.item.id.clone())
-                        .map_err(|error| task_error(error.to_string()))?,
-                    identifier: resolved.item.identifier.clone(),
-                    title: resolved.item.name.clone(),
-                    description: resolved.item.description.clone(),
-                },
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(resolved.project.id.clone())
-                        .map_err(|error| task_error(error.to_string()))?,
-                    slug: resolved.project.slug.clone(),
-                    name: resolved.project.name.clone(),
-                    prompt_context: project_context(&resolved.project),
-                },
+            directive: TaskDirective {
+                id: LinearIssueId::new(resolved.item.id.clone())
+                    .map_err(|error| task_error(error.to_string()))?,
+                identifier: resolved.item.identifier.clone(),
+                title: resolved.item.name.clone(),
+                description: resolved.item.description.clone(),
                 pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
             wave_id,
@@ -1275,7 +1264,7 @@ pub(crate) fn request_task_pr_publication(
             .ok_or_else(|| {
                 task_error(format!(
                     "Task {} has no active PR",
-                    session.launch.issue.identifier
+                    session.directive.identifier
                 ))
             })?;
         let branch = crate::engine::git::current_branch(repo)?
@@ -1283,7 +1272,7 @@ pub(crate) fn request_task_pr_publication(
         if pr.branch != branch {
             return Err(task_error(format!(
                 "Task {} active PR expects branch {:?}, but the worktree is on another branch",
-                session.launch.issue.identifier, pr.branch
+                session.directive.identifier, pr.branch
             )));
         }
         let now = time::OffsetDateTime::now_utc();
@@ -1596,7 +1585,7 @@ async fn verify_task_pr_range_with_authority_mode(
         .ok_or_else(|| {
             task_error(format!(
                 "Task {} has no active PR",
-                session.launch.issue.identifier
+                session.directive.identifier
             ))
         })?;
     let branch =
@@ -1604,7 +1593,7 @@ async fn verify_task_pr_range_with_authority_mode(
     if pr.branch != branch {
         return Err(task_error(format!(
             "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
-            session.launch.issue.identifier, pr.branch, branch
+            session.directive.identifier, pr.branch, branch
         )));
     }
 
@@ -1618,7 +1607,7 @@ async fn verify_task_pr_range_with_authority_mode(
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
     let base = pr.base_commit.clone();
-    let identifier = &session.launch.issue.identifier;
+    let identifier = &session.directive.identifier;
     let short = |sha: &str| sha.chars().take(12).collect::<String>();
 
     let merge_base = crate::engine::git::merge_base(repo, &upstream, &head).map_err(|_| {
@@ -1735,11 +1724,11 @@ async fn require_task_pr_range_nonempty_with_authority_mode(
         .ok_or_else(|| {
             task_error(format!(
                 "Task {} has no active PR",
-                session.launch.issue.identifier
+                session.directive.identifier
             ))
         })?;
     let base = &pr.base_commit;
-    let identifier = &session.launch.issue.identifier;
+    let identifier = &session.directive.identifier;
     let short = base.chars().take(12).collect::<String>();
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
@@ -1785,19 +1774,19 @@ pub(crate) fn attach_task_github_pr(
             .ok_or_else(|| {
                 task_error(format!(
                     "Task {} has no active PR",
-                    session.launch.issue.identifier
+                    session.directive.identifier
                 ))
             })?;
         let github_pr = github_pr.ok_or_else(|| {
             task_error(format!(
                 "GitHub PR for Task {} could not be read after creation or update",
-                session.launch.issue.identifier
+                session.directive.identifier
             ))
         })?;
         if github_pr.branch != pr.branch {
             return Err(task_error(format!(
                 "Task {} active PR expects branch {:?}, but GitHub reported {:?}",
-                session.launch.issue.identifier, pr.branch, github_pr.branch
+                session.directive.identifier, pr.branch, github_pr.branch
             )));
         }
         let number = u32::try_from(github_pr.number).map_err(|_| {
@@ -1813,7 +1802,7 @@ pub(crate) fn attach_task_github_pr(
         let publication = pr.publication.as_mut().ok_or_else(|| {
             task_error(format!(
                 "Task {} has no durable PR publication request",
-                session.launch.issue.identifier
+                session.directive.identifier
             ))
         })?;
         publication.github = Some(GithubPr {
@@ -1873,7 +1862,7 @@ pub(crate) fn abandon_task_pr(
             .ok_or_else(|| {
                 task_error(format!(
                     "Task {} has no active PR to abandon",
-                    session.launch.issue.identifier
+                    session.directive.identifier
                 ))
             })?;
         let branch =
@@ -1881,7 +1870,7 @@ pub(crate) fn abandon_task_pr(
         if branch != pr.branch {
             return Err(task_error(format!(
                 "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
-                session.launch.issue.identifier, pr.branch, branch
+                session.directive.identifier, pr.branch, branch
             )));
         }
         let dirty = !is_clean(repo)?;
@@ -1959,7 +1948,7 @@ pub(crate) async fn relaunch_inactive_process(
     let Some(_) = ensure_working_pr(store, session).await? else {
         return Err(task_error(format!(
             "Task {} is terminal and cannot start a Run",
-            session.launch.issue.identifier
+            session.directive.identifier
         )));
     };
     launch_task_process(store, session, None).await
@@ -1973,7 +1962,7 @@ async fn relaunch_for_ci_incident(
     let Some(_) = ensure_working_pr(store, session).await? else {
         return Err(task_error(format!(
             "Task {} is terminal and cannot repair CI",
-            session.launch.issue.identifier
+            session.directive.identifier
         )));
     };
     launch_task_process(
@@ -2017,7 +2006,7 @@ async fn launch_task_process(
         .map_err(|error| task_error(format!("failed to reserve Task Run: {error}")))?;
     let tmux_name = format!(
         "lf-task-{}-{}-{}",
-        tmux_session_slug(&session.launch.issue.identifier),
+        tmux_session_slug(&session.directive.identifier),
         &session.id.as_str()[3..11],
         &run.id.as_str()[4..12]
     );
@@ -2059,7 +2048,7 @@ async fn wait_until_running(
             WorkStatus::Done | WorkStatus::Abandoned => {
                 return Err(task_error(format!(
                     "task {} ended during startup",
-                    session.launch.issue.identifier
+                    session.directive.identifier
                 )))
             }
             WorkStatus::Ready | WorkStatus::Waiting { .. } => {}
@@ -2067,7 +2056,7 @@ async fn wait_until_running(
         if tokio::time::Instant::now() >= deadline {
             return Err(task_error(format!(
                 "task {} process did not report running within 10 seconds",
-                session.launch.issue.identifier
+                session.directive.identifier
             )));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2144,7 +2133,7 @@ async fn mark_task_body_lost(store: &SharedStore, session: &mut Task) -> OpsResu
     record_task_failure(store, session, reason, reason.to_string()).await?;
     if let Err(error) = task_recovery_adoption(store, session).await {
         tracing::info!(
-            task = %session.launch.issue.identifier,
+            task = %session.directive.identifier,
             "not recovering missing Task body: {error}"
         );
         return Ok(());
@@ -2165,7 +2154,7 @@ pub(crate) async fn reconcile_project_tasks(
     let project_tasks = |tasks: Vec<Task>| {
         tasks
             .into_iter()
-            .filter(|task| task.launch.project.id == project.launch.project.id)
+            .filter(|task| task.project_id == project.id)
             .collect::<Vec<_>>()
     };
     let mut tasks = project_tasks(
@@ -2183,7 +2172,7 @@ pub(crate) async fn reconcile_project_tasks(
         }
         if let Err(error) = task_recovery_adoption(store, task).await {
             tracing::warn!(
-                task = %task.launch.issue.identifier,
+                task = %task.directive.identifier,
                 %error,
                 "supervisor skipped Task recovery: unsafe worktree/branch state"
             );
@@ -2883,7 +2872,7 @@ pub(crate) async fn task_recovery_adoption(
     session: &Task,
 ) -> OpsResult<TaskRecoveryAdoption> {
     let worktree = &session.worktree;
-    let identifier = &session.launch.issue.identifier;
+    let identifier = &session.directive.identifier;
     if !worktree.exists() {
         return Err(task_error(format!(
             "Task {identifier} worktree {} is missing; recovery refused before moving any ownership",
@@ -2991,7 +2980,7 @@ pub(crate) async fn refuse_dirty_between_prs(store: &SharedStore, session: &Task
     Err(task_error(format!(
         "Task {} cannot recover between PRs while {} has uncommitted changes; carry them \
          forward with `lf pr next` or commit before resuming",
-        session.launch.issue.identifier,
+        session.directive.identifier,
         session.worktree.display()
     )))
 }
@@ -3140,7 +3129,7 @@ async fn heal_incoherent_base(
     };
     let Ok(fork) = fork_point(&session.worktree, &base_ref, &pr.branch) else {
         tracing::warn!(
-            task = %session.launch.issue.identifier,
+            task = %session.directive.identifier,
             branch = %pr.branch,
             base = %pr.base_commit,
             "Task PR base is incoherent and shares no history with the upstream; \
@@ -3153,7 +3142,7 @@ async fn heal_incoherent_base(
     };
     if !(ancestry(&fork, &pr.base_commit) && ancestry(&pr.base_commit, &base_ref)) {
         tracing::warn!(
-            task = %session.launch.issue.identifier,
+            task = %session.directive.identifier,
             branch = %pr.branch,
             base = %pr.base_commit,
             "Task PR base is incoherent but is not on the upstream line, so no past mint \
@@ -3163,7 +3152,7 @@ async fn heal_incoherent_base(
     }
     let mut healed = pr;
     tracing::info!(
-        task = %session.launch.issue.identifier,
+        task = %session.directive.identifier,
         branch = %healed.branch,
         from = %healed.base_commit,
         to = %fork,
@@ -3311,7 +3300,7 @@ async fn ensure_working_pr_with_authority(
     {
         return Err(task_error(format!(
             "Task {} cannot rotate PRs while {} has uncommitted changes",
-            session.launch.issue.identifier,
+            session.directive.identifier,
             session.worktree.display()
         )));
     }
@@ -3326,7 +3315,7 @@ async fn ensure_working_pr_with_authority(
         if current != settled.branch {
             return Err(task_error(format!(
                 "Task {} expected settled branch {:?} or recovery branch {:?}, but {} is on {:?}",
-                session.launch.issue.identifier,
+                session.directive.identifier,
                 settled.branch,
                 branch,
                 session.worktree.display(),
@@ -3508,7 +3497,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
         ) {
             return Err(task_error(format!(
                 "Task {} is terminal; nothing to rotate",
-                session.launch.issue.identifier
+                session.directive.identifier
             )));
         }
         let rotate = RotateOptions {
@@ -3569,7 +3558,7 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
             WorkStatus::Abandoned => {
                 return Err(task_error(format!(
                     "Task {} is abandoned and cannot be completed",
-                    session.launch.issue.identifier
+                    session.directive.identifier
                 )))
             }
             WorkStatus::Ready | WorkStatus::Running { .. } | WorkStatus::Waiting { .. } => {}
@@ -3585,7 +3574,7 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
         // review approved before the Task can be completed in the PM. Do not
         // weaken the review gate or infer merge from a green head.
         let gate = task_completion_gate(&store, &session).await?;
-        if let Some(refusal) = gate.refusal(&session.launch.issue.identifier) {
+        if let Some(refusal) = gate.refusal(&session.directive.identifier) {
             // Nothing has been written. A refusal here — an open review, a
             // committed follow-up, anything — leaves a discardable successor
             // active, so the Task keeps its PR and no rotation is provoked.
@@ -3710,7 +3699,7 @@ async fn link_pr_to_linear(store: &SharedStore, session: &Task, pr: &mut TaskPr)
         comment_id: pr.linear_comment_id.clone(),
     };
     let request = crate::ops::pm::PrLinkRequest {
-        issue_id: session.launch.issue.id.as_str().to_string(),
+        issue_id: session.directive.id.as_str().to_string(),
         url: github.url.clone(),
         title,
         subtitle: state,
@@ -3722,7 +3711,7 @@ async fn link_pr_to_linear(store: &SharedStore, session: &Task, pr: &mut TaskPr)
     // reading, but an operator running `lf pr open` should not have to go looking.
     if let Some(error) = &outcome.error {
         tracing::warn!(
-            issue = session.launch.issue.identifier,
+            issue = session.directive.identifier,
             pr = github.number,
             "Linear link degraded; the GitHub PR is published and the next publish retries: {error}"
         );
@@ -3762,7 +3751,7 @@ pub(crate) async fn reconcile_pm_writeback(
         crate::ops::task_pm::complete_task(
             &session.worktree,
             wave.name(),
-            session.launch.issue.id.as_str(),
+            session.directive.id.as_str(),
             pr_url,
         )
         .await,
@@ -3792,7 +3781,7 @@ async fn retry_pm_writeback(store: &SharedStore, session: &mut Task) {
         let result = crate::ops::task_pm::retry_complete_task(
             &session.worktree,
             wave.name(),
-            session.launch.issue.id.as_str(),
+            session.directive.id.as_str(),
             pr_url,
         )
         .await;
@@ -4095,6 +4084,13 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
     block_on_task(async move {
         let store = task_store().await?;
         let wave = owning_wave(&store, &session).await?;
+        let project = store
+            .get_project(&session.project_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read owning Project: {error}")))?
+            .ok_or_else(|| {
+                task_error(format!("owning Project {} is missing", session.project_id))
+            })?;
         let work = store
             .work_for_child(&ChildRef::Task(session.id.clone()))
             .await
@@ -4139,9 +4135,9 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
             None => None,
         };
         let completion_gate = task_completion_gate(&store, &session).await?;
-        let completion_refusal = completion_gate.refusal(&session.launch.issue.identifier);
+        let completion_refusal = completion_gate.refusal(&session.directive.identifier);
         let resume_refusal =
-            no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest);
+            no_active_pr_resume_refusal(&session.directive.identifier, active, latest);
         let work_status = store
             .work_status(&work)
             .await
@@ -4166,12 +4162,12 @@ pub fn task_snapshot(session: &Task) -> OpsResult<TaskSnapshot> {
         };
         let actions = derive_task_actions(&action_evidence);
         Ok(TaskSnapshot {
-            issue_id: session.launch.issue.id.as_str().to_string(),
-            issue_identifier: session.launch.issue.identifier,
+            issue_id: session.directive.id.as_str().to_string(),
+            issue_identifier: session.directive.identifier,
             task_id: session.id.to_string(),
-            external_project_id: session.launch.project.id.as_str().to_string(),
-            project: session.launch.project.slug,
-            pm_snapshot_synced_at: session.launch.pm_snapshot_synced_at,
+            external_project_id: project.definition.id.as_str().to_string(),
+            project: project.definition.slug,
+            pm_snapshot_synced_at: session.directive.pm_snapshot_synced_at,
             pm_writeback: session.pm_writeback,
             wave: wave.name().to_string(),
             project_id: session.project_id.to_string(),
@@ -4462,7 +4458,7 @@ fn queue_task_steer(issue: &str, message: String) -> OpsResult<TaskControlResult
             relaunch_inactive_process(&store, &mut session).await?;
         }
         Ok(TaskControlResult {
-            issue_id: session.launch.issue.identifier.clone(),
+            issue_id: session.directive.identifier.clone(),
             task_id: session.id.to_string(),
             receipt: super::child::WorkControlReceipt::Steer { receipt },
             observation: session.observation.clone(),
@@ -4499,7 +4495,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .await
             .map_err(|error| task_error(error.to_string()))?;
         Ok(TaskControlResult {
-            issue_id: session.launch.issue.identifier.clone(),
+            issue_id: session.directive.identifier.clone(),
             task_id: session.id.to_string(),
             receipt: super::child::WorkControlReceipt::Interrupt { receipt },
             observation: session.observation,
@@ -4541,7 +4537,7 @@ async fn _recover_abandoned_task(
         WorkStatus::Done => {
             return Err(task_error(format!(
                 "Task {} is completed; start a new Task rather than recovering it",
-                predecessor.launch.issue.identifier
+                predecessor.directive.identifier
             )));
         }
         WorkStatus::Abandoned => {}
@@ -4562,7 +4558,7 @@ async fn _recover_abandoned_task(
     if carried.is_empty() {
         carried = format!(
             "Continue {}: {}",
-            predecessor.launch.issue.identifier, predecessor.launch.issue.title
+            predecessor.directive.identifier, predecessor.directive.title
         );
     }
     let now = time::OffsetDateTime::now_utc();
@@ -4618,7 +4614,7 @@ pub(crate) async fn resume_task_async(
     let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     if let Some(refusal) =
-        no_active_pr_resume_refusal(&session.launch.issue.identifier, active, latest)
+        no_active_pr_resume_refusal(&session.directive.identifier, active, latest)
     {
         return Err(task_error(refusal));
     }
@@ -4627,7 +4623,7 @@ pub(crate) async fn resume_task_async(
     // lease is reaped or a successor body is launched.
     refuse_dirty_between_prs(&store, &session).await?;
     reconcile_process_liveness(&store, &mut session).await?;
-    let issue_id = session.launch.issue.identifier.clone();
+    let issue_id = session.directive.identifier.clone();
     let observation = session.observation.clone();
     let session_id = session.id.to_string();
     let run = super::child::resume_child(
@@ -4674,7 +4670,7 @@ pub fn task_abandon(issue: &str, reason: String) -> OpsResult<TaskControlResult>
             .await
             .map_err(|error| task_error(error.to_string()))?;
         Ok(TaskControlResult {
-            issue_id: session.launch.issue.identifier.clone(),
+            issue_id: session.directive.identifier.clone(),
             task_id: session.id.to_string(),
             receipt: super::child::WorkControlReceipt::Abandon { receipt },
             observation: session.observation,

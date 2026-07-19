@@ -271,7 +271,7 @@ async fn run_project_inner(
     });
     println!(
         "project {}> attached; /status, /interrupt, /detach, or type an instruction",
-        session.launch.project.slug
+        session.definition.slug
     );
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -723,7 +723,7 @@ async fn handle_attachment(
             .await?;
         println!(
             "{}  {:?}",
-            session.launch.project.slug,
+            session.definition.slug,
             store.work_status(&work).await?
         );
         return Ok(());
@@ -784,7 +784,7 @@ async fn inspect_outcome(
     wave: &Wave,
 ) -> Result<ProjectOutcome> {
     let repo = wave.repo().to_string();
-    let project_id = session.launch.project.id.as_str().to_string();
+    let project_id = session.definition.id.as_str().to_string();
     let resolved = tokio::task::spawn_blocking(move || {
         crate::ops::task_pm::resolve_project(
             std::path::Path::new(&repo),
@@ -801,7 +801,7 @@ async fn inspect_outcome(
         .snapshot
         .items
         .iter()
-        .filter(|item| item.project.as_deref() == Some(session.launch.project.slug.as_str()))
+        .filter(|item| item.project.as_deref() == Some(session.definition.slug.as_str()))
         .collect::<Vec<_>>();
     let mut task_states = Vec::with_capacity(tasks.len());
     for task in &tasks {
@@ -1163,13 +1163,13 @@ fn project_seed(
     let direction = boundary.render();
     format!(
         "Advance Linear Project {name} ({project_id}) in wave/{wave}.\n\n{context}\n\n{direction}\n\nProject: {session_id}\nIteration: {iteration}\nPM snapshot synced at: {synced_at}\nSupervised Task observations:\n{observations}\n\nThe runner plays clarify, pursue, and mutate through this same provider session before it checks authoritative Project and Task state. Read and update only this Linear Project through `lf pm`. Create or select concrete Linear tasks, run file-writing work with `lf task run <issue-id>`, and supervise those Tasks. Do not edit repository files from the Wave home. Return concise phase evidence; the runner decides complete, wait, repeat, or block after the whole flow.",
-        name = session.launch.project.name,
-        project_id = session.launch.project.id.as_str(),
+        name = session.definition.name,
+        project_id = session.definition.id.as_str(),
         wave = wave_name,
-        context = session.launch.project.prompt_context,
+        context = session.definition.prompt_context,
         session_id = session.id,
         iteration = session.iteration + 1,
-        synced_at = session.launch.pm_snapshot_synced_at,
+        synced_at = session.definition.pm_snapshot_synced_at,
     )
 }
 

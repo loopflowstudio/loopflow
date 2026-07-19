@@ -1,24 +1,23 @@
-# Slice 6D1: remove false Session identity
+# Slice 6D2: name Mac projections after what they contain
 
 ## Implement
 
-- Rename Task workspace DTO `session_id` fields to `task_id` in Rust, Swift,
-  fixtures, and tests.
-- Rename `ChildControlActivity.session_id` to `work_id` across Rust/Swift wire
-  mirrors and journal fixtures.
-- Replace `LaunchSurfaceRecord.sessionId` (an alias of `launch.id`) with
-  `launchId` in its consumers.
-- Rename production Rust Project/Task locals, parameters, errors, comments,
-  prompts, and help that call stable Work a Session.
-- Replace user docs that advertise Task Session, Project Session, or durable
-  Session identity with Task Work, Project Work, or Launch as appropriate.
-- Retain explicitly named provider session ids and real tmux, Ghostty, browser,
-  and human sessions. Do not redesign server topology in this pass.
+- Rename the Active Sessions projection to a Work census: `WorkCensus`,
+  `WaveActivity`, `WorkActivity`, `WorkActivityKind`, and `ActivityEvidence`.
+- Rename its view and row view consistently. Replace row `actions` with the
+  existing optional `launchId`; delete the one-value `SessionAction` enum.
+- Rename Context Lab's AgentLaunch-based contract from Session to Launch:
+  `LaunchSetQuery`, `LaunchSetTotals`, `LaunchLane`, `launches`, and
+  `ContextFlameLevel::LaunchSet` in Rust, JSON, Swift, fixtures, and UI copy.
+- Rename agent-session count fields in that contract to launch counts. Add no
+  compatibility keys or aliases.
+- Preserve real provider, tmux, Ghostty, browser, and human Session vocabulary.
 
 ## Done when
 
-- [x] Task workspace JSON names `task_id`; child activity JSON names `work_id`.
-- [x] Launch presentation consumers name `launchId`.
-- [x] production Project/Task code does not call stable Work or ids sessions.
-- [x] user docs contain no Task Session, Project Session, or durable Session.
-- [x] Rust/Swift DTO and focused behavior tests, fmt, and all-target clippy pass.
+- [ ] no ActiveSessions/ActiveSession/SessionAction projection types remain.
+- [ ] openability derives from `launchId`; the action enum/array are deleted.
+- [ ] Context Lab wire and UI use LaunchSet/LaunchLane/launches and launch counts.
+- [ ] remaining current Session symbols refer to real provider or surface
+      sessions, not Work, Run, Launch, or an AgentLaunch projection.
+- [ ] Context/DTO/UI Rust and Swift tests, fmt, and all-target clippy pass.

@@ -535,6 +535,12 @@ impl WaveLoop {
                     self.evidence_queue.push(message);
                 }
             }
+            InboxItem::Promotion(wake) => {
+                let message = crate::wave::journal::promotion_wake_message(&wake);
+                if self.seen.insert(message.id.clone()) {
+                    self.evidence_queue.push(message);
+                }
+            }
             InboxItem::Interrupt | InboxItem::Skip => {}
         }
     }
@@ -2410,6 +2416,48 @@ mod tests {
             .deliver(MessageOp::Message, "second wake".into())
             .expect("second wake");
         wait_for("second Wave flow", || loop_.pass_count() == 6).await;
+    }
+
+    #[tokio::test]
+    async fn typed_promotion_wake_runs_one_child_flow_without_user_speech() {
+        let mut loop_ = boot(Duration::from_secs(600), "echo promoted").await;
+        let wake = crate::wave::PromotionWake {
+            parent_wave_id: crate::id::WaveId::new(),
+            parent: "platform".to_string(),
+        };
+
+        assert!(loop_.runtime.deliver_promotion_wake(wake.clone()));
+        assert!(
+            !loop_.runtime.deliver_promotion_wake(wake.clone()),
+            "a replayed promotion signal is deduplicated before scheduling"
+        );
+        assert_eq!(wake_of(&loop_.next_seed().await), wake.prompt());
+        wait_for("one promoted Wave flow", || loop_.pass_count() == 3).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            loop_.pass_count(),
+            3,
+            "one promotion fact starts one three-step Wave flow"
+        );
+
+        let events = loop_.journal_events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, EventKind::PromotionObserved { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::UserMessage { .. })),
+            "machine promotion never enters the human thread door"
+        );
+        assert_eq!(
+            started_answers(&events)[0],
+            vec![MessageId(wake.inbox_id())]
+        );
     }
 
     // -- Scheduling, over the full wire --

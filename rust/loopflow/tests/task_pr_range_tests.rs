@@ -202,7 +202,7 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
     // The recorded base healed forward to the current origin tip.
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(
@@ -300,7 +300,7 @@ fn failed_rebase_push_does_not_advance_the_recorded_task_base() {
 
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(
@@ -362,7 +362,7 @@ fn publish_keeps_a_behind_branch_and_recorded_base_unchanged() {
     );
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(
@@ -662,7 +662,7 @@ fn serial_rotation_heals_stale_base_and_lands_the_continuation() {
     // The recorded base healed forward to the current origin tip.
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(
@@ -729,7 +729,7 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
     runtime.block_on(async {
         let mut pr = task
             .store
-            .active_task_pr(&task.session.id)
+            .active_task_pr(&task.task.id)
             .await
             .expect("read active PR")
             .expect("active PR exists");

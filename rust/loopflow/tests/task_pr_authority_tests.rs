@@ -409,7 +409,7 @@ fn valid_authority_publishes_and_records_the_pr() {
     // GitHub PR was attached, so this did not degrade to a generic PR.
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert!(

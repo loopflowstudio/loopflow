@@ -773,7 +773,7 @@ fn latest_land_disposition_wins_before_merge() {
 
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Open);

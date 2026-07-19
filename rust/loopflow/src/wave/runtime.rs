@@ -37,9 +37,9 @@ use crate::task::TaskObservation;
 #[cfg(test)]
 use crate::wave::journal::JournalAppendStage;
 use crate::wave::journal::{
-    fold_thread, journal_path, project_observation_message, restore_pending,
-    task_observation_message, EventKind, Journal, JournalAppendError, MessageId, MessageOp,
-    PendingMessage, Usage,
+    fold_thread, journal_path, project_observation_message, promotion_wake_message,
+    restore_pending, task_observation_message, EventKind, Journal, JournalAppendError, MessageId,
+    MessageOp, PendingMessage, Usage,
 };
 use crate::wave::playhead::{
     now_rfc3339, BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation,
@@ -47,6 +47,7 @@ use crate::wave::playhead::{
 };
 use crate::wave::state::{can_transition, LoopState};
 use crate::wave::wire::{ProviderSessionRef, ResidentDelta, ResidentStateTo};
+use crate::wave::PromotionWake;
 
 /// Capacity of the live turn broadcast. SSE clients that fall this far behind
 /// get a lag error and resync from `/conversation`; the journal is the source
@@ -145,6 +146,8 @@ pub enum InboxItem {
     Task(TaskObservation),
     /// A typed Project ledger observation.
     Project(ProjectObservation),
+    /// The one-time typed wake derived from this Wave's durable parent link.
+    Promotion(PromotionWake),
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
     /// for it — the `LoopState` transition records the interrupt itself.
     Interrupt,
@@ -172,6 +175,7 @@ pub struct Subscription {
     pub pending: Vec<PendingMessage>,
     pub tasks: HashMap<MessageId, TaskObservation>,
     pub projects: HashMap<MessageId, ProjectObservation>,
+    pub promotions: HashMap<MessageId, PromotionWake>,
     /// Live resident-directed ops sent after the snapshot.
     pub inbox_rx: broadcast::Receiver<InboxItem>,
 }
@@ -221,6 +225,7 @@ struct Inner {
     messages: HashMap<MessageId, PendingMessage>,
     tasks: HashMap<MessageId, TaskObservation>,
     projects: HashMap<MessageId, ProjectObservation>,
+    promotions: HashMap<MessageId, PromotionWake>,
 }
 
 /// The whole live state of one running wave server.
@@ -347,6 +352,7 @@ impl WaveRuntime {
                 messages: fold.messages,
                 tasks: fold.tasks,
                 projects: fold.projects,
+                promotions: fold.promotions,
             }),
             turn_tx,
             state_tx,
@@ -637,6 +643,7 @@ impl WaveRuntime {
             pending: inner.pending_messages.clone(),
             tasks: inner.tasks.clone(),
             projects: inner.projects.clone(),
+            promotions: inner.promotions.clone(),
             inbox_rx: self.inbox_tx.subscribe(),
         }
     }
@@ -885,6 +892,23 @@ impl WaveRuntime {
             .insert(pending.id.clone(), observation.clone());
         inner.pending_messages.push(pending);
         let _ = self.inbox_tx.send(InboxItem::Project(observation));
+        true
+    }
+
+    /// Journal and queue the typed promotion wake exactly once per parent link.
+    pub fn deliver_promotion_wake(&self, wake: PromotionWake) -> bool {
+        let mut inner = self.inner();
+        let pending = promotion_wake_message(&wake);
+        if inner.promotions.contains_key(&pending.id) {
+            return false;
+        }
+        inner.journal.append(|_| EventKind::PromotionObserved {
+            wake: wake.clone(),
+        });
+        inner.messages.insert(pending.id.clone(), pending.clone());
+        inner.promotions.insert(pending.id.clone(), wake.clone());
+        inner.pending_messages.push(pending);
+        let _ = self.inbox_tx.send(InboxItem::Promotion(wake));
         true
     }
 

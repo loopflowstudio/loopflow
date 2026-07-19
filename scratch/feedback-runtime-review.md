@@ -77,6 +77,11 @@ The exact authority/tooling contradiction is recorded in `scratch/questions.md`;
 Slice 3's implementation is complete, but its active Intelligence context is
 not curated until that ownership decision is resolved.
 
+Repair proof: the live-memory claim search is empty across current Rust, Swift,
+docs, skills, and tests outside the explicitly blocked Wave memory; CLI memory
+tests pass 3/3, the one-subcommand parser proof passes 1/1, Swift Wave chat
+streaming passes 24/24, and `cargo fmt --check` passes.
+
 ## Slice 4 — explicit prompt context
 
 Accepted. `PromptComponents` and launch seeding have no recent-Wave-chat field,

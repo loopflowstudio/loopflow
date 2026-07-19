@@ -526,6 +526,8 @@ async fn events_handler(
                     InboxFrame::Project {
                         observation: observation.clone(),
                     }
+                } else if let Some(wake) = sub.promotions.get(&message.id) {
+                    InboxFrame::Promotion { wake: wake.clone() }
                 } else {
                     pending_inbox_frame(message)
                 };
@@ -680,6 +682,7 @@ fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
         InboxItem::Project(observation) => InboxFrame::Project {
             observation: observation.clone(),
         },
+        InboxItem::Promotion(wake) => InboxFrame::Promotion { wake: wake.clone() },
         InboxItem::Interrupt => InboxFrame::Interrupt,
         InboxItem::Skip => InboxFrame::Skip,
     }

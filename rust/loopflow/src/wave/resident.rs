@@ -214,6 +214,7 @@ fn inbox_item(frame: InboxFrame) -> InboxItem {
         }),
         InboxFrame::Task { observation } => InboxItem::Task(observation),
         InboxFrame::Project { observation } => InboxItem::Project(observation),
+        InboxFrame::Promotion { wake } => InboxItem::Promotion(wake),
         InboxFrame::Interrupt => InboxItem::Interrupt,
         InboxFrame::Skip => InboxItem::Skip,
     }

@@ -1839,14 +1839,15 @@ mod tests {
                 "SELECT COUNT(*) FROM sqlite_schema
                  WHERE type='table' AND name IN (
                     'child_directives', 'launches', 'turns',
-                    'interaction_reviews', 'interactive_handoffs'
+                    'interaction_reviews', 'interactive_handoffs',
+                    'bus_messages', 'bus_cursors'
                  )",
                 [],
                 |row| row.get::<_, i64>(0),
             )
             .unwrap(),
             0,
-            "the durable spine has no compatibility or shadow lifecycle tables"
+            "the durable spine has no compatibility, Agent Bus, or shadow lifecycle tables"
         );
         let turn_columns = columns(&conn, "agent_turns");
         assert!(turn_columns.iter().any(|name| name == "epoch_id"));

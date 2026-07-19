@@ -22,17 +22,17 @@ struct LifecycleConfig {
 
 fn lifecycle_config(task: &RegisteredTask) -> LifecycleConfig {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
-    let session = runtime
-        .block_on(task.store.get_task(&task.session.id))
+    let persisted_task = runtime
+        .block_on(task.store.get_task(&task.task.id))
         .expect("read Task")
         .expect("Task");
     LifecycleConfig {
-        first_flow: session.lifecycle.first.flow,
-        first_reviewer: session.lifecycle.first.reviewer,
-        loop_flow: session.lifecycle.loop_.flow,
-        loop_reviewer: session.lifecycle.loop_.reviewer,
-        finally_flow: session.lifecycle.finally.flow,
-        finally_reviewer: session.lifecycle.finally.reviewer,
+        first_flow: persisted_task.lifecycle.first.flow,
+        first_reviewer: persisted_task.lifecycle.first.reviewer,
+        loop_flow: persisted_task.lifecycle.loop_.flow,
+        loop_reviewer: persisted_task.lifecycle.loop_.reviewer,
+        finally_flow: persisted_task.lifecycle.finally.flow,
+        finally_reviewer: persisted_task.lifecycle.finally.reviewer,
     }
 }
 
@@ -54,7 +54,7 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
     runtime.block_on(async {
         let work = task
             .store
-            .work_for_child(&ChildRef::Task(task.session.id.clone()))
+            .work_for_child(&ChildRef::Task(task.task.id.clone()))
             .await
             .expect("resolve Task Work");
         let boundary = task.store.boundary_seed(&work).await.expect("read Basis");
@@ -77,7 +77,7 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
                         // SAFETY: `getpgrp` has no preconditions and does not mutate memory.
                         id: i64::from(unsafe { libc::getpgrp() }),
                     },
-                    cwd: task.session.worktree.clone(),
+                    cwd: task.task.worktree.clone(),
                     surface: "terminal".to_string(),
                     opaque: true,
                     resume_token: None,
@@ -104,7 +104,7 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
                 FlowPosition {
                     work,
                     epoch_id: boundary.basis.epoch_id,
-                    flow: task.session.lifecycle.first.flow.clone(),
+                    flow: task.task.lifecycle.first.flow.clone(),
                     step: "review-design".to_string(),
                     step_index: 0,
                     iteration: 0,
@@ -165,7 +165,7 @@ fn task_run_explicit_reviewer_changes_only_future_feedback() {
     let attention = runtime.block_on(async {
         let work = task
             .store
-            .work_for_child(&ChildRef::Task(task.session.id.clone()))
+            .work_for_child(&ChildRef::Task(task.task.id.clone()))
             .await
             .expect("resolve Task Work");
         task.store

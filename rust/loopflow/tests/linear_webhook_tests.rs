@@ -25,8 +25,8 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     repo.commit("seed");
     repo.push_new_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
-    let issue_id = task.session.directive.id.as_str().to_string();
-    let target = ChildRef::Task(task.session.id.clone());
+    let issue_id = task.task.directive.id.as_str().to_string();
+    let target = ChildRef::Task(task.task.id.clone());
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 

@@ -110,7 +110,7 @@ fn task_snapshot_reads_its_current_parent_project() {
     let task = register_task(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     let mut project = runtime
-        .block_on(task.store.get_project(&task.session.project_id))
+        .block_on(task.store.get_project(&task.task.project_id))
         .expect("read parent Project")
         .expect("parent Project exists");
     project.definition.slug = "current-project".to_string();
@@ -119,13 +119,13 @@ fn task_snapshot_reads_its_current_parent_project() {
         .block_on(task.store.update_project(&project))
         .expect("update parent Project");
 
-    let snapshot = task_snapshot(&task.session).expect("snapshot Task");
+    let snapshot = task_snapshot(&task.task).expect("snapshot Task");
 
     assert_eq!(snapshot.project, "current-project");
     assert_eq!(snapshot.external_project_id, project.definition.id.as_str());
     assert_eq!(
         snapshot.pm_snapshot_synced_at,
-        task.session.directive.pm_snapshot_synced_at
+        task.task.directive.pm_snapshot_synced_at
     );
 }
 
@@ -292,7 +292,7 @@ fn github_failure_leaves_publication_intent_observable() {
 
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
@@ -327,19 +327,19 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
 
-    let session = task_status("INF-123").expect("reconcile Task PR");
-    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    let persisted_task = task_status("INF-123").expect("reconcile Task PR");
+    let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
     assert!(!matches!(snapshot.status, WorkStatus::Done));
     assert!(
         matches!(
-            session.observation,
+            persisted_task.observation,
             loopflow::task::Observation::Fresh { .. }
         ),
-        "manual merge reconciliation should use the bounded REST observation: {session:?}"
+        "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
     );
 
     let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
+        .block_on(task.store.task_prs(&task.task.id))
         .expect("read Task PRs");
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
@@ -349,7 +349,7 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let work = runtime
         .block_on(
             task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
         )
         .expect("resolve reconciled Task Work");
     assert!(!matches!(
@@ -384,18 +384,18 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let session = task_status("INF-123").expect("reconcile completing PR");
+    let persisted_task = task_status("INF-123").expect("reconcile completing PR");
     assert!(
         matches!(
-            session.observation,
+            persisted_task.observation,
             loopflow::task::Observation::Fresh { .. }
         ),
-        "completion should use the bounded REST observation: {session:?}"
+        "completion should use the bounded REST observation: {persisted_task:?}"
     );
-    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
     assert!(matches!(snapshot.status, WorkStatus::Done));
     let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
+        .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
@@ -430,7 +430,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
     let work = runtime
         .block_on(
             task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
         )
         .expect("resolve Task Work");
     assert!(!matches!(
@@ -438,7 +438,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
         WorkStatus::Done
     ));
     let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
+        .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs");
     assert_eq!(prs.len(), 1, "working PR must survive the refusal");
 }

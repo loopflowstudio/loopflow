@@ -5,6 +5,26 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 
+/// The one-time typed wake derived from a child Wave's durable parent link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromotionWake {
+    pub parent_wave_id: WaveId,
+    pub parent: String,
+}
+
+impl PromotionWake {
+    pub fn inbox_id(&self) -> String {
+        format!("promotion:{}", self.parent_wave_id)
+    }
+
+    pub fn prompt(&self) -> String {
+        format!(
+            "Promotion from parent Wave '{}' is complete. Begin the first child-Wave pass and report what this Wave now owns.",
+            self.parent
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Wave {
     pub id: WaveId,

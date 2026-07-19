@@ -2802,6 +2802,10 @@ mod tests {
 
     #[test]
     fn chat_parses_text_and_targeting() {
+        assert!(
+            Cli::try_parse_from(["lf", "radio", "pub", "status"]).is_err(),
+            "Radio has no compatibility command"
+        );
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
         let Some(Commands::Chat {
             text,

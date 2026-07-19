@@ -218,7 +218,7 @@ impl Drop for EnvGuard {
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
     pub store: Store,
-    pub session: Task,
+    pub task: Task,
     pub pr: TaskPr,
 }
 
@@ -279,7 +279,7 @@ fn register_task_with_process(
         created_at: now,
         updated_at: now,
     };
-    let session = Task {
+    let task = Task {
         id: TaskId::new(),
         directive: TaskDirective {
             id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
@@ -310,9 +310,9 @@ fn register_task_with_process(
     };
     let pr = TaskPr {
         id: TaskPrId::new(),
-        task_id: session.id.clone(),
+        task_id: task.id.clone(),
         sequence: 1,
-        slug: session.workspace_slug.clone(),
+        slug: task.workspace_slug.clone(),
         branch: branch.to_string(),
         base_commit: base_commit.to_string(),
         parent_pr_id: None,
@@ -334,11 +334,11 @@ fn register_task_with_process(
             .await
             .expect("create test project");
         store
-            .create_task(&session, &pr)
+            .create_task(&task, &pr)
             .await
             .expect("create test Task");
         let work = store
-            .work_for_child(&loopflow::child::ChildRef::Task(session.id.clone()))
+            .work_for_child(&loopflow::child::ChildRef::Task(task.id.clone()))
             .await
             .expect("resolve test Task Work");
         let (_, lease) = store
@@ -432,7 +432,7 @@ fn register_task_with_process(
                 .expect("reserve test Task Run");
         }
     });
-    RegisteredTask { store, session, pr }
+    RegisteredTask { store, task, pr }
 }
 
 /// A fake `open` / `xdg-open` that records each invocation to `marker`, so a

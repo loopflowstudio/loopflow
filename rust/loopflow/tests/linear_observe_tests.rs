@@ -21,7 +21,7 @@ fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
 }
 
 /// The durable substrate under the webhook receiver: the cursor is seeded at
-/// Session creation, an issue edit becomes exactly one Steer (and a
+/// Task creation, an issue edit becomes exactly one Steer (and a
 /// stale/duplicate delivery reverts nothing), and a user comment becomes one
 /// FIFO Steer that a redelivered webhook cannot double-apply.
 #[test]
@@ -37,24 +37,24 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     repo.commit("seed");
     repo.push_new_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
-    let target = ChildRef::Task(task.session.id.clone());
+    let target = ChildRef::Task(task.task.id.clone());
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 
     // The cursor is seeded from the Task directive when the Task is created,
     // so the first edit diffs against launch content rather than baselining it.
     let seeded = rt
-        .block_on(task.store.task_linear_observation(&task.session.id))
+        .block_on(task.store.task_linear_observation(&task.task.id))
         .expect("cursor read")
         .expect("cursor seeded at creation");
-    assert_eq!(seeded.last_title, task.session.directive.title);
+    assert_eq!(seeded.last_title, task.task.directive.title);
     assert_eq!(seeded.last_revision, "");
 
     // 1. A user edits title + description → one Steer.
     let outcome = rt
         .block_on(reconcile_linear_observation(
             &task.store,
-            &task.session,
+            &task.task,
             edit("2026-07-15T01:00:00.000Z", "New title", "New body"),
             VIEWER,
             now,
@@ -63,10 +63,10 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(!outcome.baselined);
     assert!(outcome.content_steer_applied);
 
-    let session = rt
-        .block_on(task.store.get_task(&task.session.id))
-        .expect("read session")
-        .expect("session");
+    let persisted_task = rt
+        .block_on(task.store.get_task(&task.task.id))
+        .expect("read Task")
+        .expect("Task");
     let work = rt
         .block_on(task.store.work_for_child(&target))
         .expect("work");
@@ -80,7 +80,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let outcome = rt
         .block_on(reconcile_linear_observation(
             &task.store,
-            &session,
+            &persisted_task,
             edit("2026-07-15T01:00:00.000Z", "New title", "New body"),
             VIEWER,
             now,
@@ -91,7 +91,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     // 3. A user comment → one FIFO Steer; a redelivered webhook adds nothing.
     let created = rt
         .block_on(task.store.apply_linear_comment(
-            &task.session.id,
+            &task.task.id,
             "c-1".to_string(),
             "please prioritize".to_string(),
             now,
@@ -100,7 +100,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(created.is_some(), "first delivery creates a follow-up");
     let duplicate = rt
         .block_on(task.store.apply_linear_comment(
-            &task.session.id,
+            &task.task.id,
             "c-1".to_string(),
             "please prioritize".to_string(),
             now,
@@ -118,11 +118,11 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let outcome = rt
         .block_on(reconcile_linear_observation(
             &task.store,
-            &session,
+            &persisted_task,
             edit(
                 "2026-07-15T00:30:00.000Z",
-                &task.session.directive.title,
-                &task.session.directive.description,
+                &task.task.directive.title,
+                &task.task.directive.description,
             ),
             VIEWER,
             now,
@@ -133,7 +133,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         "stale content never reverts direction"
     );
     let cursor = rt
-        .block_on(task.store.task_linear_observation(&task.session.id))
+        .block_on(task.store.task_linear_observation(&task.task.id))
         .expect("cursor")
         .expect("cursor exists");
     assert_eq!(cursor.last_title, "New title");

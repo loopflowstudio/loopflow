@@ -60,7 +60,7 @@ pub(crate) mod supervisor;
 mod types;
 pub mod wire;
 
-pub use types::Wave;
+pub use types::{PromotionWake, Wave};
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -663,9 +663,9 @@ mod tests {
         assert_eq!(thread[0].role, ChatRole::User);
     }
 
-    /// The thread door is the human's: `say` is not a wire op and bylines are
-    /// refused on every op — attribution enters the thread only through the
-    /// Invalid operations and unknown fields are rejected before journaling.
+    /// The thread door is the human's: `say` is not a wire op and machine
+    /// attribution fields are refused. Invalid operations and unknown fields
+    /// are rejected before journaling.
     #[tokio::test]
     async fn the_thread_door_refuses_machine_speech() {
         let (base, runtime, _tmp) = boot().await;
@@ -690,6 +690,20 @@ mod tests {
         }
 
         assert!(runtime.thread_snapshot().is_empty(), "nothing journaled");
+
+        for body in [
+            serde_json::json!({ "op": "message", "text": "hello" }),
+            serde_json::json!({ "op": "steer", "text": "change course" }),
+            serde_json::json!({ "op": "interrupt", "text": "stop here" }),
+        ] {
+            let response = client
+                .post(format!("{base}/messages"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+        }
     }
 
     #[tokio::test]

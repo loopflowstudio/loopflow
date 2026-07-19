@@ -147,7 +147,35 @@ impl StoreObserver {
     /// Deliver every pending typed child observation. Store errors are logged
     /// and retried on the next poll.
     pub async fn poll_once(&self) {
+        self.poll_promotion().await;
         self.poll_child_observations().await;
+    }
+
+    async fn poll_promotion(&self) {
+        let wave = match self.store.get_wave(&self.wave_id).await {
+            Ok(Some(wave)) => wave,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::debug!(%error, "wave observer registry read failed");
+                return;
+            }
+        };
+        let Some(parent_wave_id) = wave.parent_wave_id().cloned() else {
+            return;
+        };
+        let parent = match self.store.get_wave(&parent_wave_id).await {
+            Ok(Some(parent)) => parent,
+            Ok(None) => return,
+            Err(error) => {
+                tracing::debug!(%error, %parent_wave_id, "wave observer parent read failed");
+                return;
+            }
+        };
+        self.runtime
+            .deliver_promotion_wake(crate::wave::PromotionWake {
+                parent_wave_id,
+                parent: parent.name().to_string(),
+            });
     }
 
     async fn poll_child_observations(&self) {
@@ -270,5 +298,47 @@ mod tests {
             .await
             .expect("row created");
         assert_eq!(wave.name(), "ship");
+    }
+
+    #[tokio::test]
+    async fn parent_link_yields_one_typed_promotion_wake() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = temp_store(tmp.path()).await;
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        )
+        .with_parent(parent.id().clone());
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+        let runtime = WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf())
+            .expect("open runtime");
+        let observer = StoreObserver::new(runtime, store, child.id().clone());
+
+        observer.poll_once().await;
+        observer.poll_once().await;
+
+        let (_, events) = crate::wave::journal::Journal::open(
+            &crate::wave::journal::journal_path(tmp.path(), "ship"),
+        )
+        .expect("read journal");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(&event.kind, crate::wave::journal::EventKind::PromotionObserved { .. }))
+                .count(),
+            1,
+            "observer retries do not duplicate the durable promotion input"
+        );
+        assert!(!events.iter().any(|event| matches!(
+            &event.kind,
+            crate::wave::journal::EventKind::UserMessage { .. }
+        )));
     }
 }

@@ -34,6 +34,7 @@ use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
+use crate::wave::PromotionWake;
 
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;
@@ -216,6 +217,9 @@ pub enum EventKind {
     },
     ProjectObserved {
         observation: ProjectObservation,
+    },
+    PromotionObserved {
+        wake: PromotionWake,
     },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
@@ -526,6 +530,11 @@ impl Narrator {
                 observation.project,
                 observation.event_id,
                 ellipsize(&observation.prompt(), 70)
+            )),
+            EventKind::PromotionObserved { wake } => info(format!(
+                "observed promotion from Wave {} · {}",
+                wake.parent,
+                wake.parent_wave_id
             )),
             EventKind::ServerStarted { pid, endpoint } => {
                 info(format!("server started · pid {pid} · {endpoint}"))
@@ -856,6 +865,8 @@ pub struct ThreadFold {
     pub tasks: HashMap<MessageId, TaskObservation>,
     /// Typed Project observations indexed by their synthetic consumption id.
     pub projects: HashMap<MessageId, ProjectObservation>,
+    /// Promotion wakes indexed by their deterministic parent-link id.
+    pub promotions: HashMap<MessageId, PromotionWake>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
@@ -924,6 +935,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
+    let mut promotions: HashMap<MessageId, PromotionWake> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
@@ -971,6 +983,14 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     pending_messages.push(message.clone());
                 }
                 projects.insert(message.id.clone(), observation.clone());
+                messages.insert(message.id.clone(), message);
+            }
+            EventKind::PromotionObserved { wake } => {
+                let message = promotion_wake_message(wake);
+                if !consumed_messages.contains(&message.id) {
+                    pending_messages.push(message.clone());
+                }
+                promotions.insert(message.id.clone(), wake.clone());
                 messages.insert(message.id.clone(), message);
             }
             EventKind::TurnStarted {
@@ -1086,6 +1106,7 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         messages,
         tasks,
         projects,
+        promotions,
         open_claims,
     }
 }
@@ -1103,6 +1124,14 @@ pub fn project_observation_message(observation: &ProjectObservation) -> PendingM
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
+    }
+}
+
+pub fn promotion_wake_message(wake: &PromotionWake) -> PendingMessage {
+    PendingMessage {
+        id: MessageId(wake.inbox_id()),
+        op: MessageOp::Message,
+        text: wake.prompt(),
     }
 }
 
@@ -1462,7 +1491,7 @@ mod tests {
     }
 
     /// A fixed event sequence renders the console a human would want to read:
-    /// chat with bylines and ops, turn open/close with items and usage, the
+    /// human chat with explicit ops, turn open/close with items and usage, the
     /// prose gist once at INFO with the rest at DEBUG, and legacy worker
     /// observations.
     #[test]

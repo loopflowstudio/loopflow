@@ -795,11 +795,8 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
             launch_residency(&origin, child).await?;
         }
         for _ in 0..100 {
-            if crate::wave::server::live_endpoint(&origin, child)
-                .await
-                .is_some()
-            {
-                wake_child(&origin, child).await?;
+            if let Some(endpoint) = crate::wave::server::live_endpoint(&origin, child).await {
+                wake_child_observer(&endpoint, child).await?;
                 return Ok(promotion_session_name(&origin, child));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -810,22 +807,17 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
     })
 }
 
-/// Wake the promoted child through its thread door once the listener is live.
-async fn wake_child(repo: &Path, wave: &str) -> OpsResult<()> {
-    let status = tokio::process::Command::new(resolve_lf_binary())
-        .args([
-            "chat",
-            "--wave",
-            wave,
-            "Promotion complete. Run the first child-wave pass and report what you now own in this thread.",
-        ])
-        .current_dir(repo)
-        .status()
+/// Nudge the existing typed observer after the durable parent link is visible.
+async fn wake_child_observer(endpoint: &str, wave: &str) -> OpsResult<()> {
+    let response = reqwest::Client::new()
+        .post(format!("http://{endpoint}/observations"))
+        .send()
         .await
         .map_err(|err| OpsError::Message(format!("failed to wake promoted wave: {err}")))?;
-    if !status.success() {
+    if response.status() != reqwest::StatusCode::NO_CONTENT {
         return Err(OpsError::Message(format!(
-            "promoted wave '{wave}' started, but its bootstrap message failed"
+            "promoted wave '{wave}' started, but its observer wake returned HTTP {}",
+            response.status()
         )));
     }
     Ok(())

@@ -3442,7 +3442,7 @@ directions:
 
     #[test]
     fn gather_documents_cross_repo_docs() {
-        let session_repo = init_repo();
+        let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
@@ -3455,7 +3455,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: repo.path().to_path_buf(),
             docs: vec!["studio:swift".to_string()],
             related_repos: vec![related],
             ..Default::default()
@@ -3472,7 +3472,7 @@ directions:
 
     #[test]
     fn gather_documents_bare_repo_name_loads_whole_repo() {
-        let session_repo = init_repo();
+        let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
@@ -3484,7 +3484,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: repo.path().to_path_buf(),
             docs: vec!["studio:".to_string()],
             related_repos: vec![related],
             ..Default::default()

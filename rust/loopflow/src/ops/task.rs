@@ -231,7 +231,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
             .await
             .map_err(|error| task_error(error.to_string()))?
             .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-        let mut parent_session = store
+        let mut parent_task = store
             .get_task(&parent.task_id)
             .await
             .map_err(|error| task_error(error.to_string()))?
@@ -239,7 +239,7 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedRebase>> {
         // Reuse the parent's persisted PR number and observation cache. Stack
         // resolution used to enumerate every PR on the branch independently,
         // bypassing both the Task cache and outage-tolerant reconcile.
-        reconcile_task_pr(&store, &mut parent_session).await?;
+        reconcile_task_pr(&store, &mut parent_task).await?;
         let parent = store
             .get_task_pr(&parent_id)
             .await
@@ -419,17 +419,17 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     .await
                     .map_err(|error| task_error(error.to_string()))?
                     .ok_or_else(|| task_error(format!("stack parent {parent_id} is missing")))?;
-                let parent_session = store
+                let parent_task = store
                     .get_task(&parent.task_id)
                     .await
                     .map_err(|error| task_error(error.to_string()))?
                     .ok_or_else(|| task_error("stack parent Task is missing"))?;
-                if requested != parent_session.directive.identifier
-                    && requested != parent_session.directive.id.as_str()
+                if requested != parent_task.directive.identifier
+                    && requested != parent_task.directive.id.as_str()
                 {
                     return Err(task_error(format!(
                         "Task {} is stacked on {}, not {requested}",
-                        task.directive.identifier, parent_session.directive.identifier
+                        task.directive.identifier, parent_task.directive.identifier
                     )));
                 }
             }
@@ -488,7 +488,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         .map(|parent_issue| {
             block_on_task(async {
                 let store = task_store().await?;
-                let parent_session = store
+                let parent_task = store
                     .get_task_by_issue(parent_issue)
                     .await
                     .map_err(|error| task_error(format!("failed to read parent Task: {error}")))?
@@ -497,18 +497,18 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                             "stack parent {parent_issue:?} has no Task; run it first"
                         ))
                     })?;
-                if parent_session.directive.id.as_str() == resolved.item.id {
+                if parent_task.directive.id.as_str() == resolved.item.id {
                     return Err(task_error("a Task cannot stack on itself"));
                 }
                 let parent = store
-                    .active_task_pr(&parent_session.id)
+                    .active_task_pr(&parent_task.id)
                     .await
                     .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
                     .ok_or_else(|| task_error("stack parent has no active PR"))?;
                 if parent.github().is_none() {
                     return Err(task_error(format!(
                         "open the parent PR from {} before stacking work on it",
-                        parent_session.worktree.display()
+                        parent_task.worktree.display()
                     )));
                 }
                 Ok(parent)

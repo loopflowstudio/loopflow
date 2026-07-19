@@ -2282,9 +2282,9 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let parent_session = make_task(&wave, &project);
-        let mut parent = make_task_pr(&parent_session);
-        store.create_task(&parent_session, &parent).await.unwrap();
+        let parent_task = make_task(&wave, &project);
+        let mut parent = make_task_pr(&parent_task);
+        store.create_task(&parent_task, &parent).await.unwrap();
 
         // The parent is published but not merged — the child stacks on it.
         parent.publication = Some(PrPublication {

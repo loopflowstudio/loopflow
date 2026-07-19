@@ -231,7 +231,7 @@ fn resident_spawner(
     repo_root: PathBuf,
     endpoint: String,
     token: String,
-    session_env: Vec<(String, String)>,
+    resident_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
         let exe = std::env::current_exe()?;
@@ -251,7 +251,7 @@ fn resident_spawner(
         // resident's exit isn't journaled as a failure), then SIGTERMs the
         // resident by pid — its hooks stop the vendor process group. A
         // SIGKILL-on-drop here would orphan the codex group instead.
-        for (key, value) in &session_env {
+        for (key, value) in &resident_env {
             command.env(key, value);
         }
         #[cfg(unix)]
@@ -320,7 +320,7 @@ pub(crate) async fn run_listener(
     } else {
         None
     });
-    let mut session_env = registry_config
+    let mut resident_env = registry_config
         .as_ref()
         .map(|config| {
             vec![(
@@ -330,7 +330,7 @@ pub(crate) async fn run_listener(
         })
         .unwrap_or_default();
     if let Some((_, lease)) = wave_run.as_ref() {
-        session_env.extend([
+        resident_env.extend([
             (
                 crate::durable::RUN_CONTEXT_ENV.to_string(),
                 "agent".to_string(),
@@ -377,7 +377,7 @@ pub(crate) async fn run_listener(
             repo_root.clone(),
             addr.to_string(),
             token.clone(),
-            session_env,
+            resident_env,
         )
     });
     // Build the supervisor before spawning so the attach door can hold its

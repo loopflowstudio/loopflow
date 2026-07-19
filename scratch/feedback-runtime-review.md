@@ -273,28 +273,33 @@ The follow-up Task 15/15, store persistence 2/2, and reteam 12/12 proofs pass.
 Exact old projection/wire-key and false stable-Work Session searches are empty;
 `cargo fmt --check` and all-target Clippy with warnings denied pass.
 
-### Slice 6D repair — completion audit
+### Slice 6D3 repair — completion audit
 
-Accepted after a fresh completion audit found and removed residue that made the
-earlier broad-deletion statement false. `RegisteredTask.task` replaces the
-fixture's false `.session` field and every caller with no compatibility
-property. Stable Task identity in the Mac terminal workspace is `taskId`, while
-the remaining Session names refer only to provider continuation/configuration,
-usage windows, URLSession, tmux/Ghostty/browser surfaces, human work periods,
-or explicitly historical migration/architecture/release text.
+Accepted after a second completion audit found residue that still made the
+broad-deletion statement false. `RegisteredTask.task` has no compatibility
+property; Task values are now `parent_task`, the Wave resident receives
+`resident_env`, and prompt fixtures name their repository `repo`. Stable Task
+identity in the Mac terminal workspace remains `taskId`. The surviving Session
+names refer only to provider continuation/configuration, usage windows,
+URLSession, tmux/Ghostty/browser surfaces, human work periods, or explicit
+historical migration/architecture/release text.
 
-`WorkCensusTests.launchIdentityControlsOpenability` now proves both halves of
-the projection contract: a row carrying `launchId` is openable and a row
-without one is view-only. `WorkActivity` still has no action enum or array, and
-the exact `ActiveSession(s)|SessionAction|SessionSet*|SessionLane` search is
-empty. The Context Lab `LaunchSet` contract and DTO fixture are unchanged.
+`WorkCensusTests.projectionAssignsLaunchIdentityOnlyToUserAttention` now builds
+the real projection from a decoded roadmap plus User- and parent-routed
+Launches. The emitted User-attention Launch row carries the exact Launch id and
+is openable; the parent-routed Launch and every emitted Project and Task row
+carry no Launch id and remain view-only. `WorkActivity` still has no action enum
+or array, and the exact
+`ActiveSession(s)|SessionAction|SessionSet*|SessionLane` search is empty. The
+neighboring Mac action proof now follows the shared `OpenPr` reason, "checks
+passed; open the PR," instead of reviving an implicit Review gate in test copy.
+The Context Lab `LaunchSet` contract and DTO fixture are unchanged.
 
-Proof: the touched Rust integration suites pass 52/52; the named Receipt 1/1,
-prompt-document 9/9, and Context Lab fixture 1/1 Rust proofs pass. Swift Work
-Census 1/1, DTO fixtures 7/7, and Context Lab 10/10 pass, with the Mac target
-compiling as part of the Swift package build. Exact stable-Work Session and
-retired projection searches are empty outside the documented allowlist. `cargo
-fmt --check` and all-target Clippy with warnings denied pass.
+Focused repair proof: Swift Work Census passes 1/1 and Roadmap controls pass
+2/2; the Rust parent-Task persistence proof passes 1/1 and prompt-document
+coverage passes 9/9. Exact cited false-Session and retired-projection searches
+are empty. `cargo fmt --check` and library Clippy with warnings denied pass;
+the final broad gates remain the completion pass's responsibility.
 
 ## Final architecture review
 

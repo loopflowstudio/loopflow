@@ -15,7 +15,6 @@ use crate::child_control::{
 };
 use crate::durable::{AttentionRoute, Basis, BoundarySeed, FlowPosition, RunLease};
 use crate::engine::wave_config::read_wave_config;
-use crate::engine::InteractionPolicy;
 use crate::harness::{
     classify_disconnect_recovery, drain_turn_failure_reason, ApprovalPolicy, Harness,
     RecoveryDecision,
@@ -28,7 +27,7 @@ use crate::provider_account::recovery::{
 };
 use crate::store::SharedStore;
 use crate::task::{
-    CiCheck, Observation, PrPhase, Task, TaskEventKind, TaskGateProposal, TaskId,
+    CiCheck, FeedbackReviewer, Observation, PrPhase, Task, TaskEventKind, TaskGateProposal, TaskId,
     TaskLifecyclePhase,
 };
 use crate::wave::playhead::{
@@ -1014,9 +1013,9 @@ async fn prepare_task_flow_step(
     prepared.config.agent = Some(session.agent.clone());
     let skill = crate::engine::load_skill(&step.step, Path::new(&session.worktree))?;
     let attention = if step.feedback {
-        let route = match session.phase_plan().interaction_policy {
-            InteractionPolicy::Require => AttentionRoute::User,
-            InteractionPolicy::Defer => AttentionRoute::Parent(
+        let route = match session.phase_plan().reviewer {
+            FeedbackReviewer::User => AttentionRoute::User,
+            FeedbackReviewer::Parent => AttentionRoute::Parent(
                 store
                     .work_for_child(&ChildRef::Project(session.project_id.clone()))
                     .await?,
@@ -1914,7 +1913,7 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nProject definition snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nFeedback reviewer: {reviewer}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = session.directive.identifier,
         title = session.directive.title,
         description = session.directive.description,
@@ -1929,7 +1928,7 @@ fn task_seed(
         lifecycle_phase = session.lifecycle_phase.as_str(),
         phase_epoch = session.phase_epoch,
         gate_cycle = session.gate_cycle,
-        interaction_policy = session.phase_plan().interaction_policy.as_str(),
+        reviewer = session.phase_plan().reviewer.as_str(),
         gate_proposal = gate_proposal,
         worktree = session.worktree.display(),
         pr_sequence = pr.sequence,

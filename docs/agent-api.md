@@ -53,7 +53,7 @@ lf task run INF-123                          # run an existing Linear issue
 lf task start <project-id> "add passkeys"    # create the issue, then run it
 pbpaste | lf task start <project-id>         # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
-lf task run INF-125 --headless               # no interactive surface
+lf task run INF-125 --reviewer parent        # Project reviews every checkpoint
 lf project run <project-id>                  # start the supervising Project Session
 ```
 

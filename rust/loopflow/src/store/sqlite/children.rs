@@ -16,7 +16,6 @@ use crate::child::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildRef, ObservationRecipient,
 };
 use crate::durable::{Author, RunLease};
-use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectDefinition, TaskDirective};
 use crate::project::{
@@ -25,9 +24,10 @@ use crate::project::{
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
-    AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
-    LinearObservationOutcome, PrPhase, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation, TaskPhasePlan, TaskPr, TaskPrId,
+    AfterMerge, CiObservation, FeedbackReviewer, GithubObservation, GithubPr,
+    LinearObservationApply, LinearObservationOutcome, PrPhase, PrPublication, Task, TaskEvent,
+    TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
+    TaskPhasePlan, TaskPr, TaskPrId,
 };
 
 use super::durable::{
@@ -1490,8 +1490,8 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     issue_description, pm_snapshot_synced_at, pm_writeback_json,
     worktree, workspace_slug,
     agent, provider, provider_session_id, abandon_requested_at, abandon_reason,
-    iterate_flow, iterate_interaction_policy, phase_cursor, phase_iteration,
-    kickoff_flow, kickoff_interaction_policy, gate_flow, gate_interaction_policy,
+    iterate_flow, iterate_reviewer, phase_cursor, phase_iteration,
+    kickoff_flow, kickoff_reviewer, gate_flow, gate_reviewer,
     lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json,
     created_at, updated_at
 ) VALUES (
@@ -1504,8 +1504,8 @@ const TASK_COLUMNS: &str = "SELECT
     t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
     t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
     t.abandon_requested_at, t.abandon_reason,
-    t.iterate_flow, t.iterate_interaction_policy, t.phase_cursor, t.phase_iteration,
-    t.kickoff_flow, t.kickoff_interaction_policy, t.gate_flow, t.gate_interaction_policy,
+    t.iterate_flow, t.iterate_reviewer, t.phase_cursor, t.phase_iteration,
+    t.kickoff_flow, t.kickoff_reviewer, t.gate_flow, t.gate_reviewer,
     t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_SELECT: &str = "SELECT
@@ -1514,8 +1514,8 @@ pub(super) const TASK_SELECT: &str = "SELECT
     t.agent, t.provider, t.provider_session_id, t.created_at, t.updated_at,
     t.pm_snapshot_synced_at, t.pm_writeback_json, t.project_id,
     t.abandon_requested_at, t.abandon_reason,
-    t.iterate_flow, t.iterate_interaction_policy, t.phase_cursor, t.phase_iteration,
-    t.kickoff_flow, t.kickoff_interaction_policy, t.gate_flow, t.gate_interaction_policy,
+    t.iterate_flow, t.iterate_reviewer, t.phase_cursor, t.phase_iteration,
+    t.kickoff_flow, t.kickoff_reviewer, t.gate_flow, t.gate_reviewer,
     t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
@@ -1523,9 +1523,9 @@ const TASK_UPDATE: &str = "UPDATE tasks SET
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16, iterate_interaction_policy=?17,
-    kickoff_flow=?20, kickoff_interaction_policy=?21,
-    gate_flow=?22, gate_interaction_policy=?23,
+    iterate_flow=?16, iterate_reviewer=?17,
+    kickoff_flow=?20, kickoff_reviewer=?21,
+    gate_flow=?22, gate_reviewer=?23,
     created_at=?28, updated_at=?29
     WHERE id=?1";
 const TASK_REOPEN_UPDATE: &str = "UPDATE tasks SET
@@ -1533,9 +1533,9 @@ const TASK_REOPEN_UPDATE: &str = "UPDATE tasks SET
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16, iterate_interaction_policy=?17, phase_cursor=?18,
-    phase_iteration=?19, kickoff_flow=?20, kickoff_interaction_policy=?21,
-    gate_flow=?22, gate_interaction_policy=?23, lifecycle_phase=?24,
+    iterate_flow=?16, iterate_reviewer=?17, phase_cursor=?18,
+    phase_iteration=?19, kickoff_flow=?20, kickoff_reviewer=?21,
+    gate_flow=?22, gate_reviewer=?23, lifecycle_phase=?24,
     phase_epoch=?25, gate_cycle=?26, gate_proposal_json=?27,
     created_at=?28, updated_at=?29
     WHERE id=?1";
@@ -1544,7 +1544,7 @@ const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
-    iterate_flow=?16, iterate_interaction_policy=?17,
+    iterate_flow=?16, iterate_reviewer=?17,
     lifecycle_phase=CASE WHEN ?25>=phase_epoch THEN ?24 ELSE lifecycle_phase END,
     phase_cursor=CASE
         WHEN ?25>phase_epoch OR
@@ -1557,8 +1557,8 @@ const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
         WHEN ?25=phase_epoch THEN MAX(phase_iteration, ?19)
         ELSE phase_iteration
     END,
-    kickoff_flow=?20, kickoff_interaction_policy=?21,
-    gate_flow=?22, gate_interaction_policy=?23,
+    kickoff_flow=?20, kickoff_reviewer=?21,
+    gate_flow=?22, gate_reviewer=?23,
     phase_epoch=MAX(phase_epoch, ?25),
     gate_cycle=CASE WHEN ?25>=phase_epoch THEN ?26 ELSE gate_cycle END,
     gate_proposal_json=CASE WHEN ?25>=phase_epoch THEN ?27 ELSE gate_proposal_json END,
@@ -1633,19 +1633,13 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
                 .map(|intent| intent.reason.clone()),
         ),
         Box::new(task.lifecycle.loop_.flow.clone()),
-        Box::new(task.lifecycle.loop_.interaction_policy.as_str().to_string()),
+        Box::new(task.lifecycle.loop_.reviewer.as_str().to_string()),
         Box::new(i64::from(task.phase_cursor)),
         Box::new(i64::from(task.phase_iteration)),
         Box::new(task.lifecycle.first.flow.clone()),
-        Box::new(task.lifecycle.first.interaction_policy.as_str().to_string()),
+        Box::new(task.lifecycle.first.reviewer.as_str().to_string()),
         Box::new(task.lifecycle.finally.flow.clone()),
-        Box::new(
-            task.lifecycle
-                .finally
-                .interaction_policy
-                .as_str()
-                .to_string(),
-        ),
+        Box::new(task.lifecycle.finally.reviewer.as_str().to_string()),
         Box::new(task.lifecycle_phase.storage_str().to_string()),
         Box::new(i64::from(task.phase_epoch)),
         Box::new(i64::from(task.gate_cycle)),
@@ -1934,23 +1928,23 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         lifecycle: TaskLifecyclePlan {
             first: TaskPhasePlan {
                 flow: row.get(22)?,
-                interaction_policy: row
+                reviewer: row
                     .get::<_, String>(23)?
-                    .parse::<InteractionPolicy>()
+                    .parse::<FeedbackReviewer>()
                     .map_err(|error| invalid_column(23, error))?,
             },
             loop_: TaskPhasePlan {
                 flow: row.get(18)?,
-                interaction_policy: row
+                reviewer: row
                     .get::<_, String>(19)?
-                    .parse::<InteractionPolicy>()
+                    .parse::<FeedbackReviewer>()
                     .map_err(|error| invalid_column(19, error))?,
             },
             finally: TaskPhasePlan {
                 flow: row.get(24)?,
-                interaction_policy: row
+                reviewer: row
                     .get::<_, String>(25)?
-                    .parse::<InteractionPolicy>()
+                    .parse::<FeedbackReviewer>()
                     .map_err(|error| invalid_column(25, error))?,
             },
         },

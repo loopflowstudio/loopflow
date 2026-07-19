@@ -663,14 +663,14 @@ fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> 
             .unwrap_or("none");
         let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
         println!(
-            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (reviewer {}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             session.directive.identifier,
             work_status_label(&snapshot.status),
             session.id,
             session.lifecycle_phase.as_str(),
             session.lifecycle_cycle(),
             session.phase_plan().flow,
-            session.phase_plan().interaction_policy.as_str(),
+            session.phase_plan().reviewer.as_str(),
             session.phase_iteration + 1,
             session.phase_cursor + 1,
             body,
@@ -878,7 +878,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             finally,
             stack_on,
             directive,
-            headless,
+            reviewer,
             json,
         } => {
             let session = loopflow::ops::task::task_run(
@@ -893,7 +893,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
-                    headless: *headless,
+                    reviewer: *reviewer,
                 },
             )?;
             print_task(&session, *json)
@@ -907,7 +907,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             finally,
             stack_on,
             directive,
-            headless,
+            reviewer,
             json,
         } => {
             let session = loopflow::ops::task::task_start(
@@ -924,7 +924,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
-                    headless: *headless,
+                    reviewer: *reviewer,
                 },
             )?;
             print_task(&session, *json)

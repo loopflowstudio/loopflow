@@ -13,7 +13,6 @@ use time::OffsetDateTime;
 use crate::child::{prefixed_uuid_id, AbandonIntent};
 use crate::durable::RunId;
 pub use crate::durable::TaskId;
-use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
 use crate::planning::TaskDirective;
 use crate::project::ProjectId;
@@ -69,10 +68,43 @@ impl TaskLifecyclePhase {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum FeedbackReviewer {
+    User,
+    Parent,
+}
+
+impl FeedbackReviewer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Parent => "parent",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid Feedback reviewer: {0}")]
+pub struct FeedbackReviewerParseError(String);
+
+impl FromStr for FeedbackReviewer {
+    type Err = FeedbackReviewerParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "user" => Ok(Self::User),
+            "parent" => Ok(Self::Parent),
+            _ => Err(FeedbackReviewerParseError(value.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPhasePlan {
     pub flow: String,
-    pub interaction_policy: InteractionPolicy,
+    pub reviewer: FeedbackReviewer,
 }
 
 impl TaskPhasePlan {
@@ -104,15 +136,15 @@ impl TaskLifecyclePlan {
         Self {
             first: TaskPhasePlan {
                 flow: first_flow.into(),
-                interaction_policy: InteractionPolicy::Require,
+                reviewer: FeedbackReviewer::User,
             },
             loop_: TaskPhasePlan {
                 flow: loop_flow.into(),
-                interaction_policy: InteractionPolicy::Defer,
+                reviewer: FeedbackReviewer::Parent,
             },
             finally: TaskPhasePlan {
                 flow: finally_flow.into(),
-                interaction_policy: InteractionPolicy::Require,
+                reviewer: FeedbackReviewer::User,
             },
         }
     }
@@ -121,36 +153,31 @@ impl TaskLifecyclePlan {
         Self::standard("task-design", "slice", "ship")
     }
 
-    pub fn headless(
+    pub fn reviewed_by(
         first_flow: impl Into<String>,
         loop_flow: impl Into<String>,
         finally_flow: impl Into<String>,
+        reviewer: FeedbackReviewer,
     ) -> Self {
         let mut plan = Self::standard(first_flow, loop_flow, finally_flow);
-        plan.defer_all_interactions();
+        plan.set_reviewer(reviewer);
         plan
     }
 
-    pub fn headless_defaults() -> Self {
-        let mut plan = Self::defaults();
-        plan.defer_all_interactions();
-        plan
+    pub fn set_reviewer(&mut self, reviewer: FeedbackReviewer) {
+        self.first.reviewer = reviewer;
+        self.loop_.reviewer = reviewer;
+        self.finally.reviewer = reviewer;
     }
 
-    pub fn defer_all_interactions(&mut self) {
-        self.first.interaction_policy = InteractionPolicy::Defer;
-        self.loop_.interaction_policy = InteractionPolicy::Defer;
-        self.finally.interaction_policy = InteractionPolicy::Defer;
-    }
-
-    pub fn all_interactions_deferred(&self) -> bool {
+    pub fn all_reviewed_by(&self, reviewer: FeedbackReviewer) -> bool {
         [
-            self.first.interaction_policy,
-            self.loop_.interaction_policy,
-            self.finally.interaction_policy,
+            self.first.reviewer,
+            self.loop_.reviewer,
+            self.finally.reviewer,
         ]
         .into_iter()
-        .all(|policy| policy == InteractionPolicy::Defer)
+        .all(|phase_reviewer| phase_reviewer == reviewer)
     }
 
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
@@ -1030,9 +1057,9 @@ pub struct LinearObservationOutcome {
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
-        TaskPrId,
+        AfterMerge, FeedbackReviewer, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase,
+        PrPublication, Task, TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan,
+        TaskObservation, TaskPr, TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskDirective};
 
@@ -1527,19 +1554,38 @@ mod tests {
     }
 
     #[test]
-    fn headless_policy_defers_every_phase_without_changing_its_flows() {
+    fn explicit_reviewer_overrides_every_phase_without_changing_its_flows() {
         let mut plan = TaskLifecyclePlan::standard("task-design", "code", "ship");
-        assert!(!plan.all_interactions_deferred());
+        assert!(!plan.all_reviewed_by(FeedbackReviewer::Parent));
+        assert_eq!(plan.first.reviewer, FeedbackReviewer::User);
+        assert_eq!(plan.loop_.reviewer, FeedbackReviewer::Parent);
+        assert_eq!(plan.finally.reviewer, FeedbackReviewer::User);
 
-        plan.defer_all_interactions();
+        plan.set_reviewer(FeedbackReviewer::Parent);
 
-        assert!(plan.all_interactions_deferred());
+        assert!(plan.all_reviewed_by(FeedbackReviewer::Parent));
         assert_eq!(plan.first.flow, "task-design");
         assert_eq!(plan.loop_.flow, "code");
         assert_eq!(plan.finally.flow, "ship");
         assert_eq!(
             plan,
-            TaskLifecyclePlan::headless("task-design", "code", "ship")
+            TaskLifecyclePlan::reviewed_by(
+                "task-design",
+                "code",
+                "ship",
+                FeedbackReviewer::Parent,
+            )
         );
+
+        let user_plan = TaskLifecyclePlan::reviewed_by(
+            "task-design",
+            "code",
+            "ship",
+            FeedbackReviewer::User,
+        );
+        assert!(user_plan.all_reviewed_by(FeedbackReviewer::User));
+        assert_eq!(user_plan.first.flow, "task-design");
+        assert_eq!(user_plan.loop_.flow, "code");
+        assert_eq!(user_plan.finally.flow, "ship");
     }
 }

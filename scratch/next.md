@@ -14,9 +14,9 @@
 
 ## Done when
 
-- [ ] help and parser expose only `--reviewer user|parent`.
-- [ ] default mixed reviewers and explicit overrides are behaviorally proved.
-- [ ] an already-open Feedback keeps its recorded route.
-- [ ] stored Task phase plans contain reviewer/user|parent with no dual reader.
-- [ ] retired policy/headless symbols are absent; migration, focused behavior,
+- [x] help and parser expose only `--reviewer user|parent`.
+- [x] default mixed reviewers and explicit overrides are behaviorally proved.
+- [x] an already-open Feedback keeps its recorded route.
+- [x] stored Task phase plans contain reviewer/user|parent with no dual reader.
+- [x] retired policy/headless symbols are absent; migration, focused behavior,
       fmt, and all-target clippy pass.

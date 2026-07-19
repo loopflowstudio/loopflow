@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AttentionRoute, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx,
-    Feedback, Launch, RunLease, RunState, WorkRef, WorkStatus,
+    AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx, Launch, RunLease,
+    RunState, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -29,7 +29,7 @@ use crate::store::{
 };
 use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
-    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
+    AfterMerge, CiCheck, CiIncident, CiObservation, CiState, FeedbackReviewer, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
     PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
@@ -55,7 +55,7 @@ pub struct TaskLaunchOptions {
     pub flows: TaskFlowOverrides,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
-    pub headless: bool,
+    pub reviewer: Option<FeedbackReviewer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,23 +329,13 @@ async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
         .map_err(|error| task_error(error.to_string()))
 }
 
-fn _defer_task_interactions(session: &mut Task) -> OpsResult<bool> {
-    if session.lifecycle.all_interactions_deferred() {
-        return Ok(false);
+fn _set_task_reviewer(session: &mut Task, reviewer: FeedbackReviewer) -> bool {
+    if session.lifecycle.all_reviewed_by(reviewer) {
+        return false;
     }
-    session.lifecycle.defer_all_interactions();
+    session.lifecycle.set_reviewer(reviewer);
     session.updated_at = time::OffsetDateTime::now_utc();
-    Ok(true)
-}
-
-fn _refuse_current_user_feedback(session: &Task, feedback: Option<&Feedback>) -> OpsResult<()> {
-    if feedback.is_some_and(|feedback| feedback.attention == AttentionRoute::User) {
-        return Err(task_error(format!(
-            "Task {} routes current Feedback to the User; continue it before changing interaction policy",
-            session.directive.identifier
-        )));
-    }
-    Ok(())
+    true
 }
 
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<Task> {
@@ -354,7 +344,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         flows,
         stack_on,
         directive,
-        headless,
+        reviewer,
     } = options;
     let directive = directive
         .map(|directive| {
@@ -450,24 +440,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     session.directive.identifier, session.directive.identifier,
                 )));
             }
-            if headless && !session.lifecycle.all_interactions_deferred() {
-                let work = store
-                    .work_for_child(&ChildRef::Task(session.id.clone()))
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                let feedback = store
-                    .feedback(&work)
-                    .await
-                    .map_err(|error| task_error(error.to_string()))?;
-                _refuse_current_user_feedback(session, feedback.as_ref())?;
-                if matches!(status, WorkStatus::Running { .. }) {
-                    return Err(task_error(format!(
-                        "Task {} has an active Run; interrupt it before marking the Task headless",
-                        session.directive.identifier
-                    )));
-                }
-            }
-            if headless && _defer_task_interactions(session)? {
+            if reviewer.is_some_and(|reviewer| _set_task_reviewer(session, reviewer)) {
                 store
                     .update_task(session)
                     .await
@@ -488,7 +461,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         .flows
         .clone()
         .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
-    let lifecycle = resolve_task_lifecycle(&main_repo, &project_flows, &flows, headless)?;
+    let lifecycle = resolve_task_lifecycle(&main_repo, &project_flows, &flows, reviewer)?;
     let segment = match name.as_deref() {
         Some(name) => parse_workspace_slug(name)?,
         None => match &terminal_predecessor_id {
@@ -792,7 +765,7 @@ pub fn task_start(
         .flows
         .clone()
         .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
-    resolve_task_lifecycle(&main, &project_flows, &options.flows, options.headless)?;
+    resolve_task_lifecycle(&main, &project_flows, &options.flows, options.reviewer)?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
@@ -873,7 +846,7 @@ fn resolve_task_lifecycle(
     repo: &Path,
     project: &crate::pm::ProjectFlowPlan,
     overrides: &TaskFlowOverrides,
-    headless: bool,
+    reviewer: Option<FeedbackReviewer>,
 ) -> OpsResult<crate::task::TaskLifecyclePlan> {
     let first = overrides
         .first
@@ -893,11 +866,11 @@ fn resolve_task_lifecycle(
     let first = resolve_task_flow(repo, first, false)?;
     let loop_flow = resolve_task_flow(repo, loop_flow, false)?;
     let finally = resolve_task_flow(repo, finally, true)?;
-    Ok(if headless {
-        crate::task::TaskLifecyclePlan::headless(first, loop_flow, finally)
-    } else {
-        crate::task::TaskLifecyclePlan::standard(first, loop_flow, finally)
-    })
+    let mut lifecycle = crate::task::TaskLifecyclePlan::standard(first, loop_flow, finally);
+    if let Some(reviewer) = reviewer {
+        lifecycle.set_reviewer(reviewer);
+    }
+    Ok(lifecycle)
 }
 
 fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {

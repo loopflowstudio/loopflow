@@ -880,9 +880,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Route every interactive lifecycle step to the parent Project
-        #[arg(long)]
-        headless: bool,
+        /// Route future Feedback checkpoints to the User or parent Project
+        #[arg(long, value_enum, value_name = "USER|PARENT")]
+        reviewer: Option<crate::task::FeedbackReviewer>,
         #[arg(long)]
         json: bool,
     },
@@ -908,9 +908,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Route every interactive lifecycle step to the parent Project
-        #[arg(long)]
-        headless: bool,
+        /// Route future Feedback checkpoints to the User or parent Project
+        #[arg(long, value_enum, value_name = "USER|PARENT")]
+        reviewer: Option<crate::task::FeedbackReviewer>,
         #[arg(long)]
         json: bool,
     },
@@ -2117,26 +2117,33 @@ mod tests {
     }
 
     #[test]
-    fn task_run_and_start_accept_headless_lifecycle_policy() {
-        for argv in [
-            vec!["lf", "task", "run", "INF-123", "--headless"],
-            vec![
-                "lf",
-                "task",
-                "start",
-                "project-1",
-                "Ship auth",
-                "--headless",
-            ],
+    fn task_run_and_start_accept_explicit_reviewer() {
+        for (argv, expected) in [
+            (
+                vec!["lf", "task", "run", "INF-123", "--reviewer", "parent"],
+                crate::task::FeedbackReviewer::Parent,
+            ),
+            (
+                vec![
+                    "lf",
+                    "task",
+                    "start",
+                    "project-1",
+                    "Ship auth",
+                    "--reviewer",
+                    "user",
+                ],
+                crate::task::FeedbackReviewer::User,
+            ),
         ] {
-            let cli = Cli::try_parse_from(argv).expect("parse headless Task launch");
-            assert!(matches!(
-                cli.command,
+            let cli = Cli::try_parse_from(argv).expect("parse Task reviewer");
+            let reviewer = match cli.command {
                 Some(Commands::Task {
-                    cmd: TaskCommand::Run { headless: true, .. }
-                        | TaskCommand::Start { headless: true, .. }
-                })
-            ));
+                    cmd: TaskCommand::Run { reviewer, .. } | TaskCommand::Start { reviewer, .. },
+                }) => reviewer,
+                other => panic!("expected Task launch, got {other:?}"),
+            };
+            assert_eq!(reviewer, Some(expected));
         }
     }
 
@@ -2155,6 +2162,15 @@ mod tests {
         assert_eq!(project_id, "incident-management");
         assert_eq!(title, None);
         assert!(Cli::try_parse_from(["lf", "task", "start"]).is_err());
+    }
+
+    #[test]
+    fn task_run_rejects_retired_headless_flag() {
+        let error = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--headless"])
+            .expect_err("--headless must not remain as an alias");
+        assert!(error
+            .to_string()
+            .contains("unexpected argument '--headless'"));
     }
 
     #[test]

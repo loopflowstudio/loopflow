@@ -508,6 +508,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "drop_agent_bus",
         sql: include_str!("migrations/0.12.001_drop_agent_bus.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 3,
+        },
+        name: "task_feedback_reviewers",
+        sql: include_str!("migrations/0.12.3.003_task_feedback_reviewers.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -3483,5 +3493,56 @@ mod tests {
         );
         assert_eq!(MigrationId::parse_version("0.10.1.2.3_initial"), None);
         assert_eq!(MigrationId::parse_version("0.10.001"), None);
+    }
+
+    #[test]
+    fn task_feedback_reviewers_rename_columns_and_map_authority() {
+        let conn = open();
+        apply_set(&conn, prefix_before("task_feedback_reviewers")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('wave_test', 'test', '/repo', 100);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at)
+                 VALUES ('proj_test', 'wave_test', 'ext_proj', 100);
+             INSERT INTO tasks (
+                 id, project_id, external_issue_id, issue_identifier, created_at,
+                 iterate_interaction_policy, kickoff_interaction_policy,
+                 gate_interaction_policy
+             ) VALUES
+                 ('task_mixed', 'proj_test', 'ext_a', 'W2-1', 100,
+                  'defer', 'require', 'require'),
+                 ('task_parent', 'proj_test', 'ext_b', 'W2-2', 100,
+                  'defer', 'defer', 'defer');",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        let task_columns = columns(&conn, "tasks");
+        assert!(task_columns.contains(&"iterate_reviewer".to_string()));
+        assert!(task_columns.contains(&"kickoff_reviewer".to_string()));
+        assert!(task_columns.contains(&"gate_reviewer".to_string()));
+        assert!(!task_columns
+            .iter()
+            .any(|column| column.contains("interaction_policy")));
+
+        let mixed: (String, String, String) = conn
+            .query_row(
+                "SELECT kickoff_reviewer, iterate_reviewer, gate_reviewer
+                 FROM tasks WHERE id='task_mixed'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(mixed, ("user".into(), "parent".into(), "user".into()));
+        let parent: (String, String, String) = conn
+            .query_row(
+                "SELECT kickoff_reviewer, iterate_reviewer, gate_reviewer
+                 FROM tasks WHERE id='task_parent'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(parent, ("parent".into(), "parent".into(), "parent".into()));
     }
 }

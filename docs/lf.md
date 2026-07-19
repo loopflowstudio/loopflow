@@ -258,7 +258,7 @@ lf project run <linear-project-id>                  # durable Project Session
 lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
-lf task run DES-125 --headless                       # route Feedback to the Project
+lf task run DES-125 --reviewer parent                # route Feedback to the Project
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
 lf queue                                             # User-attention Feedback, oldest first
@@ -292,9 +292,9 @@ flows; Task launch pins their resolved names. `--first`, `--loop`, and
 `--finally` override them only while creating the Task. A flow step declares
 `feedback: true`; the active Launch routes that Feedback to the User or the
 immediate parent Run.
-Standard Tasks route first and finally Feedback to the human, while the owning
-Project conducts interactive loop steps. `--headless` routes all three to the
-Project without skipping their skills.
+Standard Tasks route first and finally Feedback to the User, while the owning
+Project reviews loop steps. `--reviewer user|parent` overrides all future Feedback
+checkpoints without changing provider presentation or skipping their skills.
 
 Feedback is the current flow step plus its live Launch and route; there is no
 Feedback id or disposition. `lf task steer` and `lf project steer` append

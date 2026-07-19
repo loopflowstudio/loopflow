@@ -6,18 +6,18 @@ use loopflow::child::ChildRef;
 use loopflow::durable::{
     AdvanceReceipt, AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance, RunTrigger,
 };
-use loopflow::engine::InteractionPolicy;
+use loopflow::task::FeedbackReviewer;
 use loopflow_test_support::TestRepo;
 use support::{register_task, RegisteredTask};
 
 #[derive(Debug, PartialEq, Eq)]
 struct LifecycleConfig {
     first_flow: String,
-    first_policy: InteractionPolicy,
+    first_reviewer: FeedbackReviewer,
     loop_flow: String,
-    loop_policy: InteractionPolicy,
+    loop_reviewer: FeedbackReviewer,
     finally_flow: String,
-    finally_policy: InteractionPolicy,
+    finally_reviewer: FeedbackReviewer,
 }
 
 fn lifecycle_config(task: &RegisteredTask) -> LifecycleConfig {
@@ -28,17 +28,17 @@ fn lifecycle_config(task: &RegisteredTask) -> LifecycleConfig {
         .expect("Task");
     LifecycleConfig {
         first_flow: session.lifecycle.first.flow,
-        first_policy: session.lifecycle.first.interaction_policy,
+        first_reviewer: session.lifecycle.first.reviewer,
         loop_flow: session.lifecycle.loop_.flow,
-        loop_policy: session.lifecycle.loop_.interaction_policy,
+        loop_reviewer: session.lifecycle.loop_.reviewer,
         finally_flow: session.lifecycle.finally.flow,
-        finally_policy: session.lifecycle.finally.interaction_policy,
+        finally_reviewer: session.lifecycle.finally.reviewer,
     }
 }
 
-fn run_headless(repo: &TestRepo, home: &std::path::Path) -> Output {
+fn run_with_reviewer(repo: &TestRepo, home: &std::path::Path, reviewer: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["task", "run", "INF-123", "--headless"])
+        .args(["task", "run", "INF-123", "--reviewer", reviewer])
         .current_dir(repo.path())
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
@@ -46,7 +46,7 @@ fn run_headless(repo: &TestRepo, home: &std::path::Path) -> Output {
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_WAVE_ID")
         .output()
-        .expect("run lf task run --headless")
+        .expect("run lf task run --reviewer")
 }
 
 fn seed_current_user_feedback(task: &RegisteredTask) {
@@ -73,8 +73,9 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
                         model: None,
                         account_id: None,
                     },
-                    containment: Containment::Tmux {
-                        name: "task-headless-feedback".to_string(),
+                    containment: Containment::ProcessGroup {
+                        // SAFETY: `getpgrp` has no preconditions and does not mutate memory.
+                        id: i64::from(unsafe { libc::getpgrp() }),
                     },
                     cwd: task.session.worktree.clone(),
                     surface: "terminal".to_string(),
@@ -121,14 +122,14 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
 }
 
 #[test]
-fn task_run_headless_existing_task_persists_all_policies() {
+fn task_run_explicit_parent_persists_all_reviewers() {
     let repo = TestRepo::new();
-    let branch = "jack/task-headless-persistence";
+    let branch = "jack/task-parent-reviewer";
     repo.create_branch(branch);
     let home = tempfile::tempdir().expect("Task home");
     let task = register_task(home.path(), repo.path(), branch, &repo.head_sha());
 
-    let output = run_headless(&repo, home.path());
+    let output = run_with_reviewer(&repo, home.path(), "parent");
     assert!(
         output.status.success(),
         "lf task run failed: {}",
@@ -136,27 +137,43 @@ fn task_run_headless_existing_task_persists_all_policies() {
     );
 
     let persisted = lifecycle_config(&task);
-    assert_eq!(persisted.first_policy, InteractionPolicy::Defer);
-    assert_eq!(persisted.loop_policy, InteractionPolicy::Defer);
-    assert_eq!(persisted.finally_policy, InteractionPolicy::Defer);
+    assert_eq!(persisted.first_reviewer, FeedbackReviewer::Parent);
+    assert_eq!(persisted.loop_reviewer, FeedbackReviewer::Parent);
+    assert_eq!(persisted.finally_reviewer, FeedbackReviewer::Parent);
 }
 
 #[test]
-fn task_run_headless_existing_task_refuses_current_user_feedback() {
+fn task_run_explicit_reviewer_changes_only_future_feedback() {
     let repo = TestRepo::new();
-    let branch = "jack/task-headless-human-feedback";
+    let branch = "jack/task-current-user-feedback";
     repo.create_branch(branch);
     let home = tempfile::tempdir().expect("Task home");
     let task = register_task(home.path(), repo.path(), branch, &repo.head_sha());
     seed_current_user_feedback(&task);
-    let before = lifecycle_config(&task);
-
-    let output = run_headless(&repo, home.path());
+    let output = run_with_reviewer(&repo, home.path(), "parent");
     assert!(
-        !output.status.success(),
-        "current User Feedback must refuse"
+        output.status.success(),
+        "lf task run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("current Feedback"), "{stderr}");
-    assert_eq!(lifecycle_config(&task), before);
+    let persisted = lifecycle_config(&task);
+    assert_eq!(persisted.first_reviewer, FeedbackReviewer::Parent);
+    assert_eq!(persisted.loop_reviewer, FeedbackReviewer::Parent);
+    assert_eq!(persisted.finally_reviewer, FeedbackReviewer::Parent);
+
+    let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
+    let attention = runtime.block_on(async {
+        let work = task
+            .store
+            .work_for_child(&ChildRef::Task(task.session.id.clone()))
+            .await
+            .expect("resolve Task Work");
+        task.store
+            .feedback(&work)
+            .await
+            .expect("read Feedback")
+            .expect("open Feedback")
+            .attention
+    });
+    assert_eq!(attention, AttentionRoute::User);
 }

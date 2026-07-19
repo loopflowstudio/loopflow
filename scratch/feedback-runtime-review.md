@@ -116,3 +116,26 @@ searches are empty. The focused parser and durable-store suites and Swift local
 launcher tests pass from implementation; `cargo fmt --check` and all-target
 Clippy with warnings denied pass. The automated `lf code` wrapper again made no
 source change and was rejected as evidence.
+
+## Slice 6B — explicit Task Feedback reviewer
+
+Accepted. `FeedbackReviewer::{User, Parent}` names the actual authority on each
+`TaskPhasePlan`. The standard lifecycle routes kickoff clarification to User,
+iteration to the immediate parent Project, and gate mutation to User. `lf task
+run|start --reviewer user|parent` can deliberately override future checkpoints;
+the overloaded Task `--headless` spelling is rejected.
+
+Migration `0.12.002_task_feedback_reviewers.sql` renames all three stored phase
+columns and maps `require|defer` to `user|parent`. Current readers accept only
+the new vocabulary. Changing a Task plan does not mutate Launch attention, so
+already-open Feedback stays routed to the peer that was chosen when it opened.
+
+`InteractionPolicy`, feedback-only `FlowAction` variants, and their dead policy
+evaluator are deleted. Provider launch may still be headless; that transport
+surface no longer decides who reviews Task Feedback.
+
+Proof: parser and Task launch tests, default/override model tests, store
+round-trip, migration mapping, and two reviewer integration tests pass. The
+integration proof changes an existing Task to Parent while its open Feedback
+remains routed to User. Exact current-reader and retired-policy searches are
+empty; `cargo fmt --check` and all-target Clippy with warnings denied pass.

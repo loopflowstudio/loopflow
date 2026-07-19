@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -94,48 +93,6 @@ pub struct XorPath {
     pub direction: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FlowAction {
-    RunSkill { skill: ConcreteSkill },
-    RunOps { ops: ConcreteOp },
-    WaitFeedback { skill: ConcreteSkill },
-    DeferFeedback { skill: ConcreteSkill },
-    Xor { branch: ConcreteXor },
-    Complete,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InteractionPolicy {
-    Require,
-    Defer,
-}
-
-impl InteractionPolicy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Require => "require",
-            Self::Defer => "defer",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid interaction policy: {0}")]
-pub struct InteractionPolicyParseError(String);
-
-impl FromStr for InteractionPolicy {
-    type Err = InteractionPolicyParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "require" => Ok(Self::Require),
-            "defer" => Ok(Self::Defer),
-            _ => Err(InteractionPolicyParseError(value.to_string())),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Flow {
     pub name: String,
@@ -192,35 +149,6 @@ pub struct Direction {
     pub name: String,
     pub content: String,
     pub source: PathBuf,
-}
-
-pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
-    next_action_with_policy(items, step_index, InteractionPolicy::Require)
-}
-
-pub fn next_action_with_policy(
-    items: &[ConcreteStep],
-    step_index: usize,
-    policy: InteractionPolicy,
-) -> FlowAction {
-    let item = match items.get(step_index) {
-        Some(item) => item,
-        None => return FlowAction::Complete,
-    };
-    match item.clone() {
-        ConcreteStep::Skill(skill) => {
-            if skill.skill.feedback {
-                match policy {
-                    InteractionPolicy::Require => FlowAction::WaitFeedback { skill },
-                    InteractionPolicy::Defer => FlowAction::DeferFeedback { skill },
-                }
-            } else {
-                FlowAction::RunSkill { skill }
-            }
-        }
-        ConcreteStep::Op(ops) => FlowAction::RunOps { ops },
-        ConcreteStep::Xor(branch) => FlowAction::Xor { branch },
-    }
 }
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
@@ -1554,70 +1482,6 @@ Be careful.
     }
 
     #[test]
-    fn next_action_marks_feedback_steps_as_wait() {
-        let flow = Flow {
-            name: "demo".to_string(),
-            items: vec![Step::Skill(Skill {
-                name: "design".to_string(),
-                agent: None,
-                default_agent: None,
-                directions: Vec::new(),
-                action_style: None,
-                interactive: None,
-                feedback: true,
-                content: None,
-            })],
-        };
-
-        let repo = TempDir::new().unwrap();
-        let items = expand_flow(&flow, repo.path()).unwrap();
-        let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::WaitFeedback { .. }));
-    }
-
-    #[test]
-    fn interaction_policy_defers_the_same_feedback_step() {
-        let flow = Flow {
-            name: "reviewed-code".to_string(),
-            items: vec![Step::Skill(Skill {
-                name: "demo".to_string(),
-                agent: None,
-                default_agent: None,
-                directions: Vec::new(),
-                action_style: None,
-                interactive: None,
-                feedback: true,
-                content: None,
-            })],
-        };
-
-        let repo = TempDir::new().unwrap();
-        let items = expand_flow(&flow, repo.path()).unwrap();
-
-        assert!(matches!(
-            next_action_with_policy(&items, 0, InteractionPolicy::Require),
-            FlowAction::WaitFeedback { .. }
-        ));
-        assert!(matches!(
-            next_action_with_policy(&items, 0, InteractionPolicy::Defer),
-            FlowAction::DeferFeedback { .. }
-        ));
-    }
-
-    #[test]
-    fn interaction_policy_does_not_skip_headless_steps() {
-        let items = vec![ConcreteStep::Skill(ConcreteSkill {
-            skill: Skill::named("implement"),
-            flow_parents: vec!["reviewed-code".to_string()],
-        })];
-
-        assert!(matches!(
-            next_action_with_policy(&items, 0, InteractionPolicy::Defer),
-            FlowAction::RunSkill { .. }
-        ));
-    }
-
-    #[test]
     fn flow_feedback_does_not_leak_from_skill_frontmatter() {
         let tmp = TempDir::new().unwrap();
         let skills_dir = tmp.path().join(".lf/skills");
@@ -1634,8 +1498,10 @@ Be careful.
         };
         let items = expand_flow(&flow, tmp.path()).unwrap();
         assert_eq!(items.len(), 1);
-        let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::RunSkill { .. }));
+        let ConcreteStep::Skill(skill) = &items[0] else {
+            panic!("expected Skill");
+        };
+        assert!(!skill.skill.feedback);
     }
 
     #[test]
@@ -1800,23 +1666,6 @@ Be careful.
     }
 
     #[test]
-    fn next_action_returns_ops_action() {
-        let items = vec![ConcreteStep::Op(ConcreteOp {
-            item: Op {
-                command: "rebase".to_string(),
-                args: Vec::new(),
-            },
-            flow_parents: vec!["ship".to_string()],
-        })];
-
-        let action = next_action(&items, 0);
-        assert!(
-            matches!(action, FlowAction::RunOps { .. }),
-            "expected RunOps action, got {action:?}"
-        );
-    }
-
-    #[test]
     fn expand_direction_names_passes_through_non_groups() {
         let tmp = TempDir::new().unwrap();
         let result = expand_direction_names(&["security".to_string()], tmp.path());
@@ -1886,19 +1735,6 @@ Be careful.
 
         let result = find_direction_path("nested", tmp.path());
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn next_action_marks_missing_skills_as_complete() {
-        let flow = Flow {
-            name: "demo".to_string(),
-            items: Vec::new(),
-        };
-
-        let repo = TempDir::new().unwrap();
-        let items = expand_flow(&flow, repo.path()).unwrap();
-        let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::Complete));
     }
 
     #[test]
@@ -2119,34 +1955,6 @@ Be careful.
             assert_eq!(branch.paths.len(), 1);
             assert_eq!(branch.paths["fix"].description, "Fix it");
         }
-    }
-
-    #[test]
-    fn next_action_returns_xor_action() {
-        let items = vec![ConcreteStep::Xor(ConcreteXor {
-            router: None,
-            paths: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "a".to_string(),
-                    XorPath {
-                        flow: Some("build".to_string()),
-                        skill: None,
-                        steps: Vec::new(),
-                        description: "Path A".to_string(),
-                        direction: Vec::new(),
-                    },
-                );
-                m
-            },
-            flow_parents: Vec::new(),
-        })];
-
-        let action = next_action(&items, 0);
-        assert!(
-            matches!(action, FlowAction::Xor { .. }),
-            "expected Xor action, got {action:?}"
-        );
     }
 
     #[test]

@@ -1862,8 +1862,8 @@ mod tests {
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(persisted.lifecycle.loop_.flow, "code");
         assert_eq!(
-            persisted.lifecycle.loop_.interaction_policy,
-            crate::engine::InteractionPolicy::Defer
+            persisted.lifecycle.loop_.reviewer,
+            crate::task::FeedbackReviewer::Parent
         );
         assert_eq!(persisted.lifecycle.first.flow, "task-design");
         assert_eq!(persisted.lifecycle.finally.flow, "ship");

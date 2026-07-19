@@ -319,9 +319,9 @@ delete orphan receipts, and rename Work/Launch identities still called Session.
 
 - [x] `lf work feedback` only presents and `lf work continue` is the only close.
 - [x] Exit guard, continuation flags, and escalation API/store state are absent.
-- [ ] Task help exposes `--reviewer user|parent`, with mixed default and explicit
+- [x] Task help exposes `--reviewer user|parent`, with mixed default and explicit
       override behavior proved.
-- [ ] Reviewer columns/values use reviewer and user/parent; no dual reader.
+- [x] Reviewer columns/values use reviewer and user/parent; no dual reader.
 - [ ] `InteractionPolicy` and dead feedback `FlowAction` machinery are absent.
 - [ ] Evidence Receipt models, command, resolver, docs, and PR helpers are absent.
 - [ ] Work/Launch wire identity uses task/work/launch rather than session.

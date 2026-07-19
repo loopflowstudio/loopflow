@@ -21,7 +21,11 @@ pub enum OpsError {
     #[error("{0}")]
     Message(String),
     #[error("rebase onto {onto} failed ({detail})")]
-    RebaseConflict { onto: String, detail: String },
+    RebaseConflict {
+        onto: String,
+        detail: String,
+        recovery: Option<Box<crate::ops::rebase::RebaseRecovery>>,
+    },
     #[error(
         "refusing to rebase: recorded base {base} is not an ancestor of HEAD, so \
          its history diverged. Reconcile by hand; the commits since the common \

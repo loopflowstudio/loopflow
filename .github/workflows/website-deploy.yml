@@ -6,6 +6,7 @@ on:
     paths:
       - "website/**"
       - "docs/**"
+      - "PROMPTS.md"
       - ".github/workflows/website-deploy.yml"
 
 concurrency:
@@ -22,9 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Reject stale or unproven product captures
+        working-directory: ${{ github.workspace }}
+        run: uv run python scripts/check_website_screens.py
+
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Fetch secrets
+      - name: Fetch deploy credentials
         uses: dopplerhq/secrets-fetch-action@v2.0.0
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN_PRD }}
@@ -37,18 +44,11 @@ jobs:
           rm -rf docs
           mkdir -p docs
           cp ../docs/*.md docs/
+          cp ../PROMPTS.md docs/prompts.md
 
       - name: Save current release image
         id: pre-deploy
         run: echo "image=$(flyctl releases --json -a loopflow-website | jq -r '.[0].ImageRef')" >> "$GITHUB_OUTPUT"
-
-      - name: Stage runtime secrets
-        run: |
-          flyctl secrets set --stage \
-            WEBSITE_DB_URL="$WEBSITE_DB_URL" \
-            RESEND_API_KEY="$RESEND_API_KEY" \
-            FIGMA_TOKEN="$FIGMA_TOKEN" \
-            -a loopflow-website
 
       - name: Deploy
         run: flyctl deploy --config fly.toml --wait-timeout 120

@@ -12,9 +12,9 @@ struct WorkAttentionTests {
 
         // Running with a live process → Working.
         #expect(nowGroup(for: tasks[0]) == .working)
-        // Idle Session but an open PR → the PR is what waits, so Ready for review.
+        // Idle Work with an open PR → the PR is what waits, so Ready for review.
         #expect(nowGroup(for: tasks[1]) == .readyForReview)
-        // No Session at all → Available, not a NOW row.
+        // No Work record at all → Available, not a NOW row.
         #expect(nowGroup(for: tasks[2]) == nil)
         // Completed → done, not a NOW row.
         #expect(nowGroup(for: tasks[3]) == nil)
@@ -35,9 +35,9 @@ struct WorkAttentionTests {
         #expect(review.rows.first?.projectName == "Loopflow API")
     }
 
-    @Test("Age order is oldest status_at first within a group")
+    @Test("Age order is oldest updated_at first within a group")
     func ageOrderOldestFirst() throws {
-        // The newer Session is listed first in the snapshot; NOW must reorder it
+        // The newer Work item is listed first in the snapshot; NOW must reorder it
         // after the older one.
         let wave = try decodeWave(workingTasks: [
             ("W2-2", "2026-07-14T23:00:00Z"),
@@ -55,7 +55,7 @@ struct WorkAttentionTests {
         #expect(tasks.count == 8)
         #expect(tasks["live_advancing"]?.attention.level == .green)
         #expect(nowGroup(for: try #require(tasks["live_advancing"])) == .working)
-        #expect(nowGroup(for: try #require(tasks["live_human_wait"])) == .needsInput)
+        #expect(nowGroup(for: try #require(tasks["live_user_wait"])) == .needsInput)
         #expect(tasks["dead_dirty"]?.attention.localProgress.dirty == true)
         #expect(tasks["dead_authored_commits"]?.attention.localProgress.authoredCommits == true)
         #expect(nowGroup(for: try #require(tasks["clean_backlog"])) == nil)
@@ -95,14 +95,14 @@ struct WorkAttentionTests {
     }
 
     private func decodeWave(workingTasks: [(String, String)]) throws -> WaveRoadmap {
-        let tasks = workingTasks.map { identifier, statusAt in
+        let tasks = workingTasks.map { identifier, updatedAt in
             """
             {
               "task": {"id":"\(identifier)","identifier":"\(identifier)","name":"n","description":"","rank":1,"completed":false,"assignee":null},
               "reference": {"issue_url":null,"workspace":null},
-              "runtime": {"session_id":"ts_\(identifier)","project_session_id":"ps_1","status":"running","reason":"working","status_at":"\(statusAt)","provider":"claude","process_alive":true,"observation":{"category":"working","reason":"working","owner":"session","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
+              "runtime": {"work_id":"\(identifier)","project_id":"p","status":{"running":{"run_id":"run_00000000000000000000000000000004"}},"reason":"working","updated_at":"\(updatedAt)","provider":"claude","process_alive":true,"observation":{"category":"working","reason":"working","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
               "next_move": {"owner":"task","reason":"working"},
-              "attention": {"level":"green","reason":"working","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","actions":[{"action":"recover","available":false,"reason":"body is alive; use attach/interrupt to interact"},{"action":"resume","available":false,"reason":"body is working; nothing to resume"},{"action":"review","available":false,"reason":"no open PR to review"},{"action":"start_next_pr","available":false,"reason":"no merged PR to advance from"},{"action":"complete","available":false,"reason":"implementation not finished"},{"action":"no_action","available":true,"reason":"Task body is working"}]},"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
+              "attention": {"level":"green","reason":"working","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","reason":"Task body is working"},"pm_completed":false,"work_status":{"running":{"run_id":"run_00000000000000000000000000000004"}},"process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "active_pr": null,
               "section": "now"
             }
@@ -110,7 +110,7 @@ struct WorkAttentionTests {
         }.joined(separator: ",")
         let json = """
         {
-          "wave": {"id":"w","name":"product","status":"running","paused":false,"goal":"g","repo":"/src/loopflow","active_tasks":\(workingTasks.count),"active_projects":1,"live":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
+          "wave": {"id":"w","name":"product","status":{"running":{"run_id":"run_00000000000000000000000000000003"}},"goal":"g","repo":"/src/loopflow","active_tasks":\(workingTasks.count),"active_projects":1,"live":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "projects": {"state":"ok","truncated":false,"items":[
             {"project":{"id":"p","slug":"api","name":"API","summary":"s","definition":"d","krs":[]},"runtime":null,"next_move":{"owner":"project","reason":"r"},"section":"now","tasks":[\(tasks)]}
           ]}

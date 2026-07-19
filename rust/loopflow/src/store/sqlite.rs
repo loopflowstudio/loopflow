@@ -13,7 +13,7 @@ use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, BusMessage, CredentialState, PmSnapshotRow, ProviderAccount,
     ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
-    StoreResult,
+    StoreResult, TurnSpendRow,
 };
 use crate::trace::{
     AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
@@ -21,10 +21,9 @@ use crate::trace::{
 };
 use crate::wave::Wave;
 
-mod child_sessions;
+mod children;
 mod ci_incidents;
-mod interaction_reviews;
-mod interactive_handoffs;
+mod durable;
 mod provider_deliveries;
 
 #[derive(Debug, Clone)]
@@ -39,8 +38,12 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     )?;
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     let mut statement = conn.prepare(
-        "SELECT worktree FROM task_sessions \
-         WHERE status NOT IN ('completed', 'abandoned')",
+        "SELECT t.worktree FROM tasks t
+         JOIN epochs e ON e.id=(
+             SELECT latest.id FROM epochs latest
+             WHERE latest.task_id=t.id ORDER BY latest.number DESC LIMIT 1
+         )
+         WHERE e.state='open'",
     )?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
@@ -301,9 +304,74 @@ fn read_provider_route_account(row: &rusqlite::Row) -> rusqlite::Result<Provider
     })
 }
 
+fn to_sqlite_conversion_error(error: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.to_string(),
+        )),
+    )
+}
+
 impl SqliteStore {
+    /// Open the store for ordinary use. This never advances the shared release
+    /// frontier: against `~/.lf/loopflow.db` it reads and validates but leaves
+    /// the migration frontier where the installed `lf` left it. Advancing the
+    /// shared frontier is the promotion boundary's job — see
+    /// [`Self::open_as_promotion_boundary`].
     pub fn new(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Forbidden)
+    }
+
+    /// Open the shared store as `lf install promote` — the single authorized
+    /// owner of the migration frontier. Applies any pending migration under the
+    /// caller's exclusive promotion lock and drained live-body fence.
+    pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
+        Self::open(path, super::FrontierAdvance::Authorized)
+    }
+
+    fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+        Self::open_with(
+            path,
+            crate::build_info::migration_authority(),
+            &super::machine_home_dir(),
+            advance,
+        )
+    }
+
+    /// Open resolving the migration decision against an explicit authority and
+    /// machine home rather than this build's compiled-in values. Production opens
+    /// pass the real ones through [`Self::open`]; the same-module shared-frontier
+    /// regressions pass a temp home and a chosen authority so they drive the
+    /// published and promotion-boundary branches a validation-only test build
+    /// cannot reach through the compiled-in authority.
+    fn open_with(
+        path: &Path,
+        authority: crate::build_info::MigrationAuthority,
+        home: &Path,
+        advance: super::FrontierAdvance,
+    ) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
+
+        // Resolve the frontier authority before touching the filesystem. An
+        // ordinary open of a shared store it may not initialize refuses here,
+        // before create_dir_all/Connection::open would leave an empty
+        // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
+        // bootstrap check could misread as "the shared store is initialized".
+        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
+            .map_err(|error| {
+                StoreError::InvalidData(format!("resolve migration authority: {error}"))
+            })?;
+        if !may_apply_migrations && !existing_database {
+            return Err(StoreError::InvalidData(format!(
+                "shared store {} is not initialized and an ordinary lf may not create it; \
+                 only `lf install promote` from an authorized build initializes the shared store",
+                path.display()
+            )));
+        }
+
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {
                 StoreError::InvalidData(format!("failed to create db dir: {err}"))
@@ -315,17 +383,21 @@ impl SqliteStore {
             "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
         )?;
 
-        let may_apply_migrations = super::may_apply_migrations(
-            path,
-            crate::build_info::migration_authority(),
-            &super::machine_home_dir(),
-        )
-        .map_err(|error| {
-            StoreError::InvalidData(format!("resolve migration authority: {error}"))
-        })?;
-
         if !may_apply_migrations {
+            // Validate the applied history first (preserving divergent/incompatible
+            // and store-ahead errors), then refuse if this binary knows a migration
+            // the store has not applied. An ordinary open must not hand back a store
+            // whose schema is older than this binary's code, which may query the
+            // columns that pending migration adds.
             super::migrations::validate_sqlite(&conn)?;
+            if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
+                return Err(StoreError::InvalidData(format!(
+                    "shared store {} is at an older frontier than this lf (pending {pending}); \
+                     an ordinary lf must not advance it — run `lf install promote` from an \
+                     authorized build to advance the shared store",
+                    path.display()
+                )));
+            }
         } else if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
         } else {
@@ -427,13 +499,14 @@ impl SqliteStore {
     }
 
     fn upsert_wave(&self, wave: &Wave) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let created_at = wave
             .created_at()
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(id) DO UPDATE SET
@@ -449,6 +522,8 @@ impl SqliteStore {
                 wave.parent_wave_id(),
             ],
         )?;
+        durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -456,9 +531,7 @@ impl SqliteStore {
 fn validate_run_events_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
         "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree,
-                wave, node, event, command, flow, skill, step_index, error,
-                input_tokens, output_tokens, cache_read_tokens, cost_usd,
-                duration_secs, provider, model
+                wave, node, event, command, flow, skill, step_index, error
          FROM run_events LIMIT 0",
     )?;
     Ok(())
@@ -1006,6 +1079,25 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn provider_session_account(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> StoreResult<Option<ProviderAccountId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT account_id FROM provider_session_accounts
+             WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), provider_session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .as_deref()
+        .map(ProviderAccountId::parse)
+        .transpose()
+        .map_err(StoreError::InvalidData)
+    }
+
     pub fn select_provider_account(
         &self,
         provider: Provider,
@@ -1163,8 +1255,11 @@ impl SqliteStore {
     }
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM epochs WHERE wave_id = ?1", params![wave_id])?;
+        tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1305,9 +1400,8 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO run_events (
                 run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                flow, skill, step_index, error, input_tokens, output_tokens,
-                cache_read_tokens, cost_usd, duration_secs, provider, model
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                flow, skill, step_index, error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 row.run_id,
                 row.process_id,
@@ -1324,23 +1418,60 @@ impl SqliteStore {
                 row.skill,
                 row.step_index,
                 row.error,
-                row.input_tokens,
-                row.output_tokens,
-                row.cache_read_tokens,
-                row.cost_usd,
-                row.duration_secs,
-                row.provider,
-                row.model,
             ],
         )?;
         Ok(())
     }
 
+    /// Every provider-measured Turn's spend since `since_unix`, attributed by
+    /// the launch that ran it.
+    ///
+    /// Turns with no provider report at all are dropped: they carry no spend to
+    /// sum, and keeping them would let a reader mistake silence for zero. Any
+    /// one measurement is enough to keep the turn — a report of cache reads
+    /// alone is still something the provider measured.
+    pub fn turn_spend_since(&self, since_unix: i64) -> StoreResult<Vec<TurnSpendRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT t.id, l.id, l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill,
+                    l.provider, l.model, COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
+                    t.provider_output_tokens, t.cache_read_tokens, t.cost_usd
+             FROM agent_turns t
+             JOIN agent_launches l ON l.id = t.launch_id
+             WHERE COALESCE(t.ended_at, t.started_at) >= ?1
+               AND (t.provider_input_tokens IS NOT NULL
+                    OR t.provider_output_tokens IS NOT NULL
+                    OR t.cache_read_tokens IS NOT NULL
+                    OR t.cost_usd IS NOT NULL)
+             ORDER BY COALESCE(t.ended_at, t.started_at), l.process_id, t.ordinal",
+        )?;
+        let rows = stmt.query_map(params![since_unix], |row| {
+            Ok(TurnSpendRow {
+                turn_id: row.get(0)?,
+                launch_id: row.get(1)?,
+                trace_id: row.get(2)?,
+                exec_id: row.get(3)?,
+                repo: row.get(4)?,
+                wave: row.get(5)?,
+                flow: row.get(6)?,
+                skill: row.get(7)?,
+                provider: row.get(8)?,
+                model: row.get(9)?,
+                at: row.get(10)?,
+                input_tokens: row.get(11)?,
+                output_tokens: row.get(12)?,
+                cache_read_tokens: row.get(13)?,
+                cost_usd: row.get(14)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::from)
+    }
+
     pub fn list_run_events_since(&self, since_unix: i64) -> StoreResult<Vec<RunEventRow>> {
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE ts >= ?1 ORDER BY ts, run_id, seq",
             params![since_unix],
         )
@@ -1360,8 +1491,7 @@ impl SqliteStore {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE run_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1373,8 +1503,7 @@ impl SqliteStore {
         let prefix = format!("{}%", exec_id.replace(['%', '_'], ""));
         self.query_run_events(
             "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
-                    flow, skill, step_index, error, input_tokens, output_tokens,
-                    cache_read_tokens, cost_usd, duration_secs, provider, model
+                    flow, skill, step_index, error
              FROM run_events WHERE process_id LIKE ?1 ORDER BY ts, seq",
             params![prefix],
         )
@@ -1404,13 +1533,6 @@ impl SqliteStore {
                 skill: row.get(12)?,
                 step_index: row.get(13)?,
                 error: row.get(14)?,
-                input_tokens: row.get(15)?,
-                output_tokens: row.get(16)?,
-                cache_read_tokens: row.get(17)?,
-                cost_usd: row.get(18)?,
-                duration_secs: row.get(19)?,
-                provider: row.get(20)?,
-                model: row.get(21)?,
             })
         })?;
         let mut events = Vec::new();
@@ -1428,44 +1550,155 @@ impl SqliteStore {
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        tx.execute(
-            "INSERT INTO agent_launches (
-                id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
-                skill, project, task, provider, model, surface, capture_status,
-                incomplete_reason, outcome, artifact_dir, conversation_path,
-                provider_events_path, provider_session_id, provider_session_path,
-                conversation_event_count, conversation_bytes
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
-            params![
-                launch.id,
-                launch.run_id,
-                launch.process_id,
-                launch.started_at,
-                launch.ended_at,
-                launch.repo,
-                launch.worktree,
-                launch.wave,
-                launch.flow,
-                launch.skill,
-                launch.project,
-                launch.task,
-                launch.provider,
-                launch.model,
-                launch.surface,
-                launch.capture_status,
-                launch.incomplete_reason,
-                launch.outcome,
-                launch.artifact_dir,
-                launch.conversation_path,
-                launch.provider_events_path,
-                launch.provider_session_id,
-                launch.provider_session_path,
-                launch.conversation_event_count,
-                launch.conversation_bytes,
-            ],
-        )?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (
+            product_run_id,
+            home_id,
+            account_id,
+            containment_kind,
+            containment_id,
+            resume_token,
+            opaque_epoch_id,
+            opaque_basis_rev,
+        ) = launch
+            .control
+            .as_ref()
+            .map(|control| {
+                let (kind, id) = control.containment.parts();
+                (
+                    Some(control.run_id.as_str()),
+                    Some(control.home_id.as_str()),
+                    control.account_id.as_deref(),
+                    Some(kind),
+                    Some(id),
+                    control.resume_token.as_deref(),
+                    control
+                        .opaque_basis
+                        .as_ref()
+                        .map(|basis| basis.epoch_id.as_str()),
+                    control
+                        .opaque_basis
+                        .as_ref()
+                        .map(|basis| basis.revision as i64),
+                )
+            })
+            .unwrap_or((None, None, None, None, None, None, None, None));
+        let registered = product_run_id.is_some()
+            && tx.query_row(
+                "SELECT EXISTS(
+                        SELECT 1 FROM agent_launches
+                        WHERE id=?1 AND product_run_id=?2
+                     )",
+                params![launch.id, product_run_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+        if registered {
+            tx.execute(
+                "UPDATE agent_launches SET
+                    run_id=?2, process_id=?3, repo=?4, worktree=?5, wave=?6,
+                    flow=?7, skill=?8, project=?9, task=?10, provider=?11,
+                    model=?12, surface=?13, capture_status=?14,
+                    incomplete_reason=?15, outcome=?16, artifact_dir=?17,
+                    conversation_path=?18, provider_events_path=?19,
+                    provider_session_id=?20, provider_session_path=?21,
+                    conversation_event_count=?22, conversation_bytes=?23
+                 WHERE id=?1 AND product_run_id=?24",
+                params![
+                    launch.id,
+                    launch.run_id,
+                    launch.process_id,
+                    launch.repo,
+                    launch.worktree,
+                    launch.wave,
+                    launch.flow,
+                    launch.skill,
+                    launch.project,
+                    launch.task,
+                    launch.provider,
+                    launch.model,
+                    launch.surface,
+                    launch.capture_status,
+                    launch.incomplete_reason,
+                    launch.outcome,
+                    launch.artifact_dir,
+                    launch.conversation_path,
+                    launch.provider_events_path,
+                    launch.provider_session_id,
+                    launch.provider_session_path,
+                    launch.conversation_event_count,
+                    launch.conversation_bytes,
+                    product_run_id,
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO agent_launches (
+                    id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                    ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
+                    ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
+                params![
+                    launch.id,
+                    launch.run_id,
+                    launch.process_id,
+                    launch.started_at,
+                    launch.ended_at,
+                    launch.repo,
+                    launch.worktree,
+                    launch.wave,
+                    launch.flow,
+                    launch.skill,
+                    launch.project,
+                    launch.task,
+                    launch.provider,
+                    launch.model,
+                    launch.surface,
+                    launch.capture_status,
+                    launch.incomplete_reason,
+                    launch.outcome,
+                    launch.artifact_dir,
+                    launch.conversation_path,
+                    launch.provider_events_path,
+                    launch.provider_session_id,
+                    launch.provider_session_path,
+                    launch.conversation_event_count,
+                    launch.conversation_bytes,
+                    product_run_id,
+                    home_id,
+                    account_id,
+                    product_run_id.map(|_| "live"),
+                    containment_kind,
+                    containment_id,
+                    resume_token,
+                    opaque_epoch_id,
+                    opaque_basis_rev,
+                ],
+            )?;
+        }
+        if let Some(run_id) = product_run_id.filter(|_| !registered) {
+            if tx.execute(
+                "UPDATE runs SET state='active' WHERE id=?1 AND state='reserved'",
+                [run_id],
+            )? == 0
+            {
+                let active: bool = tx.query_row(
+                    "SELECT state='active' FROM runs WHERE id=?1",
+                    [run_id],
+                    |row| row.get(0),
+                )?;
+                if !active {
+                    return Err(StoreError::InvalidAuthority(format!(
+                        "Run {run_id} cannot own a Launch"
+                    )));
+                }
+            }
+        }
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
@@ -1479,7 +1712,7 @@ impl SqliteStore {
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
         tx.commit()?;
@@ -1487,8 +1720,23 @@ impl SqliteStore {
     }
 
     pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        update_agent_turn(&conn, turn)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let was_running = tx
+            .query_row(
+                "SELECT status='running' FROM agent_turns WHERE id=?1",
+                [&turn.id],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?
+            .unwrap_or(false);
+        update_agent_turn(&tx, turn)?;
+        if was_running && turn.status != "running" {
+            let turn_id = crate::durable::TurnId::parse(&turn.id)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+            durable::rearm_feedback_attention(&tx, &turn_id)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1496,7 +1744,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE agent_launches
-             SET provider_session_id = ?2, provider_session_path = ?3
+             SET provider_session_id = ?2, provider_session_path = ?3,
+                 resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?2 END
              WHERE id = ?1",
             params![
                 launch.id,
@@ -1518,7 +1767,17 @@ impl SqliteStore {
             "UPDATE agent_launches SET
                 ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
                 conversation_event_count = ?6, conversation_bytes = ?7,
-                provider_session_id = ?8, provider_session_path = ?9
+                provider_session_id = ?8, provider_session_path = ?9,
+                launch_state=CASE WHEN product_run_id IS NULL THEN launch_state ELSE 'ended' END,
+                handback_state=CASE
+                    WHEN product_run_id IS NULL THEN handback_state
+                    WHEN ?5='completed' THEN 'succeeded'
+                    WHEN ?5='interrupted' THEN 'interrupted'
+                    ELSE 'failed'
+                END,
+                attention_kind=NULL, attention_work_kind=NULL,
+                attention_work_id=NULL, attention_at=NULL,
+                resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?8 END
              WHERE id = ?1",
             params![
                 launch.id,
@@ -1565,15 +1824,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn trace_capture_required_after(&self) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT required_after FROM trace_capture_meta WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?)
-    }
-
     pub fn agent_launches_matching(&self, run_id: &str) -> StoreResult<Vec<AgentLaunchRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
         // Launch timestamps use ledger-second precision. rowid preserves the
@@ -1583,7 +1833,9 @@ impl SqliteStore {
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
              FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
@@ -1595,7 +1847,9 @@ impl SqliteStore {
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes
+                    conversation_event_count, conversation_bytes, product_run_id, home_id,
+                    account_id, launch_state, containment_kind, containment_id, resume_token,
+                    opaque_epoch_id, opaque_basis_rev
              FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
@@ -1635,6 +1889,48 @@ impl SqliteStore {
                 provider_session_path: row.get(22)?,
                 conversation_event_count: row.get(23)?,
                 conversation_bytes: row.get(24)?,
+                control: match (
+                    row.get::<_, Option<String>>(25)?,
+                    row.get::<_, Option<String>>(26)?,
+                    row.get::<_, Option<String>>(29)?,
+                    row.get::<_, Option<String>>(30)?,
+                    row.get::<_, Option<String>>(31)?,
+                ) {
+                    (Some(run_id), Some(home_id), Some(kind), Some(id), resume_token) => {
+                        let opaque_epoch_id = row.get::<_, Option<String>>(32)?;
+                        let opaque_basis_rev = row.get::<_, Option<i64>>(33)?;
+                        let opaque_basis = match (opaque_epoch_id, opaque_basis_rev) {
+                            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
+                                epoch_id: crate::durable::EpochId::parse(&epoch_id)
+                                    .map_err(to_sqlite_conversion_error)?,
+                                revision: revision as u64,
+                            }),
+                            (None, None) => None,
+                            _ => {
+                                return Err(to_sqlite_conversion_error(
+                                    "stored opaque Launch Basis is incomplete",
+                                ))
+                            }
+                        };
+                        Some(crate::trace::ControlLaunch {
+                            run_id: crate::durable::RunId::parse(&run_id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            home_id: crate::durable::HomeId::parse(&home_id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            account_id: row.get(27)?,
+                            containment: crate::durable::Containment::parse(&kind, id)
+                                .map_err(to_sqlite_conversion_error)?,
+                            resume_token,
+                            opaque_basis,
+                        })
+                    }
+                    (None, None, None, None, None) => None,
+                    _ => {
+                        return Err(to_sqlite_conversion_error(
+                            "stored control Launch metadata is incomplete",
+                        ))
+                    }
+                },
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -1659,7 +1955,8 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq
+                    context_persist_ms, first_event_seq, last_event_seq, root_output,
+                    epoch_id, basis_rev
              FROM agent_turns WHERE launch_id IN ({placeholders})
              ORDER BY started_at, rowid, ordinal"
             );
@@ -1681,7 +1978,8 @@ impl SqliteStore {
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
                     provider_output_tokens, reasoning_tokens, cache_read_tokens,
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq
+                    context_persist_ms, first_event_seq, last_event_seq, root_output,
+                    epoch_id, basis_rev
              FROM agent_turns WHERE id=?1",
         )?;
         let row = stmt.query_row(params![id], map_agent_turn).optional()?;
@@ -1849,10 +2147,10 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             provider_total_input_tokens, peak_input_tokens, context_window_tokens,
             provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
             cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
-            first_event_seq, last_event_seq
+            first_event_seq, last_event_seq, root_output, epoch_id, basis_rev
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
             ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29)",
+            ?28, ?29, ?30, ?31, ?32)",
         params![
             turn.id,
             turn.launch_id,
@@ -1883,8 +2181,14 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.context_persist_ms,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.root_output,
+            turn.basis.as_ref().map(|basis| basis.epoch_id.as_str()),
+            turn.basis.as_ref().map(|basis| basis.revision as i64),
         ],
     )?;
+    if let Some(basis) = &turn.basis {
+        durable::insert_seed_sends_for_turn(tx, &turn.id, basis)?;
+    }
     Ok(())
 }
 
@@ -1951,7 +2255,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             peak_input_tokens = ?7, context_window_tokens = ?8,
             provider_output_tokens = ?9, reasoning_tokens = ?10,
             cache_read_tokens = ?11, cache_write_tokens = ?12, cost_usd = ?13,
-            first_event_seq = ?14, last_event_seq = ?15
+            first_event_seq = ?14, last_event_seq = ?15, root_output = ?16
          WHERE id = ?1",
         params![
             turn.id,
@@ -1969,6 +2273,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
             turn.cost_usd,
             turn.first_event_seq,
             turn.last_event_seq,
+            turn.root_output,
         ],
     )?;
     Ok(())
@@ -2005,5 +2310,271 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         context_persist_ms: row.get(26)?,
         first_event_seq: row.get(27)?,
         last_event_seq: row.get(28)?,
+        root_output: row.get(29)?,
+        basis: match (
+            row.get::<_, Option<String>>(30)?,
+            row.get::<_, Option<i64>>(31)?,
+        ) {
+            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
+                epoch_id: crate::durable::EpochId::parse(&epoch_id).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        30,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?,
+                revision: revision as u64,
+            }),
+            (None, None) => None,
+            _ => {
+                return Err(rusqlite::Error::InvalidColumnType(
+                    30,
+                    "epoch_id/basis_rev".to_string(),
+                    rusqlite::types::Type::Null,
+                ))
+            }
+        },
     })
+}
+
+#[cfg(test)]
+mod frontier_tests {
+    use super::SqliteStore;
+    use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
+    use crate::store::migrations::{
+        apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
+        prior_known_version,
+    };
+    use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
+    use std::path::{Path, PathBuf};
+
+    /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
+    /// the shared release store. The regressions inject it so they never touch a
+    /// developer's real `~/.lf`.
+    struct SharedHome {
+        _dir: tempfile::TempDir,
+        home: PathBuf,
+    }
+
+    impl SharedHome {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let home = dir.path().to_path_buf();
+            Self { _dir: dir, home }
+        }
+
+        fn shared_db(&self) -> PathBuf {
+            self.home.join(".lf/loopflow.db")
+        }
+    }
+
+    fn open(
+        path: &Path,
+        authority: MigrationAuthority,
+        home: &Path,
+        advance: FrontierAdvance,
+    ) -> crate::store::StoreResult<SqliteStore> {
+        SqliteStore::open_with(path, authority, home, advance)
+    }
+
+    fn frontier(path: &Path) -> Option<String> {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        latest_applied_version_sqlite(&conn).unwrap()
+    }
+
+    fn seed_shared_store_at_prior_head(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_all_but_head(&conn).unwrap();
+    }
+
+    fn seed_completed_trace(path: &Path) {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO run_events
+                (run_id, process_id, seq, ts, node, event)
+             VALUES
+                ('trace-before-promotion', 'process-before-promotion', 0, 100, 'run', 'started'),
+                ('trace-before-promotion', 'process-before-promotion', 1, 101, 'run', 'completed')",
+        )
+        .unwrap();
+    }
+
+    fn trace_events(path: &Path) -> Vec<String> {
+        SqliteStore::open_run_ledger_read_only(path)
+            .unwrap()
+            .list_run_events_since(0)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.event)
+            .collect()
+    }
+
+    /// (a) An ordinary open of an absent shared store must refuse actionably and
+    /// leave no file behind. Sabotage guard: an `open_with` that creates the
+    /// SQLite file before deciding authority (or that lets Forbidden bootstrap)
+    /// would create the path and this fails.
+    #[test]
+    fn an_ordinary_open_never_creates_or_initializes_an_absent_shared_store() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+
+        let error = open(&path, Published, &shared.home, Forbidden)
+            .expect_err("an ordinary open must not initialize the shared store");
+        assert!(
+            error.to_string().contains("only `lf install promote`"),
+            "the refusal must name the authorized boundary: {error}"
+        );
+        assert!(
+            !path.exists(),
+            "an ordinary open must not create the shared store file"
+        );
+    }
+
+    /// (b) An ordinary open of an existing shared store the binary is ahead of
+    /// must refuse actionably without advancing — it must not hand N+1 code a
+    /// store still at the N schema — while the old N reader keeps recognizing it.
+    /// Sabotage guards: a Forbidden open that applied the pending head, or that
+    /// returned a usable store instead of erroring, fails this test.
+    #[test]
+    fn an_ordinary_open_ahead_of_the_shared_frontier_refuses_without_advancing() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        seed_shared_store_at_prior_head(&path);
+        let installed_frontier = frontier(&path).unwrap();
+        assert_eq!(installed_frontier, prior_known_version());
+        assert_ne!(installed_frontier, latest_known_version());
+
+        // The candidate is one migration ahead; its ordinary open refuses rather
+        // than reuse a schema older than its own code.
+        let error = open(&path, Published, &shared.home, Forbidden)
+            .expect_err("an ordinary open ahead of the frontier must refuse");
+        assert!(
+            error.to_string().contains("lf install promote"),
+            "the refusal must name the authorized boundary: {error}"
+        );
+        assert!(
+            error.to_string().contains(&installed_frontier)
+                || error.to_string().contains(&latest_known_version()),
+            "the refusal names the pending frontier: {error}"
+        );
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(installed_frontier.as_str()),
+            "a refused open must not advance the shared frontier"
+        );
+
+        // The old reader — a build whose head is the store's frontier — still
+        // recognizes the untouched store as exactly its own frontier.
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        assert!(
+            crate::store::migrations::old_reader_recognizes(&conn),
+            "the old installed reader must still recognize the untouched store"
+        );
+    }
+
+    /// (c) The promotion boundary owns both first initialization and advancement.
+    #[test]
+    fn the_promotion_boundary_initializes_and_advances_the_shared_store() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+
+        // Initialization from absent.
+        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+
+        // Once the boundary has initialized it, an ordinary open validates the
+        // now-existing store read-only and leaves the frontier at the head.
+        open(&path, Published, &shared.home, Forbidden)
+            .expect("an ordinary open validates the initialized store");
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+
+        // Advancement from a prior-head store.
+        let advanced = SharedHome::new();
+        let advanced_path = advanced.shared_db();
+        seed_shared_store_at_prior_head(&advanced_path);
+        assert_eq!(
+            frontier(&advanced_path).as_deref(),
+            Some(prior_known_version().as_str())
+        );
+        open(&advanced_path, Published, &advanced.home, Authorized).expect("boundary advances");
+        assert_eq!(
+            frontier(&advanced_path).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+    }
+
+    /// The 2026-07-17 incident shape, exercised as two binary generations: a
+    /// branch candidate knows one migration the installed release does not.
+    /// Ordinary candidate use must leave both the shared frontier and existing
+    /// trace status untouched; explicit promotion advances once, after which
+    /// both current opens and the stable ledger reader retain the trace.
+    #[test]
+    fn branch_candidate_cannot_advance_shared_store_or_damage_trace_status_outside_promotion() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        seed_shared_store_at_prior_head(&path);
+        seed_completed_trace(&path);
+        let installed_frontier = prior_known_version();
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(installed_frontier.as_str())
+        );
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+
+        open(&path, Published, &shared.home, Forbidden)
+            .expect_err("ordinary branch candidate must not promote its draft migration");
+        assert_eq!(
+            frontier(&path).as_deref(),
+            Some(installed_frontier.as_str())
+        );
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        let installed = rusqlite::Connection::open(&path).unwrap();
+        assert!(
+            crate::store::migrations::old_reader_recognizes(&installed),
+            "the installed release must still recognize the candidate's untouched store"
+        );
+        drop(installed);
+
+        open(&path, Published, &shared.home, Authorized)
+            .expect("explicit promotion advances the shared frontier");
+        let promoted_frontier = latest_known_version();
+        assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+
+        open(&path, Published, &shared.home, Authorized)
+            .expect("repeating promotion at the same frontier is a no-op");
+        assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
+        assert_eq!(trace_events(&path), vec!["started", "completed"]);
+        open(&path, Published, &shared.home, Forbidden)
+            .expect("ordinary current binary opens after promotion");
+    }
+
+    /// A validation-only build never advances the shared store even at the
+    /// nominal boundary, and a private/isolated DB stays freely initializable —
+    /// the isolated dev escape the directive preserves.
+    #[test]
+    fn validation_only_is_walled_from_the_shared_store_but_not_private_ones() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        open(&path, ValidationOnly, &shared.home, Authorized)
+            .expect_err("a validation-only build must never initialize the shared store");
+        assert!(!path.exists());
+
+        // A private path (not ~/.lf/loopflow.db) initializes regardless of
+        // authority or boundary.
+        let private = shared.home.join(".lf-dev/branch/loopflow.db");
+        open(&private, ValidationOnly, &shared.home, Forbidden).expect("private DB initializes");
+        assert_eq!(
+            frontier(&private).as_deref(),
+            Some(latest_known_version().as_str())
+        );
+    }
 }

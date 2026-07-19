@@ -1,138 +1,73 @@
-# Screenshot manifest for Loopflow documentation and UX review
-# Run: python scripts/generate_screenshots.py
-# Output: docs/screenshots/
+# Two capture pipelines, one manifest.
 #
-# Filter by persona: python scripts/generate_screenshots.py --direction conductor
+#   uv run python scripts/capture_screenshots.py       # live product images for the site
+#   uv run python scripts/generate_screenshots.py      # deterministic Wave-surface proof
 
-repo: https://github.com/loopflowstudio/loopflow-demos
-local: ~/src/loopflow-demos
+# Public captures: the installed app against this repo's own registry.
+website:
+  - name: context-lab
+    view: context-lab
+    wave: product
+    width: 1440
+    height: 900
+    delay: 8
+    output: website/static/context-lab.png
 
-screenshots:
-  # Main dashboard - shows sidebar with grouped waves
-  - name: loopflow-main
-    type: snapshot
-    window_size: [1200, 800]
-    mock_loops: true
-    directions: [conductor, listener]
+  - name: wave-surface
+    view: wave
+    wave: product
+    width: 1440
+    height: 900
+    delay: 8
+    output: website/static/wave-surface.png
 
-  # Running wave selected - detail view
-  - name: loopflow-wave-running
-    type: snapshot
-    window_size: [1200, 800]
-    mock_loops: true
-    select_branch: wave-auth-feature
-    directions: [conductor, improviser]
+  - name: roadmap
+    view: roadmap
+    wave: product
+    width: 1440
+    height: 900
+    delay: 8
+    output: website/static/roadmap.png
 
-  # Waiting wave selected - needs interaction
-  - name: loopflow-wave-waiting
-    type: snapshot
-    window_size: [1200, 800]
-    mock_loops: true
-    select_branch: wave-api-refactor
-    directions: [conductor, listener]
-
-  # Empty state - no waves, Quick Experiment visible
-  - name: loopflow-empty
-    type: snapshot
-    window_size: [1200, 800]
-    mock_loops: true
-    mock_config: empty
-    directions: [improviser]
-
-  # Failed wave selected - error state
-  - name: loopflow-wave-failed
-    type: snapshot
-    window_size: [1200, 800]
-    mock_loops: true
-    select_branch: wave-deploy-fix
-    directions: [conductor, listener]
-
-  # Runs tab - wave history with PRs
-  - name: loopflow-wave-runs
-    type: snapshot
-    window_size: [1200, 800]
-    mock_loops: true
-    select_branch: wave-auth-feature
-    select_tab: runs
-    directions: [conductor, listener]
-
-  # Stable Wave surface (W2-178) — the Proof's five states, driven offline
-  # through the mock-waves fixture (no registry), each at a narrow (900) and a
-  # wide (1440) desktop width. WaveSurfaceStateTests asserts these render
-  # distinctly and stay selectable without clipping; these captures are the
-  # documented visual record. Distinctness is enforced by that test, not by
-  # eyeballing the manifest.
-
-  # selected — the populated detail hierarchy: objective, Projects, KRs, Task
-  # lenses, and (in the list) the child Wave indented under its parent.
+# Stable Wave-surface proof, rendered offline from fixtures at both widths.
+wave-proof:
   - name: wave-surface-selected-narrow
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_width: 900
-    ui_test_delay: 2
+    mode: mock-waves
+    width: 900
   - name: wave-surface-selected-wide
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_width: 1440
-    ui_test_delay: 2
+    mode: mock-waves
+    width: 1440
 
-  # future-child indentation — select a leaf so the list, with cadenza indented
-  # under infrastructure, is the subject rather than the detail hierarchy.
   - name: wave-surface-child-narrow
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_select_branch: cadenza
-    ui_test_width: 900
-    ui_test_delay: 2
+    mode: mock-waves
+    wave: cadenza
+    width: 900
   - name: wave-surface-child-wide
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_select_branch: cadenza
-    ui_test_width: 1440
-    ui_test_delay: 2
+    mode: mock-waves
+    wave: cadenza
+    width: 1440
 
-  # loading — the pre-snapshot state: objective from the cached plan, with the
-  # "Loading live detail…" affordance where Projects will resolve.
   - name: wave-surface-loading-narrow
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_detail_state: loading
-    ui_test_width: 900
-    ui_test_delay: 2
+    mode: mock-waves
+    detail_state: loading
+    width: 900
   - name: wave-surface-loading-wide
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_detail_state: loading
-    ui_test_width: 1440
-    ui_test_delay: 2
+    mode: mock-waves
+    detail_state: loading
+    width: 1440
 
-  # error — a failed refresh preserves the last-good detail under one quiet
-  # "showing cached plan · live status unavailable" footer, not a raw error.
   - name: wave-surface-error-narrow
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_detail_state: error
-    ui_test_width: 900
-    ui_test_delay: 2
+    mode: mock-waves
+    detail_state: error
+    width: 900
   - name: wave-surface-error-wide
-    type: uitest
-    ui_test_mode: mock-waves
-    ui_test_detail_state: error
-    ui_test_width: 1440
-    ui_test_delay: 2
+    mode: mock-waves
+    detail_state: error
+    width: 1440
 
-  # empty — no Waves: the calm empty surface, not a giant error.
   - name: wave-surface-empty-narrow
-    type: uitest
-    ui_test_mode: empty-workspaces
-    ui_test_width: 900
-    ui_test_delay: 2
+    mode: empty-workspaces
+    width: 900
   - name: wave-surface-empty-wide
-    type: uitest
-    ui_test_mode: empty-workspaces
-    ui_test_width: 1440
-    ui_test_delay: 2
-
-  # Real Product data is deliberately not a fixture entry: run
-  # scripts/prove_product_wave_surface.sh so a missing PM snapshot fails by
-  # name instead of quietly producing a mock screenshot.
+    mode: empty-workspaces
+    width: 1440

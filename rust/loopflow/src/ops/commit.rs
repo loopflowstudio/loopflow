@@ -138,10 +138,7 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     );
 
     let config = load_config_or_default(Some(repo));
-    let agent = agent_override
-        .map(str::to_string)
-        .or_else(|| config.agent.clone())
-        .unwrap_or_else(|| "claude:haiku".to_string());
+    let agent = agent_override.unwrap_or_else(|| config.agent()).to_string();
 
     let launch = AgentConfig {
         task_prompt: prompt,
@@ -272,6 +269,36 @@ pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     push_with_upstream(repo, "origin", &branch)?;
+    Ok(())
+}
+
+pub(crate) fn verify_remote_branch_head(
+    repo: &Path,
+    branch: &str,
+    expected_head: &str,
+) -> OpsResult<()> {
+    let reference = format!("refs/heads/{branch}");
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["ls-remote", "--heads", "origin", &reference])
+        .output()?;
+    if !output.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: format!("git ls-remote --heads origin {reference}"),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    let remote_head = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if remote_head != expected_head {
+        return Err(OpsError::Message(format!(
+            "origin/{branch} is {remote_head}, expected the pushed head {expected_head}"
+        )));
+    }
     Ok(())
 }
 

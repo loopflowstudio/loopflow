@@ -17,7 +17,7 @@
 //! migrated.
 //!
 //! `RunObserved`/`RunCompleted` remain readable for journals written before
-//! Project and Task Sessions replaced generic workers. New child lifecycle
+//! Project and Tasks replaced generic workers. New child lifecycle
 //! facts arrive as typed Project and Task observations. `MemoryUpdated` and
 //! `MemoryAdded` are produced by the server's memory routes (`lf memory
 //! update`/`add` — the server holds MEMORY.md's pen). `ServerStarted` is
@@ -34,7 +34,7 @@ use time::OffsetDateTime;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::project_session::ProjectObservation;
+use crate::project::ProjectObservation;
 use crate::receipt::Receipt;
 use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
@@ -1349,10 +1349,9 @@ mod tests {
 
     fn task_observation() -> crate::task::TaskObservation {
         crate::task::TaskObservation {
-            session_id: crate::task::TaskSessionId::from_raw("ts_example"),
+            task_id: crate::task::TaskId::from_raw("task_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
-            control_source: None,
             event: crate::task::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,

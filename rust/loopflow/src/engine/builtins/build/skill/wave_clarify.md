@@ -1,6 +1,5 @@
 ---
 description: Keep the Wave objective and portfolio computable.
-default_agent: codex
 action_style: procedural
 ---
 Clarify the Wave before choosing more work.

@@ -92,12 +92,12 @@ macro_rules! uuid_id {
 }
 
 uuid_id!(WaveId);
-uuid_id!(RunId);
-uuid_id!(ProcessId);
+uuid_id!(TraceId);
+uuid_id!(ExecId);
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessId, RunId, WaveId};
+    use super::{ExecId, TraceId, WaveId};
 
     #[test]
     fn ids_round_trip_as_uuid_strings() {
@@ -105,7 +105,7 @@ mod tests {
         let encoded = serde_json::to_string(&wave).unwrap();
         assert_eq!(serde_json::from_str::<WaveId>(&encoded).unwrap(), wave);
 
-        let _run = RunId::new();
-        let _process = ProcessId::new();
+        let _trace = TraceId::new();
+        let _exec = ExecId::new();
     }
 }

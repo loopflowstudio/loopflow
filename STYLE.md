@@ -315,7 +315,7 @@ Start features with a design doc under `scratch/`. After implementation, `lf rev
 
 ## User-Facing Documentation
 
-User docs follow the same principles as prompts (see PROMPT_STYLE.md):
+User docs follow the same principles as prompts (see PROMPTS.md):
 
 **Direct and imperative.** State what something does, not what it is. "Runs a prompt with assembled context" beats "A skill is a markdown file containing instructions."
 
@@ -342,6 +342,26 @@ Aim for a mix:
 - **Smoke tests**: Does the system run without crashing?
 - **Edge case tests**: What happens at boundaries?
 - **Value tests**: Does this feature do what users expect?
+
+## Verification Cadence
+
+Each phase owns one proof level:
+
+- **Implement:** one focused behavioral proof for the changed behavior, plus
+  the design's Done When.
+- **Compress:** rerun a focused proof only when the reduction changed behavior.
+- **Lint:** formatting and static analysis only; never add tests for ceremony.
+- **Rebase:** no tests when conflict-free; after conflicts, one smallest proof
+  for the reconciled behavior.
+- **Gate:** affected suites once. Reuse a pass only for identical tracked and
+  untracked content and the identical command plan.
+- **CI/release:** the full matrix, hosted checks, and deployment gates.
+- **Demo:** prefer the real configured or deployed user path and observable
+  logs. Simulations are fallback evidence and must be labeled.
+
+Do not rerun a broader proof because another lifecycle phase began. Escalate
+scope only when the narrower proof fails, the change crosses a boundary the
+narrow test cannot exercise, or release guidance explicitly requires it.
 
 ## When to Mock
 

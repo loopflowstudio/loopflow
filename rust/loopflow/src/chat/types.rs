@@ -129,6 +129,54 @@ pub struct TurnUsage {
 
 // -- Event stream --
 
+/// Durable, structured failure evidence attached to `ConversationEvent::Error`
+/// for disconnect-class failures. Internal to Rust — not mirrored in Swift or
+/// Python, not in `tests/fixtures/dto/`. Serialized to `conversation.jsonl` via
+/// `trace.rs::record_conversation` and visible in `lf runs` through the `Debug`
+/// derive. One record names the model, the endpoint that died, when the stream
+/// started and ended, the last event that parsed, and the terminal error class
+/// — no credential material, no raw auth.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct FailureEvidence {
+    /// The agent model (e.g. `opencode/glm-5.2`), from `AgentConfig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The harness/provider name (e.g. `opencode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// `harness_event_stream` (the harness's own `/event` SSE dropped) or
+    /// `upstream_provider` (the model itself reported idle/error).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_class: Option<String>,
+    /// When the SSE task began reading, ms since epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_started_at: Option<i64>,
+    /// When the disconnect was detected, ms since epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_ended_at: Option<i64>,
+    /// `stream_ended_at - stream_started_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    /// Last successfully parsed SSE event type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_event_type: Option<String>,
+    /// Seq of the last parsed event (0-based chunk count).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_event_seq: Option<u64>,
+    /// Categorized terminal error: `stream_eof`, `read_error`,
+    /// `connection_failed`, `response_error_status`, `hollow_idle`,
+    /// `decode_gap`, or `session_error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_error_class: Option<String>,
+    /// Sanitized reqwest/opencode error Display — no auth, no tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_error_message: Option<String>,
+    /// For `decode_gap`: proves the model produced tokens the harness failed to
+    /// map, distinguishing a mapping regression from a hollow model turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_output_tokens: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -189,6 +237,8 @@ pub enum ConversationEvent {
     Error {
         code: String,
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        evidence: Option<FailureEvidence>,
     },
 }
 

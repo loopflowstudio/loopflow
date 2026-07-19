@@ -1,6 +1,6 @@
 //! Durable execution of one Linear Task.
 //!
-//! A Task Session owns one durable worktree and provider transcript. Ordered PRs
+//! A Task owns one durable worktree and provider transcript. Ordered PRs
 //! own the serial branches that advance the Task. Publication intent is recorded
 //! before GitHub is called, then the GitHub receipt is attached to that intent.
 
@@ -10,59 +10,30 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::child_session::{
-    prefixed_uuid_id, AbandonIntent, ChildCommand, ChildCommandEffect, ChildCommandId,
-    ChildCommandState, ChildDecisionId, ChildDirective, ChildDirectiveId, ChildLeaseState,
-    ChildProcessGeneration, DirectiveKind,
-};
+use crate::child::{prefixed_uuid_id, AbandonIntent};
+use crate::durable::RunId;
+pub use crate::durable::TaskId;
 use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::interaction_review::{
-    InteractionReview, InteractionReviewDisposition, InteractionReviewId,
-    InteractionReviewMessageAuthor,
-};
-use crate::project_session::ProjectSessionId;
-use crate::session_context::TaskLaunchReceipt;
+use crate::launch_context::TaskLaunchReceipt;
+use crate::project::ProjectId;
 
 pub mod actions;
-pub(crate) mod interactive_rendezvous;
 pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
     #[error("invalid task id: {0}")]
     InvalidId(String),
-    #[error("invalid task session status: {0}")]
-    InvalidStatus(String),
     #[error("invalid task session: {0}")]
     InvalidInvariant(String),
 }
-
-prefixed_uuid_id!(
-    TaskSessionId,
-    "ts_",
-    TaskDataError,
-    TaskDataError::InvalidId
-);
 
 prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TaskSessionStatus {
-    Created,
-    Starting,
-    Running,
-    Waiting,
-    Blocked,
-    Failed,
-    Completed,
-    Abandoned,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum TaskLifecyclePhase {
     Kickoff,
     Iterate,
@@ -176,78 +147,18 @@ impl TaskLifecyclePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGateProposal {
-    pub status: TaskSessionStatus,
+    pub done: bool,
     pub reason: String,
 }
 
 impl TaskGateProposal {
     fn validate(&self) -> Result<(), TaskDataError> {
-        if self.status.is_process_active() || self.status == TaskSessionStatus::Created {
-            return Err(TaskDataError::InvalidInvariant(format!(
-                "{} is not a gate-settle outcome",
-                self.status.as_str()
-            )));
-        }
         if self.reason.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(
                 "gate proposal reason cannot be empty".to_string(),
             ));
         }
         Ok(())
-    }
-}
-
-impl TaskSessionStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Created => "created",
-            Self::Starting => "starting",
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Blocked => "blocked",
-            Self::Failed => "failed",
-            Self::Completed => "completed",
-            Self::Abandoned => "abandoned",
-        }
-    }
-
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Abandoned)
-    }
-
-    pub fn is_process_active(self) -> bool {
-        matches!(self, Self::Starting | Self::Running)
-    }
-
-    /// Coarsen durable intent to the shared shape the body projection reads, so
-    /// one `observe` serves Project and Task Sessions alike.
-    pub fn body_intent(self) -> crate::child_session::BodyIntent {
-        use crate::child_session::BodyIntent;
-        match self {
-            Self::Created | Self::Starting | Self::Running => BodyIntent::Active,
-            Self::Waiting => BodyIntent::Waiting,
-            Self::Blocked => BodyIntent::Blocked,
-            Self::Failed => BodyIntent::Failed,
-            Self::Completed | Self::Abandoned => BodyIntent::Terminal,
-        }
-    }
-}
-
-impl FromStr for TaskSessionStatus {
-    type Err = TaskDataError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "created" => Ok(Self::Created),
-            "starting" => Ok(Self::Starting),
-            "running" => Ok(Self::Running),
-            "waiting" => Ok(Self::Waiting),
-            "blocked" => Ok(Self::Blocked),
-            "failed" => Ok(Self::Failed),
-            "completed" => Ok(Self::Completed),
-            "abandoned" => Ok(Self::Abandoned),
-            _ => Err(TaskDataError::InvalidStatus(value.to_string())),
-        }
     }
 }
 
@@ -348,7 +259,7 @@ impl CiObservation {
     ///
     /// This asks only about legality. Whether a wake has already fired for this
     /// exact failure is a separate question with a separate owner — the durable
-    /// `ChildCommandKind::CiFix` ledger, keyed on the incident identity. Those
+    /// CI incident, keyed on the incident identity and claimed by one Run. Those
     /// two questions used to be conflated in one mutable JSON marker on this
     /// struct, which meant the wake was deduplicated by a value re-derived on
     /// every reconcile and committed only once a body had already been born.
@@ -372,6 +283,28 @@ impl CiObservation {
                 .iter()
                 .any(|check| !check.land_time_precondition())
     }
+
+    /// Whether this head is red *only* on land-time preconditions — failing, with
+    /// at least one named failure, and every named failure one that
+    /// [`CiCheck::land_time_precondition`] resolves at land.
+    ///
+    /// This is the dual of [`CiObservation::wake_legal`] within the failing
+    /// state: such a head holds nothing a Task body could repair (`lf pr land`
+    /// greens it by clearing `scratch/`), so it is *reviewable* rather than owned
+    /// by CI. The action model and Waves supervision read it to stop recommending
+    /// a doomed Resume and to stop labelling the reviewer's turn as "fixing CI".
+    ///
+    /// False for a passing or pending head, and false the moment any failure is a
+    /// real leaf or an unclassified one — the same anti-mute-button rule as
+    /// `wake_legal`: an unnamed failure keeps the head owned by CI.
+    pub fn only_land_time_preconditions(&self) -> bool {
+        self.state == CiState::Failing
+            && !self.failing_checks.is_empty()
+            && self
+                .failing_checks
+                .iter()
+                .all(|check| check.land_time_precondition())
+    }
 }
 
 /// One failed CI head carried forward after the PR's current observation moves
@@ -379,16 +312,23 @@ impl CiObservation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CiIncident {
     pub identity: String,
-    pub task_session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub pr_id: TaskPrId,
     pub repo: String,
     pub pr_number: u32,
     pub failed_head_sha: String,
+    /// The first authoritative post-turn remote head that settlement observed to
+    /// differ from `failed_head_sha` — the head the repair body actually shipped
+    /// for this incident. `None` until a ci-fix body advances the head; written
+    /// once and never overwritten by a later push.
+    pub repaired_head_sha: Option<String>,
     pub failure_set: Vec<String>,
     pub provider_completed_at: Option<OffsetDateTime>,
     pub poll_observed_at: Option<OffsetDateTime>,
     pub webhook_received_at: Option<OffsetDateTime>,
-    pub trigger_command_id: Option<ChildCommandId>,
+    /// Active or most recent Run selected to repair this incident. A successor
+    /// may replace it only after the prior Run lost execution authority.
+    pub claimed_run_id: Option<RunId>,
     pub responded_at: Option<OffsetDateTime>,
     pub green_at: Option<OffsetDateTime>,
     pub merged_at: Option<OffsetDateTime>,
@@ -486,7 +426,7 @@ pub struct PrPublication {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPr {
     pub id: TaskPrId,
-    pub task_session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub sequence: u32,
     pub slug: String,
     pub branch: String,
@@ -659,10 +599,6 @@ impl TaskPr {
 #[non_exhaustive]
 pub enum PmWritebackOperation {
     CompleteTask,
-    /// Repair: the Task was prematurely completed in the PM while its gates were
-    /// still open. Reopen the PM issue so the PM row reconverges with the
-    /// Session, PR, and review state.
-    ReopenTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -699,27 +635,22 @@ pub enum Observation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskSession {
-    pub id: TaskSessionId,
+pub struct Task {
+    pub id: TaskId,
     /// Immutable PM evidence captured before placement.
     pub launch: TaskLaunchReceipt,
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     /// Required runtime parent. Every Task reports through one durable Project
-    /// Session; its Wave retains root inspection and override authority.
-    pub project_session_id: ProjectSessionId,
-    pub current_directive_version: u32,
-    pub incorporated_directive_version: u32,
-    pub status: TaskSessionStatus,
-    pub status_reason: String,
-    pub status_at: OffsetDateTime,
+    /// Work; its Wave retains root inspection and override authority.
+    pub project_id: ProjectId,
     pub worktree: PathBuf,
     pub workspace_slug: String,
     /// Three pinned phase flows and their reviewer-routing policies.
     pub lifecycle: TaskLifecyclePlan,
     /// Current phase entry. `phase_epoch` advances on every transition,
-    /// including Gate → Iterate, so stale bodies cannot rewind the Session.
+    /// including Gate → Iterate, so stale bodies cannot rewind the Task.
     pub lifecycle_phase: TaskLifecyclePhase,
     pub phase_epoch: u32,
     pub phase_cursor: u32,
@@ -729,18 +660,14 @@ pub struct TaskSession {
     /// Outcome proposed by Iterate and awaiting Gate approval.
     pub gate_proposal: Option<TaskGateProposal>,
     /// Provider/model selection for the next body generation. This is mutable
-    /// lease state, not Task Session identity.
+    /// lease state, not Task identity.
     pub agent: String,
     /// Harness family for the next/current body generation.
     pub provider: String,
     /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
-    /// Latest launch generation, retained after that process exits. Its
-    /// [`crate::child_session::BinaryProvenance`] is the audit record of which
-    /// lf launched it — a Session no longer pins a binary of its own.
-    pub latest_process: Option<ChildProcessGeneration>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a process for a Session carrying this.
+    /// path may start a Launch for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -749,13 +676,11 @@ pub struct TaskSession {
     pub observation: Observation,
 }
 
-impl TaskSession {
+impl Task {
     /// Why a supervisor must not start another process generation, if it must not.
     ///
-    /// Three intents are terminal for *automatic* restart, and only the first is
-    /// terminal for the Session itself:
+    /// Two intents bar an automatic restart:
     ///
-    /// - the Session is `Completed` or `Abandoned` — the work is over;
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
     /// - the active PR is `Publishing` or `Open` — publication was requested
@@ -763,12 +688,12 @@ impl TaskSession {
     ///   and belongs to review.
     ///
     /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
-    /// and carries no live process, so it reads exactly like a Session that
+    /// and carries no live process, so it reads exactly like Work that
     /// merely stopped. A wake therefore launched generation 2, which reopened
     /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
     /// already open for review. An open PR is not an invitation to start over.
     ///
-    /// A human may still `lf task resume` a submitted Session to answer review;
+    /// A User may still `lf task resume` a submitted Task to answer review;
     /// this bars the supervisor, not the operator.
     pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
@@ -791,9 +716,8 @@ impl TaskSession {
     /// current-head failure evidence — never a blind wake over passing or pending
     /// work, and never past the terminal, abandon, or publishing bars.
     ///
-    /// The bar answers legality only. "Have we already woken for this failure?"
-    /// is the command ledger's question, answered once by the incident identity
-    /// on `ChildCommandKind::CiFix` — not asked again here.
+    /// The bar answers legality only. The incident's Run claim answers whether
+    /// this failure already owns execution.
     pub fn ci_fix_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
             return Some(bar);
@@ -813,16 +737,9 @@ impl TaskSession {
         None
     }
 
-    /// The two bars that hold for *every* automatic restart intent: the work is
-    /// over, or its abandonment is already decided.
+    /// The product-level bar that holds for every automatic restart intent.
+    /// Terminal execution state belongs to Work and is checked by the caller.
     pub(crate) fn terminal_or_abandon_bar(&self) -> Option<String> {
-        if self.status.is_terminal() {
-            return Some(format!(
-                "Task {} is {}; terminal Task Sessions do not restart",
-                self.launch.issue.identifier,
-                self.status.as_str()
-            ));
-        }
         if let Some(intent) = &self.abandon_intent {
             return Some(format!(
                 "Task {} is being abandoned: {}",
@@ -840,25 +757,28 @@ impl TaskSession {
         )
     }
 
+    /// The open-PR restart refusal. Only a *supervisor* (`supervisor_restart_bar`
+    /// / a non-wake-legal `ci_fix_restart_bar`) ever reads this — an operator
+    /// resume takes the abandon-only `ExplicitResume` bar and answers review — so
+    /// the text names the real next owner (the reviewer/operator) instead of
+    /// recommending `lf task resume`, which a supervisor re-running would only
+    /// self-loop on.
     fn open_pr_bar(&self, pr: &TaskPr) -> String {
         let number = pr.github().expect("open Task PR passed validation").number;
         format!(
-            "Task {} submitted pull request #{} and is awaiting review; \
-             resume it explicitly with `lf task resume {}` to answer review",
-            self.launch.issue.identifier, number, self.launch.issue.identifier,
+            "Task {} submitted pull request #{} and is in review. A supervisor \
+             cannot restart a submitted Task — an open PR is not an invitation to \
+             start over. This is the reviewer's to advance: an operator answering \
+             review resumes from a clean operator shell; if review is blocked, \
+             escalate to the owner.",
+            self.launch.issue.identifier, number,
         )
     }
 
     pub fn validate(&self) -> Result<(), TaskDataError> {
-        if self.status.is_process_active() && self.latest_process.is_none() {
-            return Err(TaskDataError::InvalidInvariant(format!(
-                "{} requires a latest process generation",
-                self.status.as_str()
-            )));
-        }
         if self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
-                "Task Session {} requires a workspace slug",
+                "Task {} requires a workspace slug",
                 self.id
             )));
         }
@@ -881,63 +801,12 @@ impl TaskSession {
         if let Some(proposal) = &self.gate_proposal {
             proposal.validate()?;
         }
-        if let PmWritebackState::Pending { operation, .. } = &self.pm_writeback {
-            match operation {
-                PmWritebackOperation::CompleteTask => {
-                    if self.status != TaskSessionStatus::Completed && self.gate_cycle == 0 {
-                        return Err(TaskDataError::InvalidInvariant(
-                            "pending PM completion requires a completed Task or an active gate cycle"
-                                .to_string(),
-                        ));
-                    }
-                }
-                PmWritebackOperation::ReopenTask => {
-                    if self.status == TaskSessionStatus::Completed {
-                        return Err(TaskDataError::InvalidInvariant(
-                            "pending PM reopen requires the Task to no longer be completed"
-                                .to_string(),
-                        ));
-                    }
-                }
-            }
-        }
-        if self.incorporated_directive_version > self.current_directive_version {
+        if matches!(self.pm_writeback, PmWritebackState::Pending { .. }) && self.gate_cycle == 0 {
             return Err(TaskDataError::InvalidInvariant(
-                "incorporated directive version exceeds current direction".to_string(),
+                "pending PM completion requires an active gate cycle".to_string(),
             ));
         }
         Ok(())
-    }
-
-    pub fn set_status(&mut self, status: TaskSessionStatus, reason: impl Into<String>) {
-        let now = OffsetDateTime::now_utc();
-        self.status = status;
-        self.status_reason = reason.into();
-        self.status_at = now;
-        self.updated_at = now;
-    }
-
-    pub fn begin_generation(&mut self, tmux_name: String) -> u32 {
-        let generation = self
-            .latest_process
-            .as_ref()
-            .map_or(1, |process| process.generation + 1);
-        let now = OffsetDateTime::now_utc();
-        self.latest_process = Some(ChildProcessGeneration {
-            generation,
-            pid: None,
-            process_group_id: None,
-            tmux_name,
-            agent: self.agent.clone(),
-            provider: self.provider.clone(),
-            provider_session_id: self.provider_session_id.clone(),
-            started_at: now,
-            state: ChildLeaseState::Reserved,
-            outcome: None,
-            provenance: None,
-        });
-        self.set_status(TaskSessionStatus::Starting, "task process is starting");
-        generation
     }
 
     pub fn phase_plan(&self) -> &TaskPhasePlan {
@@ -1003,65 +872,10 @@ impl TaskSession {
 pub enum TaskEventKind {
     Started,
     BodyHandedOff {
-        handoff: crate::child_session::ChildBodyHandoff,
-    },
-    BodyLeaseChanged {
-        process: ChildProcessGeneration,
-    },
-    /// Loopflow re-dispatched a Session whose body died, with no human asking.
-    /// The durable record of a recovery: `attempt` bounds the retry and this
-    /// event is what [`crate::child_session::count_recovery_attempts`] counts.
-    BodyRecoveryAttempted {
-        generation: u32,
-        attempt: u32,
-        reason: String,
-    },
-    StatusChanged {
-        from: TaskSessionStatus,
-        to: TaskSessionStatus,
-        reason: String,
-    },
-    CommandChanged {
-        command_id: ChildCommandId,
-        state: ChildCommandState,
-        effect: Option<ChildCommandEffect>,
-        error: Option<String>,
-    },
-    DirectiveChanged {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        directive_kind: DirectiveKind,
-    },
-    DirectiveIncorporated {
-        directive_id: ChildDirectiveId,
-        version: u32,
-        summary: String,
-    },
-    DecisionRequested {
-        decision_id: ChildDecisionId,
-        prompt: String,
-        options: Vec<String>,
-    },
-    DecisionResolved {
-        decision_id: ChildDecisionId,
-        choice: String,
-        message: Option<String>,
+        handoff: crate::child::ChildBodyHandoff,
     },
     Progress {
         summary: String,
-    },
-    InteractionReviewRequested {
-        review: Box<InteractionReview>,
-    },
-    InteractionReviewMessage {
-        review_id: InteractionReviewId,
-        author: InteractionReviewMessageAuthor,
-        text: String,
-    },
-    InteractionReviewCompleted {
-        review_id: InteractionReviewId,
-        disposition: InteractionReviewDisposition,
-        outcome: String,
     },
     PrStarted {
         pr_id: TaskPrId,
@@ -1094,20 +908,7 @@ pub enum TaskEventKind {
 impl TaskEventKind {
     /// Whether the event crosses the required Task → Project boundary.
     pub fn is_project_observable(&self) -> bool {
-        match self {
-            Self::Started | Self::Progress { .. } => false,
-            Self::InteractionReviewMessage {
-                author: InteractionReviewMessageAuthor::Reviewer,
-                ..
-            }
-            | Self::InteractionReviewCompleted { .. } => false,
-            Self::BodyLeaseChanged { process } => matches!(
-                process.state,
-                ChildLeaseState::Revoked | ChildLeaseState::Finished
-            ),
-            Self::CommandChanged { state, .. } => state.is_terminal(),
-            _ => true,
-        }
+        !matches!(self, Self::Started | Self::Progress { .. })
     }
 
     /// Whether a Project-supervised Task event also belongs in the root Wave.
@@ -1115,59 +916,47 @@ impl TaskEventKind {
     /// escalates by emitting its own `DecisionRequested` event.
     pub fn is_root_wave_observable(&self) -> bool {
         self.is_project_observable()
-            && !matches!(
-                self,
-                Self::DecisionRequested { .. }
-                    | Self::DecisionResolved { .. }
-                    | Self::InteractionReviewRequested { .. }
-                    | Self::InteractionReviewMessage { .. }
-                    | Self::InteractionReviewCompleted { .. }
-            )
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskEvent {
     pub id: i64,
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub kind: TaskEventKind,
     pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskObservation {
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub issue_identifier: String,
     pub event_id: i64,
-    pub control_source: Option<crate::child_session::ChildCommandSource>,
     pub event: TaskEventKind,
 }
 
 impl TaskObservation {
     pub fn inbox_id(&self) -> String {
-        format!("task-{}-{}", self.session_id, self.event_id)
+        format!("task-{}-{}", self.task_id, self.event_id)
     }
 
     pub fn prompt(&self) -> String {
-        let payload = serde_json::to_string(&serde_json::json!({
-            "control_source": self.control_source,
-            "event": self.event,
-        }))
-        .expect("Task observation always serializes to structured JSON");
+        let payload = serde_json::to_string(&self.event)
+            .expect("Task observation always serializes to structured JSON");
         format!(
-            "<task_observation session_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
-            self.session_id, self.issue_identifier, self.event_id, payload
+            "<task_observation task_id=\"{}\" issue=\"{}\" event_id=\"{}\">\n{}\n</task_observation>",
+            self.task_id, self.issue_identifier, self.event_id, payload
         )
     }
 }
 
-/// The durable cursor for streaming human Linear edits into one Task Session.
+/// The durable cursor for streaming human Linear edits into one Task.
 /// It is the exactly-once ledger — what issue revision and comments have already
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLinearObservation {
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     /// Linear issue `updatedAt` last folded in. Monotonic: a read whose revision
     /// is older is dropped as a stale/out-of-order response.
     pub last_revision: String,
@@ -1187,14 +976,13 @@ pub struct TaskLinearObservation {
 /// responses never duplicate direction.
 #[derive(Debug, Clone)]
 pub struct LinearObservationApply {
-    pub session_id: TaskSessionId,
+    pub task_id: TaskId,
     pub revision: String,
     pub title: String,
     pub description: String,
     pub observed_at: OffsetDateTime,
-    /// A title/description edit to persist: the Steer command and its
-    /// replacement directive. `None` when title and description are unchanged.
-    pub directive: Option<(ChildCommand, ChildDirective)>,
+    /// A title/description edit to persist as one authored Steer.
+    pub content_steer: Option<String>,
     /// Human comments observed this pass, oldest first.
     pub follow_ups: Vec<LinearFollowUp>,
 }
@@ -1202,53 +990,36 @@ pub struct LinearObservationApply {
 #[derive(Debug, Clone)]
 pub struct LinearFollowUp {
     pub comment_id: String,
-    pub command: ChildCommand,
+    pub text: String,
 }
 
 /// What one [`LinearObservationApply`] actually wrote — enough for the caller to
 /// report receipts without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearObservationOutcome {
-    /// The Session had no cursor yet: this observation seeded the baseline and
+    /// The Task had no cursor yet: this observation seeded the baseline and
     /// emitted no direction (existing comments are marked seen, not replayed).
     pub baselined: bool,
-    pub directive_applied: bool,
-    pub superseded: Vec<ChildCommandId>,
-    pub follow_ups_created: Vec<ChildCommandId>,
-}
-
-/// The result of carrying a terminal Task Session's direction onto a successor.
-///
-/// `created` is `true` when this call inserted the successor and re-keyed the
-/// Linear observation cursor and ingested-comment ledger onto it; `false` when a
-/// non-terminal successor already existed (a concurrent or retried run), in
-/// which case the carry transaction was a no-op and the existing Session is
-/// returned. Historical receipts (`child_commands`, `child_directives`) stay on
-/// the predecessor for attribution in both cases.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskSessionSuccession {
-    pub session: TaskSession,
-    pub created: bool,
+    pub content_steer_applied: bool,
+    pub follow_ups_created: Vec<crate::durable::SteerId>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AfterMerge, ChildCommandId, ChildCommandState, GithubPr, PmWritebackOperation,
-        PmWritebackState, PrPhase, PrPublication, TaskEventKind, TaskGateProposal,
-        TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr, TaskPrId, TaskSession,
-        TaskSessionId, TaskSessionStatus,
+        AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
+        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
+        TaskPrId,
     };
-    use crate::child_session::ChildDecisionId;
-    use crate::session_context::{
+    use crate::launch_context::{
         LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
         TaskLaunchReceipt,
     };
 
-    fn task_session() -> TaskSession {
+    fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
-        TaskSession {
-            id: TaskSessionId::new(),
+        Task {
+            id: TaskId::new(),
             launch: TaskLaunchReceipt {
                 issue: LinearIssueSnapshot {
                     id: LinearIssueId::new("issue-1").unwrap(),
@@ -1266,12 +1037,7 @@ mod tests {
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
-            project_session_id: crate::project_session::ProjectSessionId::new(),
-            current_directive_version: 1,
-            incorporated_directive_version: 0,
-            status: TaskSessionStatus::Created,
-            status_reason: "created".to_string(),
-            status_at: now,
+            project_id: crate::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
             lifecycle: TaskLifecyclePlan::standard("task"),
@@ -1284,7 +1050,6 @@ mod tests {
             agent: "codex".to_string(),
             provider: "codex".to_string(),
             provider_session_id: None,
-            latest_process: None,
             abandon_intent: None,
             created_at: now,
             updated_at: now,
@@ -1294,8 +1059,8 @@ mod tests {
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
-        let session = TaskSessionId::new();
-        assert_eq!(TaskSessionId::parse(session.as_str()).unwrap(), session);
+        let session = TaskId::new();
+        assert_eq!(TaskId::parse(session.as_str()).unwrap(), session);
         let pr = TaskPrId::new();
         assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
     }
@@ -1303,10 +1068,9 @@ mod tests {
     #[test]
     fn task_observation_has_a_stable_structured_inbox_identity() {
         let observation = TaskObservation {
-            session_id: TaskSessionId::from_raw("ts_example"),
+            task_id: TaskId::from_raw("ts_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 42,
-            control_source: None,
             event: super::TaskEventKind::Failed {
                 error: "provider stopped".to_string(),
                 resumable: true,
@@ -1316,55 +1080,6 @@ mod tests {
         assert_eq!(observation.inbox_id(), "task-ts_example-42");
         assert!(observation.prompt().contains("<task_observation"));
         assert!(observation.prompt().contains("\"kind\":\"failed\""));
-    }
-
-    #[test]
-    fn only_completed_and_abandoned_tasks_are_terminal() {
-        assert!(TaskSessionStatus::Completed.is_terminal());
-        assert!(TaskSessionStatus::Abandoned.is_terminal());
-        assert!(!TaskSessionStatus::Waiting.is_terminal());
-        assert!(!TaskSessionStatus::Failed.is_terminal());
-    }
-
-    #[test]
-    fn project_observes_command_outcomes_not_transport_chatter() {
-        let event = |state| TaskEventKind::CommandChanged {
-            command_id: ChildCommandId::new(),
-            state,
-            effect: None,
-            error: None,
-        };
-
-        assert!(!event(ChildCommandState::Persisted).is_project_observable());
-        assert!(!event(ChildCommandState::Claimed).is_project_observable());
-        assert!(!event(ChildCommandState::Delivering).is_project_observable());
-        assert!(event(ChildCommandState::Accepted).is_project_observable());
-        assert!(event(ChildCommandState::Failed).is_project_observable());
-        assert!(event(ChildCommandState::Uncertain).is_project_observable());
-    }
-
-    #[test]
-    fn project_supervision_keeps_routine_task_decisions_out_of_the_root_wave() {
-        let requested = TaskEventKind::DecisionRequested {
-            decision_id: ChildDecisionId::new(),
-            prompt: "Which parser shape?".to_string(),
-            options: vec!["strict".to_string(), "permissive".to_string()],
-        };
-        let resolved = TaskEventKind::DecisionResolved {
-            decision_id: ChildDecisionId::new(),
-            choice: "strict".to_string(),
-            message: None,
-        };
-
-        assert!(requested.is_project_observable());
-        assert!(resolved.is_project_observable());
-        assert!(!requested.is_root_wave_observable());
-        assert!(!resolved.is_root_wave_observable());
-        assert!(TaskEventKind::Failed {
-            error: "provider stopped".to_string(),
-            resumable: true,
-        }
-        .is_root_wave_observable());
     }
 
     #[test]
@@ -1389,7 +1104,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1437,7 +1152,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1502,7 +1217,7 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         TaskPr {
             id: TaskPrId::new(),
-            task_session_id: TaskSessionId::new(),
+            task_id: TaskId::new(),
             sequence: 1,
             slug: "ship-it".to_string(),
             branch: "jack/ship-it".to_string(),
@@ -1653,6 +1368,39 @@ mod tests {
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
     }
 
+    /// The reviewable-despite-red predicate the action model and Waves
+    /// supervision adopt: it is the exact dual of `wake_legal` within the failing
+    /// state, so the two must never both refuse the same head.
+    #[test]
+    fn only_land_time_preconditions_is_the_dual_of_wake_legal() {
+        // Red only on scratch-clear: reviewable, and no wake.
+        let scratch = failing("h1", &["scratch-clear"]);
+        assert!(scratch.only_land_time_preconditions());
+        assert!(!scratch.wake_legal());
+
+        // A real leaf beside it (or alone): not reviewable, wake arms.
+        for obs in [
+            failing("h1", &["scratch-clear", "rust-test"]),
+            failing("h1", &["rust-test"]),
+        ] {
+            assert!(!obs.only_land_time_preconditions());
+            assert!(obs.wake_legal());
+        }
+
+        // Unclassified (empty) failure: not "only preconditions", still wakes.
+        let empty = failing("h1", &[]);
+        assert!(!empty.only_land_time_preconditions());
+        assert!(empty.wake_legal());
+
+        // Passing/pending is never "only preconditions".
+        let mut green = scratch.clone();
+        green.state = super::CiState::Passing;
+        assert!(!green.only_land_time_preconditions());
+        let mut pending = scratch.clone();
+        pending.state = super::CiState::Pending;
+        assert!(!pending.only_land_time_preconditions());
+    }
+
     /// The one literal, pinned against the workflow that defines it. A rename of
     /// the CI job turns this red *at the const* instead of silently re-arming
     /// wakes in production — the anti-rot guard for a name that cannot be derived.
@@ -1674,7 +1422,7 @@ mod tests {
 
     #[test]
     fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
-        let session = task_session(); // status Waiting, no abandon intent
+        let session = task(); // status Waiting, no abandon intent
 
         // Open PR, fresh failing head: the ci-fix wake is permitted where the plain
         // supervisor restart stays barred.
@@ -1700,11 +1448,6 @@ mod tests {
         let mixed = open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"])));
         assert!(session.ci_fix_restart_bar(Some(&mixed)).is_none());
 
-        // Terminal intent dominates even a legal wake.
-        let mut terminal = task_session();
-        terminal.status = TaskSessionStatus::Completed;
-        assert!(terminal.ci_fix_restart_bar(Some(&legal)).is_some());
-
         // The bar does not deduplicate. A head that already woke a body still reads
         // as legal here — refusing the second launch is the ledger's job, and
         // asking the question twice is what let the two answers drift.
@@ -1712,19 +1455,15 @@ mod tests {
     }
 
     #[test]
-    fn task_session_rejects_impossible_process_and_writeback_state() {
-        let mut session = task_session();
-        session.status = TaskSessionStatus::Running;
-        assert!(session.validate().is_err());
-
-        session.status = TaskSessionStatus::Waiting;
+    fn task_rejects_impossible_lifecycle_and_writeback_state() {
+        let mut session = task();
         session.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
         assert!(session.validate().is_err());
 
-        session.status = TaskSessionStatus::Completed;
+        session.gate_cycle = 1;
         assert!(session.validate().is_ok());
 
         session.lifecycle.iterate.flow.clear();
@@ -1732,39 +1471,8 @@ mod tests {
     }
 
     #[test]
-    fn pending_reopen_writeback_requires_an_uncompleted_task() {
-        let mut session = task_session();
-        session.status = TaskSessionStatus::Completed;
-        session.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::ReopenTask,
-            error: "premature completion".to_string(),
-        };
-        assert!(session.validate().is_err());
-
-        session.status = TaskSessionStatus::Waiting;
-        assert!(session.validate().is_ok());
-    }
-
-    #[test]
-    fn pending_reopen_writeback_has_a_stable_json_shape() {
-        let state = PmWritebackState::Pending {
-            operation: PmWritebackOperation::ReopenTask,
-            error: "premature completion".to_string(),
-        };
-
-        assert_eq!(
-            serde_json::to_value(state).unwrap(),
-            serde_json::json!({
-                "state": "pending",
-                "operation": "reopen_task",
-                "error": "premature completion"
-            })
-        );
-    }
-
-    #[test]
     fn task_lifecycle_repeats_iterate_and_gate_until_approval() {
-        let mut session = task_session();
+        let mut session = task();
         session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
 
         assert_eq!(session.lifecycle_cycle(), 0);
@@ -1774,7 +1482,7 @@ mod tests {
         assert_eq!(session.phase_epoch, 2);
 
         let proposal = TaskGateProposal {
-            status: TaskSessionStatus::Waiting,
+            done: false,
             reason: "pull request is ready for review".to_string(),
         };
         session.phase_cursor = 2;

@@ -1,8 +1,3 @@
----
-layout: default
-title: Configuration
----
-
 # Configuration
 
 Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo config (`.lf/config.yaml`). Precedence: CLI flags > repo config > global config.
@@ -188,17 +183,27 @@ Glob patterns to exclude from file listings.
 
 ---
 
-### Model
+### Agent
 
-Default model for all skills.
+Set the default harness, with an optional model.
 
 | | |
 |---|---|
 | **CLI** | `lf gate -m codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
-| **Default** | unset (resolution falls back to skill defaults, then `claude:opus`) |
+| **Default** | unset (resolution falls back to skill defaults, then `codex`) |
+
+```yaml
+agent: codex          # harness default
+# agent: claude:opus  # harness plus model
+```
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
+
+Five built-in skills intentionally default to Claude: `kickoff`,
+`review-design`, `demo`, `code-review`, and `prompt`. Every other unconfigured
+built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
+an explicit override.
 
 Loopflow starts every Codex CLI and Session run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
@@ -307,7 +312,7 @@ runs mechanical `lf` commands.
 
 ### Session Launch
 
-Pick where interactive handoffs open.
+Pick where directly invoked interactive skills open.
 
 ```yaml
 session:
@@ -330,6 +335,75 @@ summaries:
   - path: lib
     tokens: 5000
 ```
+
+### Accounts and Profiles
+
+Connect providers once, then route each repository through managed accounts:
+
+```bash
+lf auth status                   # GitHub / Claude / Codex / OpenCode Zen / Linear
+lf auth github                   # connect a provider in your browser
+lf auth connect claude primary@example.com --chrome-profile primary@example.com
+lf auth accounts claude          # list connected accounts
+
+lf profile create --chrome-profile primary@example.com --as primary
+lf auth access set claude primary@ --profile primary
+lf route set claude primary@ engineering@
+lf route show
+```
+
+Each provider login keeps independent auth and session state under
+`~/.lf/accounts/`. Commands identify a login by its full email or an unambiguous
+email prefix; path-safe internal IDs remain private storage keys. Access profiles
+record the Chrome venues that can authenticate a login, and repository routes
+record the ordered logins a provider may use. A provider child stays pinned to
+its selected login for its lifetime. Shared logins are tried once and share one
+cooldown. Profiles, bindings, and repo routes live in the local database —
+Loopflow sends no account topology to a central service.
+
+`auth connect <provider> <email-prefix> --chrome-profile` opens the selected
+Chrome directory and binds the verified login. Codex
+verifies the login email from its ID token; Claude uses the selected Chrome
+profile email. `auth import` adopts an existing isolated credential — or the
+current macOS Keychain login when the account home is empty — without another
+OAuth flow.
+
+Routing controls per account:
+
+```bash
+lf auth set claude <email-prefix> --paid-through 2026-08-14
+lf auth set claude <email-prefix> --routing explicit-only
+lf auth reset claude <email-prefix>
+lf auth disconnect claude --email <email-prefix>
+```
+
+Once `paid-through` passes, automatic routing treats the account as
+`explicit-only` until cleared.
+
+Prefer accounts for one invocation, or restrict the process tree to exactly the
+selected accounts:
+
+```bash
+lf -m codex --account eng@example.com : "fix the tests"
+lf --account claude=jack@ --account codex=loopflow-eng@ implement
+lf --only-account codex=manabot-eng@ review
+```
+
+`--account` keeps the normal provider route as fallback; `--only-account`
+removes every unselected account and provider. Both accept repeatable
+`claude=<selector>` and `codex=<selector>` forms.
+
+`lf ssh <host> -- <cmd>` resolves the selected route locally and forwards an
+opaque handle to a foreground credential broker. It writes no managed provider
+credential files on the remote host. Detached remote sessions are rejected —
+their lease would vanish when SSH exits — so authenticate on the remote host
+for long-running work.
+
+`lf ssh <HomeId> -- <cmd>` resolves the Home's current SSH route from the
+durable store and makes the target prove that identity. Add `--remote-native`
+to forward no provider, GitHub, PM, or secret authority. Use that mode for Home
+lifecycle commands that rely on credentials installed on the remote machine
+and outlive the SSH process.
 
 ### External Skills
 

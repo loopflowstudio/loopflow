@@ -69,7 +69,7 @@ fn run_lf(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> std::p
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env("NO_COLOR", "1")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID");
     if let Some(path) = path {
         command.env("PATH", path);
@@ -88,7 +88,7 @@ fn flow_parsing_parity() {
 - implement
 - step:
     name: review
-    interactive: true
+    feedback: true
     direction: [ux, security]
 "#,
     );
@@ -105,8 +105,8 @@ fn flow_parsing_parity() {
             directions: vec![],
             action_style: None,
             interactive: None,
+            feedback: false,
             content: None,
-            fast_path: None,
         })
     );
     assert_eq!(
@@ -117,9 +117,9 @@ fn flow_parsing_parity() {
             default_agent: None,
             directions: vec!["ux".to_string(), "security".to_string()],
             action_style: None,
-            interactive: Some(true),
+            interactive: None,
+            feedback: true,
             content: None,
-            fast_path: None,
         })
     );
 }
@@ -138,7 +138,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
 
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
-    write_executable(&bin.path().join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&bin.path().join("codex"), "#!/bin/sh\nexit 0\n");
     let path = std::env::var("PATH")
         .map(|path| format!("{}:{path}", bin.path().display()))
         .unwrap_or_else(|_| bin.path().display().to_string());

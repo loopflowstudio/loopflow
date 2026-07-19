@@ -11,11 +11,10 @@ from playwright.sync_api import Page
 # Pages to test for accessibility
 PAGES_TO_TEST = [
     "/",
-    "/products",
-    "/loopflow",
-    "/team",
     "/docs",
+    "/docs/agent-api",
     "/docs/config",
+    "/docs/security",
     "/download",
 ]
 

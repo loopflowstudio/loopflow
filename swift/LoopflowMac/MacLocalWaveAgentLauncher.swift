@@ -121,7 +121,7 @@ enum LocalWaveAgentLauncher {
         return try taskStartReceipt(stdout)
     }
 
-    /// Restart the existing Task Session without creating another worktree or
+    /// Restart existing Task Work without creating another worktree or
     /// status record.
     static func resumeTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
@@ -137,10 +137,10 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    static func resolvedTaskAttachCommand(repoPath: String, issue: String) throws -> [String] {
+    static func resolvedTaskFeedbackCommand(repoPath: String, taskId: String) throws -> [String] {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try resolveWaveCapableLf(originRepo: origin)
-        return taskAttachCommand(lfPath: lfPath, issue: issue)
+        return taskFeedbackCommand(lfPath: lfPath, taskId: taskId)
     }
 
     /// Open the branch's PR for human review from `worktree`. This delegates to
@@ -196,8 +196,8 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    static func taskAttachCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "task", "attach", issue]
+    static func taskFeedbackCommand(lfPath: String, taskId: String) -> [String] {
+        [lfPath, "work", "feedback", "task", taskId, "--continue-on-exit"]
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`
@@ -352,19 +352,6 @@ enum LocalWaveAgentLauncher {
     static func hasWaveCommands(lfPath: String) -> Bool {
         run([lfPath, "help", "wave"])?.status == 0
             && run([lfPath, "help", "stop"])?.status == 0
-    }
-
-    static func tmuxSessionNames() -> Set<String> {
-        guard let result = run(["tmux", "list-sessions", "-F", "#S"]) else {
-            return []
-        }
-        guard result.status == 0 else {
-            return []
-        }
-        return Set(result.stdout
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty })
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its

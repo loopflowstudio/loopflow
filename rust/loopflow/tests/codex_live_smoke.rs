@@ -52,7 +52,7 @@ async fn codex_live_one_turn_smoke() {
                 ..
             } => completed_message = Some(text),
             ConversationEvent::TurnCompleted { status, .. } => turn_status = Some(status),
-            ConversationEvent::Error { code, message } => {
+            ConversationEvent::Error { code, message, .. } => {
                 panic!("harness error during turn: {code}: {message}")
             }
             _ => {}

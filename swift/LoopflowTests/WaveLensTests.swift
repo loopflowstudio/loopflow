@@ -8,27 +8,32 @@ struct WaveLensTests {
 
     @Test("green when a body is live")
     func greenWhenLive() {
-        let lens = WaveLens.forWave(live: true, status: .idle, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(live: true, status: .ready, activeTasks: 0, activeProjects: 0)
         #expect(lens.color == .green)
         #expect(lens.reason.contains("Running"))
     }
 
     @Test("green when running even without an explicit live flag")
     func greenWhenRunning() {
-        let lens = WaveLens.forWave(live: false, status: .running, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(
+            live: false,
+            status: .running(runID: "run_test"),
+            activeTasks: 0,
+            activeProjects: 0
+        )
         #expect(lens.color == .green)
     }
 
     @Test("red when stopped with outstanding work")
     func redWhenOutstanding() {
-        let lens = WaveLens.forWave(live: false, status: .idle, activeTasks: 2, activeProjects: 1)
+        let lens = WaveLens.forWave(live: false, status: .ready, activeTasks: 2, activeProjects: 1)
         #expect(lens.color == .red)
         #expect(lens.reason.contains("3"))
     }
 
     @Test("black when off and clean")
     func blackWhenClean() {
-        let lens = WaveLens.forWave(live: false, status: .idle, activeTasks: 0, activeProjects: 0)
+        let lens = WaveLens.forWave(live: false, status: .ready, activeTasks: 0, activeProjects: 0)
         #expect(lens.color == .black)
         #expect(!lens.color.isLit)
     }
@@ -39,8 +44,19 @@ struct WaveLensTests {
     func levelsMapOneToOne() {
         #expect(WaveLensColor(.green) == .green)
         #expect(WaveLensColor(.red) == .red)
+        #expect(WaveLensColor(.blue) == .blue)
         #expect(WaveLensColor(.black) == .black)
         #expect(WaveLensColor(.unknown) == .unknown)
+    }
+
+    @Test("a User Feedback is blue and wins over a live Project body")
+    func projectBlueWinsOverLiveBody() throws {
+        let lens = WaveLens.forProject(
+            runtime: try makeRuntime(alive: true, reason: "implementing"),
+            tasks: [try makeTask(level: "blue", reason: "Waiting for your feedback")]
+        )
+        #expect(lens.color == .blue)
+        #expect(lens.reason == "Waiting for your feedback")
     }
 
     @Test("unknown is a lit lens, distinct from the off black")
@@ -90,7 +106,7 @@ struct WaveLensTests {
     @Test("a live project body advancing is green")
     func projectLiveIsGreen() throws {
         let lens = WaveLens.forProject(
-            runtime: try makeRuntime(status: "running", alive: true, reason: "implementing the projection"),
+            runtime: try makeRuntime(alive: true, reason: "implementing the projection"),
             tasks: [try makeTask(level: "green", reason: "advancing")]
         )
         #expect(lens.color == .green)
@@ -100,7 +116,7 @@ struct WaveLensTests {
     @Test("a task needing attention wins over a live project body")
     func projectRedWinsOverLiveBody() throws {
         let lens = WaveLens.forProject(
-            runtime: try makeRuntime(status: "running", alive: true, reason: "implementing"),
+            runtime: try makeRuntime(alive: true, reason: "implementing"),
             tasks: [
                 try makeTask(level: "green", reason: "advancing"),
                 try makeTask(level: "red", reason: "awaiting review"),
@@ -156,9 +172,14 @@ struct WaveLensTests {
     @Test("every lens carries a reason for VoiceOver")
     func everyLensHasReason() throws {
         let lenses = [
-            WaveLens.forWave(live: true, status: .running, activeTasks: 0, activeProjects: 0),
-            WaveLens.forWave(live: false, status: .idle, activeTasks: 1, activeProjects: 0),
-            WaveLens.forWave(live: false, status: .idle, activeTasks: 0, activeProjects: 0),
+            WaveLens.forWave(
+                live: true,
+                status: .running(runID: "run_test"),
+                activeTasks: 0,
+                activeProjects: 0
+            ),
+            WaveLens.forWave(live: false, status: .ready, activeTasks: 1, activeProjects: 0),
+            WaveLens.forWave(live: false, status: .ready, activeTasks: 0, activeProjects: 0),
             WaveLens.forTask(try makeAttention(level: "unknown", reason: "unread")),
             WaveLens.forProject(runtime: nil, tasks: []),
         ]
@@ -183,7 +204,7 @@ struct WaveLensTests {
 
     private func makeAttention(level: String, reason: String) throws -> TaskAttentionSnapshot {
         let json = """
-        {"level":"\(level)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"next_owner":"task","actions":{"recommended":null,"actions":[{"action":"recover","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"resume","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"review","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"start_next_pr","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"complete","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"no_action","available":false,"reason":"no Task Session; start one with `lf task run`"}]},"pm_completed":false,"session_status":null,"process":{"state":"not_applicable","alive":null,"reason":null},"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"active_pr_phase":null}
+        {"level":"\(level)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"next_owner":"task","actions":{"recommended":null,"reason":"Task is ready to start"},"pm_completed":false,"work_status":null,"process":{"state":"not_applicable","alive":null,"reason":null},"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"active_pr_phase":null}
         """
         return try JSONDecoder().decode(TaskAttentionSnapshot.self, from: Data(json.utf8))
     }
@@ -193,15 +214,15 @@ struct WaveLensTests {
         {"task":{"id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"completed":false,"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
         "next_move":{"owner":"task","reason":"\(reason)"},
-        "attention":{"level":"\(level)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"next_owner":"task","actions":{"recommended":null,"actions":[{"action":"recover","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"resume","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"review","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"start_next_pr","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"complete","available":false,"reason":"no Task Session; start one with `lf task run`"},{"action":"no_action","available":false,"reason":"no Task Session; start one with `lf task run`"}]},"pm_completed":false,"session_status":null,"process":{"state":"not_applicable","alive":null,"reason":null},"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"active_pr_phase":null},
+        "attention":{"level":"\(level)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"next_owner":"task","actions":{"recommended":null,"reason":"Task is ready to start"},"pm_completed":false,"work_status":null,"process":{"state":"not_applicable","alive":null,"reason":null},"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"active_pr_phase":null},
         "prs":[],"active_pr":null}
         """
         return try JSONDecoder().decode(WaveTaskWork.self, from: Data(json.utf8))
     }
 
-    private func makeRuntime(status: String, alive: Bool, reason: String) throws -> ProjectRuntimeSnapshot {
+    private func makeRuntime(alive: Bool, reason: String) throws -> ProjectRuntimeSnapshot {
         let json = """
-        {"session_id":"ps_1","status":"\(status)","reason":"\(reason)","status_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","process_alive":\(alive),"observation":{"category":"working","reason":"\(reason)","owner":"session","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iteration 1"}}
+        {"work_id":"project-1","status":{"running":{"run_id":"run_00000000000000000000000000000006"}},"reason":"\(reason)","updated_at":"2026-07-15T00:00:00Z","iteration":1,"pending_observations":0,"provider":"codex","process_alive":\(alive),"observation":{"category":"working","reason":"\(reason)","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iteration 1"}}
         """
         return try JSONDecoder().decode(ProjectRuntimeSnapshot.self, from: Data(json.utf8))
     }

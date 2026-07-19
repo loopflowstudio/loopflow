@@ -3,7 +3,7 @@ import Foundation
 /// The NOW lens: the live-and-stuck frontier across every Wave, grouped by who
 /// must move next. A display grouping over the Rust-owned attention signal in
 /// the one `lf roadmap` read, re-shaped into a flat, cross-wave list. It
-/// invents no Session or process state.
+/// invents no Work or process state.
 public enum NowGroup: String, CaseIterable, Sendable, Hashable {
     case readyForReview
     case needsInput
@@ -31,6 +31,8 @@ public enum NowGroup: String, CaseIterable, Sendable, Hashable {
 /// reconstructs the attention level from status and process flags.
 public func nowGroup(for task: RoadmapTask) -> NowGroup? {
     switch task.attention.level {
+    case .blue:
+        return .readyForReview
     case .green:
         return .working
     case .black:
@@ -40,10 +42,9 @@ public func nowGroup(for task: RoadmapTask) -> NowGroup? {
     case .red:
         switch task.attention.nextOwner {
         case .review, .ci: return .readyForReview
-        case .human: return .needsInput
+        case .user: return .needsInput
         default: break
         }
-        if task.attention.sessionStatus == .failed { return .failed }
         return .stopped
     }
 }
@@ -86,9 +87,8 @@ public struct NowSection: Identifiable, Sendable, Hashable {
 
 /// Flatten the roadmap into the NOW shape: every Task across every visible Wave,
 /// bucketed by attention, oldest-first within each bucket, empty buckets
-/// dropped. Age is the Session's `status_at` (RFC3339, so lexicographic compare
-/// is chronological); NOW rows always have a runtime, so no timestamp is
-/// missing.
+/// dropped. Age uses the Work record's `updated_at` (RFC3339, so lexicographic
+/// compare is chronological); NOW rows always have runtime evidence.
 public func nowSections(from waves: [WaveRoadmap]) -> [NowSection] {
     var rowsByGroup: [NowGroup: [NowRow]] = [:]
     for wave in waves {
@@ -109,7 +109,7 @@ public func nowSections(from waves: [WaveRoadmap]) -> [NowSection] {
     return NowGroup.allCases.compactMap { group in
         guard let rows = rowsByGroup[group], !rows.isEmpty else { return nil }
         let sorted = rows.sorted {
-            ($0.task.runtime?.statusAt ?? "") < ($1.task.runtime?.statusAt ?? "")
+            ($0.task.runtime?.updatedAt ?? "") < ($1.task.runtime?.updatedAt ?? "")
         }
         return NowSection(group: group, rows: sorted)
     }

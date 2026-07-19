@@ -254,8 +254,13 @@ const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $b
   }
 }"#;
 
-const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: String!, $url: String!, $title: String!, $subtitle: String!) {
-  attachmentLinkURL(issueId: $issueId, url: $url, title: $title, subtitle: $subtitle) {
+// `attachmentLinkURL` links a URL and dedupes on it — re-linking the same PR
+// returns the existing attachment rather than duplicating. It accepts `issueId`,
+// `url`, and `title`, but not `subtitle` (that lives on `attachmentUpdate`'s
+// input). PR state is carried in the managed comment body and filled onto the
+// attachment as a subtitle by the later `attachmentUpdate`.
+const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: String!, $url: String!, $title: String!) {
+  attachmentLinkURL(issueId: $issueId, url: $url, title: $title) {
     attachment {
       id
     }
@@ -281,6 +286,18 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
           id
         }
       }
+    }
+  }
+}"#;
+
+// Reads the owning team of an existing issue so state transitions resolve a
+// workflow state from the issue's team, not the wave-configured team. A Project
+// can span teams (e.g. ENG-* and W2-*), and Linear rejects a state that belongs
+// to a different team than the issue.
+const ISSUE_TEAM_QUERY: &str = r#"query IssueTeam($id: String!) {
+  issue(id: $id) {
+    team {
+      id
     }
   }
 }"#;
@@ -447,8 +464,20 @@ impl LinearClient {
         ))
     }
 
-    async fn completed_state_id(&self) -> PmResult<String> {
-        let team_id = self.resolve_team_id().await?;
+    /// The owning team id of an existing issue. State transitions resolve
+    /// against this, not the wave-configured team, because a Project can span
+    /// teams and Linear rejects a state that belongs to another team.
+    async fn item_team_id(&self, item_id: &str) -> PmResult<String> {
+        let response: IssueTeamData = self
+            .graphql(ISSUE_TEAM_QUERY, json!({ "id": item_id }))
+            .await?;
+        response
+            .issue
+            .map(|issue| issue.team.id)
+            .ok_or_else(|| PmError::Message(format!("no Linear issue with id {item_id}")))
+    }
+
+    async fn completed_state_id(&self, team_id: &str) -> PmResult<String> {
         let response: WorkflowStatesData = self
             .graphql(
                 LIST_COMPLETED_WORKFLOW_STATES_QUERY,
@@ -780,7 +809,8 @@ impl LinearClient {
     }
 
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
-        let state_id = self.completed_state_id().await?;
+        let team_id = self.item_team_id(item_id).await?;
+        let state_id = self.completed_state_id(&team_id).await?;
         let _: Value = self
             .graphql(
                 SET_ITEM_STATE_MUTATION,
@@ -798,7 +828,7 @@ impl LinearClient {
     /// uses it when a Task was prematurely completed while its gates were open.
     /// Errors when the team has no unstarted state to return to.
     pub async fn reopen_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.resolve_team_id().await?;
+        let team_id = self.item_team_id(item_id).await?;
         let Some(state_id) = self.unstarted_state_id(&team_id).await? else {
             return Err(PmError::Message(format!(
                 "no active Linear workflow state found to reopen issue {item_id}"
@@ -851,7 +881,6 @@ impl LinearClient {
         issue_id: &str,
         url: &str,
         title: &str,
-        subtitle: &str,
     ) -> PmResult<String> {
         let response: AttachmentLinkData = self
             .graphql(
@@ -860,7 +889,6 @@ impl LinearClient {
                     "issueId": issue_id,
                     "url": url,
                     "title": title,
-                    "subtitle": subtitle,
                 }),
             )
             .await?;
@@ -1076,6 +1104,16 @@ struct WebhookCreateData {
 #[derive(Deserialize)]
 struct WebhookCreateNode {
     webhook: IdNode,
+}
+
+#[derive(Deserialize)]
+struct IssueTeamData {
+    issue: Option<IssueTeamNode>,
+}
+
+#[derive(Deserialize)]
+struct IssueTeamNode {
+    team: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -1418,6 +1456,22 @@ mod tests {
         assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
         assert!(SET_ITEM_STATE_MUTATION.contains("$stateId: String!"));
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
+    }
+
+    /// A wrong argument on a Linear mutation must fail here, not ship a 400 on
+    /// every publish (#1010, where `subtitle` on `attachmentLinkURL` shipped green
+    /// because the mock echoed success). `subtitle` is legal on `attachmentUpdate`
+    /// but not on `attachmentLinkURL`, so pin each mutation directly.
+    #[test]
+    fn attachment_link_omits_subtitle_and_update_keeps_it() {
+        assert!(
+            !LINK_ATTACHMENT_MUTATION.contains("subtitle"),
+            "attachmentLinkURL rejects subtitle; it must not appear in the create mutation"
+        );
+        assert!(
+            UPDATE_ATTACHMENT_MUTATION.contains("subtitle: $subtitle"),
+            "attachmentUpdate carries PR state as its input subtitle"
+        );
     }
 
     #[test]
@@ -1949,7 +2003,7 @@ mod tests {
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let attachment_id = client
-            .link_attachment("issue-1", "https://example/pr/7", "GitHub PR #7", "Open")
+            .link_attachment("issue-1", "https://example/pr/7", "GitHub PR #7")
             .await
             .expect("link attachment succeeds");
         assert_eq!(attachment_id, "att-1");
@@ -1972,6 +2026,13 @@ mod tests {
             .contains("attachmentLinkURL"));
         assert_eq!(link["variables"]["issueId"], json!("issue-1"));
         assert_eq!(link["variables"]["url"], json!("https://example/pr/7"));
+        // The create path must not send an argument Linear rejects.
+        // `attachmentLinkURL` has no `subtitle`; sending one is the 400 that
+        // shipped in #1010. PR state rides the managed comment body instead.
+        assert!(
+            link["variables"].get("subtitle").is_none(),
+            "attachmentLinkURL must not send a subtitle variable"
+        );
 
         let update: Value =
             serde_json::from_str(&requests[1].body).expect("attachment update body is json");
@@ -2156,6 +2217,88 @@ mod tests {
             .await
             .expect_err("name reused under a different key is refused");
         assert!(err.to_string().contains("PROD"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn complete_item_resolves_state_from_the_issue_team_not_the_wave_team() {
+        // The client is bound to the wave's team, but the issue lives in a
+        // *different* team (the ENG-*/W2-* split). The completed state must be
+        // resolved from the issue's own team or Linear rejects the transition.
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-wave".to_string()),
+            base_url,
+        );
+
+        client.complete_item("ENG-7").await.expect("complete item");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests.len(), 3);
+
+        let team_body: Value = serde_json::from_str(&requests[0].body).expect("team body is json");
+        assert!(team_body["query"]
+            .as_str()
+            .expect("query present")
+            .contains("IssueTeam"));
+        assert_eq!(team_body["variables"]["id"], json!("ENG-7"));
+
+        // The state lookup carries the issue's team, never the wave-bound team.
+        // Sabotage the fix (resolve from `team_id`) and this assertion goes red.
+        let states_body: Value =
+            serde_json::from_str(&requests[1].body).expect("states body is json");
+        assert_eq!(states_body["variables"]["teamId"], json!("team-eng"));
+
+        let set_body: Value = serde_json::from_str(&requests[2].body).expect("set body is json");
+        assert_eq!(set_body["variables"]["stateId"], json!("state-done"));
+        assert_eq!(set_body["variables"]["id"], json!("ENG-7"));
+    }
+
+    #[tokio::test]
+    async fn reopen_item_resolves_state_from_the_issue_team_not_the_wave_team() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "workflowStates": { "nodes": [
+                    { "id": "state-todo", "position": 1.0 }
+                ] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-wave".to_string()),
+            base_url,
+        );
+
+        client.reopen_item("ENG-7").await.expect("reopen item");
+
+        let requests = requests.lock().await;
+        let states_body: Value =
+            serde_json::from_str(&requests[1].body).expect("states body is json");
+        assert_eq!(states_body["variables"]["teamId"], json!("team-eng"));
     }
 
     #[test]

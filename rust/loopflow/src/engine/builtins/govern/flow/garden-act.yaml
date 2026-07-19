@@ -1,2 +1,4 @@
 - mutate
-- review
+- step:
+    name: review
+    feedback: true

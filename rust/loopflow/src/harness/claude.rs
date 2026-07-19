@@ -13,9 +13,10 @@ use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::harness::{claude_mapping, Capabilities, Harness, HarnessError, RawProviderEvent};
-use crate::provider_account::{resolve_provider_account, ProviderAccountRoute};
+use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent};
+use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
+use crate::store::ProviderAccountId;
 
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
@@ -26,6 +27,7 @@ pub struct ClaudeHarness {
     /// subsequent turns resume it via `--resume`.
     provider_session_id: Arc<Mutex<Option<String>>>,
     account_route: Option<ProviderAccountRoute>,
+    requested_account_id: Option<ProviderAccountId>,
     turn_in_progress: Arc<AtomicBool>,
     child: Option<Child>,
     reader_task: Option<JoinHandle<()>>,
@@ -49,6 +51,7 @@ impl ClaudeHarness {
             should_seed_task_prompt: true,
             provider_session_id: Arc::new(Mutex::new(None)),
             account_route: None,
+            requested_account_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             child: None,
             reader_task: None,
@@ -98,10 +101,12 @@ impl Harness for ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let account_route =
-            resolve_provider_account(Provider::Claude, requested_session.as_deref())
-                .await?
-                .into_route();
+        let account_route = resolve_provider_account_exact(
+            Provider::Claude,
+            requested_session.as_deref(),
+            self.requested_account_id.as_ref(),
+        )
+        .await?;
         if account_route
             .as_ref()
             .is_some_and(|route| !route.resume_requested_session())
@@ -258,6 +263,7 @@ impl Harness for ClaudeHarness {
                         let _ = events.send(ConversationEvent::Error {
                             code: "provider_rate_limited".to_string(),
                             message: signal.reason,
+                            evidence: None,
                         });
                         saw_turn_completed = true;
                         break;
@@ -340,15 +346,6 @@ impl Harness for ClaudeHarness {
         Ok(())
     }
 
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            // Mid-turn input cannot reach the running `claude -p` process;
-            // send_input fails with TurnAlreadyInProgress and the caller
-            // queues.
-            supports_steer: false,
-        }
-    }
-
     fn provider_session_id(&self) -> Option<String> {
         self.provider_session_id
             .lock()
@@ -361,6 +358,16 @@ impl Harness for ClaudeHarness {
             .provider_session_id
             .lock()
             .expect("claude provider session id lock poisoned") = provider_session_id;
+    }
+
+    fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
+        self.requested_account_id = account_id;
+    }
+
+    fn provider_account_id(&self) -> Option<ProviderAccountId> {
+        self.account_route
+            .as_ref()
+            .map(|route| route.account_id().clone())
     }
 }
 
@@ -380,6 +387,7 @@ mod tests {
             agent: None,
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
+            resume_token: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,

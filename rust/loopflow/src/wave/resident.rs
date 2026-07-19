@@ -12,7 +12,7 @@
 //! - **output**: ordered wire deltas through the token-gated resident door.
 //!
 //! The resident runs from a clean canonical main checkout. Wave turns read and
-//! coordinate there; file-writing work must first become a Task Session with
+//! coordinate there; file-writing work must first become a Task with
 //! its own worktree.
 //!
 //! # Lifecycle
@@ -134,11 +134,6 @@ fn wave_main_checkout(main_repo: &Path) -> Result<PathBuf> {
         bail!(
             "cannot start Wave resident: canonical checkout is on {}, expected {default_branch}",
             branch.as_deref().unwrap_or("detached HEAD")
-        );
-    }
-    if !crate::engine::git::is_clean(&main)? {
-        bail!(
-            "cannot start Wave resident: canonical {default_branch} checkout is dirty; Wave turns never edit repository files"
         );
     }
     Ok(main)
@@ -512,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn wave_resident_requires_a_clean_main_checkout() {
+    fn wave_resident_uses_main_without_claiming_its_dirty_state() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".gitignore", "**/.wave-endpoint\n**/.wave-resident-token\n");
         repo.stage_all();
@@ -524,9 +519,9 @@ mod tests {
             std::fs::canonicalize(repo.path()).expect("canonical repo")
         );
         std::fs::write(repo.path().join("dirty.txt"), "dirty\n").expect("dirty main");
-        assert!(wave_main_checkout(repo.path())
-            .unwrap_err()
-            .to_string()
-            .contains("checkout is dirty"));
+        assert_eq!(
+            wave_main_checkout(repo.path()).expect("dirty main remains readable"),
+            std::fs::canonicalize(repo.path()).expect("canonical repo")
+        );
     }
 }

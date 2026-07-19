@@ -37,7 +37,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::project_session::ProjectObservation;
+use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
 use crate::wave::journal::MessageOp;
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};

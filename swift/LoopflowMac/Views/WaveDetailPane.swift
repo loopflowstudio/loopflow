@@ -382,7 +382,7 @@ private struct WaveProjectWorkView: View {
 
                 Spacer()
 
-                if let status = project.runtime?.status.rawValue {
+                if let status = project.runtime?.status.label {
                     Text(status)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -496,7 +496,7 @@ private struct WaveTaskWorkView: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(2)
                 }
-                Text("\(task.runtime?.status.rawValue ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
+                Text("\(task.runtime?.status.label ?? "unstarted") · next: \(task.nextMove.owner.rawValue)")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 if let directive = task.directive {
@@ -556,7 +556,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: project.directive,
-                    status: project.runtime?.status.rawValue ?? "unstarted",
+                    status: project.runtime?.status.label ?? "unstarted",
                     reason: project.nextMove.reason,
                     provider: project.runtime?.provider,
                     location: nil,
@@ -568,7 +568,7 @@ private struct WaveWorkInspector: View {
                     .foregroundStyle(palette.text)
                 details(
                     directive: task.directive,
-                    status: task.runtime?.status.rawValue ?? "unstarted",
+                    status: task.runtime?.status.label ?? "unstarted",
                     reason: task.attention.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
@@ -592,7 +592,8 @@ private struct WaveWorkInspector: View {
                     runtime: task.runtime,
                     attention: task.attention,
                     repoPath: repoPath,
-                    terminalStore: terminalStore
+                    terminalStore: terminalStore,
+                    initialSection: task.attention.level == .blue ? .feedback : .changes
                 )
             }
         }

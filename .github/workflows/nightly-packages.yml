@@ -48,6 +48,8 @@ jobs:
           mkdir package-smoke
           tar -xzf lf-${{ matrix.target }}.tar.gz -C package-smoke
           package-smoke/lf --version
+          package-smoke/lf --help > /dev/null
+          package-smoke/lf --list > /dev/null
       - uses: actions/upload-artifact@v7
         with:
           name: nightly-${{ matrix.target }}

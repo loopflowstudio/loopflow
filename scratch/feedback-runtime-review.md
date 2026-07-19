@@ -135,21 +135,20 @@ advertises deleted memory SSE events or `/memory` routes, and the Swift chat
 client comment now names only the surviving SSE frames. The file-only runtime
 and direct-read CLI remain accepted.
 
-One current-context defect remains blocked rather than hidden: the Intelligence,
-Product, and Infrastructure Wave memories still describe deleted live-memory,
-Radio, channel, and database-bus APIs as current architecture. This repair did
-not edit them because the operating contract calls Wave memory server-owned
-and explicitly prohibits direct file writes. No owned alternative exists: `lf
-memory` is read-only and the server has no memory route, while `update-wave`
-still prescribes the forbidden ordinary file edit. The exact claims and
-authority/tooling contradiction are recorded in `scratch/questions.md`; Slice
-3's implementation is complete, but the active Wave contexts are not curated
-until that ownership decision is resolved.
+Reopened context audit, July 19: explicit human authority resolved the earlier
+server-owned-file contradiction. The Intelligence memory now names the committed
+file as the whole durable memory and deletes its stream/checkpoint/runtime model.
+The Product memory now uses Work, Run, Launch, Turn, Steer, and Feedback; it
+deletes Radio/channel/bus communication and records stopped-Project wake as the
+server-design gap. Infrastructure now calls the store durable control state,
+not a message bus, and uses Project/Task Work rather than false Session identity.
+No GOAL or Linear Project definition moved.
 
-Repair proof: the deleted live-memory, Radio, channel, and bus claims are absent
-from current Rust, Swift, docs, skills, and tests outside the explicitly blocked
-Wave memories; CLI memory tests pass 3/3, the one-subcommand parser proof passes
-1/1, Swift Wave chat streaming passes 24/24, and `cargo fmt --check` passes.
+Repair proof: current claims for live-memory, Radio, channel, and bus behavior
+are absent from the three active Wave memories; their remaining old symbols occur
+only in explicit deletion statements. CLI memory tests pass 3/3, the
+one-subcommand parser proof passes 1/1, Swift Wave chat streaming passes 24/24,
+and `cargo fmt --check` passes.
 
 ## Slice 4 — explicit prompt context
 

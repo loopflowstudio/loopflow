@@ -5,104 +5,56 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
-## Minds (settled 2026-07-10, the `minds` branch)
+## Work and continuity (settled 2026-07-19, `feedback-runtime`)
 
-The execution model, in the four verbs it produced. `scratch/minds.md` is the
-long form and dies at land; this is what survives.
+- **Work is stable identity, not a process.** Wave, Project, and Task are the
+  three Work kinds. A Run is one bounded period of execution authority; a
+  Launch is one provider/process attempt inside it; a Turn is one observed
+  provider boundary.
+- **Domain structure carries continuity.** A Wave owns `GOAL.md`, `MEMORY.md`,
+  cadence, Chat, and its Project portfolio. A Project owns definition, KRs, and
+  Tasks. A Task owns its directive, worktree, and serial PR chain. Project and
+  Task do not copy parent context or inherit recent Wave conversation.
+- **Steer is the one durable authored input.** Chat is its human Wave
+  presentation, not a second mailbox or history truth. Radio, agent channels,
+  machine bylines, and the database message bus are deleted.
+- **Feedback is an authored Task-flow checkpoint.** Its reviewer is either the
+  User or the immediate parent Project. Presentation cannot close it;
+  `lf work continue` is the explicit close. There is no Feedback escalation
+  protocol or implicit PR Review state.
+- **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
+  oldest-first. There is no live memory stream, and recent Wave Chat is not
+  ambient Project/Task prompt context.
+- **Environment configures a process; it never decides what the process is.**
+  Work identity and Run authority come from durable state, not inherited
+  endpoint variables or a surviving terminal.
+- **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
+  not the Wave's roadmap.
 
-- **Waves are the only minds.** A mind is a *read set*, not a process: it
-  re-reads the live thread and memory. Task and project loops are hands —
-  private transcript, public posts, no memory of their own. The only way to make
-  another mind is `lf project promote`, which grants residency (a process, an
-  endpoint, a cadence, a budget) and costs the parent its ambient overhearing.
-- **The verbs, and why they are four:**
-  | `lf serve <wave>` | boot a mind: listener, thread, playhead. Steerable. |
-  | `lf loop <flow> <seed>` | run a bounded child loop to its bit. Batch. `--detach` is the concurrency switch; `--dispatch` is deleted. |
-  | `lf chat` | humans only: converse with a served mind's thread. HTTP/SSE on the listener. |
-  | `lf radio pub` / `lf radio sub` | agents only: publish/subscribe on the bus. Publish is an INSERT; no server in the path. |
-  `lf __resident` is hidden. **Environment configures a process; it must never
-  decide what the process is** — the earlier `lf loop <name>` chose between
-  booting a listener and being a resident by reading `WAVE_SERVER_ENDPOINT` from
-  the environment, and tmux hands a promoting pass's env straight to its child,
-  so a promoted wave's resident attached to its *parent's* listener with the
-  parent's token. Split the verb by what it does.
-- **Inhabiting is a call, not a mode.** The wave LLM runs `lf loop project "…"`
-  and blocks; nothing about the wave changes. Blocking is one long tool call —
-  the thread's tool-boundary ear is traded for the inner loop's pass-boundary
-  ear. A live child loop is presence and extends the pass lease.
-- **Delegate all but one.** Keep the project whose next move needs the wave's
-  memory and chat in the room — the one you could not write a self-sufficient
-  seed for. Not the most important one: inhabited work advances at wake cadence,
-  delegated work advances continuously, so keeping the priority starves it.
-- **A session is not a conversation.** One thread per wave, journal-backed,
-  durable, assembled from many disposable bodies. The human attaches to the
-  running pass itself; the persona rotates with the flow's skills and that is
-  honest. Rendering each active session as its own chat is exactly how this
-  design gets undone in the UI after being right in the runtime.
-- **The playhead.** The mind is always mid-flow: a cursor through the wave
-  flow's default cycle, wrapping at the end. Enqueue attaches to the *innermost*
-  active invocation frame and drains FIFO before returning to the caller — so
-  the queue is per-frame, not one flat list. Skip interrupts the body, journals
-  a boundary, advances one step; it never restarts the flow. The journal is the
-  queue's source of truth, keyed by invocation id + step path (names alone can't
-  reconstruct the stack when a flow appears twice).
-- **The db IS the bus** (the same move that made the db the registry).
-  `bus_messages` + `bus_cursors`; publish is an INSERT, subscribe is a forward
-  poll from a rowid cursor, the sweeper rides every read and write with a 1 h
-  wall-clock window. No broker, so publishing works with zero loopflow processes
-  running and two detached hands hear each other with no served wave. The bus is
-  **not a log** — that temptation is the failure mode to guard.
-- **Byline is testimony; channel is evidence.** With no server in the publish
-  path, client-submitted attribution is the only kind possible: a forged byline
-  is visible as a mismatch against the arrival channel, not prevented. Per-hand
-  tokens stopped being needed. A mind skips rows bylined with its own channel,
-  or steering a hand wakes the steerer with its own steer.
-- **Bus delivery is at-least-once, and no doc may promise more.** The listener
-  journals a report then commits its cursor; a crash in that seam replays one
-  row. Deliberate — a duplicated report is cheaper than a silent lost one. A
-  clean restart replays nothing.
-- **Nothing crosses a boundary unless someone wrote it down on purpose.** Memory
-  is lexical scope (a child reads the parent's live memory, writes only its own);
-  chat is a mailbox that stops at the wave. Raw records stay home; authored
-  statements travel. That is what lets log-as-truth survive nesting.
-- **A hand's ear is the wave's thread**, at pass granularity — every pass is a
-  fresh process that re-reads the wave's live memory and chat at birth. Verified:
-  no `env_clear` in the pass-spawn path, and `LoopRun` worktrees are wave-named.
-  The tmux door is now read-only; it existed only because the mind on the other
-  side went deaf at birth.
-- **Backlogs are allowed.** Agents file tasks without running them; `loop/README`'s
-  "no backlog" is resolved in Linear's favor. What it bought — "the open runs ARE
-  the wave's open tasks" — is gone: a task now has three states (filed, running,
-  merged), and nothing else prevents a tracker filling with intent nobody does.
+### Runtime boundary still open
 
-### Minds: what did not land
-
-- **A detached loop's driver holds no subscription.** `lf radio pub -c <hand>`
-  reaches live `lf radio sub` listeners and nobody else; steering a hand means speaking
-  on the wave's thread. On a store bus the fast path is a poll cursor in the
-  driver's pass boundary — cheap to build, or to skip deliberately. Open fork.
-- **Mid-turn steer is Codex-only.** Claude and OpenCode queue to the next body.
-  Vendor-gated; the product question lives in the wave-chat Linear Project.
-- **Composite flow nodes** (`and`/`or`/`xor`/`loop`) still run through the
-  internal headless `__flow-step` fallback rather than first-class playhead
-  frames. Do it when the Mac's breadcrumb starts lying about nested flows.
-- **Project-loop caps** still inherit the generic 8-pass / 2-hour task defaults.
-  Needs one real project loop's dogfood data, not a guessed weeks-scale timeout.
-- **Foreground/background label** on Active sessions: the run ledger doesn't
-  persist the owner, so the Mac shows pass/worktree/liveness and declines to guess.
-- **PM label removal on promotion:** the provider abstraction has no remove-label
-  op, so promotion records residual `project:<slug>` labels instead of clearing
-  them. Provider-level API work.
-- **Residency reads wave definitions from the main checkout.** Promotion authored
-  in a worker worktree stops with an explicit land-before-residency error rather
-  than launching a child against files the listener cannot see.
+- A “Project server” does not exist. A live Project runner can answer child
+  Feedback, but a stopped Project has no common Home owner that notices the
+  durable Ready fact and starts exactly one Run.
+- The server design must assign one owner each for dispatch, liveness, retry,
+  streaming, and remote nudge before Wave, Project, and Task controls collapse
+  onto one host path.
+- Mid-turn Steer remains provider-dependent; queued durable Steers must still
+  survive provider and app exit.
+- Composite flow nodes still use the internal `__flow-step` fallback, and
+  Project-loop caps still need real dogfood data before changing.
+- Residency still reads Wave definitions from the main checkout; promotion
+  authored in a worker worktree requires landing first.
 
 ## Model (design invariants)
 
-- Frame, don't render: no native chat UI, and the CLI stays the source of truth — Concerto composes around it.
-- Concerto owns wave *navigation* (which wave to open); workflows owns wave *governance* (grading, rollups, rhythm).
-- The vendor-session launch mechanism (`vendor-session-launch`) lives in `workflows`; Concerto consumes it.
-- lfd owns the goal-loop harness runtime; Concerto attaches to and frames the session, it does not own the loop.
+- `lf` and durable store projections define the product API; Mac and iOS
+  consume that model rather than inventing a parallel lifecycle.
+- App surfaces navigate, present, and Steer Work. A view, terminal, provider
+  process, or listener is never the source of Work or Feedback truth.
+- A provider session is Launch continuity, not Work identity.
+- Runtime ownership remains deliberately unresolved until the Home/Work server
+  topology can explain stopped-parent wake and failure recovery in one diagram.
 
 ### Charter model (restarted 2026-07-07, resettled 2026-07-08, Linear-owned 2026-07-10)
 
@@ -145,36 +97,21 @@ long form and dies at land; this is what survives.
   (session-lifecycle, attention-navigation, wave-conducting, remote-connection,
   palette) was folded into these and deleted, not tombstoned.
 
-### The `lf` / lfd / pubsub spine (direction, started not complete)
+### The `lf` / Home spine (server topology not yet settled)
 
-- **`lf` is the single implementation.** It queries lfdb directly (daemon-less
-  local reads) and runs commands. Primitives already on the Rust side: `lf runs`
-  (`lf/commands/runs.rs`, RunSummary + event-folding), `lf radio sub`
-  (`lf/commands/sub.rs`, pubsub), lfd exec door (`http/routes/exec.rs`).
-- **lfd demotes to proxy + pubsub** — proxies `lf` over HTTP so remote looks like
-  local, and streams new runs. It is NOT how things execute, NOT a parallel impl.
-  Concerto's bundled lfd earns its keep solely as the pubsub pipe feeding the ledger.
-- **Superseded on the agent side:** `lf radio sub` no longer opens a socket — it
-  polls the store bus by channel prefix. Its SSE follower lives in
-  `lf/commands/thread.rs` and backs `lf chat --follow` — the sole human-thread
-  surface now that `lf wavechat` is removed (asserted absent in `lf/mod.rs`; the
-  old `chat`+`sub` fusion this design split is gone, no alias). HTTP/SSE remains
-  the *thread's* transport (`lf chat`, the Mac); the bus never had a server in
-  its path.
-- **The agent bus is one explicit namespace (this branch, `lf radio: make agent
-  bus operations explicit`).** `lf radio pub [TEXT] [-c NAME | --parent] [--from
-  NAME]` and `lf radio sub [CHANNEL] [--json]`; bare `lf radio` prints subcommand
-  help. The old top-level `lf sub` and `lf radio TEXT` spellings were removed with
-  no alias — a hidden always-failing parser branch reserves top-level `sub` so the
-  external-skill fallback can't reinterpret it as a skill name. Transport, cursor,
-  prefix, and byline behavior are unchanged; command ownership only. Every builtin
-  prompt, webhook argv, doc, and test moved to the one grammar in the same build.
-  Resident crons evaluate in **UTC**, so the product `wave` flow at `0 0 8 …` fires
-  08:00 UTC regardless of host timezone.
-- **Why:** one implementation at the daemon layer, matching "keep one
-  implementation"; kills the two-code-path / three-mirror drift the DTO rule fights.
-- **This branch is Swift catching up.** Scope boundary: redo Swift to match; do
-  NOT migrate lfd's remaining executor into `lf` (its own effort).
+- **`lf` is the single command implementation.** Local reads query the durable
+  registry directly; CLI and app actions call the same Work operations.
+- **There is no agent messaging substrate.** Radio commands, channel identity,
+  bus tables, cursors, retention, and subscriptions are gone. Durable Steers and
+  Work state replace message delivery as product truth.
+- **Human Wave Chat remains a presentation surface.** Its current HTTP/SSE
+  listener is not generalized into Project/Task communication and does not feed
+  ambient prompt context.
+- **Home ownership is the next design.** Decide how Ready scanning, remote
+  nudges, live deltas, and replaceable executors fit together before moving
+  remaining lfd/Wave-listener behavior.
+- Resident crons evaluate in **UTC**, so the product `wave` flow at `0 0 8 …`
+  fires 08:00 UTC regardless of host timezone.
 
 ## Wave ontology & viewer (built this branch, slice 1)
 
@@ -191,15 +128,16 @@ long form and dies at land; this is what survives.
 - **`BacklogItem` (this branch)** decodes `id, name, description, rank, completed,
   project, assignee` — matching the item shape `lf pm show --json` actually emits;
   the old `labels: [String]` was dropped for the explicit `project` slug.
-- **Vocabulary locked:** *Run* = ledger entry (reuses lfd's existing `Run` DTO);
-  *session* = a live run's attachable tmux (`/attach`, `TerminalSession`); *exec*
-  retired from the frontend (stays loop's word for how a run is born).
+- **Vocabulary locked:** *Run* = one bounded period of execution authority plus
+  its durable record; *Launch* = one provider/process attempt; *session* names
+  only concrete provider or attachable terminal continuity (`TerminalSession`),
+  never stable Work. *Exec* remains an implementation verb, not product identity.
 - **Plan render works end to end now** — `PmShowResult` carries `projects` +
   `synced_at`, `RegistryQuery.plan`'s `PmShowSnapshot` decodes them, and
   `WaveDetailPane` shows each Project + KR proof. The old decode-throws blocker is
   closed (see the charter section).
-- Not yet built: runs ledger renderer, live pubsub wiring, remote/`lf loop show`
-  plan query (slices 2–4).
+- The server follow-up must decide live Run/Turn streaming and remote plan
+  queries without introducing another lifecycle.
 
 ## Swift data path — RegistryQuery is the single reader
 
@@ -224,8 +162,8 @@ long form and dies at land; this is what survives.
 
 ## Performance — reads never block on lfd
 
-- **Governing invariant: the repo/wave list paints from `lf` (daemon-less); the
-  bundled daemon is pubsub-only and must never gate a read.** First instance
+- **Governing invariant: the repo/wave list paints from `lf` (daemon-less); a
+  listener or Home process must never gate a read.** First instance
   (diagnosed, fix implemented this branch): `WavesView.syncRepoStates`
   early-returned while `SharedDaemon.currentConnection == nil` and
   `prepareConnectionIfNeeded` awaited `SharedDaemon.manager.start()` — the wave
@@ -305,7 +243,8 @@ here on top of PR #849's signed-test/release hardening.
   `POST /stop`, and waits briefly for graceful shutdown. Missing/stale endpoint
   = idempotent success ("already stopped"). **The listener is the sole cleanup
   owner** (`run_listener`): stop supervisor → terminate resident → deregister
-  session → remove only this boot's endpoint + resident-token files. Detached
+  runtime registration → remove only this boot's endpoint + resident-token
+  files. Detached
   worker loops stay independent; the listener never owned their tmux. The Mac
   Stop button shells through the same CLI verb via `LocalWaveAgentLauncher`
   (launcher tests pin the exact `lf stop <wave>` argv) — one implementation, CLI

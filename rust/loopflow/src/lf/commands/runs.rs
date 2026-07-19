@@ -182,14 +182,14 @@ pub fn list_execs(json: bool) -> Result<()> {
 /// launches still stuck past this point are provably dead. Younger missing
 /// captures are reported as candidates to investigate, not swept — the
 /// anti-masking line that keeps a live capture regression visible.
-const RECONCILE_AGE_GUARD_HOURS: i64 = 48;
+pub(super) const RECONCILE_AGE_GUARD_HOURS: i64 = 48;
 
 /// `lf runs reconcile`: make the ledger and the trace root agree about what
-/// survives. Tombstones terminal captures whose conversation artifacts are gone,
-/// finalizes orphaned `capturing` launches, and removes artifact directories no
-/// launch row claims. Dry-run by default; `--apply` writes. A red `lf doctor`
-/// capture check means un-acknowledged loss — this is the explicit
-/// acknowledgment.
+/// survives. Tombstones terminal captures whose conversation artifacts are
+/// gone, interrupts dead `capturing` launches with intact evidence, acknowledges
+/// aged write loss, and removes artifact directories no launch row claims.
+/// Dry-run by default; `--apply` writes. A red `lf doctor` capture check means
+/// unacknowledged loss — this is the explicit acknowledgment.
 pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let launches = store
@@ -200,17 +200,29 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
     let now = chrono::Utc::now().timestamp();
-    let plan = plan_reconcile(&launches, &events, now, all, &|path| {
-        crate::trace::resolve_artifact(path).is_ok_and(|path| path.is_file())
-    });
+    let plan =
+        plan_reconcile(
+            &launches,
+            &events,
+            now,
+            all,
+            &|path| match crate::trace::resolve_artifact(path) {
+                Ok(path) if path.is_file() => ArtifactState::Present,
+                Ok(_) => ArtifactState::Missing,
+                Err(_) => ArtifactState::Unsafe,
+            },
+        );
     let orphans = plan_orphans(&launches, now, all)?;
 
     if apply {
         for entry in &plan.pruned {
-            store.reconcile_launch_capture(&entry.id, "pruned", Some(&entry.reason), now)?;
+            store.prune_launch_capture(&entry.id, &entry.reason, now)?;
         }
-        for entry in &plan.finalized {
-            store.reconcile_launch_capture(&entry.id, "partial", Some(&entry.reason), now)?;
+        for entry in &plan.interrupted {
+            store.interrupt_launch_capture(&entry.id, &entry.reason, now)?;
+        }
+        for entry in &plan.lost {
+            store.lose_launch_capture(&entry.id, now)?;
         }
         for orphan in &orphans {
             let path = crate::trace::resolve_artifact(&orphan.artifact_dir)?;
@@ -224,7 +236,8 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
         applied: apply,
         pruned: plan.pruned,
         recent_missing: plan.recent_missing,
-        finalized: plan.finalized,
+        interrupted: plan.interrupted,
+        lost: plan.lost,
         orphans,
     };
 
@@ -243,17 +256,21 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
             report.recent_missing.len()
         );
     }
-    println!("  {} finalized", report.finalized.len());
+    println!("  {} interrupted", report.interrupted.len());
+    println!("  {} lost", report.lost.len());
     println!(
         "  {} orphan artifacts ({})",
         report.orphans.len(),
         format_bytes(orphan_bytes)
     );
-    if !apply && (!report.pruned.is_empty() || !report.finalized.is_empty()) {
+    if !apply
+        && (!report.pruned.is_empty() || !report.interrupted.is_empty() || !report.lost.is_empty())
+    {
         println!(
-            "run with --apply to tombstone {} and finalize {}.",
+            "run with --apply to prune {}, interrupt {}, and acknowledge {} lost.",
             report.pruned.len(),
-            report.finalized.len()
+            report.interrupted.len(),
+            report.lost.len()
         );
     }
     Ok(())
@@ -298,7 +315,7 @@ fn plan_orphans(
 
 /// Total bytes and newest mtime beneath `path`, ignoring entries that vanish or
 /// deny access mid-walk — a best-effort measure, never a reason to fail.
-fn directory_size_and_mtime(path: &Path) -> (u64, i64) {
+pub(super) fn directory_size_and_mtime(path: &Path) -> (u64, i64) {
     let mut bytes = 0;
     let mut newest = 0;
     let mut stack = vec![path.to_path_buf()];
@@ -344,7 +361,7 @@ fn format_bytes(bytes: u64) -> String {
 
 /// The reconcile decision for every launch, derived without touching the store
 /// or the clock: `now` is supplied and `artifact_present` resolves a
-/// conversation path to "is the file really there". Pure so the age guard and
+/// conversation path to present, absent, or unsafe. Pure so the age guard and
 /// the dead-process rules can be tested directly — the classification is the
 /// part that must not be wrong, since `--apply` acts on it.
 fn plan_reconcile(
@@ -352,16 +369,16 @@ fn plan_reconcile(
     events: &[crate::store::RunEventRow],
     now: i64,
     all: bool,
-    artifact_present: &dyn Fn(&str) -> bool,
+    artifact_state: &dyn Fn(&str) -> ArtifactState,
 ) -> ReconcilePlan {
-    const TERMINAL: [&str; 3] = ["complete", "partial", "prompt_only"];
+    const TERMINAL: [&str; 5] = ["complete", "partial", "prompt_only", "interrupted", "lost"];
     let guard = now - RECONCILE_AGE_GUARD_HOURS * 3600;
     let stamp = chrono::DateTime::from_timestamp(now, 0)
         .unwrap_or_default()
         .format("%Y-%m-%dT%H:%M:%SZ")
         .to_string();
     let pruned_reason = format!("conversation artifact absent at reconcile {stamp}");
-    let finalized_reason = "capture interrupted; process ended without finalizing";
+    let interrupted_reason = "capture interrupted; process ended without finalizing";
 
     let mut plan = ReconcilePlan::default();
     for launch in launches {
@@ -370,7 +387,11 @@ fn plan_reconcile(
         });
         let stale = launch.started_at < guard;
 
-        if !artifact_present(&launch.conversation_path) {
+        let artifact_state = artifact_state(&launch.conversation_path);
+        if artifact_state == ArtifactState::Unsafe {
+            continue;
+        }
+        if artifact_state == ArtifactState::Missing {
             // Artifact is gone. Terminal launches are always candidates; a
             // `capturing` launch is a candidate only once its process is
             // provably dead (or stale past the guard) — a live process may
@@ -388,11 +409,15 @@ fn plan_reconcile(
             // active capture regression would tombstone the evidence.
             let old = launch.ended_at.is_some_and(|ended| ended < guard) || stale;
             if old || all {
-                plan.pruned
-                    .push(ReconcileEntry::from_launch(launch, &pruned_reason));
+                plan.pruned.push(ReconcileEntry::from_launch(
+                    launch,
+                    &reason_with_history(launch, &pruned_reason),
+                ));
             } else {
-                plan.recent_missing
-                    .push(ReconcileEntry::from_launch(launch, &pruned_reason));
+                plan.recent_missing.push(ReconcileEntry::from_launch(
+                    launch,
+                    &reason_with_history(launch, &pruned_reason),
+                ));
             }
             continue;
         }
@@ -401,18 +426,59 @@ fn plan_reconcile(
         // process ended without calling `finish()` — making it terminal and
         // honest rather than stuck.
         if launch.capture_status == "capturing" && (process_ended || stale) {
-            plan.finalized
-                .push(ReconcileEntry::from_launch(launch, finalized_reason));
+            plan.interrupted.push(ReconcileEntry::from_launch(
+                launch,
+                &reason_with_history(launch, interrupted_reason),
+            ));
+            continue;
+        }
+
+        // A partial is fresh evidence until the same age boundary makes an
+        // explicit historical acknowledgment safe. A missing reason is not
+        // actionable enough to acknowledge, so it remains partial and red.
+        if launch.capture_status == "partial"
+            && (all || launch.ended_at.is_some_and(|ended| ended < guard) || stale)
+            && launch
+                .incomplete_reason
+                .as_deref()
+                .is_some_and(|reason| !reason.trim().is_empty())
+        {
+            plan.lost.push(ReconcileEntry::from_launch(
+                launch,
+                launch
+                    .incomplete_reason
+                    .as_deref()
+                    .expect("lost candidate has a non-empty reason"),
+            ));
         }
     }
     plan
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactState {
+    Present,
+    Missing,
+    Unsafe,
+}
+
+fn reason_with_history(launch: &crate::trace::AgentLaunchRow, reason: &str) -> String {
+    match launch
+        .incomplete_reason
+        .as_deref()
+        .filter(|history| !history.trim().is_empty())
+    {
+        Some(history) => format!("{history}; {reason}"),
+        None => reason.to_string(),
+    }
 }
 
 #[derive(Debug, Default)]
 struct ReconcilePlan {
     pruned: Vec<ReconcileEntry>,
     recent_missing: Vec<ReconcileEntry>,
-    finalized: Vec<ReconcileEntry>,
+    interrupted: Vec<ReconcileEntry>,
+    lost: Vec<ReconcileEntry>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -446,7 +512,8 @@ struct ReconcileReport {
     applied: bool,
     pruned: Vec<ReconcileEntry>,
     recent_missing: Vec<ReconcileEntry>,
-    finalized: Vec<ReconcileEntry>,
+    interrupted: Vec<ReconcileEntry>,
+    lost: Vec<ReconcileEntry>,
     orphans: Vec<OrphanEntry>,
 }
 
@@ -1355,7 +1422,7 @@ pub(crate) fn format_tokens(value: i64) -> String {
 mod tests {
     use super::{
         format_duration, format_tokens, plan_orphans, plan_reconcile, summarize_execs,
-        trace_id_for_address, trace_spans,
+        trace_id_for_address, trace_spans, ArtifactState,
     };
     use crate::store::{RunEventRow, TurnSpendRow};
     use crate::trace::AgentLaunchRow;
@@ -1401,12 +1468,16 @@ mod tests {
         }
     }
 
-    fn absent(_: &str) -> bool {
-        false
+    fn absent(_: &str) -> ArtifactState {
+        ArtifactState::Missing
     }
 
-    fn present(_: &str) -> bool {
-        true
+    fn present(_: &str) -> ArtifactState {
+        ArtifactState::Present
+    }
+
+    fn unsafe_path(_: &str) -> ArtifactState {
+        ArtifactState::Unsafe
     }
 
     #[test]
@@ -1469,7 +1540,22 @@ mod tests {
     }
 
     #[test]
-    fn an_orphaned_capturing_launch_with_its_file_is_finalized_partial() {
+    fn an_unsafe_reference_is_never_acknowledged_as_pruned() {
+        let launches = vec![launch(
+            "unsafe",
+            "complete",
+            NOW - 200 * HOUR,
+            Some(NOW - 100 * HOUR),
+        )];
+
+        let plan = plan_reconcile(&launches, &[], NOW, true, &unsafe_path);
+
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.recent_missing.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn an_orphaned_capturing_launch_with_its_file_is_interrupted() {
         // Interrupted run: `begin` wrote the file, the process died before
         // `finish`. The file is here, so this is finalization, not a tombstone.
         let launches = vec![launch("stuck", "capturing", NOW - HOUR, None)];
@@ -1477,12 +1563,12 @@ mod tests {
 
         let plan = plan_reconcile(&launches, &events, NOW, false, &present);
 
-        assert_eq!(plan.finalized.len(), 1, "{plan:?}");
-        assert_eq!(plan.finalized[0].id, "stuck");
+        assert_eq!(plan.interrupted.len(), 1, "{plan:?}");
+        assert_eq!(plan.interrupted[0].id, "stuck");
         assert!(
-            plan.finalized[0].reason.contains("capture interrupted"),
+            plan.interrupted[0].reason.contains("capture interrupted"),
             "{}",
-            plan.finalized[0].reason
+            plan.interrupted[0].reason
         );
         assert!(plan.pruned.is_empty(), "{plan:?}");
     }
@@ -1497,7 +1583,8 @@ mod tests {
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
         assert!(plan.recent_missing.is_empty(), "{plan:?}");
-        assert!(plan.finalized.is_empty(), "{plan:?}");
+        assert!(plan.interrupted.is_empty(), "{plan:?}");
+        assert!(plan.lost.is_empty(), "{plan:?}");
     }
 
     #[test]
@@ -1512,7 +1599,45 @@ mod tests {
         let plan = plan_reconcile(&launches, &[], NOW, false, &present);
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
-        assert!(plan.finalized.is_empty(), "{plan:?}");
+        assert!(plan.interrupted.is_empty(), "{plan:?}");
+        assert!(plan.lost.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn an_aged_intact_partial_with_a_reason_is_acknowledged_lost() {
+        let mut partial = launch(
+            "disk-full",
+            "partial",
+            NOW - 200 * HOUR,
+            Some(NOW - 100 * HOUR),
+        );
+        partial.incomplete_reason = Some("ENOSPC while syncing conversation".to_string());
+
+        let plan = plan_reconcile(&[partial], &[], NOW, false, &present);
+
+        assert_eq!(plan.lost.len(), 1, "{plan:?}");
+        assert_eq!(plan.lost[0].id, "disk-full");
+        assert_eq!(plan.lost[0].reason, "ENOSPC while syncing conversation");
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.interrupted.is_empty(), "{plan:?}");
+    }
+
+    #[test]
+    fn a_fresh_or_unexplained_partial_stays_partial_and_red() {
+        let mut fresh = launch("fresh", "partial", NOW - 2 * HOUR, Some(NOW - HOUR));
+        fresh.incomplete_reason = Some("ENOSPC while syncing conversation".to_string());
+        let unexplained = launch(
+            "unexplained",
+            "partial",
+            NOW - 200 * HOUR,
+            Some(NOW - 100 * HOUR),
+        );
+
+        let plan = plan_reconcile(&[fresh, unexplained], &[], NOW, false, &present);
+
+        assert!(plan.lost.is_empty(), "{plan:?}");
+        assert!(plan.pruned.is_empty(), "{plan:?}");
+        assert!(plan.interrupted.is_empty(), "{plan:?}");
     }
 
     /// Write an artifact directory under the trace root with no launch row
@@ -1579,7 +1704,8 @@ mod tests {
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
         assert!(plan.recent_missing.is_empty(), "{plan:?}");
-        assert!(plan.finalized.is_empty(), "{plan:?}");
+        assert!(plan.interrupted.is_empty(), "{plan:?}");
+        assert!(plan.lost.is_empty(), "{plan:?}");
     }
 
     fn row(run_id: &str, seq: i64, ts: i64, node: &str, event: &str) -> RunEventRow {

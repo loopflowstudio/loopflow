@@ -2345,7 +2345,6 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -2368,7 +2367,6 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -2468,7 +2466,6 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -3061,7 +3058,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3097,7 +3093,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3142,7 +3137,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3181,7 +3175,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -3202,7 +3195,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };

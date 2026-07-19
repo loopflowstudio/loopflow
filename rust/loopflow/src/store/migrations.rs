@@ -548,6 +548,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "run_owns_execution",
         sql: include_str!("migrations/0.12.3.006_run_owns_execution.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 7,
+        },
+        name: "durable_asks",
+        sql: include_str!("migrations/0.12.3.007_durable_asks.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

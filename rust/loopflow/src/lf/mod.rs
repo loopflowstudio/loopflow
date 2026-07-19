@@ -165,6 +165,12 @@ pub enum Commands {
     },
     /// Open or focus Loopflow.app
     Desktop,
+    /// Ask the current Turn's parent and block until its durable Answer arrives
+    Ask {
+        /// Question text, or `wait [<ask-id>]` to resume an existing exchange
+        #[arg(trailing_var_arg = true, value_name = "QUESTION|wait [ASK_ID]")]
+        args: Vec<String>,
+    },
     /// Authorize global lf promotion against the shared migration frontier
     Install {
         #[command(subcommand)]
@@ -671,6 +677,21 @@ pub enum WorkCommand {
         kind: String,
         id: String,
         message: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List pending Asks routed to the User or this parent Work
+    Asks {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: Option<String>,
+        id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Answer one exact Ask; the first authorized Answer wins
+    Answer {
+        ask_id: crate::durable::AskId,
+        text: String,
         #[arg(long)]
         json: bool,
     },

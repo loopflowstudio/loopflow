@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn interactive_skills_support_human_and_parent_feedback() {
+    fn interactive_skills_include_the_shared_runtime_contract() {
         for name in [
             "design",
             "explore",
@@ -421,8 +421,8 @@ mod tests {
         let flow = get_builtin_flow("build").expect("build flow");
         assert!(flow.contains("- kickoff"));
         assert!(flow.contains("flow: code"));
-        assert!(flow.contains("name: review-design"));
-        assert!(flow.contains("feedback: true"));
+        assert!(!flow.contains("name: review-design"));
+        assert!(!flow.contains("feedback:"));
         assert!(!flow.contains("loop:"));
         assert!(!flow.contains("- gate"));
         assert!(!flow.contains("deploy"));

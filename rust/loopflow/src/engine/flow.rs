@@ -20,8 +20,6 @@ pub struct Skill {
     pub action_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub feedback: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -35,7 +33,6 @@ impl Skill {
             directions: Vec::new(),
             action_style: None,
             interactive: None,
-            feedback: false,
             content: None,
         }
     }
@@ -337,7 +334,6 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
         directions: frontmatter.directions,
         action_style: frontmatter.action_style,
         interactive: frontmatter.interactive,
-        feedback: false,
         content: Some(body),
     })
 }
@@ -757,10 +753,6 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
             let default_agent = parse_optional_string(map, "default_agent");
             let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
-            let feedback = map
-                .get(key("feedback"))
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
             let directions = parse_directions_field(map);
             Ok(Skill {
                 name,
@@ -769,7 +761,6 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
                 directions,
                 action_style,
                 interactive,
-                feedback,
                 content: None,
             })
         }
@@ -1024,7 +1015,6 @@ fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Skill {
     if let Some(interactive) = skill.interactive {
         resolved.interactive = Some(interactive);
     }
-    resolved.feedback = skill.feedback;
 
     resolved
 }
@@ -1482,49 +1472,6 @@ Be careful.
     }
 
     #[test]
-    fn flow_feedback_does_not_leak_from_skill_frontmatter() {
-        let tmp = TempDir::new().unwrap();
-        let skills_dir = tmp.path().join(".lf/skills");
-        fs::create_dir_all(&skills_dir).unwrap();
-        fs::write(
-            skills_dir.join("my-design.md"),
-            "---\ninteractive: true\n---\nDesign it.",
-        )
-        .unwrap();
-
-        let flow = Flow {
-            name: "test-flow".to_string(),
-            items: vec![Step::Skill(Skill::named("my-design"))],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 1);
-        let ConcreteStep::Skill(skill) = &items[0] else {
-            panic!("expected Skill");
-        };
-        assert!(!skill.skill.feedback);
-    }
-
-    #[test]
-    fn builtin_skill_requires_explicit_flow_feedback() {
-        let tmp = TempDir::new().unwrap();
-        let flow = Flow {
-            name: "test-flow".to_string(),
-            items: vec![Step::Skill(Skill::named("design"))],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        let design = items
-            .iter()
-            .find(|item| matches!(item, ConcreteStep::Skill(s) if s.skill.name == "design"));
-        assert!(
-            design.is_some(),
-            "expanded flow should contain a design skill"
-        );
-        if let Some(ConcreteStep::Skill(skill)) = design {
-            assert!(!skill.skill.feedback);
-        }
-    }
-
-    #[test]
     fn load_flow_expands_all_builtin_flows() {
         let tmp = TempDir::new().unwrap();
         for name in crate::engine::builtins::builtin_flow_names() {
@@ -1884,9 +1831,7 @@ Be careful.
         description: "Adjust the chord"
         steps:
           - implement
-          - step:
-              name: review
-              feedback: true
+          - review
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -1900,7 +1845,6 @@ Be careful.
         assert_eq!(tune.steps.len(), 2);
         assert_eq!(tune.steps[0].name, "implement");
         assert_eq!(tune.steps[1].name, "review");
-        assert!(tune.steps[1].feedback);
     }
 
     #[test]

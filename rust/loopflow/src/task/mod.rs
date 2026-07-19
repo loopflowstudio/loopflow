@@ -68,43 +68,9 @@ impl TaskLifecyclePhase {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum FeedbackReviewer {
-    User,
-    Parent,
-}
-
-impl FeedbackReviewer {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Parent => "parent",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid Feedback reviewer: {0}")]
-pub struct FeedbackReviewerParseError(String);
-
-impl FromStr for FeedbackReviewer {
-    type Err = FeedbackReviewerParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "user" => Ok(Self::User),
-            "parent" => Ok(Self::Parent),
-            _ => Err(FeedbackReviewerParseError(value.to_string())),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPhasePlan {
     pub flow: String,
-    pub reviewer: FeedbackReviewer,
 }
 
 impl TaskPhasePlan {
@@ -136,15 +102,12 @@ impl TaskLifecyclePlan {
         Self {
             first: TaskPhasePlan {
                 flow: first_flow.into(),
-                reviewer: FeedbackReviewer::User,
             },
             loop_: TaskPhasePlan {
                 flow: loop_flow.into(),
-                reviewer: FeedbackReviewer::Parent,
             },
             finally: TaskPhasePlan {
                 flow: finally_flow.into(),
-                reviewer: FeedbackReviewer::User,
             },
         }
     }
@@ -152,34 +115,6 @@ impl TaskLifecyclePlan {
     pub fn defaults() -> Self {
         Self::standard("task-design", "slice", "ship")
     }
-
-    pub fn reviewed_by(
-        first_flow: impl Into<String>,
-        loop_flow: impl Into<String>,
-        finally_flow: impl Into<String>,
-        reviewer: FeedbackReviewer,
-    ) -> Self {
-        let mut plan = Self::standard(first_flow, loop_flow, finally_flow);
-        plan.set_reviewer(reviewer);
-        plan
-    }
-
-    pub fn set_reviewer(&mut self, reviewer: FeedbackReviewer) {
-        self.first.reviewer = reviewer;
-        self.loop_.reviewer = reviewer;
-        self.finally.reviewer = reviewer;
-    }
-
-    pub fn all_reviewed_by(&self, reviewer: FeedbackReviewer) -> bool {
-        [
-            self.first.reviewer,
-            self.loop_.reviewer,
-            self.finally.reviewer,
-        ]
-        .into_iter()
-        .all(|phase_reviewer| phase_reviewer == reviewer)
-    }
-
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
         match phase {
             TaskLifecyclePhase::First => &self.first,
@@ -746,7 +681,7 @@ pub struct Task {
     pub project_id: ProjectId,
     pub worktree: PathBuf,
     pub workspace_slug: String,
-    /// Three pinned phase flows and their reviewer-routing policies.
+    /// Three pinned phase flows.
     pub lifecycle: TaskLifecyclePlan,
     /// Current phase entry. `phase_epoch` advances on every transition,
     /// including Finally → Loop, so stale bodies cannot rewind the Task.

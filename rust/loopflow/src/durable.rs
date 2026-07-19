@@ -86,6 +86,7 @@ durable_id!(EpochId, "epoch_");
 durable_id!(RunId, "run_");
 durable_id!(AgentInvocationId, "invocation_");
 durable_id!(TurnId, "turn_");
+durable_id!(AskId, "ask_");
 durable_id!(WaitId, "wait_");
 durable_id!(HomeId, "home_");
 durable_id!(SteerId, "steer_");
@@ -436,6 +437,33 @@ pub struct Turn {
     pub ended_at: Option<OffsetDateTime>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "work", rename_all = "snake_case")]
+pub enum AnswerRoute {
+    User,
+    Parent(WorkRef),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Answer {
+    pub ask_id: AskId,
+    pub author: Author,
+    pub text: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub answered_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskExchange {
+    pub id: AskId,
+    pub turn_id: TurnId,
+    pub route: AnswerRoute,
+    pub question: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub asked_at: OffsetDateTime,
+    pub answer: Option<Answer>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunAdvance {
     RunStarting {
@@ -715,70 +743,8 @@ pub struct FlowPosition {
     pub step: String,
     pub step_index: u32,
     pub iteration: u32,
-    pub feedback: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "work", rename_all = "snake_case")]
-pub enum AttentionRoute {
-    User,
-    Parent(WorkRef),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Feedback {
-    pub work: WorkRef,
-    pub invocation_id: AgentInvocationId,
-    pub basis: Basis,
-    pub position: FlowPosition,
-    /// Stable route for the entire Feedback step.
-    pub attention: AttentionRoute,
-    #[serde(with = "time::serde::rfc3339")]
-    pub opened_at: OffsetDateTime,
-    /// The current unanswered child Turn; absent while the child is acting.
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub attention_at: Option<OffsetDateTime>,
-}
-
-/// Oldest-first parent control input reconstructed from durable child facts.
-///
-/// This is a query result, not an inbox row. If delivery races a boundary the
-/// parent can render the same projection again from the child Feedback.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChildFeedback {
-    pub feedback: Feedback,
-    pub latest_output: Option<String>,
-    pub evidence: serde_json::Value,
-}
-
-/// User-facing Feedback reconstructed from current durable Work facts.
-///
-/// This is a query result, not a second lifecycle model or a queue row.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UserFeedback {
-    pub feedback: Feedback,
-    pub surface: InvocationSurface,
-    pub latest_output: Option<String>,
-    pub evidence: serde_json::Value,
-}
-
-impl ChildFeedback {
-    pub fn render(&self) -> String {
-        let kind = self.feedback.work.kind();
-        let id = self.feedback.work.id();
-        let facts =
-            serde_json::to_string_pretty(self).expect("Child Feedback facts must serialize");
-        format!(
-            "<lf:child-feedback work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
-             Service this child before background parent work. Use \
-             `lf work steer {kind} {id} \"<response>\"` to continue or \
-             `lf work continue {kind} {id}` to continue the flow. Delivery alone does not clear attention.\n\n\
-             Durable child output and current evidence:\n{facts}\n</lf:child-feedback>",
-            self.feedback.basis.epoch_id, self.feedback.basis.revision,
-        )
-    }
 }
 
 /// The generic surface for reopening an opaque or provider-backed Invocation.
@@ -790,9 +756,6 @@ pub struct InvocationSurface {
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub home_route: String,
-    pub attention: Option<AttentionRoute>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub attention_at: Option<OffsetDateTime>,
     pub handback: Option<BoundaryState>,
     pub attach_argv: Option<Vec<String>>,
 }

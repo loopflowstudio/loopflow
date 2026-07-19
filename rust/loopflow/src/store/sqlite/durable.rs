@@ -3,13 +3,13 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AgentInvocation, AgentInvocationId, AttentionRoute, Author, Basis,
-    BoundarySeed, BoundaryState, ChildFeedback, Containment, ContainmentObservation, DoneProposal,
-    DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState, Feedback, FlowPosition, Home, HomeId,
+    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AnswerRoute, AskExchange, AskId,
+    Author, Basis, BoundarySeed, BoundaryState, Containment, ContainmentObservation, DoneProposal,
+    DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState, FlowPosition, Home, HomeId,
     InterruptReceipt, InvocationRoute, InvocationSurface, Placement, ProjectId, Run, RunAdvance,
     RunId, RunLease, RunLeaseToken, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer,
     SteerId, SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, Turn, TurnId, UserFeedback, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
+    ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project::Project;
@@ -196,9 +196,7 @@ impl SqliteStore {
             "UPDATE agent_invocations
              SET ended_at=COALESCE(ended_at, ?2),
                  outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
-                 handback_state=COALESCE(handback_state, 'unknown'),
-                 attention_kind=NULL, attention_work_kind=NULL,
-                 attention_work_id=NULL, attention_at=NULL
+                 handback_state=COALESCE(handback_state, 'unknown')
              WHERE supervising_run_id=?1 AND ended_at IS NULL",
             params![prior.id.as_str(), now],
         )?;
@@ -379,9 +377,7 @@ impl SqliteStore {
                 let now = now_unix();
                 tx.execute(
                     "UPDATE agent_invocations
-                     SET ended_at=COALESCE(ended_at, ?2), outcome=?3, handback_state=?4,
-                         attention_kind=NULL, attention_work_kind=NULL,
-                         attention_work_id=NULL, attention_at=NULL
+                     SET ended_at=COALESCE(ended_at, ?2), outcome=?3, handback_state=?4
                      WHERE id=?1 AND ended_at IS NULL",
                     params![
                         invocation_id.as_str(),
@@ -461,9 +457,7 @@ impl SqliteStore {
                      WHERE id=?1 AND status='running'",
                     params![turn_id.as_str(), outcome.as_turn_status(), now_unix()],
                 )?;
-                if ended == 1 {
-                    rearm_feedback_attention(&tx, turn_id)?;
-                }
+                let _ = ended;
                 AdvanceReceipt::Turn(control_turn_in(&tx, turn_id)?)
             }
             RunAdvance::Wait { on } => {
@@ -529,9 +523,7 @@ impl SqliteStore {
                     "UPDATE agent_invocations
                      SET ended_at=COALESCE(ended_at, ?2),
                          outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
-                         handback_state=COALESCE(handback_state, 'unknown'),
-                         attention_kind=NULL, attention_work_kind=NULL,
-                         attention_work_id=NULL, attention_at=NULL
+                         handback_state=COALESCE(handback_state, 'unknown')
                      WHERE supervising_run_id=?1 AND ended_at IS NULL",
                     params![run.id.as_str(), now],
                 )?;
@@ -617,11 +609,11 @@ impl SqliteStore {
         }
         tx.execute(
             "INSERT INTO work_flow_positions (
-                epoch_id, flow, step, step_index, iteration, interactive, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                epoch_id, flow, step, step_index, iteration, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(epoch_id) DO UPDATE SET
                 flow=excluded.flow, step=excluded.step, step_index=excluded.step_index,
-                iteration=excluded.iteration, interactive=excluded.interactive,
+                iteration=excluded.iteration,
                 updated_at=excluded.updated_at",
             params![
                 position.epoch_id.as_str(),
@@ -629,7 +621,6 @@ impl SqliteStore {
                 position.step,
                 i64::from(position.step_index),
                 i64::from(position.iteration),
-                position.feedback,
                 position.updated_at.unix_timestamp(),
             ],
         )?;
@@ -637,73 +628,165 @@ impl SqliteStore {
         Ok(position.clone())
     }
 
-    pub fn route_feedback(
+    pub fn open_ask(
         &self,
         lease: &RunLease,
         invocation_id: &AgentInvocationId,
-        attention: &AttentionRoute,
-    ) -> StoreResult<Feedback> {
+        question: &str,
+    ) -> StoreResult<AskExchange> {
+        let question = question.trim();
+        if question.is_empty() {
+            return Err(StoreError::InvalidData(
+                "Ask question cannot be empty".to_string(),
+            ));
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let run = validate_run_lease(&tx, lease)?;
         require_open_invocation_for_run(&tx, invocation_id, &run.id)?;
-        let position = flow_position_in(&tx, &run.work, &run.epoch_id)?;
-        if !position.feedback {
-            return Err(StoreError::InvalidData(
-                "current flow step is not interactive".to_string(),
-            ));
+        let turn_id = current_turn_for_invocation_in(&tx, invocation_id)?;
+        if let Some(existing) = pending_ask_for_turn_in(&tx, &turn_id)? {
+            if existing.question == question {
+                tx.commit()?;
+                return Ok(existing);
+            }
+            return Err(StoreError::InvalidData(format!(
+                "Turn {turn_id} already has an unanswered Ask"
+            )));
         }
-        validate_attention_route(&tx, &run.work, attention)?;
-        let (attention_kind, attention_work_kind, attention_work_id) = match attention {
-            AttentionRoute::User => ("user", None, None),
-            AttentionRoute::Parent(work) => ("parent", Some(work.kind()), Some(work.id())),
-        };
-        let existing = tx.query_row(
-            "SELECT attention_kind, attention_work_kind, attention_work_id
-             FROM agent_invocations WHERE id=?1",
-            [invocation_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )?;
-        match existing {
-            (None, None, None) => {
-                tx.execute(
-                    "UPDATE agent_invocations SET
-                        attention_kind=?2, attention_work_kind=?3,
-                        attention_work_id=?4, attention_at=?5
-                     WHERE id=?1 AND ended_at IS NULL AND attention_kind IS NULL",
-                    params![
-                        invocation_id.as_str(),
-                        attention_kind,
-                        attention_work_kind,
-                        attention_work_id,
-                        now_unix(),
-                    ],
+        let route = match parent_work(&tx, &run.work)? {
+            Some(parent) => AnswerRoute::Parent(parent),
+            None => {
+                let surface: String = tx.query_row(
+                    "SELECT surface FROM agent_invocations WHERE id=?1",
+                    [invocation_id.as_str()],
+                    |row| row.get(0),
                 )?;
+                if surface == "headless" {
+                    return Err(StoreError::InvalidData(format!(
+                        "headless root {} {} has no parent or User answer route",
+                        run.work.kind(),
+                        run.work.id()
+                    )));
+                }
+                AnswerRoute::User
             }
-            (Some(kind), work_kind, work_id)
-                if kind == attention_kind
-                    && work_kind.as_deref() == attention_work_kind
-                    && work_id.as_deref() == attention_work_id => {}
-            _ => {
-                return Err(StoreError::InvalidData(
-                    "Feedback attention route cannot change during a Feedback step".to_string(),
-                ));
-            }
-        }
-        let feedback = feedback_in(&tx, &run.work)?.ok_or(StoreError::NotFound)?;
+        };
+        let asked_at = OffsetDateTime::from_unix_timestamp(now_unix()).map_err(invalid_durable)?;
+        let ask = AskExchange {
+            id: AskId::new(),
+            turn_id,
+            route,
+            question: question.to_string(),
+            asked_at,
+            answer: None,
+        };
+        insert_ask(&tx, &ask)?;
         tx.commit()?;
-        Ok(feedback)
+        Ok(ask)
     }
 
-    pub fn feedback(&self, work: &WorkRef) -> StoreResult<Option<Feedback>> {
+    pub fn current_ask(
+        &self,
+        lease: &RunLease,
+        invocation_id: &AgentInvocationId,
+        ask_id: Option<&AskId>,
+    ) -> StoreResult<AskExchange> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        feedback_in(&conn, work)
+        let run = validate_run_lease(&conn, lease)?;
+        require_invocation_for_run(&conn, invocation_id, &run.id)?;
+        let turn_id = current_or_latest_turn_for_invocation_in(&conn, invocation_id)?;
+        let ask = match ask_id {
+            Some(ask_id) => ask_by_id_in(&conn, ask_id)?,
+            None => latest_ask_for_turn_in(&conn, &turn_id)?.ok_or(StoreError::NotFound)?,
+        };
+        if ask.turn_id != turn_id {
+            return Err(StoreError::InvalidAuthority(
+                "Ask does not belong to the current Turn".to_string(),
+            ));
+        }
+        Ok(ask)
+    }
+
+    pub fn answer_ask(
+        &self,
+        caller: Option<&RunLease>,
+        ask_id: &AskId,
+        text: &str,
+    ) -> StoreResult<Answer> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(StoreError::InvalidData(
+                "Ask answer cannot be empty".to_string(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let ask = ask_by_id_in(&tx, ask_id)?;
+        validate_answer_caller(&tx, caller, &ask.route)?;
+        if let Some(answer) = ask.answer {
+            if answer.text == text {
+                tx.commit()?;
+                return Ok(answer);
+            }
+            return Err(StoreError::InvalidAuthority(format!(
+                "Ask {ask_id} was already answered"
+            )));
+        }
+        if !ask_is_answerable_in(&tx, ask_id)? {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Ask {ask_id} is no longer answerable"
+            )));
+        }
+        let (author, author_kind, author_id) = match caller {
+            None => (Author::User, "user", None),
+            Some(lease) => (
+                Author::Run(lease.run_id.clone()),
+                "run",
+                Some(lease.run_id.as_str()),
+            ),
+        };
+        let answered_at =
+            OffsetDateTime::from_unix_timestamp(now_unix()).map_err(invalid_durable)?;
+        if tx.execute(
+            "UPDATE ask_exchanges SET answer_author_kind=?2, answer_author_id=?3,
+                 answer_text=?4, answered_at=?5
+             WHERE id=?1 AND answered_at IS NULL",
+            params![
+                ask_id.as_str(),
+                author_kind,
+                author_id,
+                text,
+                answered_at.unix_timestamp(),
+            ],
+        )? == 0
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Ask {ask_id} was answered concurrently"
+            )));
+        }
+        let answer = Answer {
+            ask_id: ask_id.clone(),
+            author,
+            text: text.to_string(),
+            answered_at,
+        };
+        tx.commit()?;
+        Ok(answer)
+    }
+
+    pub fn pending_asks_for_parent(&self, parent: &WorkRef) -> StoreResult<Vec<AskExchange>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        query_answerable_asks(
+            &conn,
+            "a.route_kind='parent' AND a.route_work_kind=?1 AND a.route_work_id=?2",
+            params![parent.kind(), parent.id()],
+        )
+    }
+
+    pub fn pending_user_asks(&self) -> StoreResult<Vec<AskExchange>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        query_answerable_asks(&conn, "a.route_kind='user'", [])
     }
 
     pub fn invocation_surface(
@@ -780,9 +863,7 @@ impl SqliteStore {
                     "UPDATE agent_invocations
                      SET ended_at=COALESCE(ended_at, ?2),
                          outcome=CASE WHEN outcome='running' THEN 'failed' ELSE outcome END,
-                         handback_state=COALESCE(handback_state, 'unknown'),
-                         attention_kind=NULL, attention_work_kind=NULL,
-                         attention_work_id=NULL, attention_at=NULL
+                         handback_state=COALESCE(handback_state, 'unknown')
                      WHERE supervising_run_id=?1 AND ended_at IS NULL",
                     params![run_id.as_str(), now],
                 )?;
@@ -892,9 +973,7 @@ impl SqliteStore {
         if tx.execute(
             "UPDATE agent_invocations
              SET ended_at=COALESCE(ended_at, ?2),
-                 outcome=?3, handback_state=?4,
-                 attention_kind=NULL, attention_work_kind=NULL,
-                 attention_work_id=NULL, attention_at=NULL
+                 outcome=?3, handback_state=?4
              WHERE id=?1 AND supervising_run_id IS NOT NULL AND ended_at IS NULL",
             params![
                 invocation_id.as_str(),
@@ -909,95 +988,6 @@ impl SqliteStore {
         let surface = invocation_surface_in(&tx, invocation_id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(surface)
-    }
-
-    pub fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildFeedback>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT e.wave_id, e.project_id, e.task_id
-             FROM agent_invocations l
-             JOIN runs r ON r.id=l.supervising_run_id
-             JOIN epochs e ON e.id=r.epoch_id
-             WHERE l.ended_at IS NULL AND r.state='active' AND l.attention_kind='parent'
-               AND l.attention_work_kind=?1 AND l.attention_work_id=?2
-               AND l.attention_at IS NOT NULL
-             ORDER BY l.attention_at, l.id",
-        )?;
-        let rows = statement.query_map(params![parent.kind(), parent.id()], |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?;
-        let mut items = Vec::new();
-        for row in rows {
-            let work = work_from_parts(row?)?;
-            if let Some(feedback) = feedback_in(&conn, &work)? {
-                let (latest_output, evidence) = feedback_context_in(&conn, &feedback, &work)?;
-                items.push(ChildFeedback {
-                    feedback,
-                    latest_output,
-                    evidence,
-                });
-            }
-        }
-        Ok(items)
-    }
-
-    pub fn user_attention(&self) -> StoreResult<Vec<UserFeedback>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT e.wave_id, e.project_id, e.task_id
-             FROM agent_invocations l
-             JOIN runs r ON r.id=l.supervising_run_id
-             JOIN epochs e ON e.id=r.epoch_id
-             WHERE l.ended_at IS NULL AND r.state='active' AND l.attention_kind='user'
-             ORDER BY l.attention_at, l.id",
-        )?;
-        let rows = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, Option<String>>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-            ))
-        })?;
-        let mut items = Vec::new();
-        for row in rows {
-            let work = work_from_parts(row?)?;
-            if let Some(feedback) = feedback_in(&conn, &work)? {
-                if feedback.attention != AttentionRoute::User {
-                    continue;
-                }
-                let surface = invocation_surface_in(&conn, &feedback.invocation_id)?
-                    .ok_or(StoreError::NotFound)?;
-                let (latest_output, evidence) = feedback_context_in(&conn, &feedback, &work)?;
-                items.push(UserFeedback {
-                    feedback,
-                    surface,
-                    latest_output,
-                    evidence,
-                });
-            }
-        }
-        Ok(items)
-    }
-
-    pub fn continue_feedback(
-        &self,
-        caller: Option<&RunLease>,
-        work: &WorkRef,
-        if_basis: &Basis,
-    ) -> StoreResult<WorkStatus> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let feedback = feedback_in(&tx, work)?.ok_or(StoreError::NotFound)?;
-        validate_basis(&feedback.basis, if_basis)?;
-        validate_feedback_caller(&tx, caller, &feedback)?;
-        advance_feedback_in(&tx, &feedback)?;
-        let status = work_status_in(&tx, work)?;
-        tx.commit()?;
-        Ok(status)
     }
 
     pub fn interrupt(
@@ -1081,22 +1071,22 @@ impl SqliteStore {
                 "Run has an open Invocation".to_string(),
             ));
         }
-        let child_feedback_open: bool = tx.query_row(
+        let child_ask_open: bool = tx.query_row(
             "SELECT EXISTS(
-                SELECT 1 FROM agent_invocations l
-                JOIN runs child_run ON child_run.id=l.supervising_run_id
-                JOIN epochs child_epoch ON child_epoch.id=child_run.epoch_id
-                JOIN work_flow_positions position ON position.epoch_id=child_epoch.id
-                WHERE l.ended_at IS NULL AND child_run.state='active'
-                  AND position.interactive=1 AND l.attention_kind='parent'
-                  AND l.attention_work_kind=?1 AND l.attention_work_id=?2
+                SELECT 1 FROM ask_exchanges a
+                JOIN agent_turns t ON t.id=a.turn_id
+                JOIN epochs child_epoch ON child_epoch.id=t.epoch_id
+                WHERE a.answered_at IS NULL AND child_epoch.state='open'
+                  AND t.status NOT IN ('completed', 'interrupted')
+                  AND a.route_kind='parent' AND a.route_work_kind=?1
+                  AND a.route_work_id=?2
              )",
             params![run.work.kind(), run.work.id()],
             |row| row.get(0),
         )?;
-        if child_feedback_open {
+        if child_ask_open {
             return Err(StoreError::InvalidData(
-                "Run cannot complete while a child Feedback is open".to_string(),
+                "Run cannot complete while a child Ask is unanswered".to_string(),
             ));
         }
         let proposal = DoneProposal {
@@ -1158,12 +1148,6 @@ impl SqliteStore {
         tx.execute(
             "UPDATE epochs SET state='abandoned', terminal_at=?2 WHERE id=?1 AND state='open'",
             params![epoch.id.as_str(), now],
-        )?;
-        tx.execute(
-            "UPDATE agent_invocations SET attention_kind=NULL, attention_work_kind=NULL,
-                attention_work_id=NULL, attention_at=NULL
-             WHERE supervising_run_id IN (SELECT id FROM runs WHERE epoch_id=?1)",
-            [epoch.id.as_str()],
         )?;
         epoch.state = EpochState::Abandoned;
         epoch.terminal_at = Some(
@@ -1260,7 +1244,6 @@ impl SqliteStore {
         validate_control_caller(&tx, caller, work)?;
         let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
         let receipt = Self::append_steer_in(&tx, work, &author, text)?;
-        clear_answered_attention(&tx, caller, work)?;
         tx.commit()?;
         Ok(receipt)
     }
@@ -2026,8 +2009,7 @@ fn invocation_surface_in(
     let row = conn
         .query_row(
             "SELECT r.id, e.wave_id, e.project_id, e.task_id, h.route,
-                    l.attention_kind, l.attention_work_kind, l.attention_work_id,
-                    l.attention_at, l.handback_state
+                    l.handback_state
              FROM agent_invocations l
              JOIN runs r ON r.id=l.supervising_run_id
              JOIN epochs e ON e.id=r.epoch_id
@@ -2042,10 +2024,6 @@ fn invocation_surface_in(
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
@@ -2054,25 +2032,8 @@ fn invocation_surface_in(
         return Ok(None);
     };
     let work = work_from_parts((row.1, row.2, row.3))?;
-    let attention = match (row.5.as_deref(), row.6, row.7) {
-        (None, None, None) => None,
-        (Some("user"), None, None) => Some(AttentionRoute::User),
-        (Some("parent"), Some(kind), Some(id)) => {
-            Some(AttentionRoute::Parent(parse_work_ref(&kind, &id)?))
-        }
-        _ => {
-            return Err(StoreError::InvalidData(
-                "stored Invocation attention route is inconsistent".to_string(),
-            ))
-        }
-    };
-    let attention_at = row
-        .8
-        .map(OffsetDateTime::from_unix_timestamp)
-        .transpose()
-        .map_err(invalid_durable)?;
     let handback = row
-        .9
+        .5
         .as_deref()
         .map(BoundaryState::parse_handback)
         .transpose()
@@ -2116,8 +2077,6 @@ fn invocation_surface_in(
         work,
         wave_id,
         home_route: row.4,
-        attention,
-        attention_at,
         handback,
         attach_argv,
     }))
@@ -2189,7 +2148,7 @@ fn flow_position_in(
     epoch_id: &EpochId,
 ) -> StoreResult<FlowPosition> {
     conn.query_row(
-        "SELECT flow, step, step_index, iteration, interactive, updated_at
+        "SELECT flow, step, step_index, iteration, updated_at
          FROM work_flow_positions WHERE epoch_id=?1",
         [epoch_id.as_str()],
         |row| {
@@ -2198,8 +2157,7 @@ fn flow_position_in(
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, bool>(4)?,
-                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(4)?,
             ))
         },
     )
@@ -2212,26 +2170,9 @@ fn flow_position_in(
             step: row.1,
             step_index: row.2 as u32,
             iteration: row.3 as u32,
-            feedback: row.4,
-            updated_at: OffsetDateTime::from_unix_timestamp(row.5).map_err(invalid_durable)?,
+            updated_at: OffsetDateTime::from_unix_timestamp(row.4).map_err(invalid_durable)?,
         })
     })
-}
-
-fn validate_attention_route(
-    conn: &Connection,
-    work: &WorkRef,
-    attention: &AttentionRoute,
-) -> StoreResult<()> {
-    match attention {
-        AttentionRoute::User => Ok(()),
-        AttentionRoute::Parent(parent) if parent_work(conn, work)?.as_ref() == Some(parent) => {
-            Ok(())
-        }
-        AttentionRoute::Parent(_) => Err(StoreError::InvalidAuthority(
-            "attention may route only to immediate parent Work".to_string(),
-        )),
-    }
 }
 
 fn parent_work(conn: &Connection, work: &WorkRef) -> StoreResult<Option<WorkRef>> {
@@ -2260,229 +2201,251 @@ fn parent_work(conn: &Connection, work: &WorkRef) -> StoreResult<Option<WorkRef>
     }
 }
 
-fn feedback_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Feedback>> {
-    let Ok(epoch) = current_epoch_in(conn, work) else {
-        return Ok(None);
-    };
-    let row = conn
-        .query_row(
-            "SELECT l.id, l.attention_kind, l.attention_work_kind,
-                    l.attention_work_id, l.started_at, l.attention_at
-             FROM runs r JOIN agent_invocations l ON l.supervising_run_id=r.id
-             WHERE r.epoch_id=?1 AND r.state='active' AND l.ended_at IS NULL
-               AND l.attention_kind IS NOT NULL
-             ORDER BY l.started_at LIMIT 1",
-            [epoch.id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((invocation_id, kind, parent_kind, parent_id, opened_at, attention_at)) = row else {
-        return Ok(None);
-    };
-    let position = flow_position_in(conn, work, &epoch.id)?;
-    if !position.feedback {
-        return Ok(None);
-    }
-    let attention = match (kind.as_str(), parent_kind, parent_id) {
-        ("user", None, None) => AttentionRoute::User,
-        ("parent", Some(kind), Some(id)) => AttentionRoute::Parent(parse_work_ref(&kind, &id)?),
-        _ => {
-            return Err(StoreError::InvalidData(
-                "stored attention route is inconsistent".to_string(),
-            ))
-        }
-    };
-    Ok(Some(Feedback {
-        work: work.clone(),
-        invocation_id: AgentInvocationId::parse(&invocation_id).map_err(invalid_durable)?,
-        basis: epoch.current_basis,
-        position,
-        attention,
-        opened_at: OffsetDateTime::from_unix_timestamp(opened_at).map_err(invalid_durable)?,
-        attention_at: attention_at
-            .map(OffsetDateTime::from_unix_timestamp)
-            .transpose()
-            .map_err(invalid_durable)?,
-    }))
-}
-
-fn clear_answered_attention(
-    tx: &Transaction<'_>,
-    caller: Option<&RunLease>,
-    work: &WorkRef,
-) -> StoreResult<()> {
-    let Some(feedback) = feedback_in(tx, work)? else {
-        return Ok(());
-    };
-    if feedback.attention_at.is_none() || validate_feedback_caller(tx, caller, &feedback).is_err() {
-        return Ok(());
-    }
-    tx.execute(
-        "UPDATE agent_invocations SET attention_at=NULL
-         WHERE id=?1 AND attention_at=?2",
-        params![
-            feedback.invocation_id.as_str(),
-            feedback
-                .attention_at
-                .expect("pending Feedback has an attention timestamp")
-                .unix_timestamp(),
-        ],
-    )?;
-    Ok(())
-}
-
-pub(super) fn rearm_feedback_attention(tx: &Transaction<'_>, turn_id: &TurnId) -> StoreResult<()> {
-    let route = tx
-        .query_row(
-            "SELECT l.id, l.attention_kind, l.attention_work_kind, l.attention_work_id
-             FROM agent_turns turn
-             JOIN agent_invocations l ON l.id=turn.invocation_id
-             JOIN work_flow_positions position ON position.epoch_id=turn.epoch_id
-             WHERE turn.id=?1 AND l.ended_at IS NULL AND position.interactive=1
-               AND l.attention_kind IS NOT NULL AND l.attention_at IS NULL",
-            [turn_id.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((invocation_id, kind, parent_kind, parent_id)) = route else {
-        return Ok(());
-    };
-    let now = now_unix();
-    if tx.execute(
-        "UPDATE agent_invocations SET attention_at=?2
-         WHERE id=?1 AND attention_kind IS NOT NULL AND attention_at IS NULL",
-        params![invocation_id, now],
-    )? == 0
-    {
-        return Ok(());
-    }
-    let parent = match (kind.as_str(), parent_kind, parent_id) {
-        ("user", None, None) => return Ok(()),
-        ("parent", Some(kind), Some(id)) => parse_work_ref(&kind, &id)?,
-        _ => {
-            return Err(StoreError::InvalidData(
-                "stored attention route is inconsistent".to_string(),
-            ))
-        }
-    };
-    let parent_epoch = current_epoch_in(tx, &parent)?;
-    let revision = parent_epoch.current_basis.revision + 1;
-    let inserted = tx.execute(
-        "INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
-         VALUES (?1, ?2, 'evidence', ?3, ?4)
-         ON CONFLICT(kind, source_id) DO NOTHING",
-        params![
-            parent_epoch.id.as_str(),
-            revision as i64,
-            turn_id.as_str(),
-            now,
-        ],
-    )?;
-    if inserted == 1 {
-        tx.execute(
-            "UPDATE epochs SET current_rev=?2 WHERE id=?1 AND state='open'",
-            params![parent_epoch.id.as_str(), revision as i64],
-        )?;
-    }
-    Ok(())
-}
-
-fn feedback_context_in(
+fn current_turn_for_invocation_in(
     conn: &Connection,
-    feedback: &Feedback,
-    work: &WorkRef,
-) -> StoreResult<(Option<String>, serde_json::Value)> {
-    let latest_output = conn
+    invocation_id: &AgentInvocationId,
+) -> StoreResult<TurnId> {
+    let id = conn
         .query_row(
-            "SELECT root_output FROM agent_turns
-             WHERE invocation_id=?1 AND root_output IS NOT NULL
+            "SELECT id FROM agent_turns
+             WHERE invocation_id=?1 AND status='running'
              ORDER BY ordinal DESC LIMIT 1",
-            [feedback.invocation_id.as_str()],
+            [invocation_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            StoreError::InvalidAuthority(format!(
+                "AgentInvocation {invocation_id} has no active Turn"
+            ))
+        })?;
+    TurnId::parse(&id).map_err(invalid_durable)
+}
+
+fn current_or_latest_turn_for_invocation_in(
+    conn: &Connection,
+    invocation_id: &AgentInvocationId,
+) -> StoreResult<TurnId> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM agent_turns WHERE invocation_id=?1
+             ORDER BY (status='running') DESC, ordinal DESC LIMIT 1",
+            [invocation_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
+    TurnId::parse(&id).map_err(invalid_durable)
+}
+
+fn insert_ask(conn: &Connection, ask: &AskExchange) -> StoreResult<()> {
+    let (route_kind, route_work_kind, route_work_id) = match &ask.route {
+        AnswerRoute::User => ("user", None, None),
+        AnswerRoute::Parent(work) => ("parent", Some(work.kind()), Some(work.id())),
+    };
+    conn.execute(
+        "INSERT INTO ask_exchanges (
+            id, turn_id, route_kind, route_work_kind, route_work_id,
+            question, asked_at, answer_author_kind, answer_author_id,
+            answer_text, answered_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, NULL, NULL)",
+        params![
+            ask.id.as_str(),
+            ask.turn_id.as_str(),
+            route_kind,
+            route_work_kind,
+            route_work_id,
+            ask.question,
+            ask.asked_at.unix_timestamp(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(super) fn ask_by_id_in(conn: &Connection, ask_id: &AskId) -> StoreResult<AskExchange> {
+    conn.query_row(
+        "SELECT turn_id, route_kind, route_work_kind, route_work_id,
+                question, asked_at, answer_author_kind, answer_author_id,
+                answer_text, answered_at
+         FROM ask_exchanges WHERE id=?1",
+        [ask_id.as_str()],
+        |row| {
+            map_ask_row(
+                ask_id.clone(),
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+            )
+            .map_err(to_sqlite_conversion_error)
+        },
+    )
+    .map_err(StoreError::from)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn map_ask_row(
+    id: AskId,
+    turn_id: String,
+    route_kind: String,
+    route_work_kind: Option<String>,
+    route_work_id: Option<String>,
+    question: String,
+    asked_at: i64,
+    answer_author_kind: Option<String>,
+    answer_author_id: Option<String>,
+    answer_text: Option<String>,
+    answered_at: Option<i64>,
+) -> StoreResult<AskExchange> {
+    let route = match (route_kind.as_str(), route_work_kind, route_work_id) {
+        ("user", None, None) => AnswerRoute::User,
+        ("parent", Some(kind), Some(id)) => AnswerRoute::Parent(parse_work_ref(&kind, &id)?),
+        _ => {
+            return Err(StoreError::InvalidData(
+                "stored Ask route is inconsistent".to_string(),
+            ))
+        }
+    };
+    let answer = match (
+        answer_author_kind.as_deref(),
+        answer_author_id,
+        answer_text,
+        answered_at,
+    ) {
+        (None, None, None, None) => None,
+        (Some("user"), None, Some(text), Some(answered_at)) => Some(Answer {
+            ask_id: id.clone(),
+            author: Author::User,
+            text,
+            answered_at: OffsetDateTime::from_unix_timestamp(answered_at)
+                .map_err(invalid_durable)?,
+        }),
+        (Some("run"), Some(run_id), Some(text), Some(answered_at)) => Some(Answer {
+            ask_id: id.clone(),
+            author: Author::Run(RunId::parse(&run_id).map_err(invalid_durable)?),
+            text,
+            answered_at: OffsetDateTime::from_unix_timestamp(answered_at)
+                .map_err(invalid_durable)?,
+        }),
+        _ => {
+            return Err(StoreError::InvalidData(
+                "stored Ask answer is inconsistent".to_string(),
+            ))
+        }
+    };
+    Ok(AskExchange {
+        id,
+        turn_id: TurnId::parse(&turn_id).map_err(invalid_durable)?,
+        route,
+        question,
+        asked_at: OffsetDateTime::from_unix_timestamp(asked_at).map_err(invalid_durable)?,
+        answer,
+    })
+}
+
+fn pending_ask_for_turn_in(
+    conn: &Connection,
+    turn_id: &TurnId,
+) -> StoreResult<Option<AskExchange>> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM ask_exchanges WHERE turn_id=?1 AND answered_at IS NULL",
+            [turn_id.as_str()],
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    let evidence_json: String = conn.query_row(
-        "SELECT wt.payload_json FROM work_truth wt
-         WHERE wt.epoch_id=?1 ORDER BY wt.rev DESC LIMIT 1",
-        [feedback.basis.epoch_id.as_str()],
-        |row| row.get(0),
-    )?;
-    let status = work_status_in(conn, work)?;
-    let evidence = serde_json::json!({
-        "work": serde_json::from_str::<serde_json::Value>(&evidence_json)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-        "status": status,
-    });
-    Ok((latest_output, evidence))
+    id.map(|id| AskId::parse(&id).map_err(invalid_durable))
+        .transpose()?
+        .map(|id| ask_by_id_in(conn, &id))
+        .transpose()
 }
 
-fn advance_feedback_in(tx: &Transaction<'_>, feedback: &Feedback) -> StoreResult<()> {
-    if tx.execute(
-        "UPDATE work_flow_positions
-         SET step_index=step_index+1, interactive=0, updated_at=?2
-         WHERE epoch_id=?1 AND flow=?3 AND step=?4 AND step_index=?5 AND interactive=1",
-        params![
-            feedback.position.epoch_id.as_str(),
-            now_unix(),
-            feedback.position.flow.as_str(),
-            feedback.position.step.as_str(),
-            i64::from(feedback.position.step_index),
-        ],
-    )? == 0
-    {
-        return Err(StoreError::InvalidAuthority(
-            "Feedback flow position changed before continuation".to_string(),
-        ));
-    }
-    // The route outlives a cleared `attention_at`: a parent Steer answers the
-    // pending turn without closing the Feedback. Continuation clears the route
-    // itself; the flow-position fence above is what rejects a stale caller.
-    tx.execute(
-        "UPDATE agent_invocations SET attention_kind=NULL, attention_work_kind=NULL,
-            attention_work_id=NULL, attention_at=NULL
-         WHERE id=?1 AND attention_kind IS NOT NULL",
-        [feedback.invocation_id.as_str()],
-    )?;
-    Ok(())
+fn latest_ask_for_turn_in(
+    conn: &Connection,
+    turn_id: &TurnId,
+) -> StoreResult<Option<AskExchange>> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM ask_exchanges WHERE turn_id=?1
+             ORDER BY asked_at DESC, rowid DESC LIMIT 1",
+            [turn_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    id.map(|id| AskId::parse(&id).map_err(invalid_durable))
+        .transpose()?
+        .map(|id| ask_by_id_in(conn, &id))
+        .transpose()
 }
 
-fn validate_feedback_caller(
+fn validate_answer_caller(
     conn: &Connection,
     caller: Option<&RunLease>,
-    feedback: &Feedback,
+    route: &AnswerRoute,
 ) -> StoreResult<()> {
-    match (&feedback.attention, caller) {
-        (AttentionRoute::User, None) => Ok(()),
-        (AttentionRoute::Parent(parent), Some(lease)) => {
+    match (route, caller) {
+        (AnswerRoute::User, None) => Ok(()),
+        (AnswerRoute::Parent(parent), Some(lease)) => {
             let run = validate_run_lease(conn, lease)?;
             if &run.work == parent {
                 Ok(())
             } else {
                 Err(StoreError::InvalidAuthority(
-                    "Run does not own this child attention route".to_string(),
+                    "Run does not own this Ask answer route".to_string(),
                 ))
             }
         }
         _ => Err(StoreError::InvalidAuthority(
-            "caller does not own this attention route".to_string(),
+            "caller does not own this Ask answer route".to_string(),
         )),
     }
+}
+
+fn ask_is_answerable_in(conn: &Connection, ask_id: &AskId) -> StoreResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM ask_exchanges a
+            JOIN agent_turns t ON t.id=a.turn_id
+            JOIN epochs e ON e.id=t.epoch_id
+            WHERE a.id=?1 AND a.answered_at IS NULL AND e.state='open'
+              AND t.status NOT IN ('completed', 'interrupted')
+         )",
+        [ask_id.as_str()],
+        |row| row.get(0),
+    )
+    .map_err(StoreError::from)
+}
+
+fn query_answerable_asks(
+    conn: &Connection,
+    route_predicate: &str,
+    parameters: impl rusqlite::Params,
+) -> StoreResult<Vec<AskExchange>> {
+    let sql = format!(
+        "SELECT a.id FROM ask_exchanges a
+         JOIN agent_turns t ON t.id=a.turn_id
+         JOIN epochs e ON e.id=t.epoch_id
+         WHERE a.answered_at IS NULL AND e.state='open'
+           AND t.status NOT IN ('completed', 'interrupted')
+           AND {route_predicate}
+         ORDER BY a.asked_at, a.rowid"
+    );
+    let mut statement = conn.prepare(&sql)?;
+    let ids = statement
+        .query_map(parameters, |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter()
+        .map(|id| {
+            let id = AskId::parse(&id).map_err(invalid_durable)?;
+            ask_by_id_in(conn, &id)
+        })
+        .collect()
 }
 
 fn validate_control_caller(
@@ -2618,6 +2581,17 @@ fn work_from_parts(
 
 fn invalid_durable(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
+}
+
+fn to_sqlite_conversion_error(error: impl std::fmt::Display) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.to_string(),
+        )),
+    )
 }
 
 pub(crate) fn create_wave_spine(
@@ -2793,9 +2767,7 @@ pub(crate) fn end_run_for_lease(
     conn.execute(
         "UPDATE agent_invocations SET
             ended_at=COALESCE(ended_at, ?2),
-            outcome=?3, handback_state=?4,
-            attention_kind=NULL, attention_work_kind=NULL,
-            attention_work_id=NULL, attention_at=NULL
+            outcome=?3, handback_state=?4
          WHERE supervising_run_id=?1 AND ended_at IS NULL",
         params![
             run.id.as_str(),

@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod ask;
 pub mod chat;
 pub mod ci;
 pub mod context;

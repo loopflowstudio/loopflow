@@ -1591,20 +1591,7 @@ impl SqliteStore {
     pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let was_running = tx
-            .query_row(
-                "SELECT status='running' FROM agent_turns WHERE id=?1",
-                [&turn.id],
-                |row| row.get::<_, bool>(0),
-            )
-            .optional()?
-            .unwrap_or(false);
         update_agent_turn(&tx, turn)?;
-        if was_running && turn.status != "running" {
-            let turn_id = crate::durable::TurnId::parse(&turn.id)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-            durable::rearm_feedback_attention(&tx, &turn_id)?;
-        }
         tx.commit()?;
         Ok(())
     }
@@ -1646,8 +1633,6 @@ impl SqliteStore {
                     WHEN ?5='interrupted' THEN 'interrupted'
                     ELSE 'failed'
                 END,
-                attention_kind=NULL, attention_work_kind=NULL,
-                attention_work_id=NULL, attention_at=NULL,
                 resume_token=CASE WHEN supervising_run_id IS NULL THEN resume_token ELSE ?8 END
              WHERE id = ?1",
             params![
@@ -1883,6 +1868,37 @@ impl SqliteStore {
         }
         turns.sort_by_key(|turn| (turn.started_at, turn.ordinal));
         Ok(turns)
+    }
+
+    pub fn ask_exchanges_for_turns(
+        &self,
+        turn_ids: &[String],
+    ) -> StoreResult<Vec<crate::durable::AskExchange>> {
+        if turn_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut asks = Vec::new();
+        for turn_ids in turn_ids.chunks(500) {
+            let placeholders = in_placeholders(turn_ids.len());
+            let sql = format!(
+                "SELECT id FROM ask_exchanges WHERE turn_id IN ({placeholders})
+                 ORDER BY asked_at, rowid"
+            );
+            let mut statement = conn.prepare(&sql)?;
+            let ids = statement
+                .query_map(rusqlite::params_from_iter(turn_ids), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for id in ids {
+                let id = crate::durable::AskId::parse(&id)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                asks.push(durable::ask_by_id_in(&conn, &id)?);
+            }
+        }
+        asks.sort_by_key(|ask| ask.asked_at);
+        Ok(asks)
     }
 
     /// One agent turn by its UUID.

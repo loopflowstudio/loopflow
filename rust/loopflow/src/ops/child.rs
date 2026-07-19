@@ -187,7 +187,7 @@ pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLeas
     // authority is the ambient fallback: `AuthenticatedRequest::cli()` treats
     // local shell presence as the user, which is right for a local-first
     // product but means a body that lost its lease would otherwise inherit
-    // full User rights. Every Launch sets this var, so its presence without a
+    // full User rights. Every Run body sets this var, so its presence without a
     // resolvable lease is a fenced or stale writer and must fail closed.
     //
     // This deliberately does not consult the deleted Task/Project executor env

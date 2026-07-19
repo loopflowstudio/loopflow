@@ -21,7 +21,7 @@ use crate::harness::{
 };
 use crate::project::{ChildEventPayload, Project, ProjectEventKind, ProjectId};
 use crate::provider_account::recovery::{
-    capability_key, plan_run_route_recovery, settle_route_recovery, stop_launch_for_recovery,
+    capability_key, plan_run_route_recovery, settle_route_recovery, stop_invocation_for_recovery,
     ExactRoute, RecoveryChoice, RecoverySettlement, RecoveryStopOutcome,
 };
 use crate::store::SharedStore;
@@ -107,28 +107,15 @@ async fn run_project_inner(
         .current_run(&work)
         .await?
         .ok_or_else(|| anyhow!("Project Work {} has no active Run", work.id()))?;
-    let launch = store
-        .current_launch(lease)
+    let invocation = store
+        .open_invocation(lease)
         .await?
-        .ok_or_else(|| anyhow!("Project Run {} has no current Launch", lease.run_id))?;
-    let crate::durable::AdvanceReceipt::Launch(launch) = store
-        .advance_run(
-            lease,
-            crate::durable::RunAdvance::LaunchLive {
-                launch_id: launch.id,
-            },
-        )
-        .await?
-    else {
-        unreachable!("LaunchLive returns a Launch receipt")
-    };
-    let mut run_control = crate::trace::ControlLaunch {
-        run_id: run.id,
-        home_id: run.home_id,
-        account_id: launch.route.account_id.clone(),
-        containment: launch.containment.clone(),
-        resume_token: launch.resume_token.clone(),
-        opaque_basis: launch.opaque_basis.clone(),
+        .ok_or_else(|| anyhow!("Project Run {} has no open Invocation", lease.run_id))?;
+    let mut supervision = crate::trace::SupervisedInvocation {
+        invocation_id: invocation.id.clone(),
+        supervising_run_id: run.id,
+        account_id: invocation.route.account_id.clone(),
+        resume_token: invocation.resume_token.clone(),
     };
     let mut pending = VecDeque::new();
     let initial_input = take_current_input(&store, &project, lease, &mut pending).await?;
@@ -162,28 +149,30 @@ async fn run_project_inner(
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(project.provider_session_id.clone());
-    let requested_account = launch
+    let requested_account = invocation
         .route
         .account_id
         .as_deref()
         .map(crate::store::ProviderAccountId::parse)
         .transpose()
-        .map_err(|reason| anyhow!("invalid Launch account route: {reason}"))?;
+        .map_err(|reason| anyhow!("invalid Invocation account route: {reason}"))?;
     harness.set_provider_account_id(requested_account);
     store.validate_run_lease(lease).await?;
     harness.start(&prepared.turn.config).await?;
     project.provider = harness_name;
     project.provider_session_id = harness.provider_session_id();
-    let launch = store
-        .observe_launch_provider(
+    let invocation = store
+        .observe_invocation_provider(
             lease,
-            &launch.id,
+            &invocation.id,
             harness.provider_account_id(),
             project.provider_session_id.clone(),
         )
         .await?;
-    run_control.account_id = launch.route.account_id.clone();
-    run_control.resume_token = launch.resume_token.clone();
+    let invocation_id = invocation.id.clone();
+    let invocation_route = invocation.route.clone();
+    supervision.account_id = invocation.route.account_id.clone();
+    supervision.resume_token = invocation.resume_token.clone();
     if let Err(error) = store.update_project_for_run(&project, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
@@ -206,7 +195,7 @@ async fn run_project_inner(
                 render_ms: prepared.turn.context_render_ms,
                 raw_provider: true,
                 basis: Some(prepared.basis.clone()),
-                control: Some(run_control.clone()),
+                supervision: Some(supervision.clone()),
             },
         ) {
             Ok(capture) => Some(capture),
@@ -228,7 +217,7 @@ async fn run_project_inner(
     let mut pending_child = None;
     let mut delivered_child = initial_child.as_ref().map(|child| {
         (
-            child.feedback.launch_id.clone(),
+            child.feedback.invocation_id.clone(),
             child.feedback.basis.revision,
         )
     });
@@ -321,7 +310,7 @@ async fn run_project_inner(
                 }
                 if provider_turn_active && !control_turn_active {
                     if let Some(child) = store.child_attention(&work).await?.into_iter().next() {
-                        let key = (child.feedback.launch_id.clone(), child.feedback.basis.revision);
+                        let key = (child.feedback.invocation_id.clone(), child.feedback.basis.revision);
                         if delivered_child.as_ref() != Some(&key) {
                             match harness.send_current(&child.render()).await {
                                 SendCurrentOutcome::Sent { .. } => {
@@ -407,10 +396,12 @@ async fn run_project_inner(
                                 "provider turn failed",
                             );
                             finish_capture(capture.as_ref(), "failed");
-                            return fail_and_maybe_relaunch(
+                            return fail_and_maybe_recover(
                                 &store,
                                 &mut project,
                                 lease,
+                                &invocation_id,
+                                &invocation_route,
                                 harness.as_mut(),
                                 &wave,
                                 &reason,
@@ -467,7 +458,7 @@ async fn run_project_inner(
                             control_turn_active = true;
                             provider_turn_active = true;
                             delivered_child = Some((
-                                child.feedback.launch_id,
+                                child.feedback.invocation_id,
                                 child.feedback.basis.revision,
                             ));
                             continue;
@@ -563,13 +554,10 @@ async fn run_project_inner(
                         project.last_state_fingerprint = Some(outcome.fingerprint);
                         store.update_project_for_run(&project, lease).await?;
                         let _ = harness.stop().await;
-                        let launch = store.current_launch(lease).await?.ok_or_else(|| {
-                            anyhow!("Project Run {} has no Launch to finish", lease.run_id)
-                        })?;
                         store.advance_run(
                             lease,
-                            crate::durable::RunAdvance::LaunchEnded {
-                                launch_id: launch.id,
+                            crate::durable::RunAdvance::InvocationEnded {
+                                invocation_id: invocation_id.clone(),
                                 outcome: crate::durable::BoundaryState::Succeeded,
                             },
                         ).await?;
@@ -597,10 +585,12 @@ async fn run_project_inner(
                     ConversationEvent::Error { code, message, .. } => {
                         let reason = format!("{code}: {message}");
                         finish_capture(capture.as_ref(), "failed");
-                        return fail_and_maybe_relaunch(
+                        return fail_and_maybe_recover(
                             &store,
                             &mut project,
                             lease,
+                            &invocation_id,
+                            &invocation_route,
                             harness.as_mut(),
                             &wave,
                             &reason,
@@ -935,10 +925,13 @@ async fn finish_failed(
 
 /// Recover a retryable body failure through the Run's next exact route after
 /// PRD-38 permits replacement and the current containment stops positively.
+#[allow(clippy::too_many_arguments)] // Invocation identity is evidence, not a recovery knob.
 async fn handle_body_failure(
     store: &SharedStore,
     project: &mut Project,
     lease: &RunLease,
+    invocation_id: &crate::durable::AgentInvocationId,
+    invocation_route: &crate::durable::InvocationRoute,
     harness: &mut dyn Harness,
     wave: &Wave,
     reason: &str,
@@ -961,12 +954,10 @@ async fn handle_body_failure(
         && crate::engine::agent::classify_retryable_agent_failure(reason).is_some());
 
     if route_recovery_permitted {
-        let launch = store
-            .current_launch(lease)
+        let current_route = ExactRoute::try_from(invocation_route)?;
+        let stopped = match stop_invocation_for_recovery(store, lease, invocation_id, harness)
             .await?
-            .ok_or_else(|| anyhow!("Project Run {} has no Launch to hand back", lease.run_id))?;
-        let current_route = ExactRoute::try_from(&launch.route)?;
-        let stopped = match stop_launch_for_recovery(store, lease, harness).await? {
+        {
             RecoveryStopOutcome::Stopped(stopped) => stopped,
             RecoveryStopOutcome::Fenced { error, stop } => {
                 tracing::error!(project = %project.id, containment = ?stop.containment, %error, "Project recovery left the Run fenced");
@@ -975,7 +966,7 @@ async fn handle_body_failure(
         };
         let choice = plan_run_route_recovery(store, lease, backup_agent).await?;
         let failure = match &choice {
-            RecoveryChoice::Launch(_) => reason.to_string(),
+            RecoveryChoice::Invoke(_) => reason.to_string(),
             RecoveryChoice::AwaitCapability { reasons } => format!(
                 "{reason}; waiting on provider route capability: {}",
                 capability_key(reasons)
@@ -993,8 +984,8 @@ async fn handle_body_failure(
             .await?;
         store.update_project_for_run(project, lease).await?;
         return match settle_route_recovery(store, lease, stopped, choice).await? {
-            RecoverySettlement::Launch {
-                lease: rotated,
+            RecoverySettlement::RecoveryRun {
+                lease: recovery_lease,
                 route,
             } => {
                 let agent = route.agent.agent();
@@ -1013,15 +1004,17 @@ async fn handle_body_failure(
                 }
                 project.agent = agent;
                 project.provider = provider;
-                store.update_project_for_run(project, &rotated).await?;
+                store
+                    .update_project_for_run(project, &recovery_lease)
+                    .await?;
                 store
                     .append_project_event_for_run(
                         &project.id,
-                        &rotated,
+                        &recovery_lease,
                         &ProjectEventKind::BodyHandedOff { handoff },
                     )
                     .await?;
-                Ok(Some((rotated, route)))
+                Ok(Some((recovery_lease, route)))
             }
             RecoverySettlement::AwaitCapability { wait } => {
                 tracing::info!(project = %project.id, wait = %wait.id, "Project waiting for a provider route capability");
@@ -1050,19 +1043,24 @@ async fn handle_body_failure(
     }
 }
 
-async fn fail_and_maybe_relaunch(
+#[allow(clippy::too_many_arguments)]
+async fn fail_and_maybe_recover(
     store: &SharedStore,
     project: &mut Project,
     lease: &RunLease,
+    invocation_id: &crate::durable::AgentInvocationId,
+    invocation_route: &crate::durable::InvocationRoute,
     harness: &mut dyn Harness,
     wave: &Wave,
     reason: &str,
     turn_had_durable_side_effect: bool,
 ) -> Result<()> {
-    let Some((rotated, route)) = handle_body_failure(
+    let Some((recovery_lease, route)) = handle_body_failure(
         store,
         project,
         lease,
+        invocation_id,
+        invocation_route,
         harness,
         wave,
         reason,
@@ -1072,7 +1070,7 @@ async fn fail_and_maybe_relaunch(
     else {
         return Ok(());
     };
-    spawn_failover(store, project, &rotated, wave, &route).await
+    spawn_failover(store, project, &recovery_lease, wave, &route).await
 }
 
 async fn finish_abandoned(

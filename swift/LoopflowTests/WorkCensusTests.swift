@@ -5,57 +5,67 @@ import Testing
 
 @Suite("Work Census")
 struct WorkCensusTests {
-    @Test("Only User-attention Launch rows are openable")
-    func projectionAssignsLaunchIdentityOnlyToUserAttention() throws {
+    @Test("Only User-attention Invocation rows are openable")
+    func projectionAssignsInvocationIdentityOnlyToUserAttention() throws {
         let roadmap = try minimalRoadmap()
-        let userLaunch = launch(id: "launch-user", attentionKind: "user")
-        let parentLaunch = launch(id: "launch-parent", attentionKind: "parent")
+        let userInvocation = invocation(id: "invocation-user", attentionKind: "user")
+        let parentInvocation = invocation(id: "invocation-parent", attentionKind: "parent")
 
         let census = WorkCensus(
             roadmap: roadmap,
             runs: [],
-            launches: [userLaunch, parentLaunch]
+            invocations: [userInvocation, parentInvocation]
         )
         let wave = try #require(census.groups.first { $0.id == "wave-1" })
-        let userRow = try #require(wave.rows.first { $0.id == "launch:launch-user" })
-        let parentRow = try #require(wave.rows.first { $0.id == "launch:launch-parent" })
+        let userRow = try #require(wave.rows.first { $0.id == "invocation:invocation-user" })
+        let parentRow = try #require(wave.rows.first { $0.id == "invocation:invocation-parent" })
 
-        #expect(userRow.kind == .launch)
-        #expect(userRow.launchId == userLaunch.id)
+        #expect(userRow.kind == .invocation)
+        #expect(userRow.invocationId == userInvocation.id)
         #expect(userRow.isOpenable)
 
-        #expect(parentRow.kind == .launch)
-        #expect(parentRow.launchId == nil)
+        #expect(parentRow.kind == .invocation)
+        #expect(parentRow.invocationId == nil)
         #expect(!parentRow.isOpenable)
 
-        let workRows = wave.rows.filter { $0.kind != .launch }
+        let workRows = wave.rows.filter { $0.kind != .invocation }
         #expect(workRows.map(\.kind) == [.project, .task])
-        #expect(workRows.allSatisfy { $0.launchId == nil && !$0.isOpenable })
+        #expect(workRows.allSatisfy { $0.invocationId == nil && !$0.isOpenable })
     }
 
-    private func launch(id: String, attentionKind: String) -> LaunchSurfaceRecord {
-        LaunchSurfaceRecord(
-            launch: LaunchRecord(
+    private func invocation(id: String, attentionKind: String) -> InvocationSurfaceRecord {
+        let work = WorkReference(
+            kind: .task,
+            id: "ts_now00000000000000000000000000000"
+        )
+        return InvocationSurfaceRecord(
+            invocation: AgentInvocationRecord(
                 id: id,
-                runId: "run-\(id)",
-                homeId: "home-1",
-                route: LaunchRouteRecord(provider: "opaque", model: nil, accountId: nil),
-                cwd: "/src/loopflow.task",
+                supervisingRunId: "run-\(id)",
+                route: InvocationRouteRecord(provider: "opaque", model: nil, accountId: nil),
                 surface: "terminal",
-                state: .live,
-                containment: .processGroup(id: 1),
-                opaqueBasis: nil,
                 resumeToken: nil,
                 startedAt: "2026-07-17T12:00:00Z",
                 endedAt: nil
             ),
-            work: WorkReference(
-                kind: .task,
-                id: "ts_now00000000000000000000000000000"
+            run: RunRecord(
+                id: "run-\(id)",
+                work: work,
+                epochId: "epoch-1",
+                homeId: "home-1",
+                state: .active,
+                trigger: .user,
+                retryOf: nil,
+                containment: .processGroup(id: 1),
+                cwd: "/src/loopflow.task",
+                createdAt: "2026-07-17T11:59:59Z",
+                startedAt: "2026-07-17T12:00:00Z",
+                endedAt: nil
             ),
+            work: work,
             waveId: "wave-1",
             homeRoute: "local",
-            attention: LaunchAttentionRecord(
+            attention: InvocationAttentionRecord(
                 kind: attentionKind,
                 work: attentionKind == "parent"
                     ? WorkReference(

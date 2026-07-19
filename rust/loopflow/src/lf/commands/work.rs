@@ -183,11 +183,11 @@ async fn run_feedback(store: &Store, work: &WorkRef) -> anyhow::Result<()> {
 
 fn present_feedback(feedback: &Feedback) -> anyhow::Result<ExitStatus> {
     Command::new(std::env::current_exe()?)
-        .arg("launch")
+        .arg("invocation")
         .arg("present")
-        .arg(feedback.launch_id.as_str())
+        .arg(feedback.invocation_id.as_str())
         .status()
-        .context("present Feedback Launch")
+        .context("present Feedback Invocation")
 }
 
 async fn find_user_feedback(store: &Store, work: &WorkRef) -> anyhow::Result<Option<UserFeedback>> {

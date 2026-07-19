@@ -1,6 +1,6 @@
 //! `lf runs`, `lf execs`, and `lf trace` — read local execution evidence.
 //!
-//! Runs are agent-backed skill launches, the grain that owns context and token
+//! Runs are agent-backed skill invocations, the grain that owns context and token
 //! evidence. Execs are `lf` processes, the grain that owns argv and process
 //! lineage. Trace joins the two through `run_id` and `process_id`. All commands
 //! are local-only readers; nothing is fetched from anywhere.
@@ -20,7 +20,7 @@ use crate::wave::journal::short_id;
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-/// A drill filter over the run ledger. Both constituents scope the same launch
+/// A drill filter over the run ledger. Both constituents scope the same invocation
 /// set: `wave` narrows to one Wave, `task` to one roadmap Task by its Linear
 /// issue identifier — the key that joins a roadmap row to its runs.
 #[derive(Debug, Clone, Copy, Default)]
@@ -30,12 +30,12 @@ pub(crate) struct RunFilter<'a> {
 }
 
 impl RunFilter<'_> {
-    fn matches(&self, launch: &crate::trace::AgentLaunchRow) -> bool {
+    fn matches(&self, invocation: &crate::trace::AgentInvocationRow) -> bool {
         self.wave
-            .is_none_or(|wave| launch.wave.as_deref() == Some(wave))
+            .is_none_or(|wave| invocation.wave.as_deref() == Some(wave))
             && self
                 .task
-                .is_none_or(|task| launch.task.as_deref() == Some(task))
+                .is_none_or(|task| invocation.task.as_deref() == Some(task))
     }
 }
 
@@ -48,28 +48,28 @@ pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, boo
     let events = store
         .list_run_events_since(since)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
-    let launches = store
-        .agent_launches_since(since)
-        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
+    let invocations = store
+        .agent_invocations_since(since)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
         .into_iter()
-        .filter(|launch| launch.skill.is_some())
-        .filter(|launch| filter.matches(launch))
+        .filter(|invocation| invocation.skill.is_some())
+        .filter(|invocation| filter.matches(invocation))
         .collect::<Vec<_>>();
-    let launch_ids = launches
+    let invocation_ids = invocations
         .iter()
-        .map(|launch| launch.id.clone())
+        .map(|invocation| invocation.id.clone())
         .collect::<Vec<_>>();
     let turns = store
-        .agent_turns_for_launches(&launch_ids)
+        .agent_turns_for_invocations(&invocation_ids)
         .map_err(|err| anyhow!("failed to read run turns: {err}"))?;
 
-    let mut runs = summarize_runs(&events, &launches, &turns);
+    let mut runs = summarize_runs(&events, &invocations, &turns);
     sort_runs(&mut runs);
     let truncated = cap_runs(&mut runs);
     Ok((runs, truncated))
 }
 
-/// `lf runs [--wave <name>] [--task <id>]`: recent agent-backed skill launches,
+/// `lf runs [--wave <name>] [--task <id>]`: recent agent-backed skill invocations,
 /// optionally drilled to one Wave or one roadmap Task.
 pub fn list(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     let (runs, _truncated) = collect_runs(RunFilter { wave, task })?;
@@ -177,52 +177,47 @@ pub fn list_execs(json: bool) -> Result<()> {
     Ok(())
 }
 
-/// A capture lifecycle is considered lost beyond 48h: terminal launches whose
+/// A capture lifecycle is considered lost beyond 48h: terminal invocations whose
 /// artifacts vanished that long ago are safe to tombstone, and `capturing`
-/// launches still stuck past this point are provably dead. Younger missing
+/// invocations still stuck past this point are provably dead. Younger missing
 /// captures are reported as candidates to investigate, not swept — the
 /// anti-masking line that keeps a live capture regression visible.
 pub(super) const RECONCILE_AGE_GUARD_HOURS: i64 = 48;
 
 /// `lf runs reconcile`: make the ledger and the trace root agree about what
 /// survives. Tombstones terminal captures whose conversation artifacts are
-/// gone, interrupts dead `capturing` launches with intact evidence, acknowledges
-/// aged write loss, and removes artifact directories no launch row claims.
+/// gone, interrupts dead `capturing` invocations with intact evidence, acknowledges
+/// aged write loss, and removes artifact directories no invocation row claims.
 /// Dry-run by default; `--apply` writes. A red `lf doctor` capture check means
 /// unacknowledged loss — this is the explicit acknowledgment.
 pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
-    let launches = store
-        .agent_launches_since(0)
-        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?;
+    let invocations = store
+        .agent_invocations_since(0)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?;
     let events = store
         .list_run_events_since(0)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
     let now = chrono::Utc::now().timestamp();
-    let plan =
-        plan_reconcile(
-            &launches,
-            &events,
-            now,
-            all,
-            &|path| match crate::trace::resolve_artifact(path) {
-                Ok(path) if path.is_file() => ArtifactState::Present,
-                Ok(_) => ArtifactState::Missing,
-                Err(_) => ArtifactState::Unsafe,
-            },
-        );
-    let orphans = plan_orphans(&launches, now, all)?;
+    let plan = plan_reconcile(&invocations, &events, now, all, &|path| {
+        match crate::trace::resolve_artifact(path) {
+            Ok(path) if path.is_file() => ArtifactState::Present,
+            Ok(_) => ArtifactState::Missing,
+            Err(_) => ArtifactState::Unsafe,
+        }
+    });
+    let orphans = plan_orphans(&invocations, now, all)?;
 
     if apply {
         for entry in &plan.pruned {
-            store.prune_launch_capture(&entry.id, &entry.reason, now)?;
+            store.prune_invocation_capture(&entry.id, &entry.reason, now)?;
         }
         for entry in &plan.interrupted {
-            store.interrupt_launch_capture(&entry.id, &entry.reason, now)?;
+            store.interrupt_invocation_capture(&entry.id, &entry.reason, now)?;
         }
         for entry in &plan.lost {
-            store.lose_launch_capture(&entry.id, now)?;
+            store.lose_invocation_capture(&entry.id, now)?;
         }
         for orphan in &orphans {
             let path = crate::trace::resolve_artifact(&orphan.artifact_dir)?;
@@ -276,7 +271,7 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Artifact directories under the trace root that no launch row claims — the
+/// Artifact directories under the trace root that no invocation row claims — the
 /// reverse of a dangling reference. Nothing in the ledger points at them, so
 /// they are unreadable evidence and unbounded disk.
 ///
@@ -285,17 +280,17 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
 /// capture is briefly a legitimate orphan. Removing one would delete a live
 /// run's transcript out from under it.
 fn plan_orphans(
-    launches: &[crate::trace::AgentLaunchRow],
+    invocations: &[crate::trace::AgentInvocationRow],
     now: i64,
     all: bool,
 ) -> Result<Vec<OrphanEntry>> {
-    let claimed: BTreeSet<&str> = launches
+    let claimed: BTreeSet<&str> = invocations
         .iter()
-        .map(|launch| launch.artifact_dir.as_str())
+        .map(|invocation| invocation.artifact_dir.as_str())
         .collect();
     let guard = now - RECONCILE_AGE_GUARD_HOURS * 3600;
     let mut orphans = Vec::new();
-    for artifact_dir in crate::trace::list_launch_artifact_dirs()? {
+    for artifact_dir in crate::trace::list_invocation_artifact_dirs()? {
         if claimed.contains(artifact_dir.as_str()) {
             continue;
         }
@@ -359,13 +354,13 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// The reconcile decision for every launch, derived without touching the store
+/// The reconcile decision for every invocation, derived without touching the store
 /// or the clock: `now` is supplied and `artifact_present` resolves a
 /// conversation path to present, absent, or unsafe. Pure so the age guard and
 /// the dead-process rules can be tested directly — the classification is the
 /// part that must not be wrong, since `--apply` acts on it.
 fn plan_reconcile(
-    launches: &[crate::trace::AgentLaunchRow],
+    invocations: &[crate::trace::AgentInvocationRow],
     events: &[crate::store::RunEventRow],
     now: i64,
     all: bool,
@@ -381,54 +376,56 @@ fn plan_reconcile(
     let interrupted_reason = "capture interrupted; process ended without finalizing";
 
     let mut plan = ReconcilePlan::default();
-    for launch in launches {
+    for invocation in invocations {
         let process_ended = events.iter().any(|event| {
-            event.process_id == launch.process_id && event.node == "run" && event.event != "started"
+            event.process_id == invocation.process_id
+                && event.node == "run"
+                && event.event != "started"
         });
-        let stale = launch.started_at < guard;
+        let stale = invocation.started_at < guard;
 
-        let artifact_state = artifact_state(&launch.conversation_path);
+        let artifact_state = artifact_state(&invocation.conversation_path);
         if artifact_state == ArtifactState::Unsafe {
             continue;
         }
         if artifact_state == ArtifactState::Missing {
-            // Artifact is gone. Terminal launches are always candidates; a
-            // `capturing` launch is a candidate only once its process is
+            // Artifact is gone. Terminal invocations are always candidates; a
+            // `capturing` invocation is a candidate only once its process is
             // provably dead (or stale past the guard) — a live process may
             // still be writing, and `begin` always creates the file, so an
-            // absent file on a live `capturing` launch is a transient race,
+            // absent file on a live `capturing` invocation is a transient race,
             // not a tombstone target.
-            let dead = TERMINAL.contains(&launch.capture_status.as_str())
-                || (launch.capture_status == "capturing" && (process_ended || stale));
+            let dead = TERMINAL.contains(&invocation.capture_status.as_str())
+                || (invocation.capture_status == "capturing" && (process_ended || stale));
             if !dead {
                 continue;
             }
-            // Age guard: a terminal launch is old when it ended before the
-            // guard; a `capturing` launch never set `ended_at`, so fall back to
+            // Age guard: a terminal invocation is old when it ended before the
+            // guard; a `capturing` invocation never set `ended_at`, so fall back to
             // the stale-start check. Without this line, `--apply` during an
             // active capture regression would tombstone the evidence.
-            let old = launch.ended_at.is_some_and(|ended| ended < guard) || stale;
+            let old = invocation.ended_at.is_some_and(|ended| ended < guard) || stale;
             if old || all {
-                plan.pruned.push(ReconcileEntry::from_launch(
-                    launch,
-                    &reason_with_history(launch, &pruned_reason),
+                plan.pruned.push(ReconcileEntry::from_invocation(
+                    invocation,
+                    &reason_with_history(invocation, &pruned_reason),
                 ));
             } else {
-                plan.recent_missing.push(ReconcileEntry::from_launch(
-                    launch,
-                    &reason_with_history(launch, &pruned_reason),
+                plan.recent_missing.push(ReconcileEntry::from_invocation(
+                    invocation,
+                    &reason_with_history(invocation, &pruned_reason),
                 ));
             }
             continue;
         }
 
-        // File is present. Finalize an orphaned `capturing` launch whose
+        // File is present. Finalize an orphaned `capturing` invocation whose
         // process ended without calling `finish()` — making it terminal and
         // honest rather than stuck.
-        if launch.capture_status == "capturing" && (process_ended || stale) {
-            plan.interrupted.push(ReconcileEntry::from_launch(
-                launch,
-                &reason_with_history(launch, interrupted_reason),
+        if invocation.capture_status == "capturing" && (process_ended || stale) {
+            plan.interrupted.push(ReconcileEntry::from_invocation(
+                invocation,
+                &reason_with_history(invocation, interrupted_reason),
             ));
             continue;
         }
@@ -436,16 +433,16 @@ fn plan_reconcile(
         // A partial is fresh evidence until the same age boundary makes an
         // explicit historical acknowledgment safe. A missing reason is not
         // actionable enough to acknowledge, so it remains partial and red.
-        if launch.capture_status == "partial"
-            && (all || launch.ended_at.is_some_and(|ended| ended < guard) || stale)
-            && launch
+        if invocation.capture_status == "partial"
+            && (all || invocation.ended_at.is_some_and(|ended| ended < guard) || stale)
+            && invocation
                 .incomplete_reason
                 .as_deref()
                 .is_some_and(|reason| !reason.trim().is_empty())
         {
-            plan.lost.push(ReconcileEntry::from_launch(
-                launch,
-                launch
+            plan.lost.push(ReconcileEntry::from_invocation(
+                invocation,
+                invocation
                     .incomplete_reason
                     .as_deref()
                     .expect("lost candidate has a non-empty reason"),
@@ -462,8 +459,8 @@ enum ArtifactState {
     Unsafe,
 }
 
-fn reason_with_history(launch: &crate::trace::AgentLaunchRow, reason: &str) -> String {
-    match launch
+fn reason_with_history(invocation: &crate::trace::AgentInvocationRow, reason: &str) -> String {
+    match invocation
         .incomplete_reason
         .as_deref()
         .filter(|history| !history.trim().is_empty())
@@ -490,12 +487,12 @@ struct ReconcileEntry {
 }
 
 impl ReconcileEntry {
-    fn from_launch(launch: &crate::trace::AgentLaunchRow, reason: &str) -> Self {
+    fn from_invocation(invocation: &crate::trace::AgentInvocationRow, reason: &str) -> Self {
         Self {
-            id: launch.id.clone(),
-            run_id: launch.run_id.clone(),
+            id: invocation.id.clone(),
+            run_id: invocation.run_id.clone(),
             reason: reason.to_string(),
-            ended_at: launch.ended_at,
+            ended_at: invocation.ended_at,
         }
     }
 }
@@ -524,11 +521,11 @@ pub fn trace(
     content: bool,
     events_mode: bool,
     jsonl: bool,
-    launch_prefix: Option<&str>,
+    invocation_prefix: Option<&str>,
     turn_prefix: Option<&str>,
 ) -> Result<()> {
-    if launch_prefix.is_some() && !events_mode && !content {
-        return Err(anyhow!("--launch requires --events or --content"));
+    if invocation_prefix.is_some() && !events_mode && !content {
+        return Err(anyhow!("--invocation requires --events or --content"));
     }
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let matches = store
@@ -537,11 +534,11 @@ pub fn trace(
     let mut trace_matches = store
         .run_events_matching(exec_id)
         .map_err(|err| anyhow!("failed to read trace: {err}"))?;
-    // `lf runs` prints the launch id, which is neither a process id nor a run
+    // `lf runs` prints the invocation id, which is neither a process id nor a run
     // id. Resolve it to its trace so any id a user reads there opens its
     // complete trace — one continuous drill from run to record.
     if matches.is_empty() && trace_matches.is_empty() {
-        if let Some(run_id) = resolve_launch_trace_id(&store, exec_id)? {
+        if let Some(run_id) = resolve_invocation_trace_id(&store, exec_id)? {
             trace_matches = store
                 .run_events_matching(&run_id)
                 .map_err(|err| anyhow!("failed to read trace: {err}"))?;
@@ -556,18 +553,18 @@ pub fn trace(
             .map_err(|err| anyhow!("failed to read trace: {err}"))?
     };
 
-    let launches = store.agent_launches_matching(&trace_id)?;
+    let invocations = store.agent_invocations_matching(&trace_id)?;
     let spans = trace_spans(&events, &store.turn_spend_since(0)?);
     if events_mode {
-        return trace_events(&launches, launch_prefix, jsonl);
+        return trace_events(&invocations, invocation_prefix, jsonl);
     }
-    let launch_ids = launches
+    let invocation_ids = invocations
         .iter()
-        .map(|launch| launch.id.clone())
+        .map(|invocation| invocation.id.clone())
         .collect::<Vec<_>>();
-    let turns = store.agent_turns_for_launches(&launch_ids)?;
+    let turns = store.agent_turns_for_invocations(&invocation_ids)?;
     if content {
-        let dto = trace_content(&launches, &turns, launch_prefix, turn_prefix)?;
+        let dto = trace_content(&invocations, &turns, invocation_prefix, turn_prefix)?;
         println!("{}", serde_json::to_string(&dto)?);
         return Ok(());
     }
@@ -578,7 +575,7 @@ pub fn trace(
             serde_json::to_string(&TraceDto {
                 trace_id: events[0].run_id.clone(),
                 spans,
-                launches,
+                invocations,
                 turns,
                 assets: store.context_assets_for_turns(&turn_ids)?,
                 decisions: store.context_decisions_for_turns(&turn_ids)?,
@@ -627,26 +624,26 @@ pub fn trace(
         format_cost(total_cost)
     );
 
-    for launch in &launches {
+    for invocation in &invocations {
         println!(
-            "\n  launch    {}  {}{}  {} / {}",
-            short_id(&launch.id),
-            launch.provider,
-            launch
+            "\n  invocation    {}  {}{}  {} / {}",
+            short_id(&invocation.id),
+            invocation.provider,
+            invocation
                 .model
                 .as_deref()
                 .map(|model| format!(":{model}"))
                 .unwrap_or_default(),
-            launch.capture_status,
-            launch.outcome,
+            invocation.capture_status,
+            invocation.outcome,
         );
-        if let Some(reason) = &launch.incomplete_reason {
+        if let Some(reason) = &invocation.incomplete_reason {
             println!("    incomplete  {reason}");
         }
-        if let Some(session_id) = &launch.provider_session_id {
+        if let Some(session_id) = &invocation.provider_session_id {
             println!("    session     {session_id}");
         }
-        if let Some(session_path) = &launch.provider_session_path {
+        if let Some(session_path) = &invocation.provider_session_path {
             let availability = if std::path::Path::new(session_path).exists() {
                 "available"
             } else {
@@ -656,9 +653,12 @@ pub fn trace(
         }
         println!(
             "    events      {}",
-            crate::trace::resolve_artifact(&launch.conversation_path)?.display()
+            crate::trace::resolve_artifact(&invocation.conversation_path)?.display()
         );
-        for turn in turns.iter().filter(|turn| turn.launch_id == launch.id) {
+        for turn in turns
+            .iter()
+            .filter(|turn| turn.invocation_id == invocation.id)
+        {
             println!(
                 "    turn {}  {} tokens  provider input {}  {}",
                 turn.ordinal,
@@ -728,24 +728,24 @@ fn trace_id_for_address(
     }
 }
 
-/// Resolve a launch id (or prefix) — the id `lf runs` prints — to its trace id.
-/// `None` when no launch matches (the caller keeps its original error path); an
+/// Resolve a invocation id (or prefix) — the id `lf runs` prints — to its trace id.
+/// `None` when no invocation matches (the caller keeps its original error path); an
 /// error when the prefix spans distinct traces so the drill never opens the
 /// wrong one.
-fn resolve_launch_trace_id(store: &SqliteStore, prefix: &str) -> Result<Option<String>> {
+fn resolve_invocation_trace_id(store: &SqliteStore, prefix: &str) -> Result<Option<String>> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
     let run_ids = store
-        .agent_launches_since(since)
-        .map_err(|err| anyhow!("failed to read skill launches: {err}"))?
+        .agent_invocations_since(since)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
         .into_iter()
-        .filter(|launch| launch.id.starts_with(prefix))
-        .map(|launch| launch.run_id)
+        .filter(|invocation| invocation.id.starts_with(prefix))
+        .map(|invocation| invocation.run_id)
         .collect::<BTreeSet<_>>();
     match run_ids.len() {
         0 => Ok(None),
         1 => Ok(run_ids.into_iter().next()),
         _ => Err(anyhow!(
-            "launch '{prefix}' is ambiguous — matches traces: {}",
+            "invocation '{prefix}' is ambiguous — matches traces: {}",
             run_ids
                 .into_iter()
                 .map(|id| short_id(&id))
@@ -771,28 +771,34 @@ pub struct TraceArtifactDto {
 }
 
 fn trace_content(
-    launches: &[crate::trace::AgentLaunchRow],
+    invocations: &[crate::trace::AgentInvocationRow],
     turns: &[crate::trace::AgentTurnRow],
-    launch_prefix: Option<&str>,
+    invocation_prefix: Option<&str>,
     turn_prefix: Option<&str>,
 ) -> Result<TraceContentDto> {
-    let selected_launches = launches
+    let selected_invocations = invocations
         .iter()
-        .filter(|launch| launch_prefix.is_none_or(|prefix| launch.id.starts_with(prefix)))
+        .filter(|invocation| {
+            invocation_prefix.is_none_or(|prefix| invocation.id.starts_with(prefix))
+        })
         .collect::<Vec<_>>();
-    let launch = match selected_launches.as_slice() {
-        [] => return Err(anyhow!("no captured launch matches the requested trace")),
-        [launch] => *launch,
-        _ if launch_prefix.is_none() => {
+    let invocation = match selected_invocations.as_slice() {
+        [] => {
             return Err(anyhow!(
-                "--content needs --launch when a trace has multiple launches"
+                "no captured invocation matches the requested trace"
             ))
         }
-        _ => return Err(anyhow!("launch prefix is ambiguous")),
+        [invocation] => *invocation,
+        _ if invocation_prefix.is_none() => {
+            return Err(anyhow!(
+                "--content needs --invocation when a trace has multiple invocations"
+            ))
+        }
+        _ => return Err(anyhow!("invocation prefix is ambiguous")),
     };
     let selected_turns = turns
         .iter()
-        .filter(|turn| turn.launch_id == launch.id)
+        .filter(|turn| turn.invocation_id == invocation.id)
         .filter(|turn| turn_prefix.is_none_or(|prefix| turn.id.starts_with(prefix)))
         .collect::<Vec<_>>();
     let turn = match selected_turns.as_slice() {
@@ -800,7 +806,7 @@ fn trace_content(
         [turn] => *turn,
         _ if turn_prefix.is_none() => {
             return Err(anyhow!(
-                "--content needs --turn when a launch has multiple turns"
+                "--content needs --turn when a invocation has multiple turns"
             ))
         }
         _ => return Err(anyhow!("turn prefix is ambiguous")),
@@ -808,8 +814,8 @@ fn trace_content(
 
     Ok(TraceContentDto {
         address: crate::lf::commands::context::TraceAddress {
-            run_id: launch.run_id.clone(),
-            launch_id: launch.id.clone(),
+            run_id: invocation.run_id.clone(),
+            invocation_id: invocation.id.clone(),
             turn_id: turn.id.clone(),
         },
         system_prompt: turn.system_prompt_path.as_deref().map_or_else(
@@ -817,7 +823,7 @@ fn trace_content(
             read_trace_artifact,
         ),
         task_prompt: read_trace_artifact(&turn.task_prompt_path),
-        conversation: read_trace_artifact(&launch.conversation_path),
+        conversation: read_trace_artifact(&invocation.conversation_path),
     })
 }
 
@@ -854,47 +860,51 @@ fn read_trace_artifact(relative: &str) -> TraceArtifactDto {
 pub struct TraceDto {
     pub trace_id: String,
     pub spans: Vec<SpanDto>,
-    pub launches: Vec<crate::trace::AgentLaunchRow>,
+    pub invocations: Vec<crate::trace::AgentInvocationRow>,
     pub turns: Vec<crate::trace::AgentTurnRow>,
     pub assets: Vec<crate::trace::ContextAssetRow>,
     pub decisions: Vec<crate::trace::ContextDecisionRow>,
 }
 
 fn trace_events(
-    launches: &[crate::trace::AgentLaunchRow],
-    launch_prefix: Option<&str>,
+    invocations: &[crate::trace::AgentInvocationRow],
+    invocation_prefix: Option<&str>,
     jsonl: bool,
 ) -> Result<()> {
-    let selected = launches
+    let selected = invocations
         .iter()
-        .filter(|launch| launch_prefix.is_none_or(|prefix| launch.id.starts_with(prefix)))
+        .filter(|invocation| {
+            invocation_prefix.is_none_or(|prefix| invocation.id.starts_with(prefix))
+        })
         .collect::<Vec<_>>();
     if selected.is_empty() {
-        return Err(anyhow!("no captured launch matches the requested trace"));
+        return Err(anyhow!(
+            "no captured invocation matches the requested trace"
+        ));
     }
-    if launch_prefix.is_some() && selected.len() > 1 {
-        return Err(anyhow!("launch prefix is ambiguous"));
+    if invocation_prefix.is_some() && selected.len() > 1 {
+        return Err(anyhow!("invocation prefix is ambiguous"));
     }
     if jsonl && selected.len() > 1 {
         return Err(anyhow!(
-            "--jsonl needs --launch when a trace contains multiple launches"
+            "--jsonl needs --invocation when a trace contains multiple invocations"
         ));
     }
 
-    for launch in selected {
-        let path = crate::trace::resolve_artifact(&launch.conversation_path)?;
+    for invocation in selected {
+        let path = crate::trace::resolve_artifact(&invocation.conversation_path)?;
         let file = std::fs::File::open(&path).map_err(|error| {
             anyhow!(
                 "normalized conversation missing at {}: {error}",
                 path.display()
             )
         })?;
-        if !jsonl && launches.len() > 1 {
+        if !jsonl && invocations.len() > 1 {
             println!(
-                "launch {}  {}  {}",
-                short_id(&launch.id),
-                launch.provider,
-                launch.capture_status
+                "invocation {}  {}  {}",
+                short_id(&invocation.id),
+                invocation.provider,
+                invocation.capture_status
             );
         }
         let mut reader = BufReader::new(file);
@@ -952,11 +962,11 @@ fn print_recorded_event(event: &crate::trace::RecordedConversationEvent) {
     }
 }
 
-/// One agent-backed skill launch. This is the shared wire type for `lf runs`
+/// One agent-backed skill invocation. This is the shared wire type for `lf runs`
 /// and the Runs evidence in `lf status`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SkillRunEntry {
-    /// Agent launch id: the run's stable identity.
+    /// Agent invocation id: the run's stable identity.
     pub id: String,
     pub trace_id: String,
     pub exec_id: String,
@@ -964,12 +974,12 @@ pub struct SkillRunEntry {
     pub repo: String,
     pub worktree: String,
     pub wave: Option<String>,
-    /// Roadmap Project slug that owns this run, when it launched inside a
+    /// Roadmap Project slug that owns this run, when it invocationed inside a
     /// Project/Task. `None` for runs with no plan attribution — the join
     /// is never inferred.
     pub project: Option<String>,
     /// Roadmap Task's Linear issue identifier (e.g. `W2-122`) that owns this run,
-    /// when it launched inside a Task. `None` when unattributed. This is
+    /// when it invocationed inside a Task. `None` when unattributed. This is
     /// the key that drills a roadmap row to its runs and complete trace.
     pub task: Option<String>,
     pub flow: Option<String>,
@@ -1067,47 +1077,47 @@ fn cap_runs(runs: &mut Vec<SkillRunEntry>) -> bool {
 
 fn summarize_runs(
     events: &[RunEventRow],
-    launches: &[crate::trace::AgentLaunchRow],
+    invocations: &[crate::trace::AgentInvocationRow],
     turns: &[crate::trace::AgentTurnRow],
 ) -> Vec<SkillRunEntry> {
     let process_parents = events
         .iter()
         .map(|event| (event.process_id.as_str(), event.parent_process_id.clone()))
         .collect::<BTreeMap<_, _>>();
-    let mut turns_by_launch: BTreeMap<&str, Vec<&crate::trace::AgentTurnRow>> = BTreeMap::new();
+    let mut turns_by_invocation: BTreeMap<&str, Vec<&crate::trace::AgentTurnRow>> = BTreeMap::new();
     for turn in turns {
-        turns_by_launch
-            .entry(turn.launch_id.as_str())
+        turns_by_invocation
+            .entry(turn.invocation_id.as_str())
             .or_default()
             .push(turn);
     }
 
-    launches
+    invocations
         .iter()
-        .filter_map(|launch| {
-            let skill = launch.skill.clone()?;
-            let turns = turns_by_launch
-                .get(launch.id.as_str())
+        .filter_map(|invocation| {
+            let skill = invocation.skill.clone()?;
+            let turns = turns_by_invocation
+                .get(invocation.id.as_str())
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             Some(SkillRunEntry {
-                id: launch.id.clone(),
-                trace_id: launch.run_id.clone(),
-                exec_id: launch.process_id.clone(),
+                id: invocation.id.clone(),
+                trace_id: invocation.run_id.clone(),
+                exec_id: invocation.process_id.clone(),
                 parent_exec_id: process_parents
-                    .get(launch.process_id.as_str())
+                    .get(invocation.process_id.as_str())
                     .cloned()
                     .flatten(),
-                repo: launch.repo.clone(),
-                worktree: launch.worktree.clone(),
-                wave: launch.wave.clone(),
-                project: launch.project.clone(),
-                task: launch.task.clone(),
-                flow: launch.flow.clone(),
+                repo: invocation.repo.clone(),
+                worktree: invocation.worktree.clone(),
+                wave: invocation.wave.clone(),
+                project: invocation.project.clone(),
+                task: invocation.task.clone(),
+                flow: invocation.flow.clone(),
                 skill,
-                status: launch_status_label(&launch.outcome).to_string(),
-                started: launch.started_at,
-                ended: launch.ended_at,
+                status: invocation_status_label(&invocation.outcome).to_string(),
+                started: invocation.started_at,
+                ended: invocation.ended_at,
                 turns: turns.len() as i64,
                 system_tokens: turns.iter().map(|turn| turn.system_tokens).sum(),
                 task_tokens: turns.iter().map(|turn| turn.task_tokens).sum(),
@@ -1127,13 +1137,13 @@ fn summarize_runs(
                     turns.iter().map(|turn| turn.cache_write_tokens),
                 ),
                 cost_usd: sum_optional_f64(turns.iter().map(|turn| turn.cost_usd)),
-                duration_secs: launch
+                duration_secs: invocation
                     .ended_at
-                    .map(|ended| ended.saturating_sub(launch.started_at).max(0) as f64),
-                provider: launch.provider.clone(),
-                model: launch.model.clone(),
-                surface: launch.surface.clone(),
-                capture_status: launch.capture_status.clone(),
+                    .map(|ended| ended.saturating_sub(invocation.started_at).max(0) as f64),
+                provider: invocation.provider.clone(),
+                model: invocation.model.clone(),
+                surface: invocation.surface.clone(),
+                capture_status: invocation.capture_status.clone(),
             })
         })
         .collect()
@@ -1302,7 +1312,7 @@ fn status_label(event: &str) -> &'static str {
     }
 }
 
-fn launch_status_label(outcome: &str) -> &'static str {
+fn invocation_status_label(outcome: &str) -> &'static str {
     match outcome {
         "completed" => "ok",
         "failed" | "interrupted" => "error",
@@ -1425,20 +1435,20 @@ mod tests {
         trace_id_for_address, trace_spans, ArtifactState,
     };
     use crate::store::{RunEventRow, TurnSpendRow};
-    use crate::trace::AgentLaunchRow;
+    use crate::trace::AgentInvocationRow;
 
     const NOW: i64 = 1_800_000_000;
     const HOUR: i64 = 3_600;
 
-    /// A launch whose conversation artifact is named but whose presence the
+    /// A invocation whose conversation artifact is named but whose presence the
     /// test decides via the `artifact_present` closure.
-    fn launch(
+    fn invocation(
         id: &str,
         capture_status: &str,
         started_at: i64,
         ended_at: Option<i64>,
-    ) -> AgentLaunchRow {
-        AgentLaunchRow {
+    ) -> AgentInvocationRow {
+        AgentInvocationRow {
             id: id.to_string(),
             run_id: format!("run-{id}"),
             process_id: id.to_string(),
@@ -1464,7 +1474,7 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 10,
-            control: None,
+            supervision: None,
         }
     }
 
@@ -1482,14 +1492,14 @@ mod tests {
 
     #[test]
     fn a_long_gone_terminal_capture_is_tombstoned() {
-        let launches = vec![launch(
+        let invocations = vec![invocation(
             "old",
             "complete",
             NOW - 200 * HOUR,
             Some(NOW - 100 * HOUR),
         )];
 
-        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+        let plan = plan_reconcile(&invocations, &[], NOW, false, &absent);
 
         assert_eq!(plan.pruned.len(), 1, "{plan:?}");
         assert_eq!(plan.pruned[0].id, "old");
@@ -1507,14 +1517,14 @@ mod tests {
     fn a_recently_missing_capture_is_reported_not_swept() {
         // The anti-masking line: a capture that vanished an hour ago is
         // evidence of a live regression, not history to acknowledge.
-        let launches = vec![launch(
+        let invocations = vec![invocation(
             "fresh",
             "complete",
             NOW - 2 * HOUR,
             Some(NOW - HOUR),
         )];
 
-        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+        let plan = plan_reconcile(&invocations, &[], NOW, false, &absent);
 
         assert!(
             plan.pruned.is_empty(),
@@ -1526,14 +1536,14 @@ mod tests {
 
     #[test]
     fn all_overrides_the_age_guard_for_recent_losses() {
-        let launches = vec![launch(
+        let invocations = vec![invocation(
             "fresh",
             "complete",
             NOW - 2 * HOUR,
             Some(NOW - HOUR),
         )];
 
-        let plan = plan_reconcile(&launches, &[], NOW, true, &absent);
+        let plan = plan_reconcile(&invocations, &[], NOW, true, &absent);
 
         assert_eq!(plan.pruned.len(), 1, "{plan:?}");
         assert!(plan.recent_missing.is_empty(), "{plan:?}");
@@ -1541,27 +1551,27 @@ mod tests {
 
     #[test]
     fn an_unsafe_reference_is_never_acknowledged_as_pruned() {
-        let launches = vec![launch(
+        let invocations = vec![invocation(
             "unsafe",
             "complete",
             NOW - 200 * HOUR,
             Some(NOW - 100 * HOUR),
         )];
 
-        let plan = plan_reconcile(&launches, &[], NOW, true, &unsafe_path);
+        let plan = plan_reconcile(&invocations, &[], NOW, true, &unsafe_path);
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
         assert!(plan.recent_missing.is_empty(), "{plan:?}");
     }
 
     #[test]
-    fn an_orphaned_capturing_launch_with_its_file_is_interrupted() {
+    fn an_orphaned_capturing_invocation_with_its_file_is_interrupted() {
         // Interrupted run: `begin` wrote the file, the process died before
         // `finish`. The file is here, so this is finalization, not a tombstone.
-        let launches = vec![launch("stuck", "capturing", NOW - HOUR, None)];
+        let invocations = vec![invocation("stuck", "capturing", NOW - HOUR, None)];
         let events = vec![row("stuck", 1, NOW - HOUR, "run", "completed")];
 
-        let plan = plan_reconcile(&launches, &events, NOW, false, &present);
+        let plan = plan_reconcile(&invocations, &events, NOW, false, &present);
 
         assert_eq!(plan.interrupted.len(), 1, "{plan:?}");
         assert_eq!(plan.interrupted[0].id, "stuck");
@@ -1574,12 +1584,12 @@ mod tests {
     }
 
     #[test]
-    fn a_live_capturing_launch_is_left_alone() {
+    fn a_live_capturing_invocation_is_left_alone() {
         // Still running, no terminal run event, inside the guard: the file may
         // be mid-write and the row is not ours to touch.
-        let launches = vec![launch("live", "capturing", NOW - HOUR, None)];
+        let invocations = vec![invocation("live", "capturing", NOW - HOUR, None)];
 
-        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+        let plan = plan_reconcile(&invocations, &[], NOW, false, &absent);
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
         assert!(plan.recent_missing.is_empty(), "{plan:?}");
@@ -1589,14 +1599,14 @@ mod tests {
 
     #[test]
     fn an_intact_terminal_capture_needs_no_reconciliation() {
-        let launches = vec![launch(
+        let invocations = vec![invocation(
             "good",
             "complete",
             NOW - 200 * HOUR,
             Some(NOW - 100 * HOUR),
         )];
 
-        let plan = plan_reconcile(&launches, &[], NOW, false, &present);
+        let plan = plan_reconcile(&invocations, &[], NOW, false, &present);
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
         assert!(plan.interrupted.is_empty(), "{plan:?}");
@@ -1640,7 +1650,7 @@ mod tests {
         assert!(plan.interrupted.is_empty(), "{plan:?}");
     }
 
-    /// Write an artifact directory under the trace root with no launch row
+    /// Write an artifact directory under the trace root with no invocation row
     /// claiming it, returning its relative path.
     fn orphan_dir(guard: &crate::journal::TestLedgerGuard, rel: &str) -> String {
         let dir = guard.home().join("traces").join(rel);
@@ -1655,7 +1665,7 @@ mod tests {
         // unclaimed directory may be a live capture mid-flight — removing it
         // would delete a running transcript.
         let guard = crate::journal::TestLedgerGuard::new();
-        let rel = orphan_dir(&guard, "run-x/proc-x/launch-x");
+        let rel = orphan_dir(&guard, "run-x/proc-x/invocation-x");
         let written = std::fs::metadata(guard.home().join("traces").join(&rel))
             .unwrap()
             .modified()
@@ -1679,10 +1689,10 @@ mod tests {
     }
 
     #[test]
-    fn an_artifact_directory_a_launch_claims_is_never_an_orphan() {
+    fn an_artifact_directory_a_invocation_claims_is_never_an_orphan() {
         let guard = crate::journal::TestLedgerGuard::new();
-        let rel = orphan_dir(&guard, "run-y/proc-y/launch-y");
-        let mut claimed = launch("launch-y", "complete", NOW - 200 * HOUR, None);
+        let rel = orphan_dir(&guard, "run-y/proc-y/invocation-y");
+        let mut claimed = invocation("invocation-y", "complete", NOW - 200 * HOUR, None);
         claimed.artifact_dir = rel;
 
         let orphans = plan_orphans(&[claimed], NOW, true).unwrap();
@@ -1691,16 +1701,16 @@ mod tests {
     }
 
     #[test]
-    fn an_already_pruned_launch_is_not_reconciled_twice() {
+    fn an_already_pruned_invocation_is_not_reconciled_twice() {
         // Idempotence: re-running reconcile must not re-tombstone a tombstone.
-        let launches = vec![launch(
+        let invocations = vec![invocation(
             "done",
             "pruned",
             NOW - 200 * HOUR,
             Some(NOW - 100 * HOUR),
         )];
 
-        let plan = plan_reconcile(&launches, &[], NOW, false, &absent);
+        let plan = plan_reconcile(&invocations, &[], NOW, false, &absent);
 
         assert!(plan.pruned.is_empty(), "{plan:?}");
         assert!(plan.recent_missing.is_empty(), "{plan:?}");
@@ -1731,7 +1741,7 @@ mod tests {
     fn turn(process: &str, at: i64, input: i64, cost: f64) -> TurnSpendRow {
         TurnSpendRow {
             turn_id: format!("turn-{process}-{at}"),
-            launch_id: format!("launch-{process}"),
+            invocation_id: format!("invocation-{process}"),
             trace_id: process.to_string(),
             exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),
@@ -1875,7 +1885,7 @@ mod tests {
         let events = vec![row("process", 0, 100, "run", "completed")];
         let mut codex = turn("process", 120, 30, 0.25);
         codex.turn_id = "turn-codex".to_string();
-        codex.launch_id = "launch-codex".to_string();
+        codex.invocation_id = "invocation-codex".to_string();
         codex.provider = "codex".to_string();
         codex.model = None;
 

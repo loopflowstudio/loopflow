@@ -2023,7 +2023,7 @@ fn launch_skill_agent(
             render_ms: 0,
             raw_provider: true,
             basis: None,
-            control: None,
+            supervision: None,
         },
     )?;
 

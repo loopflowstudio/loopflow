@@ -60,7 +60,7 @@ enum LaunchLaunchResult: Equatable, Sendable {
 /// Detects which surfaces the current machine can present and opens them. The
 /// pure resolver decides *which* surface; this is the side effect that reaches
 /// out to `NSWorkspace` and the filesystem. It never creates or renames Work —
-/// it runs the exact Launch attach command the store handed back.
+/// it runs the exact Invocation attach command the store handed back.
 enum LaunchTargetLauncher {
     struct Command: Equatable {
         let cwd: String
@@ -102,7 +102,7 @@ enum LaunchTargetLauncher {
     /// descriptors remain byte-for-byte unchanged. Remote descriptors run the
     /// exact cwd/environment/argv on their declared host instead of probing or
     /// executing the remote path on this Mac.
-    static func command(for attach: LaunchSurfaceRecord, home: String? = nil) -> Command {
+    static func command(for attach: InvocationSurfaceRecord, home: String? = nil) -> Command {
         guard isRemoteHome(attach.host) else {
             return Command(cwd: attach.cwd, argv: attach.argv, environment: attach.environment)
         }
@@ -121,9 +121,9 @@ enum LaunchTargetLauncher {
         )
     }
 
-    /// Keep the Feedback controller local. `lf launch present` owns the one Home
+    /// Keep the Feedback controller local. `lf invocation present` owns the one Home
     /// hop needed to reach the recorded provider terminal.
-    static func feedbackCommand(for attach: LaunchSurfaceRecord) -> Command {
+    static func feedbackCommand(for attach: InvocationSurfaceRecord) -> Command {
         let lfPath = Bundle.main.url(forAuxiliaryExecutable: "lf")?.path ?? "lf"
         return Command(
             cwd: "/",
@@ -162,14 +162,14 @@ enum LaunchTargetLauncher {
         )
     }
 
-    /// Launch an external surface for a launch. Ghostty is embedded and never
+    /// Launch an external surface for an Invocation. Ghostty is embedded and never
     /// routed here. Returns whether the launch attached, opened worktree-only,
     /// or failed; the caller records the preference only on `.attached` and
     /// falls back visibly on `.failed`.
     @MainActor
     static func launch(
         _ surface: LaunchTarget,
-        attach: LaunchSurfaceRecord,
+        attach: InvocationSurfaceRecord,
         home: String,
         reach: LaunchTargetReach
     ) async -> LaunchLaunchResult {
@@ -188,7 +188,7 @@ enum LaunchTargetLauncher {
     }
 
     private static func launchWarp(
-        attach: LaunchSurfaceRecord,
+        attach: InvocationSurfaceRecord,
         home: String,
         attaching: Bool
     ) -> LaunchLaunchResult {
@@ -219,7 +219,7 @@ enum LaunchTargetLauncher {
     /// shared attach command* in the worktree, with the descriptor's environment
     /// preserved. Pure and testable: the embedded command is the environment
     /// prefix plus the provider-session-bearing argv the store handed back, so a
-    /// Warp launch attaches the same Launch — with the same environment —
+    /// Warp launch attaches the same Invocation — with the same environment —
     /// rather than a fresh shell. Warp launch configs carry no environment field
     /// of their own, so the environment rides an `env KEY=VALUE …` prefix on the
     /// command itself, exactly as the embedded terminal would inherit it.
@@ -253,10 +253,10 @@ enum LaunchTargetLauncher {
 
     /// Write the launch configuration, returning its `warp://launch` URL, or nil
     /// if it could not be written so the caller can fall back visibly.
-    private static func writeWarpLaunchConfig(attach: LaunchSurfaceRecord, home: String) -> URL? {
+    private static func writeWarpLaunchConfig(attach: InvocationSurfaceRecord, home: String) -> URL? {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".warp/launch_configurations", isDirectory: true)
-        let name = warpLaunchConfigName(launchId: attach.launchId)
+        let name = warpLaunchConfigName(launchId: attach.invocationId)
         let command = command(for: attach, home: home)
         let yaml = warpLaunchConfigYAML(
             name: name,
@@ -303,7 +303,7 @@ enum LaunchTargetLauncher {
     @MainActor
     private static func launchIDEAttach(
         _ surface: LaunchTarget,
-        attach: LaunchSurfaceRecord,
+        attach: InvocationSurfaceRecord,
         home: String
     ) async -> LaunchLaunchResult {
         guard await openWorkspace(surface, cwd: attach.cwd) else { return .failed }

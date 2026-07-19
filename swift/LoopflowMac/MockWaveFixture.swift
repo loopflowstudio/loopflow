@@ -294,7 +294,7 @@ enum MockWaveFixture {
         "truncated": false,
         "items": [
           {
-            "id": "launch-1",
+            "id": "invocation-1",
             "trace_id": "run-1",
             "exec_id": "proc-1",
             "parent_exec_id": null,

@@ -93,17 +93,6 @@ impl Store {
         task: &Task,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        let launch = self
-            .current_launch(lease)
-            .await?
-            .ok_or_else(|| super::StoreError::InvalidData("test Run has no Launch".to_string()))?;
-        self.advance_run(
-            lease,
-            crate::durable::RunAdvance::LaunchLive {
-                launch_id: launch.id,
-            },
-        )
-        .await?;
         self.update_task_for_run(task, lease).await
     }
 
@@ -191,18 +180,23 @@ impl Store {
         };
         self.advance_run(
             &lease,
-            crate::durable::RunAdvance::LaunchStarting {
-                route: crate::durable::LaunchRoute {
-                    provider: task.provider.clone(),
-                    model: None,
-                    account_id: None,
-                },
+            crate::durable::RunAdvance::RunStarting {
                 containment: crate::durable::Containment::Tmux {
                     name: format!("test-task-{}", task.id),
                 },
                 cwd: task.worktree.clone(),
+            },
+        )
+        .await?;
+        self.advance_run(
+            &lease,
+            crate::durable::RunAdvance::InvocationStarting {
+                route: crate::durable::InvocationRoute {
+                    provider: task.provider.clone(),
+                    model: None,
+                    account_id: None,
+                },
                 surface: "headless".to_string(),
-                opaque: false,
                 resume_token: task.provider_session_id.clone(),
             },
         )
@@ -624,17 +618,6 @@ impl Store {
         project: &Project,
         lease: &RunLease,
     ) -> StoreResult<()> {
-        let launch = self
-            .current_launch(lease)
-            .await?
-            .ok_or_else(|| super::StoreError::InvalidData("test Run has no Launch".to_string()))?;
-        self.advance_run(
-            lease,
-            crate::durable::RunAdvance::LaunchLive {
-                launch_id: launch.id,
-            },
-        )
-        .await?;
         self.update_project_for_run(project, lease).await
     }
 
@@ -689,18 +672,23 @@ impl Store {
         };
         self.advance_run(
             &lease,
-            crate::durable::RunAdvance::LaunchStarting {
-                route: crate::durable::LaunchRoute {
-                    provider: project.provider.clone(),
-                    model: None,
-                    account_id: None,
-                },
+            crate::durable::RunAdvance::RunStarting {
                 containment: crate::durable::Containment::Tmux {
                     name: format!("test-project-{}", project.id),
                 },
                 cwd: std::path::PathBuf::from("/tmp/project-test"),
+            },
+        )
+        .await?;
+        self.advance_run(
+            &lease,
+            crate::durable::RunAdvance::InvocationStarting {
+                route: crate::durable::InvocationRoute {
+                    provider: project.provider.clone(),
+                    model: None,
+                    account_id: None,
+                },
                 surface: "headless".to_string(),
-                opaque: false,
                 resume_token: project.provider_session_id.clone(),
             },
         )

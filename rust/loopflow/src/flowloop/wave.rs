@@ -364,9 +364,9 @@ struct WaveControl {
     lease: RunLease,
 }
 
-fn child_key(child: &ChildFeedback) -> (crate::durable::LaunchId, u64) {
+fn child_key(child: &ChildFeedback) -> (crate::durable::AgentInvocationId, u64) {
     (
-        child.feedback.launch_id.clone(),
+        child.feedback.invocation_id.clone(),
         child.feedback.basis.revision,
     )
 }
@@ -488,8 +488,8 @@ struct WaveLoop {
     cron_last_fired: HashMap<String, DateTime<Utc>>,
     provider_session: Option<ProviderSessionRef>,
     control: Option<WaveControl>,
-    servicing_child: Option<(crate::durable::LaunchId, u64)>,
-    delivered_child: Option<(crate::durable::LaunchId, u64)>,
+    servicing_child: Option<(crate::durable::AgentInvocationId, u64)>,
+    delivered_child: Option<(crate::durable::AgentInvocationId, u64)>,
     end: Option<LoopEnd>,
 }
 
@@ -618,39 +618,73 @@ impl WaveLoop {
 
     async fn capture_control(
         &mut self,
+        provider: &str,
+        model: Option<&str>,
     ) -> Result<(
         Option<crate::durable::Basis>,
-        Option<crate::trace::ControlLaunch>,
+        Option<crate::trace::SupervisedInvocation>,
     )> {
         let Some(control) = &self.control else {
             return Ok((None, None));
         };
         let epoch = control.store.current_epoch(&control.lease.work).await?;
-        let run = control
+        let mut run = control
             .store
             .current_run(&control.lease.work)
             .await?
-            .ok_or_else(|| anyhow!("Wave Run authority disappeared before Launch"))?;
+            .ok_or_else(|| anyhow!("Wave Run authority disappeared before Invocation"))?;
         if run.id != control.lease.run_id {
             anyhow::bail!(
-                "Wave Run {} was replaced before Launch by {}",
+                "Wave Run {} was replaced before Invocation by {}",
                 control.lease.run_id,
                 run.id
             );
         }
         let process_group = crate::engine::process::current_process_group_id()
             .ok_or_else(|| anyhow!("Wave resident has no isolated process group"))?;
+        if run.state == crate::durable::RunState::Reserved {
+            let receipt = control
+                .store
+                .advance_run(
+                    &control.lease,
+                    crate::durable::RunAdvance::RunStarting {
+                        containment: crate::durable::Containment::ProcessGroup {
+                            id: i64::from(process_group),
+                        },
+                        cwd: self.cwd.clone(),
+                    },
+                )
+                .await?;
+            let crate::durable::AdvanceReceipt::Run(started) = receipt else {
+                unreachable!("RunStarting returns a Run receipt")
+            };
+            run = started;
+        }
+        let receipt = control
+            .store
+            .advance_run(
+                &control.lease,
+                crate::durable::RunAdvance::InvocationStarting {
+                    route: crate::durable::InvocationRoute {
+                        provider: provider.to_string(),
+                        model: model.map(str::to_string),
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                },
+            )
+            .await?;
+        let crate::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
+            unreachable!("InvocationStarting returns an Invocation receipt")
+        };
         Ok((
             Some(epoch.current_basis),
-            Some(crate::trace::ControlLaunch {
-                run_id: run.id,
-                home_id: run.home_id,
+            Some(crate::trace::SupervisedInvocation {
+                invocation_id: invocation.id,
+                supervising_run_id: run.id,
                 account_id: None,
-                containment: crate::durable::Containment::ProcessGroup {
-                    id: i64::from(process_group),
-                },
                 resume_token: None,
-                opaque_basis: None,
             }),
         ))
     }
@@ -855,14 +889,17 @@ impl WaveLoop {
         };
         body.harness = Some(prepared.harness.clone());
         body.model = prepared.model.clone();
-        let (basis, control) = match self.capture_control().await {
+        let (basis, control) = match self
+            .capture_control(&prepared.harness, prepared.model.as_deref())
+            .await
+        {
             Ok(control) => control,
             Err(error) => {
                 let body_id = body.body_id.clone();
                 self.open_body(body, answers).await;
                 self.finish_failed_pass(
                     &body_id,
-                    &format!("failed to establish Wave Run Launch: {error}"),
+                    &format!("failed to establish Wave Run Invocation: {error}"),
                 )
                 .await;
                 return;
@@ -886,7 +923,7 @@ impl WaveLoop {
                     render_ms: prepared.context_render_ms,
                     raw_provider: true,
                     basis,
-                    control,
+                    supervision: control,
                 },
             ) {
                 Ok(capture) => Some(capture),
@@ -1785,12 +1822,14 @@ mod tests {
         parent_lease: RunLease,
         child_lease: RunLease,
         child_work: WorkRef,
-        child_launch: crate::durable::Launch,
+        child_invocation: crate::durable::AgentInvocation,
     }
 
     async fn feedback_rig(tmp: &tempfile::TempDir, route: bool) -> FeedbackRig {
         use crate::child::ChildRef;
-        use crate::durable::{AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance};
+        use crate::durable::{
+            AttentionRoute, Containment, FlowPosition, InvocationRoute, RunAdvance,
+        };
         use crate::planning::{LinearProjectId, ProjectPlan};
         use crate::project::{Project, ProjectId};
 
@@ -1844,38 +1883,36 @@ mod tests {
             .reserve_run(&child_work, crate::durable::RunTrigger::User)
             .await
             .unwrap();
-        let launch = store
+        store
             .advance_run(
                 &child_lease,
-                RunAdvance::LaunchStarting {
-                    route: LaunchRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
+                RunAdvance::RunStarting {
                     containment: Containment::Tmux {
                         name: "child-feedback".to_string(),
                     },
                     cwd: tmp.path().join("child"),
+                },
+            )
+            .await
+            .unwrap();
+        let receipt = store
+            .advance_run(
+                &child_lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
                     surface: "headless".to_string(),
-                    opaque: false,
                     resume_token: None,
                 },
             )
             .await
             .unwrap();
-        let crate::durable::AdvanceReceipt::Launch(child_launch) = launch else {
-            panic!("expected child Launch")
+        let crate::durable::AdvanceReceipt::Invocation(child_invocation) = receipt else {
+            panic!("expected child Invocation")
         };
-        store
-            .advance_run(
-                &child_lease,
-                RunAdvance::LaunchLive {
-                    launch_id: child_launch.id.clone(),
-                },
-            )
-            .await
-            .unwrap();
         let child_basis = store
             .current_epoch(&child_work)
             .await
@@ -1901,7 +1938,7 @@ mod tests {
             store
                 .route_feedback(
                     &child_lease,
-                    &child_launch.id,
+                    &child_invocation.id,
                     AttentionRoute::Parent(parent_lease.work.clone()),
                 )
                 .await
@@ -1915,7 +1952,7 @@ mod tests {
             parent_lease,
             child_lease,
             child_work,
-            child_launch,
+            child_invocation,
         }
     }
 
@@ -2090,7 +2127,7 @@ mod tests {
         let store = rig.control.store.clone();
         let parent_lease = rig.parent_lease.clone();
         let child_work = rig.child_work.clone();
-        let child_launch_id = rig.child_launch.id.clone();
+        let child_invocation_id = rig.child_invocation.id.clone();
         let child_lease = rig.child_lease.clone();
         let inputs = Arc::new(Mutex::new(Vec::new()));
         let harness_inputs = inputs.clone();
@@ -2142,7 +2179,7 @@ mod tests {
         store
             .route_feedback(
                 &child_lease,
-                &child_launch_id,
+                &child_invocation_id,
                 crate::durable::AttentionRoute::Parent(parent_lease.work.clone()),
             )
             .await

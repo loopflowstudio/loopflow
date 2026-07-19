@@ -1011,7 +1011,7 @@ async fn snapshot_task_runtime(
     now: time::OffsetDateTime,
 ) -> Result<TaskRuntimeSnapshot> {
     let process_alive = work_status_is_running(&status)
-        && child_launch_alive(store, &ChildRef::Task(task.id.clone()), liveness).await?;
+        && child_run_alive(store, &ChildRef::Task(task.id.clone()), liveness).await?;
     let latest_event_at = store
         .latest_task_event_at(&task.id)
         .await
@@ -1046,7 +1046,7 @@ async fn snapshot_project_runtime(
     now: time::OffsetDateTime,
 ) -> Result<ProjectRuntimeSnapshot> {
     let process_alive = work_status_is_running(&status)
-        && child_launch_alive(store, &ChildRef::Project(project.id.clone()), liveness).await?;
+        && child_run_alive(store, &ChildRef::Project(project.id.clone()), liveness).await?;
     let pending_observations = if work_status_is_terminal(&status) {
         store
             .pending_observations(&ObservationRecipient::Project {
@@ -1087,7 +1087,7 @@ async fn snapshot_project_runtime(
     })
 }
 
-async fn child_launch_alive(
+async fn child_run_alive(
     store: &SharedStore,
     child: &ChildRef,
     liveness: &TmuxLiveness,
@@ -1103,16 +1103,10 @@ async fn child_launch_alive(
     else {
         return Ok(false);
     };
-    let Some(launch) = store
-        .current_launch_for_run(&run.id)
-        .await
-        .map_err(|error| anyhow!("failed to read child Launch: {error}"))?
-    else {
-        return Ok(false);
-    };
-    Ok(match launch.containment {
-        Containment::Tmux { name } => liveness.is_alive(&name),
-        Containment::ProcessGroup { .. } => true,
+    Ok(match run.containment {
+        None => false,
+        Some(Containment::Tmux { name }) => liveness.is_alive(&name),
+        Some(Containment::ProcessGroup { .. }) => true,
     })
 }
 

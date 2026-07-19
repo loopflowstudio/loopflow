@@ -42,7 +42,7 @@ lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Work, Steers, worktree, and active PR, but gives the next Launch to the selected
+Work, Steers, worktree, and active PR, but gives the next Invocation to the selected
 agent. It refuses while another executor is still writing; interrupt that
 boundary first. A Steer is durable before live delivery is attempted. Provider
 acceptance is not incorporation; the Basis of a later successful boundary is.

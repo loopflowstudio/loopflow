@@ -97,8 +97,8 @@ struct LocalWaveAgentLauncherTests {
 
     @Test("Feedback presentation never requests continuation")
     func feedbackPresentationCommandShape() throws {
-        let data = try loadFixtureData("launch_surface.json")
-        let surface = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: data)
+        let data = try loadFixtureData("invocation_surface.json")
+        let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: data)
         let command = LaunchTargetLauncher.feedbackCommand(for: surface)
 
         #expect(Array(command.argv.dropFirst()) == [

@@ -18,7 +18,7 @@ use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::id::{ExecId, TraceId};
 use crate::store::{StoreError, StoreResult};
 
-pub use crate::durable::{LaunchId, TurnId};
+pub use crate::durable::{AgentInvocationId, TurnId};
 
 pub const TRACE_SCHEMA_VERSION: u32 = 1;
 pub const TOKENIZER: &str = "cl100k_base";
@@ -681,7 +681,7 @@ pub enum RecordedConversationPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentLaunchRow {
+pub struct AgentInvocationRow {
     pub id: String,
     pub run_id: String,
     pub process_id: String,
@@ -707,23 +707,21 @@ pub struct AgentLaunchRow {
     pub provider_session_path: Option<String>,
     pub conversation_event_count: i64,
     pub conversation_bytes: i64,
-    pub control: Option<ControlLaunch>,
+    pub supervision: Option<SupervisedInvocation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ControlLaunch {
-    pub run_id: crate::durable::RunId,
-    pub home_id: crate::durable::HomeId,
+pub struct SupervisedInvocation {
+    pub invocation_id: crate::durable::AgentInvocationId,
+    pub supervising_run_id: crate::durable::RunId,
     pub account_id: Option<String>,
-    pub containment: crate::durable::Containment,
     pub resume_token: Option<String>,
-    pub opaque_basis: Option<crate::durable::Basis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentTurnRow {
     pub id: String,
-    pub launch_id: String,
+    pub invocation_id: String,
     pub ordinal: i64,
     pub provider_turn_id: Option<String>,
     pub started_at: i64,
@@ -782,20 +780,20 @@ pub struct CaptureStart {
     pub render_ms: u64,
     pub raw_provider: bool,
     pub basis: Option<crate::durable::Basis>,
-    pub control: Option<ControlLaunch>,
+    pub supervision: Option<SupervisedInvocation>,
 }
 
 impl CaptureHandle {
-    pub fn launch_id(&self) -> crate::durable::LaunchId {
+    pub fn invocation_id(&self) -> crate::durable::AgentInvocationId {
         let id = self
             .0
             .lock()
             .expect("trace capture mutex poisoned")
-            .launch
+            .invocation
             .id
             .clone();
-        crate::durable::LaunchId::parse(&id)
-            .expect("TraceCapture stores a generated durable Launch id")
+        crate::durable::AgentInvocationId::parse(&id)
+            .expect("TraceCapture stores a generated durable Invocation id")
     }
 
     pub fn artifact_dir(&self) -> PathBuf {
@@ -803,7 +801,7 @@ impl CaptureHandle {
             .0
             .lock()
             .expect("trace capture mutex poisoned")
-            .launch
+            .invocation
             .artifact_dir
             .clone();
         resolve_artifact(&relative).expect("capture stores a validated relative artifact path")
@@ -867,29 +865,29 @@ impl CaptureHandle {
         capture.finish_current_turn(status, OffsetDateTime::now_utc().unix_timestamp())
     }
 
-    pub(crate) fn fail_and_begin_launch(
+    pub(crate) fn fail_and_begin_invocation(
         &self,
         provider: String,
         model: Option<String>,
         text: &str,
     ) -> StoreResult<()> {
         let mut capture = self.0.lock().expect("trace capture mutex poisoned");
-        if capture.launch.control.is_some() {
+        if capture.invocation.supervision.is_some() {
             return Err(StoreError::InvalidData(
-                "a control Launch successor must be reserved before capture".to_string(),
+                "a supervised Invocation successor must be reserved before capture".to_string(),
             ));
         }
         let context = capture.context.clone();
         let start = CaptureStart {
             provider,
             model,
-            surface: capture.launch.surface.clone(),
+            surface: capture.invocation.surface.clone(),
             input_op: "message".to_string(),
             gather_ms: 0,
             render_ms: 0,
             raw_provider: capture.provider_path.is_some(),
             basis: None,
-            control: None,
+            supervision: None,
         };
         capture.finish("failed", false)?;
         *capture = TraceCapture::begin(
@@ -911,8 +909,8 @@ impl CaptureHandle {
 
     pub fn set_provider_session_id(&self, session_id: Option<String>) {
         self.with_capture(|capture| {
-            capture.launch.provider_session_id = session_id;
-            crate::journal::open_ledger()?.update_agent_launch_receipt(&capture.launch)
+            capture.invocation.provider_session_id = session_id;
+            crate::journal::open_ledger()?.update_agent_invocation_receipt(&capture.invocation)
         });
     }
 
@@ -930,7 +928,7 @@ impl CaptureHandle {
         }
         if let Err(error) = operation(&mut capture) {
             let message = error.to_string();
-            tracing::warn!(error = %message, launch_id = %capture.launch.id, "trace capture became partial");
+            tracing::warn!(error = %message, invocation_id = %capture.invocation.id, "trace capture became partial");
             let _ = capture.append_payload(RecordedConversationPayload::CaptureError {
                 message: message.clone(),
             });
@@ -942,7 +940,7 @@ impl CaptureHandle {
 #[derive(Debug)]
 struct TraceCapture {
     context: TraceCaptureContext,
-    launch: AgentLaunchRow,
+    invocation: AgentInvocationRow,
     turn: AgentTurnRow,
     conversation_path: PathBuf,
     provider_path: Option<PathBuf>,
@@ -962,15 +960,10 @@ impl TraceCapture {
         validate_input_op(&start.input_op)?;
         let persist_start = Instant::now();
         let ledger = crate::journal::open_ledger()?;
-        let registered_launch = start
-            .control
+        let invocation_id = start
+            .supervision
             .as_ref()
-            .map(|control| ledger.control_launch_for_run(&control.run_id))
-            .transpose()?
-            .flatten();
-        let launch_id = registered_launch
-            .as_ref()
-            .map(|launch| launch.id.clone())
+            .map(|supervision| supervision.invocation_id.clone())
             .unwrap_or_default();
         let turn_id = TurnId::new();
         let root = trace_root();
@@ -979,11 +972,11 @@ impl TraceCapture {
             .join(context.run_id.as_str())
             .join(context.process_id.as_str());
         create_private_dir(&process_dir)?;
-        let artifact_dir = process_dir.join(launch_id.as_str());
-        let staging_dir = process_dir.join(format!(".{}.staging", launch_id.as_str()));
+        let artifact_dir = process_dir.join(invocation_id.as_str());
+        let staging_dir = process_dir.join(format!(".{}.staging", invocation_id.as_str()));
         if staging_dir.exists() || artifact_dir.exists() {
             return Err(StoreError::InvalidData(format!(
-                "trace artifact already exists for launch {launch_id}"
+                "trace artifact already exists for invocation {invocation_id}"
             )));
         }
         create_private_dir(&staging_dir)?;
@@ -1037,15 +1030,12 @@ impl TraceCapture {
             .as_ref()
             .map(|path| artifact_dir.join(path.strip_prefix(&staging_dir).expect("staged path")));
 
-        let started_at = registered_launch
-            .as_ref()
-            .map(|launch| launch.started_at.unix_timestamp())
-            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp());
+        let started_at = OffsetDateTime::now_utc().unix_timestamp();
         let system_tokens = prepared.system.as_ref().map_or(0, |channel| channel.tokens) as i64;
         let task_tokens = prepared.task.tokens as i64;
         let persist_ms = persist_start.elapsed().as_millis() as i64;
-        let launch = AgentLaunchRow {
-            id: launch_id.to_string(),
+        let invocation = AgentInvocationRow {
+            id: invocation_id.to_string(),
             run_id: context.run_id.to_string(),
             process_id: context.process_id.to_string(),
             started_at,
@@ -1073,11 +1063,11 @@ impl TraceCapture {
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: initial_bytes as i64,
-            control: start.control,
+            supervision: start.supervision,
         };
         let turn = AgentTurnRow {
             id: turn_id.to_string(),
-            launch_id: launch.id.clone(),
+            invocation_id: invocation.id.clone(),
             ordinal: 1,
             provider_turn_id: None,
             started_at,
@@ -1127,14 +1117,14 @@ impl TraceCapture {
                 decision,
             })
             .collect::<Vec<_>>();
-        if let Err(error) = ledger.insert_trace_capture(&launch, &turn, &assets, &decisions) {
+        if let Err(error) = ledger.insert_trace_capture(&invocation, &turn, &assets, &decisions) {
             let _ = fs::remove_dir_all(&artifact_dir);
             return Err(error);
         }
 
         Ok(Self {
             context,
-            launch,
+            invocation,
             turn,
             conversation_path: published_conversation_path,
             provider_path: published_provider_path,
@@ -1159,8 +1149,8 @@ impl TraceCapture {
         };
         let bytes = append_json_line(&self.conversation_path, &event)?;
         self.event_seq += 1;
-        self.launch.conversation_event_count += 1;
-        self.launch.conversation_bytes += bytes as i64;
+        self.invocation.conversation_event_count += 1;
+        self.invocation.conversation_bytes += bytes as i64;
         self.turn.last_event_seq = Some(event.seq as i64);
         Ok(())
     }
@@ -1179,7 +1169,7 @@ impl TraceCapture {
         let ordinal = self.turn.ordinal + 1;
         let turn_id = TurnId::new();
         let provider_turn_id = self.turn.provider_turn_id.clone();
-        let artifact_dir = resolve_artifact(&self.launch.artifact_dir)?;
+        let artifact_dir = resolve_artifact(&self.invocation.artifact_dir)?;
         let turns_dir = artifact_dir.join("turns");
         let task_path = turns_dir.join(format!("{ordinal:04}-task.md"));
         let staging_path = turns_dir.join(format!(".{ordinal:04}-task.md.staging"));
@@ -1194,7 +1184,7 @@ impl TraceCapture {
         let task_tokens = prepared.task.tokens as i64;
         let mut turn = AgentTurnRow {
             id: turn_id.to_string(),
-            launch_id: self.launch.id.clone(),
+            invocation_id: self.invocation.id.clone(),
             ordinal,
             provider_turn_id,
             started_at: now,
@@ -1300,10 +1290,10 @@ impl TraceCapture {
         };
         append_json_line(provider_path, &record)?;
         self.provider_seq += 1;
-        if self.launch.provider_session_id.is_none() {
+        if self.invocation.provider_session_id.is_none() {
             if let Some(session_id) = provider_session_id(line) {
-                self.launch.provider_session_id = Some(session_id);
-                crate::journal::open_ledger()?.update_agent_launch_receipt(&self.launch)?;
+                self.invocation.provider_session_id = Some(session_id);
+                crate::journal::open_ledger()?.update_agent_invocation_receipt(&self.invocation)?;
             }
         }
         Ok(())
@@ -1387,26 +1377,26 @@ impl TraceCapture {
     fn finish(&mut self, outcome: &str, prompt_only: bool) -> StoreResult<()> {
         if !matches!(outcome, "completed" | "failed" | "interrupted") {
             return Err(StoreError::InvalidData(format!(
-                "invalid agent launch outcome: {outcome}"
+                "invalid agent invocation outcome: {outcome}"
             )));
         }
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        self.launch.ended_at = Some(now);
-        self.launch.outcome = outcome.to_string();
+        self.invocation.ended_at = Some(now);
+        self.invocation.outcome = outcome.to_string();
         let sync_error = sync_file(&self.conversation_path)
             .and_then(|_| self.provider_path.as_deref().map_or(Ok(()), sync_file))
             .err();
         if let Some(error) = sync_error {
             self.failed.get_or_insert_with(|| error.to_string());
         }
-        self.launch.capture_status = if self.failed.is_some() {
+        self.invocation.capture_status = if self.failed.is_some() {
             "partial".to_string()
         } else if prompt_only {
             "prompt_only".to_string()
         } else {
             "complete".to_string()
         };
-        self.launch.incomplete_reason = match (&self.failed, prompt_only) {
+        self.invocation.incomplete_reason = match (&self.failed, prompt_only) {
             (Some(error), _) => Some(error.clone()),
             (None, true) => Some("provider conversation not captured by Loopflow".to_string()),
             (None, false) => None,
@@ -1423,7 +1413,7 @@ impl TraceCapture {
             .to_string()
         };
         self.apply_usage_to_turn();
-        crate::journal::open_ledger()?.finish_trace_capture(&self.launch, &self.turn)
+        crate::journal::open_ledger()?.finish_trace_capture(&self.invocation, &self.turn)
     }
 }
 
@@ -1462,7 +1452,7 @@ pub fn resolve_artifact(relative: &str) -> StoreResult<PathBuf> {
     Ok(trace_root().join(relative))
 }
 
-pub fn list_launch_artifact_dirs() -> StoreResult<Vec<String>> {
+pub fn list_invocation_artifact_dirs() -> StoreResult<Vec<String>> {
     let root = trace_root();
     if !root.exists() {
         return Ok(Vec::new());
@@ -1476,9 +1466,9 @@ pub fn list_launch_artifact_dirs() -> StoreResult<Vec<String>> {
             if !process.is_dir() {
                 continue;
             }
-            for launch in read_dirs(&process)? {
-                if launch.is_dir() {
-                    directories.push(artifact_relative(&root, &launch)?);
+            for invocation in read_dirs(&process)? {
+                if invocation.is_dir() {
+                    directories.push(artifact_relative(&root, &invocation)?);
                 }
             }
         }
@@ -1748,7 +1738,7 @@ mod tests {
                     channel: ContextChannel::Task,
                     kind: ContextAssetKind::Goal,
                     scope: ContextScope::Step,
-                    label: "inherited launch goal".to_string(),
+                    label: "inherited invocation goal".to_string(),
                     source_path: None,
                     included_by: "message".to_string(),
                     content: "outer MEMORY remainder".to_string(),
@@ -1901,7 +1891,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
-                control: None,
+                supervision: None,
             },
         )
         .unwrap();
@@ -1911,7 +1901,7 @@ mod tests {
         });
         capture.begin_turn("message", "follow up").unwrap();
         capture
-            .fail_and_begin_launch(
+            .fail_and_begin_invocation(
                 "codex".to_string(),
                 Some("gpt-5.6".to_string()),
                 "retry after provider failure",
@@ -1920,18 +1910,18 @@ mod tests {
         capture.finish("completed", false).unwrap();
 
         let store = crate::journal::open_ledger().unwrap();
-        let launches = store.agent_launches_matching(run_id.as_str()).unwrap();
-        assert_eq!(launches.len(), 2);
-        assert_eq!(launches[0].outcome, "failed");
-        assert_eq!(launches[1].outcome, "completed");
-        assert_eq!(launches[1].capture_status, "complete");
-        assert_eq!(launches[0].project.as_deref(), Some("context"));
-        assert_eq!(launches[0].task.as_deref(), Some("W2-71"));
-        assert!(!std::path::Path::new(&launches[0].artifact_dir).is_absolute());
-        let conversation = super::resolve_artifact(&launches[0].conversation_path).unwrap();
+        let invocations = store.agent_invocations_matching(run_id.as_str()).unwrap();
+        assert_eq!(invocations.len(), 2);
+        assert_eq!(invocations[0].outcome, "failed");
+        assert_eq!(invocations[1].outcome, "completed");
+        assert_eq!(invocations[1].capture_status, "complete");
+        assert_eq!(invocations[0].project.as_deref(), Some("context"));
+        assert_eq!(invocations[0].task.as_deref(), Some("W2-71"));
+        assert!(!std::path::Path::new(&invocations[0].artifact_dir).is_absolute());
+        let conversation = super::resolve_artifact(&invocations[0].conversation_path).unwrap();
         assert!(conversation.is_file());
         let first_turns = store
-            .agent_turns_for_launches(&[launches[0].id.clone()])
+            .agent_turns_for_invocations(&[invocations[0].id.clone()])
             .unwrap();
         assert_eq!(first_turns.len(), 2);
         assert_eq!(first_turns[0].status, "partial");
@@ -1941,7 +1931,7 @@ mod tests {
         );
         assert_eq!(first_turns[1].status, "failed");
         let retry_turns = store
-            .agent_turns_for_launches(&[launches[1].id.clone()])
+            .agent_turns_for_invocations(&[invocations[1].id.clone()])
             .unwrap();
         assert_eq!(retry_turns.len(), 1);
         assert_eq!(retry_turns[0].context_coverage, "provider_total_only");
@@ -1959,10 +1949,10 @@ mod tests {
     }
 
     #[test]
-    fn capture_hydrates_the_registered_product_launch() {
+    fn capture_hydrates_the_registered_product_invocation() {
         let guard = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (run, launch) = runtime.block_on(async {
+        let (run, invocation) = runtime.block_on(async {
             let store = crate::store::open_store(&crate::store::StorageConfig::sqlite(
                 guard.home().join("loopflow.db"),
             ))
@@ -1970,7 +1960,7 @@ mod tests {
             .unwrap();
             let wave = crate::wave::Wave::new(
                 crate::id::WaveId::new(),
-                "capture-launch".to_string(),
+                "capture-invocation".to_string(),
                 guard.home().display().to_string(),
             );
             store.create_wave(&wave).await.unwrap();
@@ -1979,39 +1969,37 @@ mod tests {
                 .reserve_run(&work, crate::durable::RunTrigger::User)
                 .await
                 .unwrap();
+            store
+                .advance_run(
+                    &lease,
+                    crate::durable::RunAdvance::RunStarting {
+                        containment: crate::durable::Containment::Tmux {
+                            name: "lf-capture-invocation".to_string(),
+                        },
+                        cwd: guard.home().to_path_buf(),
+                    },
+                )
+                .await
+                .unwrap();
             let receipt = store
                 .advance_run(
                     &lease,
-                    crate::durable::RunAdvance::LaunchStarting {
-                        route: crate::durable::LaunchRoute {
+                    crate::durable::RunAdvance::InvocationStarting {
+                        route: crate::durable::InvocationRoute {
                             provider: "codex".to_string(),
                             model: Some("gpt-5".to_string()),
                             account_id: None,
                         },
-                        containment: crate::durable::Containment::Tmux {
-                            name: "lf-capture-launch".to_string(),
-                        },
-                        cwd: guard.home().to_path_buf(),
                         surface: "headless".to_string(),
-                        opaque: false,
                         resume_token: None,
                     },
                 )
                 .await
                 .unwrap();
-            let crate::durable::AdvanceReceipt::Launch(launch) = receipt else {
-                panic!("expected Launch receipt")
+            let crate::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
+                panic!("expected Invocation receipt")
             };
-            store
-                .advance_run(
-                    &lease,
-                    crate::durable::RunAdvance::LaunchLive {
-                        launch_id: launch.id.clone(),
-                    },
-                )
-                .await
-                .unwrap();
-            (run, launch)
+            (run, invocation)
         });
 
         let capture = CaptureHandle::begin(
@@ -2020,7 +2008,7 @@ mod tests {
                 process_id: ExecId::new(),
                 repo: guard.home().to_path_buf(),
                 worktree: guard.home().to_path_buf(),
-                wave: Some("capture-launch".to_string()),
+                wave: Some("capture-invocation".to_string()),
                 project: None,
                 task: None,
                 flow: Some("wave".to_string()),
@@ -2036,40 +2024,38 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
-                control: Some(super::ControlLaunch {
-                    run_id: run.id.clone(),
-                    home_id: run.home_id.clone(),
+                supervision: Some(super::SupervisedInvocation {
+                    invocation_id: invocation.id.clone(),
+                    supervising_run_id: run.id.clone(),
                     account_id: None,
-                    containment: launch.containment.clone(),
                     resume_token: None,
-                    opaque_basis: None,
                 }),
             },
         )
         .unwrap();
-        assert_eq!(capture.launch_id(), launch.id);
+        assert_eq!(capture.invocation_id(), invocation.id);
         capture.finish("completed", false).unwrap();
 
-        let launches = crate::journal::open_ledger()
+        let invocations = crate::journal::open_ledger()
             .unwrap()
-            .agent_launches_since(0)
+            .agent_invocations_since(0)
             .unwrap()
             .into_iter()
             .filter(|row| {
-                row.control
+                row.supervision
                     .as_ref()
-                    .is_some_and(|control| control.run_id == run.id)
+                    .is_some_and(|supervision| supervision.supervising_run_id == run.id)
             })
             .collect::<Vec<_>>();
-        assert_eq!(launches.len(), 1);
-        assert_eq!(launches[0].id, launch.id.as_str());
-        assert_eq!(launches[0].capture_status, "complete");
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(invocations[0].id, invocation.id.as_str());
+        assert_eq!(invocations[0].capture_status, "complete");
         let surface = crate::journal::open_ledger()
             .unwrap()
-            .launch_surface(&launch.id)
+            .invocation_surface(&invocation.id)
             .unwrap()
-            .expect("captured Launch remains historical evidence");
-        assert_eq!(surface.launch.state, crate::durable::LaunchState::Ended);
+            .expect("captured Invocation remains historical evidence");
+        assert!(surface.invocation.ended_at.is_some());
         assert_eq!(
             surface.handback,
             Some(crate::durable::BoundaryState::Succeeded)
@@ -2078,7 +2064,7 @@ mod tests {
 
     #[test]
     fn artifact_paths_cannot_escape_the_trace_root() {
-        assert!(resolve_artifact("run/process/launch/conversation.jsonl").is_ok());
+        assert!(resolve_artifact("run/process/invocation/conversation.jsonl").is_ok());
         assert!(resolve_artifact("../outside").is_err());
         assert!(resolve_artifact("/absolute").is_err());
     }

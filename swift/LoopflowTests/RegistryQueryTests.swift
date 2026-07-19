@@ -69,7 +69,7 @@ struct RegistryQueryTests {
               "active_pr":null
             }]
           }],
-          "runs":{"state":"ok","truncated":false,"items":[{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task_pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
+          "runs":{"state":"ok","truncated":false,"items":[{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task_pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
           "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"user","reason":"User merge requested","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
           "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
@@ -240,14 +240,14 @@ struct RegistryQueryTests {
     @Test("lf runs decodes the ledger window")
     func runsDecode() async throws {
         let json = """
-        [{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":"auditability","task":"W2-122","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"},
-         {"id":"launch-2","trace_id":"def","exec_id":"span-2","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":null,"task":null,"flow":null,"skill":"debug","status":"running","started":120,"ended":null,"turns":0,"system_tokens":0,"task_tokens":0,"supplied_context_tokens":0,"input_tokens":null,"output_tokens":null,"reasoning_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null,"cost_usd":null,"duration_secs":null,"provider":"claude","model":null,"surface":"headless","capture_status":"pending"}]
+        [{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":"auditability","task":"W2-122","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"},
+         {"id":"invocation-2","trace_id":"def","exec_id":"span-2","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":null,"task":null,"flow":null,"skill":"debug","status":"running","started":120,"ended":null,"turns":0,"system_tokens":0,"task_tokens":0,"supplied_context_tokens":0,"input_tokens":null,"output_tokens":null,"reasoning_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null,"cost_usd":null,"duration_secs":null,"provider":"claude","model":null,"surface":"headless","capture_status":"pending"}]
         """
         let query = RegistryQuery { _, _ in json }
 
         let runs = try await query.recentRuns()
         #expect(runs.count == 2)
-        #expect(runs[0].id == "launch-1")
+        #expect(runs[0].id == "invocation-1")
         #expect(runs[0].traceId == "abc")
         #expect(runs[0].wave == "goals")
         #expect(runs[0].status == "ok")
@@ -266,7 +266,7 @@ struct RegistryQueryTests {
     @Test("lf usage --json decodes one additive Turn row")
     func spendDecodes() async throws {
         let json = """
-        [{"turn_id":"turn-1","launch_id":"launch-1","trace_id":"abc","exec_id":"child","repo":"/src/loopflow","wave":null,"flow":"build","skill":"gate","provider":"claude","model":"opus","at":100,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25}]
+        [{"turn_id":"turn-1","invocation_id":"invocation-1","trace_id":"abc","exec_id":"child","repo":"/src/loopflow","wave":null,"flow":"build","skill":"gate","provider":"claude","model":"opus","at":100,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25}]
         """
         let query = RegistryQuery { args, _ in
             #expect(args == ["usage", "--json", "--days", "30"])
@@ -275,7 +275,7 @@ struct RegistryQueryTests {
 
         let turns = try await query.spend()
         #expect(turns[0].id == "turn-1")
-        #expect(turns[0].launchId == "launch-1")
+        #expect(turns[0].invocationId == "invocation-1")
         #expect(turns[0].traceId == "abc")
         #expect(turns[0].execId == "child")
         #expect(turns[0].totalTokens == 1200)
@@ -314,7 +314,7 @@ struct RegistryQueryTests {
             ])
             return fixture
         }
-        let selection = LaunchSetQuery(
+        let selection = InvocationSetQuery(
             repoPaths: ["/src/loopflow"],
             startedAfter: 100,
             startedBefore: 200,
@@ -336,20 +336,20 @@ struct RegistryQueryTests {
 
         #expect(snapshot.query == selection)
         #expect(snapshot.aggregateRoot.attributedTokens == 800)
-        #expect(snapshot.evidence[0].representatives[0].address.launchId == "launch-1")
+        #expect(snapshot.evidence[0].representatives[0].address.invocationId == "invocation-1")
     }
 
     @Test("Trace bodies load only through the explicit content query")
     func traceContentUsesExactAddress() async throws {
-        let address = TraceAddress(runId: "run-1", launchId: "launch-1", turnId: "turn-1")
+        let address = TraceAddress(runId: "run-1", invocationId: "invocation-1", turnId: "turn-1")
         let query = RegistryQuery { args, cwd in
             #expect(cwd == nil)
             #expect(args == [
                 "trace", "run-1", "--json", "--content",
-                "--launch", "launch-1", "--turn", "turn-1",
+                "--invocation", "invocation-1", "--turn", "turn-1",
             ])
             return """
-            {"address":{"run_id":"run-1","launch_id":"launch-1","turn_id":"turn-1"},"system_prompt":{"path":null,"content":null,"unavailable_reason":"turn has no system prompt"},"task_prompt":{"path":"/trace/task.txt","content":"exact task","unavailable_reason":null},"conversation":{"path":"/trace/events.jsonl","content":null,"unavailable_reason":"missing"}}
+            {"address":{"run_id":"run-1","invocation_id":"invocation-1","turn_id":"turn-1"},"system_prompt":{"path":null,"content":null,"unavailable_reason":"turn has no system prompt"},"task_prompt":{"path":"/trace/task.txt","content":"exact task","unavailable_reason":null},"conversation":{"path":"/trace/events.jsonl","content":null,"unavailable_reason":"missing"}}
             """
         }
 
@@ -381,7 +381,7 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
-    @Test("Task launch refreshes the Wave plan before launch")
+    @Test("Task invocation refreshes the Wave plan before invocation")
     func planCanSyncProjects() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["pm", "show", "--wave", "goals", "--json", "--sync"])

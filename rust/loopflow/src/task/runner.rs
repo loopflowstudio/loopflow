@@ -22,7 +22,7 @@ use crate::harness::{
 use crate::planning::ProjectPlan;
 use crate::project::Project;
 use crate::provider_account::recovery::{
-    capability_key, plan_run_route_recovery, settle_route_recovery, stop_launch_for_recovery,
+    capability_key, plan_run_route_recovery, settle_route_recovery, stop_invocation_for_recovery,
     ExactRoute, RecoveryChoice, RecoverySettlement, RecoveryStopOutcome,
 };
 use crate::store::SharedStore;
@@ -131,28 +131,15 @@ async fn run_task_with(
         .current_run(&work)
         .await?
         .ok_or_else(|| anyhow!("Task Work {} has no active Run", work.id()))?;
-    let launch = store
-        .current_launch(lease)
+    let invocation = store
+        .open_invocation(lease)
         .await?
-        .ok_or_else(|| anyhow!("Task Run {} has no current Launch", lease.run_id))?;
-    let crate::durable::AdvanceReceipt::Launch(launch) = store
-        .advance_run(
-            lease,
-            crate::durable::RunAdvance::LaunchLive {
-                launch_id: launch.id,
-            },
-        )
-        .await?
-    else {
-        unreachable!("LaunchLive returns a Launch receipt")
-    };
-    let mut run_control = crate::trace::ControlLaunch {
-        run_id: run.id,
-        home_id: run.home_id,
-        account_id: launch.route.account_id.clone(),
-        containment: launch.containment.clone(),
-        resume_token: launch.resume_token.clone(),
-        opaque_basis: launch.opaque_basis.clone(),
+        .ok_or_else(|| anyhow!("Task Run {} has no open Invocation", lease.run_id))?;
+    let mut supervision = crate::trace::SupervisedInvocation {
+        invocation_id: invocation.id.clone(),
+        supervising_run_id: run.id,
+        account_id: invocation.route.account_id.clone(),
+        resume_token: invocation.resume_token.clone(),
     };
     // Typed current-head evidence selects ci-fix before ordinary lifecycle work.
     // The exact Run claim is the crash/recovery fence; no command row mediates it.
@@ -175,28 +162,30 @@ async fn run_task_with(
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
     harness.set_provider_session_id(task.provider_session_id.clone());
-    let requested_account = launch
+    let requested_account = invocation
         .route
         .account_id
         .as_deref()
         .map(crate::store::ProviderAccountId::parse)
         .transpose()
-        .map_err(|reason| anyhow!("invalid Launch account route: {reason}"))?;
+        .map_err(|reason| anyhow!("invalid Invocation account route: {reason}"))?;
     harness.set_provider_account_id(requested_account);
     store.validate_run_lease(lease).await?;
     harness.start(&prepared.turn.config).await?;
     task.provider = harness_name;
     task.provider_session_id = harness.provider_session_id();
-    let launch = store
-        .observe_launch_provider(
+    let invocation = store
+        .observe_invocation_provider(
             lease,
-            &launch.id,
+            &invocation.id,
             harness.provider_account_id(),
             task.provider_session_id.clone(),
         )
         .await?;
-    run_control.account_id = launch.route.account_id.clone();
-    run_control.resume_token = launch.resume_token.clone();
+    let invocation_id = invocation.id.clone();
+    let invocation_route = invocation.route.clone();
+    supervision.account_id = invocation.route.account_id.clone();
+    supervision.resume_token = invocation.resume_token.clone();
     if let Err(error) = store.update_task_for_run(&task, lease).await {
         let _ = harness.stop().await;
         return Err(error.into());
@@ -232,7 +221,7 @@ async fn run_task_with(
                 render_ms: prepared.turn.context_render_ms,
                 raw_provider: true,
                 basis: Some(prepared.basis.clone()),
-                control: Some(run_control.clone()),
+                supervision: Some(supervision.clone()),
             },
         ) {
             Ok(capture) => Some(capture),
@@ -250,11 +239,11 @@ async fn run_task_with(
         .set_flow_position(lease, prepared.position.clone())
         .await?;
     if let Some(attention) = prepared.attention.clone() {
-        let capture = capture
-            .as_ref()
-            .ok_or_else(|| anyhow!("interactive Task step requires an observable active Launch"))?;
+        let capture = capture.as_ref().ok_or_else(|| {
+            anyhow!("interactive Task step requires an observable active AgentInvocation")
+        })?;
         store
-            .route_feedback(lease, &capture.launch_id(), attention)
+            .route_feedback(lease, &capture.invocation_id(), attention)
             .await?;
     }
     let mut active_basis = prepared.basis.clone();
@@ -439,10 +428,12 @@ async fn run_task_with(
                                 &mut event_rx,
                                 "provider turn failed",
                             );
-                            return fail_and_maybe_relaunch(
+                            return fail_and_maybe_recover(
                                 &store,
                                 &mut task,
                                 lease,
+                                &invocation_id,
+                                &invocation_route,
                                 harness.as_mut(),
                                 &wave,
                                 &reason,
@@ -912,13 +903,10 @@ async fn run_task_with(
                                     &TaskEventKind::Completed { summary },
                                 ).await?;
                             }
-                            let launch = store.current_launch(lease).await?.ok_or_else(|| {
-                                anyhow!("Task Run {} has no Launch to finish", lease.run_id)
-                            })?;
                             store.advance_run(
                                 lease,
-                                crate::durable::RunAdvance::LaunchEnded {
-                                    launch_id: launch.id,
+                                crate::durable::RunAdvance::InvocationEnded {
+                                    invocation_id: invocation_id.clone(),
                                     outcome: crate::durable::BoundaryState::Succeeded,
                                 },
                             ).await?;
@@ -935,10 +923,12 @@ async fn run_task_with(
                     }
                     ConversationEvent::Error { code, message, .. } => {
                         let reason = format!("{code}: {message}");
-                        return fail_and_maybe_relaunch(
+                        return fail_and_maybe_recover(
                             &store,
                             &mut task,
                             lease,
+                            &invocation_id,
+                            &invocation_route,
                             harness.as_mut(),
                             &wave,
                             &reason,
@@ -1062,9 +1052,9 @@ fn interactive_step_protocol(
         AttentionRoute::Parent(_) => "the immediate parent Run",
     };
     format!(
-        "Conduct the `{skill}` Feedback step in this existing Task Launch. Attention is routed \
+        "Conduct the `{skill}` Feedback step in this existing Task AgentInvocation. Attention is routed \
 to {route}. Conversation arrives as ordinary Steers addressed to Work `{}`. Ask bounded \
-questions, respond in this same Launch, and wait when another answer is required. A current \
+questions, respond in this same AgentInvocation, and wait when another answer is required. A current \
 Basis Continue advances the flow; there is no approval or changes-requested disposition. Extra \
 findings are ordinary Steers.\n\n{instructions}",
         work.id()
@@ -1109,10 +1099,11 @@ async fn start_prepared_task_step(
         .set_flow_position(lease, prepared.position.clone())
         .await?;
     if let Some(attention) = &prepared.attention {
-        let capture = capture
-            .ok_or_else(|| anyhow!("interactive Task step requires an observable active Launch"))?;
+        let capture = capture.ok_or_else(|| {
+            anyhow!("interactive Task step requires an observable active AgentInvocation")
+        })?;
         store
-            .route_feedback(lease, &capture.launch_id(), attention.clone())
+            .route_feedback(lease, &capture.invocation_id(), attention.clone())
             .await?;
     }
     if let Some(capture) = capture {
@@ -1507,6 +1498,8 @@ async fn handle_body_failure(
     store: &SharedStore,
     task: &mut Task,
     lease: &RunLease,
+    invocation_id: &crate::durable::AgentInvocationId,
+    invocation_route: &crate::durable::InvocationRoute,
     harness: &mut dyn Harness,
     wave: &Wave,
     reason: &str,
@@ -1531,12 +1524,10 @@ async fn handle_body_failure(
         && crate::engine::agent::classify_retryable_agent_failure(reason).is_some());
 
     if route_recovery_permitted {
-        let launch = store
-            .current_launch(lease)
+        let current_route = ExactRoute::try_from(invocation_route)?;
+        let stopped = match stop_invocation_for_recovery(store, lease, invocation_id, harness)
             .await?
-            .ok_or_else(|| anyhow!("Task Run {} has no Launch to hand back", lease.run_id))?;
-        let current_route = ExactRoute::try_from(&launch.route)?;
-        let stopped = match stop_launch_for_recovery(store, lease, harness).await? {
+        {
             RecoveryStopOutcome::Stopped(stopped) => stopped,
             RecoveryStopOutcome::Fenced { error, stop } => {
                 tracing::error!(task = %task.id, containment = ?stop.containment, %error, "Task recovery left the Run fenced");
@@ -1545,7 +1536,7 @@ async fn handle_body_failure(
         };
         let choice = plan_run_route_recovery(store, lease, backup_agent).await?;
         let failure = match &choice {
-            RecoveryChoice::Launch(_) => reason.to_string(),
+            RecoveryChoice::Invoke(_) => reason.to_string(),
             RecoveryChoice::AwaitCapability { reasons } => format!(
                 "{reason}; waiting on provider route capability: {}",
                 capability_key(reasons)
@@ -1563,8 +1554,8 @@ async fn handle_body_failure(
             .await?;
         store.update_task_for_run(task, lease).await?;
         return match settle_route_recovery(store, lease, stopped, choice).await? {
-            RecoverySettlement::Launch {
-                lease: rotated,
+            RecoverySettlement::RecoveryRun {
+                lease: recovery_lease,
                 route,
             } => {
                 let agent = route.agent.agent();
@@ -1583,15 +1574,15 @@ async fn handle_body_failure(
                 }
                 task.agent = agent;
                 task.provider = provider;
-                store.update_task_for_run(task, &rotated).await?;
+                store.update_task_for_run(task, &recovery_lease).await?;
                 store
                     .append_task_event_for_run(
                         &task.id,
-                        &rotated,
+                        &recovery_lease,
                         &TaskEventKind::BodyHandedOff { handoff },
                     )
                     .await?;
-                Ok(Some((rotated, route)))
+                Ok(Some((recovery_lease, route)))
             }
             RecoverySettlement::AwaitCapability { wait } => {
                 tracing::info!(task = %task.id, wait = %wait.id, "Task waiting for a provider route capability");
@@ -1634,20 +1625,24 @@ async fn handle_body_failure(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn fail_and_maybe_relaunch(
+async fn fail_and_maybe_recover(
     store: &SharedStore,
     task: &mut Task,
     lease: &RunLease,
+    invocation_id: &crate::durable::AgentInvocationId,
+    invocation_route: &crate::durable::InvocationRoute,
     harness: &mut dyn Harness,
     wave: &Wave,
     reason: &str,
     turn_had_durable_side_effect: bool,
     capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<()> {
-    let Some((rotated, route)) = handle_body_failure(
+    let Some((recovery_lease, route)) = handle_body_failure(
         store,
         task,
         lease,
+        invocation_id,
+        invocation_route,
         harness,
         wave,
         reason,
@@ -1658,7 +1653,7 @@ async fn fail_and_maybe_relaunch(
     else {
         return Ok(());
     };
-    spawn_failover(store, task, &rotated, &route).await
+    spawn_failover(store, task, &recovery_lease, &route).await
 }
 
 async fn finish_abandoned(

@@ -32,7 +32,7 @@ use crate::task::{
 
 use super::durable::{
     create_project_spine, create_task_spine, end_run_for_lease, validate_run_lease,
-    work_for_child_in, work_status_in,
+    validate_stop_lease, work_for_child_in, work_status_in,
 };
 use super::SqliteStore;
 
@@ -218,7 +218,13 @@ impl SqliteStore {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_task_for_run_in(&transaction, task, lease)? == 0 {
+        require_cleanup_run_owns_child(&transaction, &ChildRef::Task(task.id.clone()), lease)?;
+        let parameters = task_params(task);
+        if transaction.execute(
+            TASK_RUN_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot finish Task {}",
                 lease.run_id, task.id
@@ -970,7 +976,17 @@ impl SqliteStore {
         validate_project(project)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_project_for_run_in(&transaction, project, lease)? == 0 {
+        require_cleanup_run_owns_child(
+            &transaction,
+            &ChildRef::Project(project.id.clone()),
+            lease,
+        )?;
+        let parameters = project_params(project);
+        if transaction.execute(
+            PROJECT_RUN_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
             return Err(StoreError::InvalidAuthority(format!(
                 "Run {} cannot finish Project {}",
                 lease.run_id, project.id
@@ -1645,6 +1661,24 @@ fn require_run_owns_child(
     lease: &RunLease,
 ) -> StoreResult<()> {
     let run = validate_run_lease(conn, lease)?;
+    let work = work_for_child_in(conn, target)?;
+    if run.work != work {
+        return Err(StoreError::InvalidAuthority(format!(
+            "Run {} does not own {} Work {}",
+            run.id,
+            target.target_kind(),
+            work.id()
+        )));
+    }
+    Ok(())
+}
+
+fn require_cleanup_run_owns_child(
+    conn: &Connection,
+    target: &ChildRef,
+    lease: &RunLease,
+) -> StoreResult<()> {
+    let run = validate_stop_lease(conn, lease)?;
     let work = work_for_child_in(conn, target)?;
     if run.work != work {
         return Err(StoreError::InvalidAuthority(format!(

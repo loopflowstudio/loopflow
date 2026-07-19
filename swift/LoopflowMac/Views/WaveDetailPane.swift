@@ -48,7 +48,7 @@ struct WaveDetailPane: View {
     // A shared singleton is externally owned, so it observes as an @ObservedObject.
     // Wrapping it in @StateObject installs StateObject's create-and-own lifecycle
     // during the first body pass, which fires the singleton's publisher mid-eval —
-    // an AttributeGraph dependency cycle at cold launch and sheet presentation.
+    // an AttributeGraph dependency cycle at cold invocation and sheet presentation.
     @ObservedObject private var terminalStore = TaskTerminalStore.shared
 
     var body: some View {
@@ -107,7 +107,7 @@ struct WaveDetailPane: View {
                     .font(Typography.caption())
             }
             .buttonStyle(.borderless)
-            .help("Study the instructions seen by this Wave's launches")
+            .help("Study the instructions seen by this Wave's invocations")
             .accessibilityIdentifier("wave-context-lab")
 
             Button {

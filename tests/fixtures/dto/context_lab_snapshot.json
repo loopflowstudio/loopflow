@@ -37,50 +37,50 @@
     "current_revision_only": true
   },
   "coverage": {
-    "complete_launches": 1,
-    "partial_launches": 0,
-    "prompt_only_launches": 0,
-    "capturing_launches": 0,
+    "complete_invocations": 1,
+    "partial_invocations": 0,
+    "prompt_only_invocations": 0,
+    "capturing_invocations": 0,
     "attributed_turns": 1,
     "provider_total_only_turns": 0,
     "unknown_turns": 1,
     "prompt_artifacts_available": 1,
     "conversations_available": 1,
-    "source_observable_launches": 1
+    "source_observable_invocations": 1
   },
   "totals": {
     "runs": 1,
-    "launches": 1,
+    "invocations": 1,
     "turns": 2,
     "initial_prompt_tokens": 1000,
-    "initial_prompt_launches": 1,
+    "initial_prompt_invocations": 1,
     "median_initial_prompt_tokens": 1000,
     "p95_initial_prompt_tokens": 1000,
     "instruction_tokens": 800,
     "lifetime_input_tokens": 2400,
-    "lifetime_input_launches": 1,
+    "lifetime_input_invocations": 1,
     "median_lifetime_input_tokens": 2400,
     "p95_lifetime_input_tokens": 2400,
     "median_peak_context_percent": 45.0,
     "p95_peak_context_percent": 45.0,
-    "peak_context_launches": 1,
-    "completed_launches": 1,
-    "failed_launches": 0,
-    "interrupted_launches": 0,
-    "running_launches": 0,
+    "peak_context_invocations": 1,
+    "completed_invocations": 1,
+    "failed_invocations": 0,
+    "interrupted_invocations": 0,
+    "running_invocations": 0,
     "steering_turns": 0,
-    "steered_launches": 0
+    "steered_invocations": 0
   },
   "aggregate_root": {
-    "id": "launch-set",
-    "level": "launch_set",
+    "id": "invocation-set",
+    "level": "invocation_set",
     "kind": null,
     "label": "Initial prompts",
     "source_path": null,
     "content_sha256": null,
     "attributed_tokens": 800,
     "run_count": 1,
-    "launch_count": 1,
+    "invocation_count": 1,
     "turn_count": 2,
     "children": [
       {
@@ -92,7 +92,7 @@
         "content_sha256": null,
         "attributed_tokens": 800,
         "run_count": 1,
-        "launch_count": 1,
+        "invocation_count": 1,
         "turn_count": 1,
         "children": [
           {
@@ -104,7 +104,7 @@
             "content_sha256": null,
             "attributed_tokens": 800,
             "run_count": 1,
-            "launch_count": 1,
+            "invocation_count": 1,
             "turn_count": 1,
             "children": [
               {
@@ -116,7 +116,7 @@
                 "content_sha256": "0123456789abcdef",
                 "attributed_tokens": 800,
                 "run_count": 1,
-                "launch_count": 1,
+                "invocation_count": 1,
                 "turn_count": 1,
                 "children": []
               }
@@ -126,9 +126,9 @@
       }
     ]
   },
-  "launches": [
+  "invocations": [
     {
-      "id": "launch-1",
+      "id": "invocation-1",
       "run_id": "run-1",
       "started_at": 110,
       "outcome": "completed",
@@ -202,22 +202,22 @@
       ],
       "measurements": {
         "exposed_runs": 1,
-        "exposed_launches": 1,
+        "exposed_invocations": 1,
         "exposed_turns": 1,
         "attributed_tokens": 800,
         "median_tokens_per_exposed_turn": 800,
         "p95_tokens_per_exposed_turn": 800,
         "first_seen": 120,
         "last_seen": 120,
-        "completed_launches": 1,
-        "failed_launches": 0,
+        "completed_invocations": 1,
+        "failed_invocations": 0,
         "steering_turns": 0,
-        "complete_capture_launches": 1,
+        "complete_capture_invocations": 1,
         "provider_models": [
           {
             "provider": "codex",
             "model": "gpt-5",
-            "exposed_launches": 1
+            "exposed_invocations": 1
           }
         ]
       },
@@ -226,7 +226,7 @@
           "role": "smooth_complete",
           "address": {
             "run_id": "run-1",
-            "launch_id": "launch-1",
+            "invocation_id": "invocation-1",
             "turn_id": "turn-1"
           },
           "outcome": "completed",

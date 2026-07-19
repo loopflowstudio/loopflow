@@ -602,14 +602,14 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 fn format_child_body(
     agent: &str,
     provider: &str,
-    launch: Option<&loopflow::durable::Launch>,
+    invocation: Option<&loopflow::durable::AgentInvocation>,
 ) -> String {
-    launch.map_or_else(
+    invocation.map_or_else(
         || format!("none; next agent {agent}, provider {provider}"),
-        |launch| {
+        |invocation| {
             format!(
-                "launch {}; agent {agent}; provider {}; {:?}",
-                launch.id, launch.route.provider, launch.state
+                "invocation {}; agent {agent}; provider {}",
+                invocation.id, invocation.route.provider
             )
         },
     )
@@ -661,7 +661,7 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
-        let body = format_child_body(&task.agent, &task.provider, snapshot.launch.as_ref());
+        let body = format_child_body(&task.agent, &task.provider, snapshot.invocation.as_ref());
         println!(
             "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (reviewer {}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             task.plan.identifier,
@@ -755,7 +755,11 @@ fn print_project(project: &loopflow::project::Project, json: bool) -> anyhow::Re
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let body = format_child_body(&project.agent, &project.provider, snapshot.launch.as_ref());
+        let body = format_child_body(
+            &project.agent,
+            &project.provider,
+            snapshot.invocation.as_ref(),
+        );
         println!(
             "{}  {}\n  project: {}\n  body: {}\n  iteration: {}\n  reason: {}",
             project.plan.slug,
@@ -1300,8 +1304,8 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }
-            Some(Commands::Launch { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::launch::run(cmd))
+            Some(Commands::Invocation { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::invocation::run(cmd))
             }
             Some(Commands::Work { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
@@ -1407,7 +1411,7 @@ fn main() -> anyhow::Result<()> {
                 content,
                 events,
                 jsonl,
-                launch,
+                invocation,
                 turn,
             }) => loopflow::lf::commands::runs::trace(
                 exec_id,
@@ -1415,7 +1419,7 @@ fn main() -> anyhow::Result<()> {
                 *content,
                 *events,
                 *jsonl,
-                launch.as_deref(),
+                invocation.as_deref(),
                 turn.as_deref(),
             ),
             Some(Commands::Chat {

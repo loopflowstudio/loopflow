@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx, Launch,
+    AgentInvocation, AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx,
     RunState, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
@@ -35,7 +35,7 @@ pub struct ProjectSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub launch: Option<Launch>,
+    pub invocation: Option<AgentInvocation>,
     pub latest_event: Option<crate::project::ProjectEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -432,19 +432,15 @@ async fn reconcile_project_liveness(store: &SharedStore, project: &mut Project) 
     else {
         return Ok(());
     };
-    let launch = store
-        .current_launch_for_run(&run.id)
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
-    if run.state == RunState::Reserved && launch.is_none() {
+    if run.state == RunState::Reserved {
         let still_starting =
             run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
         if still_starting {
             return Ok(());
         }
     }
-    if let Some(launch) = &launch {
-        let alive = match &launch.containment {
+    if let Some(containment) = &run.containment {
+        let alive = match containment {
             Containment::Tmux { name } => tmux_session_exists(name)
                 .await
                 .map_err(|error| project_error(error.to_string()))?,
@@ -453,18 +449,14 @@ async fn reconcile_project_liveness(store: &SharedStore, project: &mut Project) 
         if alive {
             return Ok(());
         }
-        if launch.state == crate::durable::LaunchState::Starting
-            && launch.started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
-        {
+        if run.started_at.is_some_and(|started_at| {
+            started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
+        }) {
             return Ok(());
         }
     }
     store
-        .recover_run(
-            &run.id,
-            launch.as_ref().map(|launch| &launch.id),
-            ContainmentObservation::Absent,
-        )
+        .recover_run(&run.id, ContainmentObservation::Absent)
         .await
         .map_err(|error| project_error(error.to_string()))?;
     Ok(())
@@ -492,18 +484,18 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .work_for_child(&ChildRef::Project(project.id.clone()))
             .await
             .map_err(|error| project_error(error.to_string()))?;
-        let launch = match store
+        let run = store
             .current_run(&work)
             .await
-            .map_err(|error| project_error(error.to_string()))?
-        {
+            .map_err(|error| project_error(error.to_string()))?;
+        let invocation = match &run {
             Some(run) => store
-                .current_launch_for_run(&run.id)
+                .open_invocation_for_run(&run.id)
                 .await
                 .map_err(|error| project_error(error.to_string()))?,
             None => None,
         };
-        let process_alive = match launch.as_ref().map(|launch| &launch.containment) {
+        let process_alive = match run.as_ref().and_then(|run| run.containment.as_ref()) {
             Some(Containment::Tmux { name }) => tmux_session_exists(name)
                 .await
                 .map_err(|error| project_error(error.to_string()))?,
@@ -539,7 +531,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             provider: project.provider,
             provider_session_id: project.provider_session_id,
             process_alive,
-            launch,
+            invocation,
             latest_event,
             created_at: project.created_at,
             updated_at: project.updated_at,
@@ -709,7 +701,7 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
             project.plan.id.as_str()
         )));
     }
-    let launch = block_on_project(async {
+    let run = block_on_project(async {
         let store = project_store().await?;
         let work = store
             .work_for_child(&ChildRef::Project(project.id.clone()))
@@ -720,14 +712,10 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project has no active Run"))?;
-        store
-            .current_launch_for_run(&run.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error("Project Run has no active Launch"))
+        Ok(run)
     })?;
-    let Containment::Tmux { name } = launch.containment else {
-        return Err(project_error("Project Launch is not attachable"));
+    let Some(Containment::Tmux { name }) = run.containment else {
+        return Err(project_error("Project Run is not attachable"));
     };
     let status = std::process::Command::new("tmux")
         .args(["attach-project", "-t", &name])

@@ -4,7 +4,8 @@ use std::process::{Command, Output};
 
 use loopflow::child::ChildRef;
 use loopflow::durable::{
-    AdvanceReceipt, AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance, RunTrigger,
+    AdvanceReceipt, AttentionRoute, Containment, FlowPosition, InvocationRoute, RunAdvance,
+    RunTrigger,
 };
 use loopflow::task::FeedbackReviewer;
 use loopflow_test_support::TestRepo;
@@ -63,41 +64,39 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
             .reserve_run(&work, RunTrigger::User)
             .await
             .expect("reserve Run");
-        let launch = match task
-            .store
+        task.store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchStarting {
-                    route: LaunchRoute {
-                        provider: "opaque".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
+                RunAdvance::RunStarting {
                     containment: Containment::ProcessGroup {
                         // SAFETY: `getpgrp` has no preconditions and does not mutate memory.
                         id: i64::from(unsafe { libc::getpgrp() }),
                     },
                     cwd: task.task.worktree.clone(),
+                },
+            )
+            .await
+            .expect("start Run");
+        let invocation = match task
+            .store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "opaque".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
                     surface: "terminal".to_string(),
-                    opaque: true,
                     resume_token: None,
                 },
             )
             .await
-            .expect("start Launch")
+            .expect("start Invocation")
         {
-            AdvanceReceipt::Launch(launch) => launch,
-            receipt => panic!("expected Launch, got {receipt:?}"),
+            AdvanceReceipt::Invocation(invocation) => invocation,
+            receipt => panic!("expected Invocation, got {receipt:?}"),
         };
-        task.store
-            .advance_run(
-                &lease,
-                RunAdvance::LaunchLive {
-                    launch_id: launch.id.clone(),
-                },
-            )
-            .await
-            .expect("mark Launch live");
         task.store
             .set_flow_position(
                 &lease,
@@ -115,7 +114,7 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
             .await
             .expect("record flow position");
         task.store
-            .route_feedback(&lease, &launch.id, AttentionRoute::User)
+            .route_feedback(&lease, &invocation.id, AttentionRoute::User)
             .await
             .expect("route User attention");
     });

@@ -262,7 +262,7 @@ lf task run DES-125 --reviewer parent                # route Feedback to the Pro
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
 lf queue                                             # User-attention Feedback, oldest first
-lf work feedback task task_...                       # open the recorded Launch
+lf work feedback task task_...                       # open the recorded Invocation
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -290,21 +290,21 @@ completion.
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
 `--finally` override them only while creating the Task. A flow step declares
-`feedback: true`; the active Launch routes that Feedback to the User or the
+`feedback: true`; the active Invocation routes that Feedback to the User or the
 immediate parent Run.
 Standard Tasks route first and finally Feedback to the User, while the owning
 Project reviews loop steps. `--reviewer user|parent` overrides all future Feedback
 checkpoints without changing provider presentation or skipping their skills.
 
-Feedback is the current flow step plus its live Launch and route; there is no
+Feedback is the current flow step plus its live Invocation and route; there is no
 Feedback id or disposition. `lf task steer` and `lf project steer` append
 durable direction before attempting live delivery. `lf work continue` advances
 past Feedback under its current Basis fence. Interrupt and
 replacement direction stay separate: interrupt the active boundary, then
 Steer normally.
 
-`lf work feedback` opens the current Feedback's recorded Launch presentation —
-the Launch's tmux attach route today. Presentation never advances the flow:
+`lf work feedback` opens the current Feedback's recorded Invocation presentation —
+the Invocation's tmux attach route today. Presentation never advances the flow:
 success, failure, signals, and client close all leave Feedback open. Run
 `lf work continue` explicitly to advance it under its current Basis fence.
 
@@ -335,22 +335,22 @@ origin provider, GitHub, PM, account, or secret authority crosses SSH. Raw
 `lf ssh <host> -- <command>` keeps the foreground credential-forwarding
 behavior.
 
-## Presenting an Opaque Launch
+## Presenting an Opaque AgentInvocation
 
 ```bash
-lf launch list --active --json
-lf launch status launch_... --json
-lf launch present launch_...                 # exec the tmux/provider attach route
-lf launch handback launch_... --outcome succeeded
+lf invocation list --active --json
+lf invocation status invocation_... --json
+lf invocation present invocation_...                 # exec the tmux/provider attach route
+lf invocation handback invocation_... --outcome succeeded
 ```
 
-`present` is the generic presentation adapter for an opaque TUI Launch: it
-executes that Launch's attach route but does not create Feedback or become its
-identity. The descriptor carries stable Work and Wave identity, Home route,
-provider, cwd, attention route, explicit handback evidence, and optional attach
-argv; tmux or the provider owns terminal bytes.
+`present` is the generic presentation adapter for an opaque TUI Invocation: it
+executes that Invocation's attach route but does not create Feedback or become
+its identity. The descriptor carries the supervising Run and its stable Work,
+Wave, Home, cwd, and containment alongside provider trace, attention, explicit
+handback evidence, and optional attach argv.
 
-Closing the app or terminal does not end the Launch. Record the observed
+Closing the app or terminal does not end the Invocation. Record the observed
 boundary result with `handback --outcome succeeded|failed|interrupted|unknown`;
 process exit alone does not claim success.
 
@@ -395,8 +395,8 @@ lf roadmap --json               # current plan across Waves joined to runtime tr
 lf runs                         # one row per skill call: context, tokens, cost
 lf execs                        # one row per lf process
 lf trace 66863649               # select an exec or trace; render its process tree
-lf trace 66863649 --json        # inspect the same tree and its skill launches
-lf trace 66863649 --json --content --launch <launch> --turn <turn>
+lf trace 66863649 --json        # inspect the same tree and its skill invocations
+lf trace 66863649 --json --content --invocation <invocation> --turn <turn>
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # subscription % per account + spend by repo/provider
@@ -453,14 +453,14 @@ spend from the local execution ledger.
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a
 trace. `lf trace` accepts an exec or trace id and leaves killed processes open instead
-of hiding them. `lf context` aggregates one filtered Launch set without opening
+of hiding them. `lf context` aggregates one filtered Invocation set without opening
 bodies. Its Project and Task filters use captured control identity rather than
 inferring ownership from a worktree path. The research-state flags require an
 observed steer or a launch containing a current resolvable file-backed instruction
 revision; missing revision identity does not match the current-only filter.
 `lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
-run/launch/turn address.
+run/invocation/turn address.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on

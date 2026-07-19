@@ -9,7 +9,7 @@ pub(crate) mod fixtures;
 pub mod flow;
 pub mod home;
 pub mod install;
-pub mod launch;
+pub mod invocation;
 pub mod list;
 pub mod ops;
 pub mod profile;

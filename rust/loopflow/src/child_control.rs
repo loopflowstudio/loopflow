@@ -2,7 +2,7 @@
 //!
 //! Runners render authored direction from the durable Work boundary and may
 //! attempt a same-Turn Send as a latency optimization. Lifecycle control is a
-//! projection over the active Run, Launch, Turn, and Epoch.
+//! projection over the active Run, AgentInvocation, Turn, and Epoch.
 
 use std::collections::VecDeque;
 

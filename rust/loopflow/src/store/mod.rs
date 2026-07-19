@@ -24,7 +24,7 @@ mod token_crypto;
 /// for a run, flow, or skill, written directly by `lf` into the local store.
 ///
 /// Lineage only. Spend lives on `agent_turns`, the grain the provider actually
-/// measures; readers join `run_events -> agent_launches -> agent_turns` rather
+/// measures; readers join `run_events -> agent_invocations -> agent_turns` rather
 /// than reading tokens from here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEventRow {
@@ -45,7 +45,7 @@ pub struct RunEventRow {
     pub error: Option<String>,
 }
 
-/// One provider-measured Turn's spend, joined to the launch that names where it
+/// One provider-measured Turn's spend, joined to the invocation that names where it
 /// was spent. This is the only additive usage grain: `lf usage`, `lf top`, and
 /// the trace tree all sum these rows, and every total is a grouping of them.
 ///
@@ -56,7 +56,7 @@ pub struct RunEventRow {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TurnSpendRow {
     pub turn_id: String,
-    pub launch_id: String,
+    pub invocation_id: String,
     pub trace_id: String,
     pub exec_id: String,
     pub repo: String,
@@ -968,7 +968,7 @@ mod tests {
         CiIncident, GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskId, TaskPr,
         TaskPrId,
     };
-    use crate::trace::{AgentLaunchRow, AgentTurnRow};
+    use crate::trace::{AgentInvocationRow, AgentTurnRow};
     use crate::wave::Wave;
     use std::env;
     use std::path::PathBuf;
@@ -1215,8 +1215,8 @@ mod tests {
         }
     }
 
-    fn trace_launch(id: &str) -> AgentLaunchRow {
-        AgentLaunchRow {
+    fn trace_invocation(id: &str) -> AgentInvocationRow {
+        AgentInvocationRow {
             id: id.to_string(),
             run_id: format!("run-{id}"),
             process_id: format!("process-{id}"),
@@ -1242,20 +1242,20 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 0,
             conversation_bytes: 0,
-            control: None,
+            supervision: None,
         }
     }
 
     fn trace_turn(
         id: &str,
-        launch_id: &str,
+        invocation_id: &str,
         ordinal: i64,
         status: &str,
         basis: crate::durable::Basis,
     ) -> AgentTurnRow {
         AgentTurnRow {
             id: id.to_string(),
-            launch_id: launch_id.to_string(),
+            invocation_id: invocation_id.to_string(),
             ordinal,
             provider_turn_id: None,
             started_at: ordinal,
@@ -1423,17 +1423,21 @@ mod tests {
             .resolve_run_lease(task_child_lease.run_token.clone())
             .await
             .unwrap();
-        let launch = store
+        let invocation = store
             .sqlite
-            .control_launch_for_run(&task_run_lease.run_id)
+            .open_invocation_for_run(&task_run_lease.run_id)
             .unwrap()
-            .expect("Task reservation registered its product Launch");
-        assert_eq!(launch.state, crate::durable::LaunchState::Live);
+            .expect("Task reservation registered its Invocation");
         assert_eq!(
-            launch.containment,
-            Containment::Tmux {
+            invocation.supervising_run_id,
+            Some(task_run_lease.run_id.clone())
+        );
+        let run = store.current_run(&task_work).await.unwrap().unwrap();
+        assert_eq!(
+            run.containment,
+            Some(Containment::Tmux {
                 name: format!("test-task-{}", task.id)
-            }
+            })
         );
         let task_basis = store.current_epoch(&task_work).await.unwrap().current_basis;
         store
@@ -1455,7 +1459,7 @@ mod tests {
         store
             .route_feedback(
                 &task_run_lease,
-                &launch.id,
+                &invocation.id,
                 AttentionRoute::Parent(parent_lease.work.clone()),
             )
             .await
@@ -1466,7 +1470,7 @@ mod tests {
             .advance_run(
                 &task_run_lease,
                 RunAdvance::TurnStarting {
-                    launch_id: launch.id.clone(),
+                    invocation_id: invocation.id.clone(),
                 },
             )
             .await
@@ -1519,7 +1523,7 @@ mod tests {
         store
             .route_feedback(
                 &task_run_lease,
-                &launch.id,
+                &invocation.id,
                 AttentionRoute::Parent(parent_lease.work.clone()),
             )
             .await
@@ -1656,19 +1660,25 @@ mod tests {
             .await
             .unwrap();
         let basis_zero = store.current_epoch(&work).await.unwrap().current_basis;
-        let launch = trace_launch("fixed-basis");
+        let invocation = trace_invocation("fixed-basis");
         let completed = trace_turn(
             "turn-completed",
-            &launch.id,
+            &invocation.id,
             1,
             "completed",
             basis_zero.clone(),
         );
         store
             .sqlite
-            .insert_trace_capture(&launch, &completed, &[], &[])
+            .insert_trace_capture(&invocation, &completed, &[], &[])
             .unwrap();
-        let running = trace_turn("turn-running", &launch.id, 2, "running", basis_zero.clone());
+        let running = trace_turn(
+            "turn-running",
+            &invocation.id,
+            2,
+            "running",
+            basis_zero.clone(),
+        );
         store
             .sqlite
             .insert_agent_turn_capture(&running, &[], &[])
@@ -1711,7 +1721,7 @@ mod tests {
 
         let applied = trace_turn(
             "turn-applied",
-            &launch.id,
+            &invocation.id,
             3,
             "completed",
             receipt.steer.basis.clone(),

@@ -6,13 +6,13 @@ import SwiftUI
 /// The projection (`WorkCensus`) owns every rule — red propagation,
 /// evidence classification, and which rows are view-only. This view only renders
 /// what the census decided and, for a deliberate interactive launch, offers the
-/// one mutation: Open, which re-attaches the exact Launch in Ghostty.
+/// one mutation: Open, which re-attaches the exact Invocation in Ghostty.
 struct WorkCensusView: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     @Environment(\.palette) private var palette
     @State private var reading = WorkCensusReading()
-    @State private var openTarget: LaunchSurfaceRecord?
+    @State private var openTarget: InvocationSurfaceRecord?
 
     var body: some View {
         ScrollView {
@@ -32,7 +32,7 @@ struct WorkCensusView: View {
                         emptyState
                     }
                     ForEach(census.groups) { group in
-                        WaveGroupView(group: group, onOpen: openLaunch)
+                        WaveGroupView(group: group, onOpen: openInvocation)
                     }
                 } else if reading.error == nil {
                     ProgressView().padding(Spacing.xxl)
@@ -49,8 +49,8 @@ struct WorkCensusView: View {
             }
         }
         .refreshable { await load() }
-        .sheet(item: $openTarget) { launch in
-            LaunchAttachSheet(launch: launch, query: query) { openTarget = nil }
+        .sheet(item: $openTarget) { invocation in
+            InvocationAttachSheet(invocation: invocation, query: query) { openTarget = nil }
         }
         .accessibilityIdentifier("control-work-census")
     }
@@ -74,10 +74,10 @@ struct WorkCensusView: View {
             .textSelection(.enabled)
     }
 
-    private func openLaunch(_ launchId: String) {
+    private func openInvocation(_ invocationId: String) {
         // Open needs the durable row's provider, Home, and resume token to
         // resolve the surface; look it up from the same list the census read.
-        openTarget = reading.launches.first { $0.id == launchId }
+        openTarget = reading.invocations.first { $0.id == invocationId }
     }
 
     private func load() async {
@@ -91,23 +91,23 @@ struct WorkCensusView: View {
                 runs = []
                 notices.append("Direct executions unavailable: \(error.localizedDescription)")
             }
-            let launches: [LaunchSurfaceRecord]
+            let invocations: [InvocationSurfaceRecord]
             do {
-                launches = try await query.activeLaunches()
+                invocations = try await query.activeInvocations()
             } catch {
-                launches = []
-                notices.append("Interactive launches unavailable: \(error.localizedDescription)")
+                invocations = []
+                notices.append("Interactive invocations unavailable: \(error.localizedDescription)")
             }
             reading = WorkCensusReading(
-                census: WorkCensus(roadmap: roadmap, runs: runs, launches: launches),
-                launches: launches,
+                census: WorkCensus(roadmap: roadmap, runs: runs, invocations: invocations),
+                invocations: invocations,
                 notices: notices,
                 error: nil
             )
         } catch {
             reading = WorkCensusReading(
                 census: nil,
-                launches: [],
+                invocations: [],
                 notices: [],
                 error: "Work Census unavailable: \(error.localizedDescription)"
             )
@@ -117,7 +117,7 @@ struct WorkCensusView: View {
 
 private struct WorkCensusReading {
     var census: WorkCensus?
-    var launches: [LaunchSurfaceRecord] = []
+    var invocations: [InvocationSurfaceRecord] = []
     var notices: [String] = []
     var error: String?
 }
@@ -243,7 +243,7 @@ private struct WorkActivityRowView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                 }
-                if let reason = row.reason, !reason.isEmpty, row.kind != .launch {
+                if let reason = row.reason, !reason.isEmpty, row.kind != .invocation {
                     Text(reason)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -253,7 +253,7 @@ private struct WorkActivityRowView: View {
 
             Spacer(minLength: Spacing.sm)
 
-            if row.isOpenable, let launchId = row.launchId {
+            if row.isOpenable, let launchId = row.invocationId {
                 Button("Open") { onOpen(launchId) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -274,7 +274,7 @@ private struct WorkActivityRowView: View {
         case .project: "square.stack.3d.up"
         case .task: "checklist"
         case .directExecution: "bolt"
-        case .launch: "hand.raised"
+        case .invocation: "hand.raised"
         }
     }
 
@@ -289,7 +289,7 @@ private struct WorkActivityRowView: View {
         }
         if let step = row.step { parts.append(step) }
         if let age = row.ageSecs { parts.append("\(RelativeAge.phrase(age)) ago") }
-        if let owner = row.nextOwner, row.kind != .launch {
+        if let owner = row.nextOwner, row.kind != .invocation {
             parts.append("→ \(owner.rawValue)")
         }
         return parts.joined(separator: " · ")
@@ -351,21 +351,21 @@ private enum RelativeAge {
     }
 }
 
-// MARK: - Open: present the exact Launch in the remembered surface
+// MARK: - Open: present the exact Invocation in the remembered surface
 
 /// Open resolves *where* to present the launch — the last successful surface for
 /// this provider on this Home, then the last overall, then embedded Ghostty — and
 /// records the choice only after a launch succeeds. Every target attaches the one
-/// Launch by running the argv the contract hands back; this view owns no
+/// Invocation by running the argv the contract hands back; this view owns no
 /// lifecycle and never creates or names the provider session.
-private struct LaunchAttachSheet: View {
-    let launch: LaunchSurfaceRecord
+private struct InvocationAttachSheet: View {
+    let invocation: InvocationSurfaceRecord
     let query: RegistryQuery
     let onClose: () -> Void
     var preferences: LaunchTargetPreferences = .shared
 
     @Environment(\.palette) private var palette
-    @State private var attach: LaunchSurfaceRecord?
+    @State private var attach: InvocationSurfaceRecord?
     @State private var capability: LaunchTargetCapability?
     @State private var surface: LaunchTarget?
     @State private var externalNote: String?
@@ -385,7 +385,7 @@ private struct LaunchAttachSheet: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Text(launch.attention?.kind == "user" ? "Feedback" : "Interactive launch")
+            Text(invocation.attention?.kind == "user" ? "Feedback" : "Interactive launch")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             if let fallbackNotice {
@@ -411,7 +411,7 @@ private struct LaunchAttachSheet: View {
     /// by the reach it delivers so a worktree-only option never overclaims.
     private func surfaceMenu(
         capability: LaunchTargetCapability,
-        attach: LaunchSurfaceRecord
+        attach: InvocationSurfaceRecord
     ) -> some View {
         Menu {
             ForEach(capability.offeredOptions) { option in
@@ -430,16 +430,16 @@ private struct LaunchAttachSheet: View {
     @ViewBuilder
     private var content: some View {
         if let attach, surface == .ghostty {
-            let command = launch.attention?.kind == "user"
+            let command = invocation.attention?.kind == "user"
                 ? LaunchTargetLauncher.feedbackCommand(for: attach)
-                : LaunchTargetLauncher.command(for: attach, home: launch.home)
+                : LaunchTargetLauncher.command(for: attach, home: invocation.home)
             GhosttyTerminalView(
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "feedback-\(attach.launchId)"
+                sessionId: "feedback-\(attach.invocationId)"
             )
-            .id(attach.launchId)
+            .id(attach.invocationId)
         } else if let surface, let externalNote {
             ContentUnavailableView {
                 Label("Presented in \(surface.appName)", systemImage: "arrow.up.forward.app")
@@ -465,7 +465,7 @@ private struct LaunchAttachSheet: View {
 
     private func start() async {
         do {
-            let descriptor = try await query.attachLaunch(launchId: launch.id)
+            let descriptor = try await query.attachInvocation(invocationId: invocation.id)
             attach = descriptor
             if descriptor.attention?.kind == "user" {
                 surface = .ghostty
@@ -479,13 +479,13 @@ private struct LaunchAttachSheet: View {
             let cap = LaunchTargetLauncher.capability(
                 host: descriptor.host,
                 cwd: descriptor.cwd,
-                provider: launch.provider,
-                providerSessionId: launch.providerSessionId
+                provider: invocation.provider,
+                providerSessionId: invocation.providerSessionId
             )
             capability = cap
             let resolution = LaunchTargetResolver.resolve(
-                provider: launch.provider,
-                home: launch.home,
+                provider: invocation.provider,
+                home: invocation.home,
                 memory: preferences.memory,
                 capability: cap
             )
@@ -507,7 +507,7 @@ private struct LaunchAttachSheet: View {
     /// launch falls back visibly to the embedded terminal.
     private func present(
         _ target: LaunchTarget,
-        attach: LaunchSurfaceRecord,
+        attach: InvocationSurfaceRecord,
         capability: LaunchTargetCapability,
         userInitiated: Bool
     ) async {
@@ -527,7 +527,7 @@ private struct LaunchAttachSheet: View {
         let result = await LaunchTargetLauncher.launch(
             target,
             attach: attach,
-            home: launch.home,
+            home: invocation.home,
             reach: reach
         )
         switch result {
@@ -557,8 +557,8 @@ private struct LaunchAttachSheet: View {
     ) {
         preferences.recordLaunch(
             surface,
-            provider: launch.provider,
-            home: launch.home,
+            provider: invocation.provider,
+            home: invocation.home,
             reach: reach,
             userInitiated: userInitiated,
             launchSucceeded: launched

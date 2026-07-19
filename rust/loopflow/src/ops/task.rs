@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx, Launch, RunLease,
-    RunState, WorkRef, WorkStatus,
+    AgentInvocation, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx,
+    RunLease, RunState, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -102,7 +102,7 @@ pub struct TaskSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub launch: Option<Launch>,
+    pub invocation: Option<AgentInvocation>,
     pub latest_event: Option<crate::task::TaskEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -2201,19 +2201,15 @@ pub(crate) async fn reconcile_process_liveness(
     else {
         return Ok(());
     };
-    let launch = store
-        .current_launch_for_run(&run.id)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    if run.state == RunState::Reserved && launch.is_none() {
+    if run.state == RunState::Reserved {
         let still_starting =
             run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
         if still_starting {
             return Ok(());
         }
     }
-    if let Some(launch) = &launch {
-        let alive = match &launch.containment {
+    if let Some(containment) = &run.containment {
+        let alive = match containment {
             Containment::Tmux { name } => tmux_session_exists(name)
                 .await
                 .map_err(|error| task_error(error.to_string()))?,
@@ -2222,18 +2218,14 @@ pub(crate) async fn reconcile_process_liveness(
         if alive {
             return Ok(());
         }
-        if launch.state == crate::durable::LaunchState::Starting
-            && launch.started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
-        {
+        if run.started_at.is_some_and(|started_at| {
+            started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
+        }) {
             return Ok(());
         }
     }
     store
-        .recover_run(
-            &run.id,
-            launch.as_ref().map(|launch| &launch.id),
-            ContainmentObservation::Absent,
-        )
+        .recover_run(&run.id, ContainmentObservation::Absent)
         .await
         .map_err(|error| task_error(error.to_string()))?;
     mark_task_body_lost(store, task).await
@@ -2365,8 +2357,8 @@ pub(crate) async fn supervise_project_task_bodies(
     project: &crate::project::Project,
 ) -> OpsResult<usize> {
     // Project supervision reconciles each child's durable Run. Live
-    // containment is never killed merely for being quiet; a missing Launch is
-    // recovered by exact Run/Launch identity in reconcile_process_liveness.
+    // containment is never killed merely for being quiet; missing containment
+    // is recovered by exact Run identity in reconcile_process_liveness.
     reconcile_project_tasks(store, project).await?;
     Ok(0)
 }
@@ -4196,18 +4188,18 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
             .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
-        let launch = match store
+        let run = store
             .current_run(&work)
             .await
-            .map_err(|error| task_error(error.to_string()))?
-        {
+            .map_err(|error| task_error(error.to_string()))?;
+        let invocation = match &run {
             Some(run) => store
-                .current_launch_for_run(&run.id)
+                .open_invocation_for_run(&run.id)
                 .await
                 .map_err(|error| task_error(error.to_string()))?,
             None => None,
         };
-        let process_alive = match launch.as_ref().map(|launch| &launch.containment) {
+        let process_alive = match run.as_ref().and_then(|run| run.containment.as_ref()) {
             Some(Containment::Tmux { name }) => tmux_session_exists(name)
                 .await
                 .map_err(|error| task_error(error.to_string()))?,
@@ -4288,7 +4280,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             provider: task.provider,
             provider_session_id: task.provider_session_id,
             process_alive,
-            launch,
+            invocation,
             latest_event,
             created_at: task.created_at,
             updated_at: task.updated_at,

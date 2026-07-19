@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 
 use loopflow::child::ChildRef;
 use loopflow::durable::{
-    AttentionRoute, Containment, FlowPosition, LaunchRoute, RunAdvance, RunTrigger,
+    AttentionRoute, Containment, FlowPosition, InvocationRoute, RunAdvance, RunTrigger,
 };
 use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{
@@ -1111,39 +1111,37 @@ fn land_refuses_to_request_merge_while_task_feedback_is_open() {
             .reserve_run(&work, RunTrigger::User)
             .await
             .expect("reserve Task Run");
-        let receipt = task
-            .store
+        task.store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchStarting {
-                    route: LaunchRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
+                RunAdvance::RunStarting {
                     containment: Containment::Tmux {
                         name: "feedback-proof".to_string(),
                     },
                     cwd: repo.path().to_path_buf(),
+                },
+            )
+            .await
+            .expect("start Task Run");
+        let receipt = task
+            .store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
                     surface: "tui".to_string(),
-                    opaque: false,
                     resume_token: None,
                 },
             )
             .await
-            .expect("start Task Launch");
-        let loopflow::durable::AdvanceReceipt::Launch(launch) = receipt else {
-            panic!("expected Launch receipt")
+            .expect("start Task Invocation");
+        let loopflow::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
+            panic!("expected Invocation receipt")
         };
-        task.store
-            .advance_run(
-                &lease,
-                RunAdvance::LaunchLive {
-                    launch_id: launch.id.clone(),
-                },
-            )
-            .await
-            .expect("make Task Launch live");
         let basis = task
             .store
             .current_epoch(&work)
@@ -1167,7 +1165,7 @@ fn land_refuses_to_request_merge_while_task_feedback_is_open() {
             .await
             .expect("set Feedback position");
         task.store
-            .route_feedback(&lease, &launch.id, AttentionRoute::User)
+            .route_feedback(&lease, &invocation.id, AttentionRoute::User)
             .await
             .expect("open Task Feedback");
     });

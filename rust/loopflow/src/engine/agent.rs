@@ -1336,7 +1336,7 @@ fn _launch_agent_once(
     if retry {
         if let Some(capture) = &process.capture {
             capture
-                .fail_and_begin_launch(harness.clone(), model.clone(), &launch.task_prompt)
+                .fail_and_begin_invocation(harness.clone(), model.clone(), &launch.task_prompt)
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -1368,7 +1368,7 @@ fn _launch_agent_once(
                         render_ms: 0,
                         raw_provider: process.auto,
                         basis: None,
-                        control: None,
+                        supervision: None,
                     },
                 )
             })

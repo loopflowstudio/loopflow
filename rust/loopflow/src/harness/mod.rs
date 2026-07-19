@@ -296,7 +296,7 @@ pub trait Harness: Send + Sync {
     fn provider_session_id(&self) -> Option<String>;
     /// Independently isolated provider process group, when the harness owns
     /// one. Providers that remain in the runner's process group return None;
-    /// the Launch record retains the runner group recorded at activation.
+    /// the Run retains the runner group recorded at activation.
     fn process_group_id(&self) -> Option<u32> {
         None
     }
@@ -311,7 +311,7 @@ pub trait Harness: Send + Sync {
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Drivers that take resume state at `start` instead ignore this.
     fn set_provider_session_id(&mut self, _provider_session_id: Option<String>) {}
-    /// Pin this Launch to the exact managed account already recorded in its
+    /// Pin this Invocation to the exact managed account already recorded in its
     /// durable route. Accountless providers keep the default no-op.
     fn set_provider_account_id(&mut self, _account_id: Option<crate::store::ProviderAccountId>) {}
     /// The managed account selected before the first provider Turn begins.

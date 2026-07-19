@@ -538,6 +538,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "explicit_pr_merge_requests",
         sql: include_str!("migrations/0.12.3.005_explicit_pr_merge_requests.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 6,
+        },
+        name: "run_owns_execution",
+        sql: include_str!("migrations/0.12.3.006_run_owns_execution.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1738,25 +1748,39 @@ mod tests {
             .unwrap()
     }
 
-    /// Insert one `agent_launches` row carrying `capture_status`, reporting
-    /// whether the table's CHECK constraint accepted it. Rolls the probe row
-    /// back so callers can reuse the connection.
+    /// Insert one trace row carrying `capture_status`, reporting whether the
+    /// table's CHECK constraint accepted it. Historical prefixes still use
+    /// the pre-reduction table name.
     fn capture_status_accepts(conn: &rusqlite::Connection, capture_status: &str) -> bool {
         let id = format!("probe-{capture_status}");
+        let table = if conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_invocations'",
+                [],
+                |_| Ok(()),
+            )
+            .is_ok()
+        {
+            "agent_invocations"
+        } else {
+            "agent_launches"
+        };
         let inserted = conn
             .execute(
-                "INSERT INTO agent_launches (
+                &format!(
+                    "INSERT INTO {table} (
                      id, run_id, process_id, started_at, repo, worktree, provider,
                      surface, capture_status, outcome, artifact_dir,
                      conversation_path, conversation_event_count, conversation_bytes
                  ) VALUES (?1, 'run-probe', 'proc-probe', 100, '/repo', '/repo',
                      'codex', 'headless', ?2, 'completed', 'probe/dir',
-                     'probe/conversation.jsonl', 1, 10)",
+                     'probe/conversation.jsonl', 1, 10)"
+                ),
                 rusqlite::params![id, capture_status],
             )
             .is_ok();
         if inserted {
-            conn.execute("DELETE FROM agent_launches WHERE id = ?1", [&id])
+            conn.execute(&format!("DELETE FROM {table} WHERE id = ?1"), [&id])
                 .unwrap();
         }
         inserted
@@ -2062,7 +2086,7 @@ mod tests {
         let (status, events, bytes) = conn
             .query_row(
                 "SELECT capture_status, conversation_event_count, conversation_bytes
-                 FROM agent_launches WHERE id = 'al_history'",
+                 FROM agent_invocations WHERE id = 'al_history'",
                 [],
                 |row| {
                     Ok((
@@ -2130,7 +2154,7 @@ mod tests {
 
         let mut statuses = conn
             .prepare(
-                "SELECT capture_status FROM agent_launches
+                "SELECT capture_status FROM agent_invocations
                  WHERE id LIKE 'history-%' ORDER BY capture_status",
             )
             .unwrap()
@@ -2196,7 +2220,7 @@ mod tests {
             .query_row(
                 "SELECT product_run_id, home_id, containment_kind, containment_id,
                         resume_token
-                 FROM agent_launches WHERE id = 'legacy-trace'",
+                 FROM agent_invocations WHERE id = 'legacy-trace'",
                 [],
                 |row| {
                     Ok((
@@ -2212,7 +2236,7 @@ mod tests {
         assert_eq!(legacy_trace, (None, None, None, None, None));
         assert_eq!(
             conn.query_row(
-                "SELECT resume_token FROM agent_launches WHERE id = 'control-shaped'",
+                "SELECT resume_token FROM agent_invocations WHERE id = 'control-shaped'",
                 [],
                 |row| row.get::<_, String>(0),
             )
@@ -2222,14 +2246,14 @@ mod tests {
     }
 
     #[test]
-    fn capture_rebuilds_restore_every_launch_index() {
+    fn the_trace_rebuild_restores_every_invocation_index() {
         // A rebuild drops the table, and with it its indexes. Losing one would
         // silently degrade every `lf runs`/`lf trace` lookup.
         let conn = open();
         apply_sqlite(&conn).unwrap();
 
         let mut indexes = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_launches'")
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'agent_invocations'")
             .unwrap()
             .query_map([], |row| row.get::<_, String>(0))
             .unwrap()
@@ -2241,15 +2265,56 @@ mod tests {
         assert_eq!(
             indexes,
             vec![
-                "idx_agent_launches_attention",
-                "idx_agent_launches_one_control_live",
-                "idx_agent_launches_process",
-                "idx_agent_launches_project",
-                "idx_agent_launches_run",
-                "idx_agent_launches_task",
-                "idx_agent_launches_wave",
+                "idx_agent_invocations_attention",
+                "idx_agent_invocations_process",
+                "idx_agent_invocations_project",
+                "idx_agent_invocations_run",
+                "idx_agent_invocations_supervisor",
+                "idx_agent_invocations_task",
+                "idx_agent_invocations_wave",
             ]
         );
+    }
+
+    #[test]
+    fn run_owns_execution_migration_leaves_one_current_schema() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+
+        let old_table_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='agent_launches'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!old_table_exists);
+
+        let run_columns = columns(&conn, "runs");
+        for column in ["containment_kind", "containment_id", "cwd", "started_at"] {
+            assert!(run_columns.contains(&column.to_string()));
+        }
+
+        let invocation_columns = columns(&conn, "agent_invocations");
+        assert!(invocation_columns.contains(&"supervising_run_id".to_string()));
+        for removed in [
+            "product_run_id",
+            "home_id",
+            "launch_state",
+            "containment_kind",
+            "containment_id",
+            "opaque_epoch_id",
+            "opaque_basis_rev",
+        ] {
+            assert!(!invocation_columns.contains(&removed.to_string()));
+        }
+
+        let turn_columns = columns(&conn, "agent_turns");
+        assert!(turn_columns.contains(&"invocation_id".to_string()));
+        assert!(!turn_columns.contains(&"launch_id".to_string()));
     }
 
     #[test]
@@ -2743,25 +2808,34 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let project_launch: (String, String, String, String) = conn
+        let project_run: (String, String, String, String, String) = conn
             .query_row(
-                "SELECT agent_launches.launch_state, agent_launches.containment_kind,
-                        agent_launches.containment_id, agent_launches.provider
-                 FROM agent_launches
-                 JOIN runs ON runs.id = agent_launches.product_run_id
+                "SELECT agent_invocations.id, runs.state, runs.containment_kind,
+                        runs.containment_id, agent_invocations.provider
+                 FROM agent_invocations
+                JOIN runs ON runs.id = agent_invocations.supervising_run_id
                  WHERE runs.source_kind = 'project' AND runs.source_id = ?1",
                 [&project_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
+        assert!(project_run.0.starts_with("invocation_"));
         assert_eq!(
-            project_launch,
             (
-                "live".to_string(),
-                "tmux".to_string(),
-                "project-legacy".to_string(),
-                "codex".to_string(),
-            )
+                project_run.1.as_str(),
+                project_run.2.as_str(),
+                project_run.3.as_str(),
+                project_run.4.as_str(),
+            ),
+            ("active", "tmux", "project-legacy", "codex")
         );
         let pr: (
             i64,

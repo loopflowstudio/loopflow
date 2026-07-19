@@ -766,7 +766,7 @@ pub struct Task {
     /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a Launch for Task Work carrying this.
+    /// path may start a Run for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

@@ -8,9 +8,9 @@ title: Architecture
 > **Moment of transparency — July 19, 2026**
 >
 > The durable model is coherent: Wave, Project, and Task are stable Work;
-> Epoch/Run/Wait derive lifecycle; Basis orders input; Launch and Turn own
-> execution evidence. The former `project_sessions` and `task_sessions` storage
-> is gone.
+> Epoch/Run/Wait derive lifecycle; Basis orders input; Run owns execution
+> authority and containment; AgentInvocation and Turn own provider trace. The
+> former `project_sessions` and `task_sessions` storage is gone.
 >
 > The communication model is smaller too. Steer is authored input. Chat is the
 > human Wave presentation. `MEMORY.md` is the only memory. Radio, channel
@@ -67,8 +67,9 @@ parent or CLI -> reserve Run -> __work project -> Project runner
 parent or CLI -> reserve Run -> __work task -> Task runner -> worktree -> serial PRs
 
 Steer -> Epoch Basis -> provider boundary -> agent Turn
-Run -> Launch -> provider process / optional Turn
-interactive flow + Launch attention -> Feedback projection
+Run -> runner containment
+  \-> AgentInvocation -> optional Turn
+interactive flow + AgentInvocation attention -> Feedback projection
 ```
 
 `lf` is the machine-wide CLI and JSON interface. `lf start` routes each Wave to
@@ -114,7 +115,8 @@ The normalized boundary is now visible in code:
 - Project and Task ids are stable Work identity;
 - Epoch/Run/Wait derive lifecycle and status;
 - one Run lease owns execution authority;
-- Launch owns provider route, continuation, and containment;
+- Run owns Home, lifecycle, cwd, and runner containment;
+- AgentInvocation owns provider route, continuation, and trace;
 - Turn owns observed boundary outcome, Basis, output, and usage;
 - Project and Task loops own only their domain policy;
 - child attention is consumed before parent background work when that parent is
@@ -123,7 +125,7 @@ The normalized boundary is now visible in code:
   matrix of every blocked alternative.
 
 Remaining `session` names belong to provider, tmux, Ghostty, browser, or human
-substrate, or to historical migrations. They are not Work, Run, or Launch
+substrate, or to historical migrations. They are not Work, Run, or AgentInvocation
 identity.
 
 ### Foundations already changed
@@ -157,7 +159,7 @@ Several prerequisites now match the target:
    derive status, and completion closes an Epoch only after a successful
    current boundary and quiescent containment.
 9. Stored Feedback and Handoff aggregates are deleted. Interactive flow
-   position, live Launch, and `attention: User | Parent(WorkRef)` derive
+   position, live AgentInvocation, and `attention: User | Parent(WorkRef)` derive
    Feedback. Presentation has no continuation callback; a Basis-fenced
    `continue_feedback` is the only close.
 10. `ChildCommand` is deleted. Direct Run/Work controls and typed CI incident
@@ -193,12 +195,13 @@ Several prerequisites now match the target:
 **Decision.** One model conducts Wave, Project, and Task Work:
 
 ```text
-Work -> Epoch -> Run -> Launch -> optional Turn
-                    \-> Wait
+Work -> Epoch -> Run -> runner containment
+              |       \-> AgentInvocation -> optional Turn
+              \-> Wait
 
 Steer advances the Work Basis.
-Run owns execution authority.
-Launch owns provider/process continuity.
+Run owns execution authority and runner containment.
+AgentInvocation owns provider-conversation continuity and trace.
 Turn records an observed provider exchange when one exists.
 ```
 
@@ -220,19 +223,19 @@ model beside Epoch/Run/Wait.
 | Epoch | one pursuit of Work: `Open`, `Done`, or `Abandoned` | retry count and provider generation |
 | Basis | `(epoch, rev)` for every prompt-relevant durable input | separate truth/directive/response cursors |
 | Steer | ordered authored direction from User or active parent Run | replacement, lifecycle, and response variants |
-| Run | one wake-to-wait authority period and lease | provider transcript and process generation |
+| Run | one wake-to-wait authority period, lease, Home, cwd, and runner containment | provider transcript and process generation |
 | Wait | exact durable fact required before another useful Run | Blocked and Sleeping lifecycle states |
-| Launch | one provider or TUI process lifetime, route, containment, and optional resume token | Work-level provider session |
+| AgentInvocation | one provider or TUI invocation, route, surface, and optional resume token | Work authority and runner containment |
 | Turn | observed provider boundary, immutable Basis, outcome, and usage | required boundary for opaque TUIs |
 | Send | one delivery attempt for one Steer and exact Turn | incorporation state |
 | Home | stable local execution authority identified by `HomeId` | hostname as identity |
 
-`Exec` remains a low-level process record beneath Launch. It is evidence, not
-a public lifecycle target.
+`Exec` remains low-level process evidence. It is not a public lifecycle target
+and cannot override the Run's containment identity.
 
 There is no first-class `Actor`, writable `Ack`, `Handle`, `Body`, `Session`,
 `Block`, `Sleep`, `Interaction`, `InteractionId`, Feedback row, or `FeedbackId` in
-the target. Feedback is derived from flow, Launch, and attention.
+the target. Feedback is derived from flow, AgentInvocation, and attention.
 
 ## Identity and containment
 
@@ -306,7 +309,7 @@ an immutable ingestion event. It is not a copied rendered prompt.
 ### Fixed boundary Basis
 
 **Decision.** A structured Turn records one immutable starting Basis before
-provider input begins. An opaque TUI records the Basis on its Launch because
+provider input begins. An opaque TUI uses the current Run/Epoch boundary because
 Loopflow cannot see inner Turns. Live delivery never advances that boundary.
 
 The applied Basis is derived from the greatest successful root boundary Basis
@@ -364,7 +367,7 @@ The adapter boundary is:
 ```text
 send_current(turn, steer) -> Sent | NotSteerable | Failed | Unknown
 interrupt(boundary)       -> Ended | Fenced | Unknown
-launch(seed, route)       -> Launch
+launch(seed, route)       -> AgentInvocation
 observe(boundary)         -> Progress | Succeeded | Failed | Unknown
 ```
 
@@ -469,7 +472,7 @@ revisions never grant current authority.
 ## Run
 
 **Decision.** A Run is one wake-to-wait execution authority. It may contain
-several provider Turns and several sequential Launches.
+several provider Turns and several sequential or overlapping AgentInvocations.
 
 ```rust
 enum RunState { Reserved, Active, Stopping, Ended }
@@ -478,7 +481,7 @@ enum RunState { Reserved, Active, Stopping, Ended }
 | From | Operation | Durable step before side effects | Result |
 | --- | --- | --- | --- |
 | none | `reserve` | insert Run with trigger and lease hash; take Epoch active slot | Reserved |
-| Reserved | launch receipt | record executor/containment intent, then start outside transaction | Active after lease proof |
+| Reserved | `RunStarting` | attach complete containment and cwd | Active |
 | Reserved/Active | `stop` | set Stopping and revoke lease | Ended only after containment absence |
 | Active | `advance` to Wait | record boundary outcome and Wait; clear slot atomically | Ended |
 | Active | `advance` to boundary | record next fixed Basis before provider side effect | Active |
@@ -519,22 +522,24 @@ group is preferred to a recyclable pid. Stop/recovery must preserve this
 fail-closed behavior when the old child-body probe moves into the generic Run
 controller.
 
-## Launch and Turn
+## Run containment, AgentInvocation, and Turn
 
-**Decision.** Launch owns provider, model, account, Home, containment identity,
-and optional opaque continuation token. Account is the routing primitive;
-browser profiles are verified login venues belonging to accounts, not Launch
-identity. Provider/account/model fallback creates another Launch in the same
+**Decision.** Run owns Home, lifecycle, cwd, and the tmux or process-group
+containment that fences every process it supervises. Reserved has no
+containment. Active and Stopping retain one complete, immutable containment
+identity. Ended retains acquired containment; a never-started reservation may
+end without it.
+
+AgentInvocation owns provider, model, account, surface, optional resume token,
+and timestamps. Its optional `supervising_run_id` is provenance, not a
+capability. Starting or ending an Invocation cannot change Run state or choose
+the Interrupt/recovery target. Several Invocations may overlap beneath one
 Run.
 
-```rust
-enum LaunchState { Starting, Live, Stopping, Ended }
-enum TurnState { Starting, Active, Succeeded, Failed, Interrupted, Unknown }
-```
-
-Persist Launch route, boundary Basis for a TUI, and containment intent before
-spawn. Record Live only after containment and provider readiness exist. Fence
-new input before shutdown. Record Ended only after containment absence.
+If only a provider conversation fails, the live runner may start another
+AgentInvocation under the same Run. Replacing runner containment ends that Run
+and reserves a distinct `Recovery { prior_run_id }` Run; authority is never
+rotated onto a second controller in the old Run.
 
 For structured providers, create the Loopflow Turn with its Basis before
 sending the initial prompt. Correlate a vendor Turn id when observed; never use
@@ -548,9 +553,10 @@ aggregate. Partial, failed, and interrupted output remains evidence and does
 not apply Basis. Tool calls, native child transcripts, and vendor event detail
 remain optional trace artifacts.
 
-Opaque TUIs have no synthetic Turns. Their Launch is the boundary. Process exit
-alone is not success; explicit `done`, handback, or failure supplies the
-Loopflow outcome.
+Opaque TUIs have no synthetic Turns. Their AgentInvocation is the boundary.
+Process exit alone is not success; explicit `done`, handback, or failure
+supplies the Loopflow outcome. Handback and Invocation attention are temporary
+until the Ask/Answer interaction slice replaces Feedback.
 
 The live schema enforces:
 
@@ -558,8 +564,9 @@ The live schema enforces:
 - unique `(work, epoch_number)` and `(epoch, rev)`;
 - every typed input owns exactly one revision;
 - one non-ended Run per Epoch;
-- one non-ended writable root Launch per Run;
-- one nonterminal root Turn per Launch;
+- complete immutable containment on every Active or Stopping Run;
+- any number of supervised AgentInvocations per Run;
+- every Turn belongs to exactly one AgentInvocation;
 - unique `(steer, turn, via)` Send attempt;
 - one unresolved Wait for an Open Epoch with no active Run.
 
@@ -595,7 +602,7 @@ Feedback is derived from facts the system already needs:
 
 ```text
 current flow step is interactive
-+ active Launch
++ active AgentInvocation
 + Feedback route to User or immediate parent Work
 + latest observed root Turn output when the provider exposes Turns
 = open Feedback
@@ -603,11 +610,11 @@ current flow step is interactive
 
 There is no Feedback row, Feedback id, reviewer generation, disposition, approval,
 or copied evidence aggregate. Stable Work identifies the conversation target;
-`LaunchId` opens the current provider/TUI surface; Basis fences a stale close.
+`AgentInvocationId` opens the current provider/TUI surface; Basis fences a stale close.
 At most one Feedback may be current for one Work because one flow has one current
 step.
 
-Feedback route and pending attention are different facts on that Launch. The
+Feedback route and pending attention are different facts on that AgentInvocation. The
 route exists for the whole interactive interval. `attention_at` exists only
 while the routed peer owes the next response. A parent Steer clears pending
 attention after its durable commit but leaves the Feedback open. The child's next
@@ -618,14 +625,14 @@ aggregate.
 ```text
 steer(work, text, if_basis)   # one message inside the Feedback
 continue_feedback(work, if_basis) # end the interval and advance the flow
-open_launch(launch)           # attach a User client to its surface
+open_invocation(invocation)   # attach a User client to its surface
 ```
 
 Closing records no judgment. Consequential feedback is already durable as
 Steer. The routed peer—User or parent—closes the Feedback; the child cannot
 silently release itself from requested attention.
 
-While its Launch is usable, a Work in Feedback remains Running. It is not asleep
+While its AgentInvocation is usable, a Work in Feedback remains Running. It is not asleep
 or blocked merely because the next participant has not replied.
 
 ### Parent responsiveness
@@ -641,7 +648,7 @@ background pursuit:
 The control lane is an ordered projection over durable inputs and pending child
 attention, not another stored inbox or priority table. The same parent agent
 that is running clarify, pursue, mutate, cadence, or another flow services it.
-There is no reviewer Launch and no second parent agent.
+There is no reviewer AgentInvocation and no second parent agent.
 
 **Current gap.** This ordering exists inside a live Wave resident or Project
 runner. It does not yet guarantee that a stopped Project starts when Task
@@ -659,7 +666,7 @@ When a child terminal Turn re-arms parent attention, the same transaction
 allocates one idempotent `evidence` revision on the parent's current Epoch using
 that child Turn as source. The next parent boundary therefore starts from a
 Basis that includes the child reply, and an older completion proposal loses.
-The source remains the child Turn/Launch; there is no copied inbox row.
+The source remains the child Turn/AgentInvocation; there is no copied inbox row.
 
 The active Run listens for control input concurrently with provider events. At
 every parent Turn boundary it drains control before starting more background
@@ -685,7 +692,7 @@ control-lane item. After all child attention drains, the same parent agent
 resumes its own flow from durable position and Basis.
 
 Serving child attention must not require a clean writable canonical checkout.
-Wave and Project control Launches get read-only repository context; writable
+Wave and Project control AgentInvocations get read-only repository context; writable
 repository work belongs to Task Workspaces. A dirty main checkout may be
 reported as evidence but cannot prevent a parent from steering a child.
 
@@ -724,7 +731,7 @@ Run health (`Starting`, `Working`, `Stalled`, `Recovering`, `Dead`, or
 not proof that its Run is dead.
 
 Swift is one User client. It derives `AwaitingUser` from a live Feedback routed to
-User and opens the Launch by `LaunchId`, including after Swift was closed. An
+User and opens the AgentInvocation by `AgentInvocationId`, including after Swift was closed. An
 external agent using the User API can conduct the same Feedback without becoming
 a Loopflow parent Run. A parent-routed Feedback appears only in that parent's
 control lane. Interaction and Handoff ids disappear.
@@ -742,7 +749,7 @@ stopped.
 
 **Current decision.** `HomeId` is durable execution authority. Hostname, socket, SSH
 route, and reachability are mutable observations. Only the owner mutates Work,
-Runs, Launches, and Turns. Remote Homes may observe but cannot seize authority
+Runs, AgentInvocations, and Turns. Remote Homes may observe but cannot seize authority
 because a probe timed out. A remote route may be re-observed, but the owning
 machine's `local` marker cannot be rewritten as a remote route.
 
@@ -787,7 +794,7 @@ owns recovery mechanics, not Wave/Product judgment.
 | Claude one-shot CLI used with Max | no second input to `claude -p`; seed later process | kill/fence process | `--resume` captured session id |
 | Claude persistent `stream-json` | informative future route; may accept or queue input | streaming interrupt | session resume/fork |
 | OpenCode server | async prompt exists but incorporation into already-running model request is not promised | session abort | server-scoped session |
-| opaque tmux TUI | no observable inner Turn | process/tmux fence | Launch remains attachable |
+| opaque tmux TUI | no observable inner Turn | process/tmux fence | AgentInvocation remains attachable |
 
 Claude's Agent SDK still launches a Claude executable, but supported third-party
 use normally requires API-key or cloud-provider authentication. Loopflow's Max
@@ -829,7 +836,7 @@ context isolation and parallel reasoning inside one Run.
 ## Reconstruction
 
 **Decision.** Provider transcript and continuation tokens are optional hints.
-A new Launch renders from:
+A new AgentInvocation renders from:
 
 - current authored Work truth selected by Epoch revisions;
 - outstanding Steers in revision order;
@@ -839,9 +846,11 @@ A new Launch renders from:
 - workspace, git HEAD, PR/CI/review lineage;
 - known Loopflow-mediated effects and unknown-effect records.
 
-Losing a token, provider, account, or transcript starts another Launch in the
-same Run when replay is safe. The renderer either produces a sufficient seed or
-names an exact Wait. It never silently starts from an empty prompt.
+Losing a token, provider, account, or transcript starts another AgentInvocation
+in the same Run when replay is safe. Losing runner containment instead ends the
+Run and reserves a linked Recovery Run. The renderer either produces a
+sufficient seed or names an exact Wait. It never silently starts from an empty
+prompt.
 
 ## Workspace, PR, and CI boundaries
 
@@ -850,7 +859,7 @@ Runs operate from the canonical main checkout and currently refuse to start
 when it is dirty. Provider launch fails before execution if it receives another
 writable repository root.
 
-**Target.** Wave and Project control Launches receive repository context
+**Target.** Wave and Project control AgentInvocations receive repository context
 read-only. A dirty canonical checkout remains visible evidence but cannot block
 parent control or child Feedback. Writable repository changes still belong
 only to Task Workspaces.
@@ -894,22 +903,25 @@ process. Moving totals to Turn raised measured output because it removed loss,
 not because it double-counted.
 
 Trace `TraceId` and `ExecId` are diagnostic lineage. Product `RunId`,
-`LaunchId`, and `TurnId` name the target execution spine.
+`AgentInvocationId`, and `TurnId` name the target execution spine.
 
 ## Migration
 
-Migration `0.11.036_delete_sessions.sql` is one-way and has
-no dual-write mode. It:
+Migrations `0.11.036_delete_sessions.sql` and
+`0.12.005_run_owns_execution.sql` are one-way and have no dual-write mode. They:
 
-1. copies surviving Project and Task domain facts into stable `projects` and
+1. copy surviving Project and Task domain facts into stable `projects` and
    `tasks` rows;
-2. rewrites PR, CI, observation, control, and Run ownership references to
+2. rewrite PR, CI, observation, control, and Run ownership references to
    stable Work ids before deleting the old identity;
-3. preserves provider continuation on Launch and stable external bindings on
+3. preserve provider continuation on AgentInvocation and stable external bindings on
    Work;
-4. drops the obsolete dependent tables, then `task_sessions` and
+4. drop the obsolete dependent tables, then `task_sessions` and
    `project_sessions`;
-5. leaves no Task/Project status column on the replacement records.
+5. leave no Task/Project status column on the replacement records;
+6. move containment, cwd, and execution transitions onto Run;
+7. rename `agent_launches` to `agent_invocations`, rewrite durable id prefixes
+   and Turn references once, and drop control-only trace columns.
 
 Fresh-database proof asserts that `tasks` exists, both Session tables are
 absent, and neither product table carries `status`, `status_reason`, or
@@ -944,7 +956,7 @@ in parallel, while Wave has a third listener/resident stack.
 
 This is the unaddressed slice. It is done when:
 
-1. Home, Wave, Project, Task, Run, and Launch process ownership fits on one
+1. Home, Wave, Project, Task, Run, and AgentInvocation process ownership fits on one
    screen, including which pieces are long-lived and which are replaceable;
 2. one Home-owned mechanism derives useful Ready Work from durable state and
    reserves exactly one Run—no Task callback, app process, or CLI shell is
@@ -958,7 +970,7 @@ This is the unaddressed slice. It is done when:
 6. process exit, app exit, listener restart, a dirty canonical checkout, and a
    failed best-effort nudge cannot lose input or strand Ready Work; status names
    the exact durable fact still needed;
-7. generic Run reservation, Launch supervision, provider recovery, Steer
+7. generic Run reservation, AgentInvocation supervision, provider recovery, Steer
    delivery, interrupt, and Wait settlement have one implementation; each Work
    kind contributes only domain prompt, flow, evidence, and closure policy;
 8. the design decides whether an open Feedback retains a Run or records a typed

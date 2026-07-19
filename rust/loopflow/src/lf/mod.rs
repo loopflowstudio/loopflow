@@ -307,10 +307,10 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Inspect, attach, and hand back provider or opaque process Launches
-    Launch {
+    /// Inspect, attach, and hand back provider or opaque AgentInvocations
+    Invocation {
         #[command(subcommand)]
-        cmd: LaunchCommand,
+        cmd: InvocationCommand,
     },
     /// Inspect and control stable Wave, Project, or Task Work
     Work {
@@ -405,19 +405,19 @@ pub enum Commands {
         /// Filter by model
         #[arg(long)]
         model: Vec<String>,
-        /// Filter by launch surface
+        /// Filter by invocation surface
         #[arg(long)]
         surface: Vec<String>,
-        /// Filter by launch outcome
+        /// Filter by invocation outcome
         #[arg(long)]
         outcome: Vec<String>,
         /// Filter by capture state
         #[arg(long)]
         capture_state: Vec<String>,
-        /// Include only launches with observed steering turns
+        /// Include only invocations with observed steering turns
         #[arg(long)]
         steered_only: bool,
-        /// Include only launches containing a current file instruction revision
+        /// Include only invocations containing a current file instruction revision
         #[arg(long)]
         current_revision_only: bool,
         /// Emit the Context Lab snapshot as JSON
@@ -493,9 +493,9 @@ pub enum Commands {
         /// Stream stored event objects as JSONL
         #[arg(long, requires = "events")]
         jsonl: bool,
-        /// Select one launch by id prefix
+        /// Select one AgentInvocation by id prefix
         #[arg(long)]
-        launch: Option<String>,
+        invocation: Option<String>,
         /// Select one turn by id prefix (with --content)
         #[arg(long, requires = "content")]
         turn: Option<String>,
@@ -594,7 +594,7 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum RunsCommand {
     /// Tombstone terminal captures whose conversation artifacts are gone, and
-    /// finalize orphaned `capturing` launches. Dry-run by default; `--apply`
+    /// finalize orphaned `capturing` invocations. Dry-run by default; `--apply`
     /// writes. A red `lf doctor` capture check means un-acknowledged loss —
     /// this is the explicit acknowledgment that turns historical loss green
     /// while leaving fresh loss red.
@@ -613,37 +613,37 @@ pub enum RunsCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum LaunchCommand {
-    /// List Launches backed by the normalized Run controller
+pub enum InvocationCommand {
+    /// List AgentInvocations supervised by Runs
     List {
-        /// Include only Launches whose containment may still be live
+        /// Include only invocations whose supervising Run may still be live
         #[arg(long)]
         active: bool,
         #[arg(long)]
         json: bool,
     },
-    /// Show one Launch and its generic attach route
+    /// Show one AgentInvocation and its generic attach route
     Status {
-        launch_id: String,
+        invocation_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Return the generic attach descriptor without changing Launch state
+    /// Return the generic attach descriptor without changing Run state
     Attach {
-        launch_id: String,
+        invocation_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record explicit terminal evidence for an opaque Launch boundary
+    /// Record explicit terminal evidence for an opaque invocation boundary
     Handback {
-        launch_id: String,
+        invocation_id: String,
         #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
         outcome: String,
         #[arg(long)]
         json: bool,
     },
-    /// Exec the Launch's generic attach route
-    Present { launch_id: String },
+    /// Exec the AgentInvocation's generic attach route
+    Present { invocation_id: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -674,7 +674,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Present the current User-attention Feedback in its recorded Launch
+    /// Present the current User-attention Feedback in its recorded Invocation
     Feedback {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -688,7 +688,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the current Turn or opaque Launch boundary
+    /// Interrupt the current Turn or opaque Invocation boundary
     Interrupt {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -2140,7 +2140,7 @@ mod tests {
     }
 
     #[test]
-    fn context_accepts_repeatable_launch_set_filters() {
+    fn context_accepts_repeatable_invocation_set_filters() {
         let cli = Cli::try_parse_from([
             "lf",
             "context",
@@ -2202,8 +2202,8 @@ mod tests {
             "run-1",
             "--json",
             "--content",
-            "--launch",
-            "launch-1",
+            "--invocation",
+            "invocation-1",
             "--turn",
             "turn-1",
         ])
@@ -2212,10 +2212,10 @@ mod tests {
             cli.command,
             Some(Commands::Trace {
                 content: true,
-                launch: Some(launch),
+                invocation: Some(invocation),
                 turn: Some(turn),
                 ..
-            }) if launch == "launch-1" && turn == "turn-1"
+            }) if invocation == "invocation-1" && turn == "turn-1"
         ));
         assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
     }
@@ -2496,26 +2496,26 @@ mod tests {
         ));
     }
     #[test]
-    fn cli_parses_generic_launch_contract() {
+    fn cli_parses_generic_invocation_contract() {
         let cli = Cli::try_parse_from([
             "lf",
-            "launch",
+            "invocation",
             "handback",
-            "launch_1",
+            "invocation_1",
             "--outcome",
             "unknown",
             "--json",
         ])
-        .expect("parse Launch handback");
+        .expect("parse Invocation handback");
         assert!(matches!(
             cli.command,
-            Some(Commands::Launch {
-                cmd: LaunchCommand::Handback {
-                    launch_id,
+            Some(Commands::Invocation {
+                cmd: InvocationCommand::Handback {
+                    invocation_id,
                     outcome,
                     json: true,
                 }
-            }) if launch_id == "launch_1" && outcome == "unknown"
+            }) if invocation_id == "invocation_1" && outcome == "unknown"
         ));
     }
 

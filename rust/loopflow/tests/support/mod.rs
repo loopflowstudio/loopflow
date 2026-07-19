@@ -345,41 +345,39 @@ fn register_task_with_process(
             .reserve_run(&work, loopflow::durable::RunTrigger::User)
             .await
             .expect("reserve completed test Task Run");
-        let loopflow::durable::AdvanceReceipt::Launch(launch) = store
+        store
             .advance_run(
                 &lease,
-                loopflow::durable::RunAdvance::LaunchStarting {
-                    route: loopflow::durable::LaunchRoute {
+                loopflow::durable::RunAdvance::RunStarting {
+                    containment: loopflow::durable::Containment::ProcessGroup { id: 1 },
+                    cwd: worktree.to_path_buf(),
+                },
+            )
+            .await
+            .expect("start test Task Run");
+        let loopflow::durable::AdvanceReceipt::Invocation(invocation) = store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::InvocationStarting {
+                    route: loopflow::durable::InvocationRoute {
                         provider: "codex".to_string(),
                         model: None,
                         account_id: None,
                     },
-                    containment: loopflow::durable::Containment::ProcessGroup { id: 1 },
-                    cwd: worktree.to_path_buf(),
                     surface: "test".to_string(),
-                    opaque: false,
                     resume_token: None,
                 },
             )
             .await
-            .expect("start test Task Launch")
+            .expect("start test Task Invocation")
         else {
-            unreachable!("LaunchStarting returns Launch")
+            unreachable!("InvocationStarting returns Invocation")
         };
-        store
-            .advance_run(
-                &lease,
-                loopflow::durable::RunAdvance::LaunchLive {
-                    launch_id: launch.id.clone(),
-                },
-            )
-            .await
-            .expect("activate test Task Launch");
         let loopflow::durable::AdvanceReceipt::Turn(turn) = store
             .advance_run(
                 &lease,
                 loopflow::durable::RunAdvance::TurnStarting {
-                    launch_id: launch.id.clone(),
+                    invocation_id: invocation.id.clone(),
                 },
             )
             .await
@@ -410,8 +408,8 @@ fn register_task_with_process(
         store
             .advance_run(
                 &lease,
-                loopflow::durable::RunAdvance::LaunchEnded {
-                    launch_id: launch.id,
+                loopflow::durable::RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id,
                     outcome: loopflow::durable::BoundaryState::Succeeded,
                 },
             )

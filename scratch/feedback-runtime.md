@@ -296,9 +296,9 @@ delete orphan receipts, and rename Work/Launch identities still called Session.
 
 ### Communication and memory
 
-- [ ] Radio/channel modules, CLI, store methods, bus tables, `LF_CHANNEL`,
+- [x] Radio/channel modules, CLI, store methods, bus tables, `LF_CHANNEL`,
       `MessageOp::Say`, and machine bylines are absent.
-- [ ] Project promotion and builtin prompts use typed evidence, not Radio.
+- [x] Project promotion and builtin prompts use typed evidence, not Radio.
 - [ ] Prompt memory reads only applicable `MEMORY.md` files.
 - [ ] Memory journal variants, replay, runtime state, HTTP writes, SSE frames,
       Swift facts, write commands, receipts, and export skill are absent.

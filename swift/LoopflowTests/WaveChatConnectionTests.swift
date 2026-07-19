@@ -40,7 +40,6 @@ struct WaveChatConnectionTests {
             status: .completed,
             items: [],
             createdAt: "2026-07-15T04:00:00Z",
-            from: nil,
             body: nil,
             activity: nil
         )
@@ -307,7 +306,6 @@ struct WaveChatConnectionTests {
         #expect(turn.status == .completed)
         #expect(turn.text.hasPrefix("Project runtime-simplification is pursuing Task INF-872"))
         #expect(turn.createdAtDate != nil)
-        #expect(turn.from == nil, "explicit null decodes as absent")
         #expect(turn.items.count == 4)
         guard case let .command(_, command, cwd, status, output, exitCode, _) = turn.items[3] else {
             Issue.record("expected a command item")
@@ -391,7 +389,7 @@ struct SSEFrameParserTests {
 }
 
 /// A complete `turn` frame using the current Wave → Project → Task vocabulary.
-private let currentTurnFrame = #"{"id":"turn-101","role":"assistant","text":"Project runtime-simplification is pursuing Task INF-872. The Task Session is running in its worktree and opened PR #912. Focused Swift tests passed; the required build check is still pending, so the Task remains submitted.","status":"completed","items":[{"type":"command","id":"call_status","command":["lf","status","infrastructure","--json"],"cwd":"/Users/jack/src/loopflow.infrastructure","status":"completed","output":"INF-872 · running · Task Session ts_872\n","exit_code":0,"duration_ms":81},{"type":"command","id":"call_diff","command":["git","diff","--stat","origin/main...HEAD"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"completed","output":"2 files changed, 18 insertions(+), 6 deletions(-)\n","exit_code":0,"duration_ms":34},{"type":"command","id":"call_test","command":["swift","test","--package-path","swift","--filter","RegistryQueryTests"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"completed","output":"9 tests passed\n","exit_code":0,"duration_ms":2140},{"type":"command","id":"call_checks","command":["gh","pr","checks","912"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"failed","output":"build is still pending\n","exit_code":1,"duration_ms":417}],"created_at":"2026-07-13T20:00:00Z","from":null,"body":null,"activity":null}"#
+private let currentTurnFrame = #"{"id":"turn-101","role":"assistant","text":"Project runtime-simplification is pursuing Task INF-872. The Task Session is running in its worktree and opened PR #912. Focused Swift tests passed; the required build check is still pending, so the Task remains submitted.","status":"completed","items":[{"type":"command","id":"call_status","command":["lf","status","infrastructure","--json"],"cwd":"/Users/jack/src/loopflow.infrastructure","status":"completed","output":"INF-872 · running · Task Session ts_872\n","exit_code":0,"duration_ms":81},{"type":"command","id":"call_diff","command":["git","diff","--stat","origin/main...HEAD"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"completed","output":"2 files changed, 18 insertions(+), 6 deletions(-)\n","exit_code":0,"duration_ms":34},{"type":"command","id":"call_test","command":["swift","test","--package-path","swift","--filter","RegistryQueryTests"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"completed","output":"9 tests passed\n","exit_code":0,"duration_ms":2140},{"type":"command","id":"call_checks","command":["gh","pr","checks","912"],"cwd":"/Users/jack/src/loopflow.infrastructure.inf-872","status":"failed","output":"build is still pending\n","exit_code":1,"duration_ms":417}],"created_at":"2026-07-13T20:00:00Z","body":null,"activity":null}"#
 
 // Composer verb selection: the smallest honest mapping from (loop state, has
 // text) to what the primary/secondary buttons do. The view renders this

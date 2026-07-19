@@ -249,16 +249,12 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     public let status: Lifecycle
     public let items: [ConversationItem]
     public let createdAt: String
-    /// Speaker label for attributed emissions (`lf radio pub` — worker reports,
-    /// child-wave escalations). Absent (`nil`) for the loop's own turns and
-    /// plain user turns; mirrors Rust `ChatTurn.from`.
-    public let from: String?
-    /// Body that produced an assistant span; nil for human/attributed turns.
+    /// Body that produced an assistant span; nil for human turns.
     public let body: BodyProvenance?
     public let activity: ChildControlActivity?
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, text, status, items, from, body, activity
+        case id, role, text, status, items, body, activity
         case createdAt = "created_at"
     }
 
@@ -269,7 +265,6 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         status: Lifecycle,
         items: [ConversationItem],
         createdAt: String,
-        from: String?,
         body: BodyProvenance?,
         activity: ChildControlActivity?
     ) throws {
@@ -279,7 +274,6 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
         self.status = status
         self.items = items
         self.createdAt = createdAt
-        self.from = from
         self.body = body
         self.activity = activity
         try validate()
@@ -294,7 +288,6 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
             status: values.decode(Lifecycle.self, forKey: .status),
             items: values.decode([ConversationItem].self, forKey: .items),
             createdAt: values.decode(String.self, forKey: .createdAt),
-            from: values.decodeIfPresent(String.self, forKey: .from),
             body: values.decodeIfPresent(BodyProvenance.self, forKey: .body),
             activity: values.decodeIfPresent(ChildControlActivity.self, forKey: .activity)
         )
@@ -305,7 +298,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
             guard text.isEmpty, items.isEmpty, body == nil else {
                 throw ChatTurnError.mixedActivity
             }
-            guard role == .user, status == .completed, from != nil else {
+            guard role == .user, status == .completed else {
                 throw ChatTurnError.invalidActivityEnvelope
             }
         } else if role == .user {
@@ -359,7 +352,6 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
             status: status,
             items: grownItems,
             createdAt: createdAt,
-            from: from,
             body: body,
             activity: activity
         )

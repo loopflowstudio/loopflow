@@ -83,7 +83,7 @@ Current decentralized truth is deliberately split by substrate:
 
 | Substrate | Owns |
 | --- | --- |
-| local SQLite | this Home's runtime, credentials, receipts, and agent bus |
+| local SQLite | this Home's runtime, credentials, receipts, and Work state |
 | append-only journals | Wave conversation and durable run narrative |
 | Linear | shared Wave/Project/Task planning truth |
 | GitHub | branches, PRs, checks, and merges |

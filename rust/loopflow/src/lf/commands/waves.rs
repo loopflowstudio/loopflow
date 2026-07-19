@@ -1810,7 +1810,7 @@ fn next_move_for_task(
 
 /// The invoking context's wave id: `LF_WAVE_ID`, else `None` (the caller
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
-/// resolution surface `lf chat`/`lf radio sub` own.
+/// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
         .ok()

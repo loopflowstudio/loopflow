@@ -77,16 +77,13 @@ fn drop_note() {
     eprintln!("no wave here; memory write dropped");
 }
 
-/// Memory is wave-level (MEMORY.md is wave identity; work lines have no
-/// memory — their notes are files), so this resolves the FAMILY HEAD even
-/// inside a work-line worktree and ignores the channel arm entirely.
+/// Memory is Wave-level (`MEMORY.md` is Wave identity).
 async fn resolve(context: &CliContext, target: &WaveTargetArgs) -> Result<Option<ResolvedWave>> {
     resolve_target(
         target,
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
     )
     .await
 }
@@ -248,10 +245,16 @@ mod tests {
             "the ORIGIN file is the one replaced"
         );
 
-        let summary = write_memory(&target, "add", "workers report via lf radio pub", None, &[])
-            .await
-            .expect("add");
-        assert_eq!(summary, "workers report via lf radio pub");
+        let summary = write_memory(
+            &target,
+            "add",
+            "child progress arrives as typed Work observations",
+            None,
+            &[],
+        )
+        .await
+        .expect("add");
+        assert_eq!(summary, "child progress arrives as typed Work observations");
         assert_eq!(
             std::fs::read_to_string(origin.join("wave/ship/MEMORY.md")).expect("origin file"),
             "# Ship\n\nfold is truth\n",
@@ -270,7 +273,7 @@ mod tests {
                     summary: "# Ship".to_string()
                 },
                 EventKind::MemoryAdded {
-                    fact: "workers report via lf radio pub".to_string(),
+                    fact: "child progress arrives as typed Work observations".to_string(),
                     receipts: Vec::new(),
                 },
             ]
@@ -390,7 +393,6 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
-            env_channel: None,
         };
         run_with_context(
             &context,
@@ -413,7 +415,6 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
-            env_channel: None,
         };
         let err = run_with_context(&context, None, &WaveTargetArgs::default())
             .await

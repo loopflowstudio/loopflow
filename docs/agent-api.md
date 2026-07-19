@@ -25,8 +25,8 @@ kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with or steer a Wave.
 
 A Wave, Project, or Task agent launched by Loopflow is an internal participant.
-It receives `LOOPFLOW.md`, reports through `lf radio`, and never impersonates
-the User in chat.
+It receives `LOOPFLOW.md`; typed Work observations and Feedback carry
+coordination across the parent relationship.
 
 A Wave directing a task is the internal case:
 
@@ -100,26 +100,6 @@ worktree.
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.
 
-## Internal agents: the radio
-
-Loopflow-launched agents talk to each other on the bus; chat belongs to the
-User surface.
-
-```bash
-lf radio pub --channel goals.build "parser lands green; starting docs"
-lf radio sub goals --json          # NDJSON stream of a channel family
-```
-
-Publish is an INSERT into the shared local store — no broker, no server in the
-path, so it works even with zero loopflow processes running. A listening Wave
-folds messages from its channel family into its journal with attribution.
-Outside any wave, a publish prints a drop note and exits 0, so the verb is safe
-in every prompt. Never guess a channel: publish only where the prompt or skill
-names one.
-
-An external harness acting for the person may use `lf chat`; a
-Loopflow-launched worker never posts there.
-
 ## Remember, with receipts
 
 ```bash
@@ -179,8 +159,8 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
-- Answer humans in turn text; report proactively on the radio only when a
-  channel is established.
+- Answer humans in turn text; use typed Work observations and explicit
+  Feedback points for parent/child coordination.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

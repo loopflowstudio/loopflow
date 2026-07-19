@@ -150,7 +150,6 @@ fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::pr
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = wave_id {
         command.env("LF_WAVE_ID", id);
@@ -252,7 +251,7 @@ fn pm_show_honors_the_shared_resolution_rules() {
     let _ = uuid;
 }
 
-/// The channel/memory consumers resolve the same wave as `status`/`pm show`.
+/// Chat and memory resolve the same Wave as `status` and `pm show`.
 /// `lf memory show` (via `chat::resolve_target`) reads the resolved wave's
 /// MEMORY.md across the whole matrix: UUID, hand-set name, explicit override,
 /// stale error, no-context error. Before the shared resolver, a hand-set name

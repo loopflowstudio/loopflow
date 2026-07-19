@@ -790,7 +790,7 @@ fn run_in_wave_context_assembles_chat_and_memory_sections() {
     fs::create_dir_all(repo.join("wave/goals")).unwrap();
     fs::write(
         repo.join("wave/goals/MEMORY.md"),
-        "- workers report via lf radio pub",
+        "- child progress arrives as typed Work observations",
     )
     .unwrap();
     make_commit(repo, "initial");
@@ -801,7 +801,6 @@ fn run_in_wave_context_assembles_chat_and_memory_sections() {
         id: MessageId(format!("msg-{seq}")),
         op: MessageOp::Message,
         text: "how goes the build?".to_string(),
-        from: None,
     });
 
     let components = gather_context(&GatherContextOpts {
@@ -815,7 +814,7 @@ fn run_in_wave_context_assembles_chat_and_memory_sections() {
     assert!(prompt.contains("<lf:wave-chat-recent>"));
     assert!(prompt.contains("user: how goes the build?"));
     assert!(prompt.contains("<lf:wave-memory>"));
-    assert!(prompt.contains("workers report via lf radio pub"));
+    assert!(prompt.contains("child progress arrives as typed Work observations"));
 }
 
 #[test]

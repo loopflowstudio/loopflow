@@ -121,7 +121,6 @@ struct AttemptFailurePresentationTests {
             status: .failed,
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
-            from: nil,
             body: nil,
             activity: nil
         )
@@ -145,7 +144,6 @@ struct AttemptFailurePresentationTests {
             status: .completed,
             items: [],
             createdAt: "2026-07-10T17:54:00Z",
-            from: nil,
             body: body("body-4"),
             activity: nil
         )
@@ -175,7 +173,6 @@ struct AttemptFailurePresentationTests {
             status: .failed,
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
-            from: nil,
             body: body("body-1", reason: capacityReason),
             activity: nil
         )
@@ -186,7 +183,6 @@ struct AttemptFailurePresentationTests {
             status: .failed,
             items: [],
             createdAt: "2026-07-10T17:54:00Z",
-            from: nil,
             body: body("body-2", reason: capacityReason),
             activity: nil
         )
@@ -242,7 +238,6 @@ struct AttemptFailurePresentationTests {
             status: status,
             items: [],
             createdAt: "2026-07-10T17:53:00Z",
-            from: nil,
             body: body,
             activity: nil
         )

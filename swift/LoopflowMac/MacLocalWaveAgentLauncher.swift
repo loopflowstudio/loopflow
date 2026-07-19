@@ -230,9 +230,9 @@ enum LocalWaveAgentLauncher {
     /// The `wave` a server at `endpoint` reports on `GET /health`, or nil when
     /// nothing answers within 2s (mirrors Rust `ENDPOINT_PROBE_TIMEOUT`).
     /// Probe contract: the guard keys on the `wave` field only. `/health`'s
-    /// `status` is channel liveness (`serving`) and `loop_state` is the resident's
+    /// `status` is listener liveness (`serving`) and `loop_state` is the resident's
     /// state — a wave whose loop failed still answers here and still blocks a
-    /// second launch, which is correct: the channel is live.
+    /// second launch, which is correct: the listener is live.
     static func healthWaveName(endpoint: String) -> String? {
         guard let url = URL(string: "http://\(endpoint)/health") else { return nil }
         var request = URLRequest(url: url)

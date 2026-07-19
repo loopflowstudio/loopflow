@@ -2,12 +2,10 @@
 //!
 //! The thread is the product surface: journaled, durable, replayed. It stays
 //! SSE on the listener (`GET /events`), because a thread has a past and a
-//! socket that replays it is the right shape. The agent bus is the other wire
-//! entirely — a table, polled ([`super::sub`]).
+//! socket that replays it is the right shape.
 //!
 //! Targeting and endpoint resolution are `lf chat`'s
-//! ([`super::chat::resolve_target`]): the ambient rule (`LF_CHANNEL` env,
-//! else `LF_WAVE_ID`, else the worktree name) with an explicit NAME override.
+//! ([`super::chat::resolve_target`]): `LF_WAVE_ID` with an explicit NAME override.
 //!
 //! The stream is followed until the process is killed: on disconnect (or a
 //! wave with no live server yet) it reconnects on a backoff ladder,
@@ -60,7 +58,6 @@ pub(crate) async fn follow(wave: Option<&str>) -> Result<()> {
             context.store.as_ref(),
             context.repo.as_deref(),
             context.env_wave_id.as_deref(),
-            context.env_channel.as_deref(),
         )
         .await?;
         let Some(resolved) = resolved else {
@@ -212,10 +209,7 @@ impl Renderer {
             if !progress.opened {
                 progress.opened = true;
                 progress.finished = true;
-                // The speaker, not the turn id: the thread exposes no runtime
-                // identifiers.
-                let who = turn.from.as_deref().unwrap_or("you");
-                lines.push(format!("{who} › {}", turn.text));
+                lines.push(format!("you › {}", turn.text));
             }
             return lines;
         }
@@ -598,9 +592,11 @@ mod tests {
         assert_eq!(
             renderer.lines_for(&Frame {
                 event: "memory-add".into(),
-                data: "workers report via lf radio pub with full detail".into()
+                data: "child progress arrives as typed Work observations with full detail".into()
             }),
-            vec!["memory added: workers report via lf radio pub with full detail"]
+            vec![
+                "memory added: child progress arrives as typed Work observations with full detail"
+            ]
         );
         let user = turn_json("turn-1", "user", "how goes it?", "completed", "[]");
         assert_eq!(
@@ -727,7 +723,7 @@ mod tests {
             .expect("user turn");
         runtime
             .append_memory(
-                "workers report via lf radio pub with full useful detail",
+                "child progress arrives as typed Work observations with full useful detail",
                 vec![],
             )
             .unwrap();
@@ -795,7 +791,7 @@ mod tests {
         assert!(
             frames.iter().any(|f| {
                 f.event == "memory-add"
-                    && f.data == "workers report via lf radio pub with full useful detail"
+                    && f.data == "child progress arrives as typed Work observations with full useful detail"
             }),
             "replayed memory-add frame arrives with the full fact: {frames:?}"
         );

@@ -21,3 +21,23 @@ invariant violation instead of silently selecting completion.
 Proof: exact deleted-symbol/dead-field searches are empty; the action behavior
 tests and migration test pass; `cargo fmt --check` passes. The automated
 `lf code` wrapper made no source change and was rejected as evidence.
+
+## Slice 2 — Radio and channel identity
+
+Accepted. The Radio CLI and hidden subscription compatibility surface, bus
+store/runtime/listener/retention, channel-family identity, `LF_CHANNEL`, and
+current bus tables are deleted. `MessageOp::Say`, machine byline fields, and
+the replay-only `ChannelOpened` event are deleted with their Rust and Swift
+wire consumers. Human Wave conversation remains one plain message/steer
+surface; ordinary Rust channels and prompt system/task channels are unrelated.
+
+Migration `0.12.001_drop_agent_bus.sql` drops both bus tables. Historical
+schema fixtures retain their old table definitions so the current migration
+is exercised. Project promotion now reports in its typed child-Wave thread and
+does not publish a second lossy copy.
+
+Proof: exact current-source Radio/channel-identity search is empty; all 36
+migration tests, 7 Wave journal tests, and 3 Wave resolution-matrix tests pass;
+Swift contract tests and `cargo check -p loopflow` passed during implementation;
+`cargo fmt --check` passes. The first migration proof caught and corrected a
+missing registration and a current probe that still queried the dropped table.

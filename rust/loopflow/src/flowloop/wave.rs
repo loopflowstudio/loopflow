@@ -585,10 +585,7 @@ impl WaveLoop {
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
         let content = messages
             .iter()
-            .map(|m| match &m.from {
-                Some(from) => format!("[{from}] {}", m.text),
-                None => m.text.clone(),
-            })
+            .map(|m| m.text.clone())
             .collect::<Vec<_>>()
             .join("\n\n");
         self.run_pass(content, answers, inbox_rx).await;
@@ -1211,11 +1208,7 @@ impl WaveLoop {
         if self.end.is_some() {
             return false;
         }
-        let text = match &message.from {
-            Some(from) => format!("[{from}] {}", message.text),
-            None => message.text.clone(),
-        };
-        match harness.send_current(&text).await {
+        match harness.send_current(&message.text).await {
             SendCurrentOutcome::Sent { .. } => {
                 // Live delivery improves latency; it does not advance the
                 // Turn's immutable starting Basis. Keep the message pending so
@@ -2449,29 +2442,6 @@ mod tests {
         let answers = started_answers(&loop_.journal_events());
         assert_eq!(answers[0], vec![message_id(&user_turn)]);
         assert!(answers.iter().skip(1).all(Vec::is_empty));
-    }
-
-    /// A say emission wakes the loop like a message: the next pass's
-    /// wake carries the byline and its `TurnStarted.answers` consumes the id.
-    #[tokio::test]
-    async fn say_wakes_the_loop_and_is_consumed_by_the_next_pass() {
-        let mut loop_ = boot(Duration::from_secs(600), "echo noted").await;
-        let turn = loop_.runtime.deliver_say(
-            "implement run-1 finished: PR #7, one surprise".into(),
-            "worker".into(),
-        );
-        // A pass records its seed only after its `TurnStarted` is journaled,
-        // so the wake and the answers it consumed are both readable here.
-        assert_eq!(
-            wake_of(&loop_.next_seed().await),
-            "[worker] implement run-1 finished: PR #7, one surprise",
-            "the pass wake carries the byline"
-        );
-        assert_eq!(
-            started_answers(&loop_.journal_events())[0],
-            vec![message_id(&turn)],
-            "the say emission is consumed like any queued message"
-        );
     }
 
     /// Messages landing mid-flow queue — never rejected, never injected —

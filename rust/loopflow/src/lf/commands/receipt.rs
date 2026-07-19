@@ -44,7 +44,6 @@ async fn run_with_context(
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
     )
     .await?
     .ok_or_else(|| {
@@ -90,7 +89,6 @@ pub enum ResolvedRecord {
         role: String,
         text: String,
         created_at: String,
-        from: Option<String>,
     },
     WorkerReport {
         run_id: String,
@@ -161,7 +159,6 @@ fn resolve_chat_turn(reference: &str, resolved: &ResolvedWave) -> Result<Resolve
         role: role_str(turn.role),
         text: turn.text.clone(),
         created_at: turn.created_at.clone(),
-        from: turn.from.clone(),
     })
 }
 
@@ -369,13 +366,8 @@ fn print_record(resolved: &ResolvedReceipt) {
             role,
             text,
             created_at,
-            from,
         } => {
-            let byline = from
-                .as_deref()
-                .map(|f| format!(" · from {f}"))
-                .unwrap_or_default();
-            println!("  {role} turn {turn_id}{byline} · {created_at}");
+            println!("  {role} turn {turn_id} · {created_at}");
             for line in text.lines() {
                 println!("  {line}");
             }

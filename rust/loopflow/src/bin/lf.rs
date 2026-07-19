@@ -1099,18 +1099,11 @@ fn main() -> anyhow::Result<()> {
         cli.wave = Some(wave.name().to_string());
     }
     // One resolved wave identity drives prompt context, registry attribution,
-    // journaling, and every child process. An explicit wave is also the
-    // default bus channel for this invocation.
+    // journaling, and every child process.
     let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
         EnvGuard::set(
             loopflow::engine::wave_context::WAVE_ID_ENV,
             wave.id().to_string(),
-        )
-    });
-    let _explicit_channel_env = explicit_wave.as_ref().map(|wave| {
-        EnvGuard::set(
-            loopflow::engine::wave_context::CHANNEL_ENV,
-            wave.name().to_string(),
         )
     });
     // `--account`/`--only-account` are resolved once at the outer invocation.
@@ -1449,26 +1442,9 @@ fn main() -> anyhow::Result<()> {
             }) => loopflow::lf::commands::chat::run(
                 text, *follow, *steer, *history, *json, *limit, target,
             ),
-            Some(Commands::Radio { command }) => match command {
-                loopflow::lf::RadioCommand::Pub {
-                    text,
-                    channel,
-                    parent,
-                    from,
-                } => loopflow::lf::commands::radio::run_pub(
-                    text,
-                    channel.as_deref(),
-                    *parent,
-                    from.as_deref(),
-                ),
-                loopflow::lf::RadioCommand::Sub { channel, json } => {
-                    loopflow::lf::commands::sub::run(channel.as_deref(), *json)
-                }
-            },
             Some(Commands::Install { .. }) => {
                 unreachable!("install dispatches before home routing")
             }
-            Some(Commands::RetiredSub { .. }) => unreachable!("retired sub cannot parse"),
             Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
             Some(Commands::Memory { cmd, target }) => {
                 loopflow::lf::commands::memory::run(cmd.as_ref(), target)

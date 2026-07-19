@@ -8,7 +8,7 @@ whoever is watching. The map:
 |---|---|---|
 | A human running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
 | A human operating waves | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
-| An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [The Agent Bus](#the-agent-bus) | [The Agent API](agent-api.md) |
+| An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks) | [The Agent API](agent-api.md) |
 | Watching the whole machine | [Reading the Local Ledger](#reading-the-local-ledger) | [Conducting](conducting.md) |
 
 Every read surface takes `--json`; that JSON is the same wire the Mac app
@@ -359,9 +359,8 @@ process exit alone does not claim success.
 
 ## Speaking to Waves
 
-Two wires, not one. The **thread** is the human surface: durable, replayed,
-owned by a running Wave. The **bus** is how agents call to each other: a table in
-the shared store, ephemeral, no server in the path.
+The **thread** is the human surface: durable, replayed, and owned by a running
+Wave. Typed Work observations carry Project and Task progress to their parent.
 
 ```bash
 lf chat "ship the button audit first"       # post into the current wave's thread
@@ -396,38 +395,6 @@ Waves sharing `main`.
 | `--follow` | Replay the selected thread's latest 12 turns and continue live while typed lines post (`lf chat`) |
 | `--history --json` | Read the selected Wave's durable local thread without requiring a listener (`lf chat`) |
 | `--limit N` | Bound a `--history` read (default: 12) |
-
-## The Agent Bus
-
-```bash
-lf radio pub "landed PR #91, tests green"       # report on your own channel
-lf radio pub -c infra.148e "rebase and retry"   # steer a specific hand
-lf radio pub --parent "blocked on schema change" # escalate to the parent's channel
-lf radio sub                                      # hear your channel and its hands
-lf radio sub infra.148e --json                    # one hand's traffic as NDJSON
-```
-
-Channels are a dot tree: `infra` is the wave, `infra.148e` is one of its hands.
-A subscription is a prefix, so `lf radio sub infra` hears the whole family.
-
-| Command | What it does |
-|---------|--------------|
-| `lf radio pub [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
-| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the Wave need not be running |
-
-Broadcast, not delivery. `lf radio sub` tunes in at the head and hears only what is
-said while it listens: nothing is replayed, and a frame published to a channel
-nobody was on is gone. A frame survives one hour, then the sweeper takes it —
-the bus is a wire, and `lf runs` plus the merged PR are the records of record. A
-running Wave is the one durable subscriber: it polls from a saved cursor, so it
-catches its hands' reports across a restart, and when a frame aged out before it
-woke, the miss is announced in its thread rather than passed over in silence.
-
-| Flag | Description |
-|------|-------------|
-| `-c, --channel NAME` | Broadcast on any channel (`lf radio pub`) |
-| `--parent` | Broadcast on the parent wave's channel (`lf radio pub`) |
-| `--from LABEL` | Byline for machine speech (`--from ci`). Testimony, not proof: the row records it beside the channel the frame arrived on |
 
 ## Reading the Local Ledger
 

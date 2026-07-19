@@ -452,20 +452,13 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     );
 
     // Ambient wave context: every run born inside a wave inherits recent chat
-    // and memory. Explicit --wave wins; otherwise managed env names the channel.
-    // Both resolve through the channel's family head — a hand lives INSIDE its
-    // wave's mind. Work-line channels are ephemeral bus topics with no thread
-    // and no MEMORY.md of their own; a hand's reports land in the wave's
-    // journal, so reading the wave is reading everything it has said. No wave
-    // (or no wave state) → both stay empty and the prompt gains nothing.
+    // and memory. Explicit --wave wins; otherwise LF_WAVE_ID resolves the Wave.
+    // No wave (or no wave state) → both stay empty and the prompt gains nothing.
     let ambient_start = Instant::now();
-    let ambient_channel = opts
+    let ambient_wave = opts
         .wave
         .clone()
-        .or_else(crate::engine::wave_context::resolve_ambient_channel_name);
-    let ambient_wave = ambient_channel
-        .as_deref()
-        .map(|channel| crate::wave::channel::family_head(channel).to_string());
+        .or_else(crate::engine::wave_context::resolve_ambient_wave_name);
     let wave_chat = ambient_wave
         .as_deref()
         .and_then(|wave| crate::engine::wave_context::gather_wave_chat(repo_root, wave));
@@ -476,7 +469,7 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
     }
     debug!(
         elapsed_ms = ambient_start.elapsed().as_millis(),
-        channel = ambient_channel.as_deref(),
+        wave = ambient_wave.as_deref(),
         has_chat = wave_chat.is_some(),
         "gathered ambient wave context"
     );

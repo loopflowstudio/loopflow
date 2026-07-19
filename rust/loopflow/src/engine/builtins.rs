@@ -462,6 +462,6 @@ mod tests {
         assert!(skill.contains("lf pm show --wave <parent> --project <slug> --json"));
         assert!(skill.contains("parent_wave_id"));
         assert!(skill.contains("lf pm show"));
-        assert!(skill.contains("lf radio pub --parent"));
+        assert!(skill.contains("typed Wave and Project relationship"));
     }
 }

@@ -499,6 +499,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "after_merge_continue_task",
         sql: include_str!("migrations/0.12.3.002_after_merge_continue_task.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            ordinal: 1,
+        },
+        name: "drop_agent_bus",
+        sql: include_str!("migrations/0.12.001_drop_agent_bus.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -2957,7 +2966,11 @@ mod tests {
     #[test]
     fn after_merge_review_rows_become_continue_task() {
         let conn = open();
-        apply_set(&conn, &MIGRATIONS[..MIGRATIONS.len() - 1]).unwrap();
+        let migration_index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "after_merge_continue_task")
+            .expect("after-merge migration is registered");
+        apply_set(&conn, &MIGRATIONS[..migration_index]).unwrap();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         conn.execute(
             "INSERT INTO task_prs (
@@ -3253,8 +3266,8 @@ mod tests {
             writer.busy_timeout(Duration::ZERO).unwrap();
             let blocked = writer
                 .execute(
-                    "INSERT INTO bus_messages (channel, byline, text, at)
-                     VALUES ('test', 'writer', 'after migration', 1)",
+                    "INSERT INTO blob_tokens (sha, lines, bytes, tokens)
+                     VALUES ('writer-probe', 1, 2, 3)",
                     [],
                 )
                 .is_err_and(|error| {
@@ -3270,8 +3283,8 @@ mod tests {
             writer.busy_timeout(Duration::from_secs(5)).unwrap();
             writer
                 .execute(
-                    "INSERT INTO bus_messages (channel, byline, text, at)
-                     VALUES ('test', 'writer', 'after migration', 1)",
+                    "INSERT INTO blob_tokens (sha, lines, bytes, tokens)
+                     VALUES ('writer-probe', 1, 2, 3)",
                     [],
                 )
                 .unwrap();
@@ -3298,12 +3311,12 @@ mod tests {
         writer.join().unwrap();
         assert_eq!(
             conn.query_row(
-                "SELECT text FROM bus_messages WHERE byline = 'writer'",
+                "SELECT sha FROM blob_tokens WHERE sha = 'writer-probe'",
                 [],
                 |row| row.get::<_, String>(0),
             )
             .unwrap(),
-            "after migration"
+            "writer-probe"
         );
         let backup = rusqlite::Connection::open(find_backup(
             directory.path(),
@@ -3312,7 +3325,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             backup
-                .query_row("SELECT count(*) FROM bus_messages", [], |row| row
+                .query_row("SELECT count(*) FROM blob_tokens", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
             0

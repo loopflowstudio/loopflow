@@ -184,7 +184,6 @@ pub enum InboxFrame {
         id: String,
         op: MessageOp,
         text: String,
-        from: Option<String>,
     },
     Task {
         observation: TaskObservation,
@@ -265,8 +264,7 @@ mod tests {
         }
         assert!(serde_json::from_value::<InboxFrame>(serde_json::json!({
             "kind": "message",
-            "text": "hi",
-            "from": null
+            "text": "hi"
         }))
         .is_err());
 
@@ -274,10 +272,9 @@ mod tests {
             "kind": "message",
             "id": "msg-1",
             "op": "message",
-            "text": "hi",
-            "from": null
+            "text": "hi"
         }))
         .expect("message frame parses");
-        assert!(matches!(frame, InboxFrame::Message { from: None, .. }));
+        assert!(matches!(frame, InboxFrame::Message { .. }));
     }
 }

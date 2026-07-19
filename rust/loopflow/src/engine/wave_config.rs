@@ -35,7 +35,7 @@ pub struct WaveConfig {
     pub pm: Option<WavePmConfig>,
     /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
     /// listener to refuse to START turns (message→turn, heartbeat, cron)
-    /// while keeping the channel serving and queueing. File-first and re-read
+    /// while keeping the listener serving and queueing. File-first and re-read
     /// live (`crate::wave::runtime::WaveRuntime::paused`), not the registry
     /// row.
     pub paused: Option<bool>,

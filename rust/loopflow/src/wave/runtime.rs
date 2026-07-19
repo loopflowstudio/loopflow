@@ -34,9 +34,7 @@ use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
 use crate::project::ProjectObservation;
 use crate::receipt::Receipt;
-use crate::security::sanitize_fs_component;
 use crate::task::TaskObservation;
-use crate::wave::channel::matches_prefix;
 #[cfg(test)]
 use crate::wave::journal::JournalAppendStage;
 use crate::wave::journal::{
@@ -73,36 +71,6 @@ const MEMORY_BROADCAST_CAPACITY: usize = 64;
 /// `/events?inbox=true` frames and the supervisor). The journal is the
 /// durable queue; a lagged subscriber resyncs from the pending replay.
 const INBOX_BROADCAST_CAPACITY: usize = 256;
-
-/// How a channel name relates to a wave's family, per [`channel_role`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChannelRole {
-    /// The wave's own channel (raw or sanitized spelling of its name).
-    Primary,
-    /// A work line: a dot-descendant of the wave's channel name.
-    Child,
-}
-
-/// A wave's primary channel name: the sanitized filesystem form of its name.
-/// Worktree basenames — and therefore child channel names — derive from it
-/// (`web/ui` mints `web-ui` worktrees and `web-ui.<run>` channels).
-pub fn wave_channel_name(wave: &str) -> String {
-    sanitize_fs_component(wave)
-}
-
-/// THE family-membership predicate: how `channel` relates to `wave`, or
-/// `None` when it is outside the family. The message door, `/events` scoping,
-/// and the ambient dot-split (`engine::wave_context`) all route through it,
-/// so every consumer agrees on what the family is called. Membership compares
-/// against the SANITIZED wave name ([`wave_channel_name`]) — the form channel
-/// names actually carry — while the raw spelling still addresses the primary.
-pub fn channel_role(wave: &str, channel: &str) -> Option<ChannelRole> {
-    let family = wave_channel_name(wave);
-    if channel == wave || channel == family {
-        return Some(ChannelRole::Primary);
-    }
-    matches_prefix(channel, &family).then_some(ChannelRole::Child)
-}
 
 /// One whole-turn frame: the turn plus its wire JSON, serialized ONCE at the
 /// send site so N subscribers share one serialization instead of performing N.
@@ -275,10 +243,6 @@ struct Inner {
 #[derive(Debug)]
 pub struct WaveRuntime {
     name: String,
-    /// The primary channel's name — the wave name sanitized to its
-    /// filesystem form ([`wave_channel_name`]); child channels are its
-    /// dot-descendants.
-    channel_name: String,
     repo_root: PathBuf,
     /// Journal + materialized thread + loop state, behind one lock so their
     /// orders never diverge.
@@ -304,7 +268,7 @@ pub struct WaveRuntime {
     /// fold is the durable queue.
     inbox_tx: broadcast::Sender<InboxItem>,
     /// Whether a resident has ever been spawned for / attached to this
-    /// listener. `/health` serves `loop_state: null` until then (a dormant channel
+    /// listener. `/health` serves `loop_state: null` until then (a dormant listener
     /// has no loop to report on).
     resident_expected: AtomicBool,
 }
@@ -394,7 +358,6 @@ impl WaveRuntime {
         let (inbox_tx, _) = broadcast::channel(INBOX_BROADCAST_CAPACITY);
         let memory = Memory::for_wave(&repo_root, &name);
         Ok(Arc::new(Self {
-            channel_name: wave_channel_name(&name),
             name,
             repo_root,
             inner: Mutex::new(Inner {
@@ -424,13 +387,6 @@ impl WaveRuntime {
 
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    /// The primary channel's name (the wave name, sanitized — see
-    /// [`wave_channel_name`]). Family scans and default `/events` scopes key
-    /// off this, never the raw name.
-    pub fn channel_name(&self) -> &str {
-        &self.channel_name
     }
 
     pub fn repo_root(&self) -> &std::path::Path {
@@ -686,25 +642,6 @@ impl WaveRuntime {
         self.resident_expected.store(true, Ordering::Relaxed);
     }
 
-    // -- Channel family --
-    //
-    // The primary channel is the served mind and the only journaled one. Child
-    // names are addresses on the shared-store bus; this runtime never brokers
-    // them, it only recognizes which ones its ear should fold
-    // (`crate::wave::bus`).
-
-    /// Whether `channel` is within this wave's family: the primary channel
-    /// or a dot-descendant of the sanitized wave name (see [`channel_role`]).
-    pub fn in_family(&self, channel: &str) -> bool {
-        channel_role(&self.name, channel).is_some()
-    }
-
-    /// Whether `channel` addresses this wave's PRIMARY channel (raw or
-    /// sanitized spelling).
-    pub fn is_primary(&self, channel: &str) -> bool {
-        channel_role(&self.name, channel) == Some(ChannelRole::Primary)
-    }
-
     // -- Memory (the server holds MEMORY.md's pen) --
     //
     // `update` writes the compiled ORIGIN repo's wave/<name>/MEMORY.md; `add`
@@ -910,11 +847,10 @@ impl WaveRuntime {
         turn
     }
 
-    /// Deliver one human op from the thread door, uninterpreted by the caller:
+    /// Deliver one op from the thread door, uninterpreted by the caller:
     /// the door validates SHAPE (op names, text presence) and hands the op
     /// here; what an op *means* lives in this runtime and the loop's
-    /// scheduler. The thread is unattributed — bylines arrive on the bus, via
-    /// [`Self::deliver_say`]. A bare interrupt (empty text) journals nothing
+    /// scheduler. A bare interrupt (empty text) journals nothing
     /// and appends no turn — `None`; every other delivery journals a
     /// `UserMessage`, commits the user turn, and queues for the loop.
     pub fn deliver(&self, op: MessageOp, text: String) -> Option<ChatTurn> {
@@ -939,38 +875,27 @@ impl WaveRuntime {
             self.deliver_interrupt();
             return Ok(None);
         }
-        self.try_deliver_message(text, op, None).map(Some)
-    }
-
-    /// Deliver an attributed emission folded off the bus — a worker report,
-    /// child-wave escalation, or CLI FYI. Same journal row, thread commit, and
-    /// inbox path as any user message; the byline rides along.
-    pub fn deliver_say(&self, text: String, from: String) -> ChatTurn {
-        self.try_deliver_message(text, MessageOp::Say, Some(from))
-            .expect("journal truth must accept a bus report before runtime delivery")
+        self.try_deliver_message(text, op).map(Some)
     }
 
     fn try_deliver_message(
         &self,
         text: String,
         op: MessageOp,
-        from: Option<String>,
     ) -> Result<ChatTurn, JournalAppendError> {
         let mut inner = self.inner();
         let event = inner.journal.try_append(|seq| EventKind::UserMessage {
             id: MessageId(format!("msg-{seq}")),
             op,
             text: text.clone(),
-            from: from.clone(),
         })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
         turn.created_at = event.at_rfc3339();
-        turn.from = from.clone();
         let turn = self.commit_locked(&mut inner, turn);
         // The pending fold stays live (not boot-only): it is the replay the
         // resident's subscription serves and the validator for its `answers`.
-        let pending = PendingMessage { id, op, text, from };
+        let pending = PendingMessage { id, op, text };
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner.pending_messages.push(pending.clone());
         // Inbox broadcast still under the lock, so inbox order == journal
@@ -1009,7 +934,6 @@ impl WaveRuntime {
         let turn = ChatTurn::child_activity(
             format!("turn-{}", event.seq),
             event.at_rfc3339(),
-            "task".to_string(),
             crate::chat::turns::ChildControlActivity::from_task(&observation),
         );
         self.commit_locked(&mut inner, turn);
@@ -1033,7 +957,6 @@ impl WaveRuntime {
         let turn = ChatTurn::child_activity(
             format!("turn-{}", event.seq),
             event.at_rfc3339(),
-            "project".to_string(),
             crate::chat::turns::ChildControlActivity::from_project(&observation),
         );
         self.commit_locked(&mut inner, turn);
@@ -1229,7 +1152,6 @@ impl WaveRuntime {
             status: Lifecycle::Running,
             items: Vec::new(),
             created_at: event.at_rfc3339(),
-            from: None,
             body,
             activity: None,
         };
@@ -1491,7 +1413,6 @@ mod tests {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: String::new(),
-            from: None,
             body: None,
             activity: None,
         }
@@ -1714,41 +1635,6 @@ mod tests {
     }
 
     #[test]
-    fn deliver_say_journals_attribution_and_queues_for_the_loop() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let rt = open_runtime(tmp.path());
-        let mut rx = rt.subscribe_inbox();
-        let from = "worker".to_string();
-        let turn = rt.deliver_say("PR landed; one surprise in the fold".into(), from.clone());
-        assert_eq!(turn.role, ChatRole::User);
-        assert_eq!(turn.from.as_deref(), Some("worker"));
-
-        // Inbox: an attributed Say message the loop reacts to like any input.
-        let InboxItem::Message(msg) = rx.try_recv().expect("inbox item") else {
-            panic!("expected a message inbox item");
-        };
-        assert_eq!(msg.op, MessageOp::Say);
-        assert_eq!(msg.from, Some(from.clone()));
-
-        // Journal: the UserMessage row carries the attribution, and a
-        // restarted runtime folds it back into the pending queue.
-        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let EventKind::UserMessage {
-            op, from: stored, ..
-        } = &events[0].kind
-        else {
-            panic!("expected UserMessage");
-        };
-        assert_eq!(*op, MessageOp::Say);
-        assert_eq!(stored.as_ref(), Some(&from));
-        let rt2 = open_runtime(tmp.path());
-        let pending = rt2.pending_messages();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].from, Some(from));
-        assert_eq!(rt2.thread_snapshot()[0].from.as_deref(), Some("worker"));
-    }
-
-    #[test]
     fn update_memory_writes_the_origin_file_and_add_publishes_delta() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
@@ -1786,7 +1672,7 @@ mod tests {
     fn subscription_replays_full_memory_facts_in_order() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
-        let long_fact = "workers report via lf radio pub with the full useful detail";
+        let long_fact = "workers report through typed Work observations with full useful detail";
 
         rt.append_memory(long_fact, vec![]).expect("append");
         rt.append_memory("second fact", vec![]).expect("append");
@@ -2249,51 +2135,6 @@ mod tests {
         assert_eq!(thread[1].status, Lifecycle::Completed);
     }
 
-    /// Family membership compares against the SANITIZED wave name: a wave
-    /// whose name sanitizes (`web/ui` → `web-ui`) mints `web-ui.<run>`
-    /// channels — those must pass `in_family`, and the raw name still
-    /// addresses the primary. This is the one predicate server scoping and
-    /// the ambient dot-split share.
-    #[test]
-    fn channel_role_compares_against_the_sanitized_wave_name() {
-        // The raw name and its sanitized form both address the primary.
-        assert_eq!(channel_role("web/ui", "web/ui"), Some(ChannelRole::Primary));
-        assert_eq!(channel_role("web/ui", "web-ui"), Some(ChannelRole::Primary));
-        // A child channel carries the sanitized head (worktree basenames do).
-        assert_eq!(
-            channel_role("web/ui", "web-ui.148e0e02"),
-            Some(ChannelRole::Child)
-        );
-        // The un-sanitized dotted form is NOT the family (no such channel).
-        assert_eq!(channel_role("web/ui", "web/ui.148e"), None);
-        // A plain name is its own sanitized form.
-        assert_eq!(channel_role("goals", "goals"), Some(ChannelRole::Primary));
-        assert_eq!(
-            channel_role("goals", "goals.148e0e02"),
-            Some(ChannelRole::Child)
-        );
-        assert_eq!(channel_role("goals", "goalsmith"), None);
-        assert_eq!(channel_role("goals", "concerto"), None);
-    }
-
-    /// A sanitized-name wave recognizes its family by the SANITIZED channel
-    /// name — the form hands actually carry. The runtime brokers nothing; it
-    /// only knows which bus channels its ear should fold.
-    #[test]
-    fn a_sanitized_wave_recognizes_its_family_by_the_sanitized_name() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let origin = tmp.path().join("repo");
-        let rt = WaveRuntime::open("web/ui".into(), origin).expect("open runtime");
-        assert_eq!(rt.channel_name(), "web-ui");
-        assert!(rt.is_primary("web-ui"));
-        assert!(
-            rt.is_primary("web/ui"),
-            "the raw spelling still addresses it"
-        );
-        assert!(rt.in_family("web-ui.148e"));
-        assert!(!rt.in_family("web-ui-other"));
-    }
-
     /// Claimed-but-unanswered messages are requeued when a turn ends without
     /// completing: a Failed TurnFinished returns its claims to pending, and a
     /// restart re-delivers them (never lost). A Completed turn keeps them
@@ -2543,9 +2384,7 @@ mod tests {
         );
     }
 
-    /// One journal per served mind, zero per channel. The mind's own thread is
-    /// the only thing this runtime writes; hands' reports arrive through the
-    /// bus and its ear (`crate::wave::bus`), never through here.
+    /// The served Wave owns one journal for all accepted thread messages.
     #[test]
     fn only_the_served_mind_journals() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -2555,12 +2394,11 @@ mod tests {
 
         rt.deliver(MessageOp::Message, "to the wave".into())
             .expect("user turn");
-        rt.deliver_say("to a".into(), "ship.a".into());
+        rt.deliver(MessageOp::Message, "to a".into());
 
         let wave = rt.thread_snapshot();
         assert_eq!(wave.len(), 2);
         assert_eq!(wave[0].text, "to the wave");
-        assert_eq!(wave[1].from.as_deref(), Some("ship.a"));
 
         // On disk: exactly one journal, the served wave's, with both rows.
         assert_eq!(
@@ -2572,7 +2410,7 @@ mod tests {
             .iter()
             .filter(|e| matches!(e.kind, EventKind::UserMessage { .. }))
             .count();
-        assert_eq!(messages, 2, "the wave's message and the folded report");
+        assert_eq!(messages, 2);
 
         // Consumption: both are queued for the loop across a reopen.
         let rt2 = WaveRuntime::open("ship".into(), origin.clone()).expect("reopen");

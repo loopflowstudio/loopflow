@@ -1,13 +1,13 @@
 //! `lf wave <name>` — one mind implemented as a listener and resident pair.
 //!
-//! The listener (this module's [`run_listener`]) is the channel made durable — pure
+//! The listener (this module's [`run_listener`]) is the Wave made durable — pure
 //! hear / check / fold / tell, vendor-free:
 //!
 //! - holds the mind's one journal pen;
 //! - serves the doors: `/messages`, `/events`, `/memory`, `/health`,
 //!   and the token-gated resident door ([`server`]);
 //! - drains typed Project/Task observations ([`registry::StoreObserver`]) and
-//!   its hands' broadcasts off the shared-store bus ([`bus::BusListener`]);
+//!   typed Project/Task observations;
 //! - keeps the Wave row and discovery pointer current;
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
@@ -46,8 +46,6 @@
 //! file enforces one live listener per Wave. No registry store on the machine
 //! means no child observations; the listener remains otherwise functional.
 
-pub mod bus;
-pub(crate) mod channel;
 pub mod journal;
 pub(crate) mod memory;
 pub mod playhead;
@@ -324,16 +322,10 @@ pub(crate) async fn run_listener(
     let mut session_env = registry_config
         .as_ref()
         .map(|config| {
-            vec![
-                (
-                    crate::engine::wave_context::WAVE_ID_ENV.to_string(),
-                    config.wave.id().to_string(),
-                ),
-                (
-                    crate::engine::wave_context::CHANNEL_ENV.to_string(),
-                    config.wave.name().to_string(),
-                ),
-            ]
+            vec![(
+                crate::engine::wave_context::WAVE_ID_ENV.to_string(),
+                config.wave.id().to_string(),
+            )]
         })
         .unwrap_or_default();
     if let Some((_, lease)) = wave_run.as_ref() {
@@ -359,7 +351,6 @@ pub(crate) async fn run_listener(
 
     let mut observer: Option<Arc<registry::StoreObserver>> = None;
     let mut observer_task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut bus_task: Option<tokio::task::JoinHandle<()>> = None;
     if let Some((store, wave_id)) = registered {
         let obs = Arc::new(registry::StoreObserver::new(
             runtime.clone(),
@@ -368,10 +359,6 @@ pub(crate) async fn run_listener(
         ));
         observer_task = Some(tokio::spawn(Arc::clone(&obs).run(registry::POLL_CADENCE)));
         observer = Some(obs);
-        // The mind's ear: the bus is a table, so the listener subscribes to it
-        // like anyone else. Unregistered boots have no store and stay deaf.
-        let listener = Arc::new(bus::BusListener::new(runtime.clone(), store));
-        bus_task = Some(tokio::spawn(listener.run(bus::POLL_CADENCE)));
     }
 
     // The resident door: a per-boot token, published beside the endpoint
@@ -464,9 +451,6 @@ pub(crate) async fn run_listener(
     if let Some(task) = observer_task {
         task.abort();
     }
-    if let Some(task) = bus_task {
-        task.abort();
-    }
     if let Some((store, lease)) = wave_run.take() {
         if let Err(error) = store
             .stop_run(
@@ -543,7 +527,6 @@ mod tests {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
-            from: None,
             body: None,
             activity: None,
         }
@@ -682,8 +665,7 @@ mod tests {
 
     /// The thread door is the human's: `say` is not a wire op and bylines are
     /// refused on every op — attribution enters the thread only through the
-    /// bus fold. "Agents don't use chat" is a wire property, not doctrine,
-    /// and each refusal names the bus.
+    /// Invalid operations and unknown fields are rejected before journaling.
     #[tokio::test]
     async fn the_thread_door_refuses_machine_speech() {
         let (base, runtime, _tmp) = boot().await;
@@ -704,12 +686,7 @@ mod tests {
                 .send()
                 .await
                 .unwrap();
-            assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
-            let text = response.text().await.unwrap();
-            assert!(
-                text.contains("lf radio pub"),
-                "the refusal names the bus: {text}"
-            );
+            assert!(response.status().is_client_error());
         }
 
         assert!(runtime.thread_snapshot().is_empty(), "nothing journaled");
@@ -819,24 +796,24 @@ mod tests {
         assert!(runtime.thread_snapshot().is_empty());
     }
 
-    /// `/health` splits channel liveness from the resident: `status` says
-    /// the channel serves; `loop_state` is null while no resident was ever spawned
+    /// `/health` splits listener liveness from the resident: `status` says
+    /// the listener serves; `loop_state` is null while no resident was ever spawned
     /// or attached, then carries the resident's
-    /// state — a dead resident on a live channel reads `serving` + `failed`.
+    /// state — a dead resident behind a live listener reads `serving` + `failed`.
     #[tokio::test]
-    async fn health_splits_channel_liveness_from_the_loop() {
+    async fn health_splits_listener_liveness_from_the_loop() {
         let (base, runtime, _tmp) = boot().await;
         narrate(&runtime, "first");
 
-        // Dormant: no resident ever — loop is null, the channel serves.
+        // Dormant: no resident ever — loop is null, the listener serves.
         let body: serde_json::Value = reqwest::get(format!("{base}/health"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        assert_eq!(body["status"], "serving", "status is channel liveness");
-        assert!(body["loop_state"].is_null(), "dormant channel has no loop");
+        assert_eq!(body["status"], "serving", "status is listener liveness");
+        assert!(body["loop_state"].is_null(), "dormant listener has no loop");
         assert_eq!(body["wave"], "ship");
         assert_eq!(body["turns"], 1);
 
@@ -850,7 +827,7 @@ mod tests {
             .unwrap();
         assert_eq!(body["loop_state"], "idle", "loop is the resident's state");
 
-        // The resident dies; the channel keeps serving.
+        // The resident dies; the listener keeps serving.
         runtime.transition(
             crate::wave::state::LoopState::Failed {
                 reason: "vendor gone".into(),
@@ -1365,8 +1342,7 @@ mod tests {
         );
     }
 
-    /// Boot the HTTP surface over a wave. Child channels need no setup: they
-    /// are names on the bus, not places on disk.
+    /// Boot the HTTP surface over a Wave.
     async fn boot_family() -> (String, Arc<WaveRuntime>, tempfile::TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let origin = tmp.path().join("repo");
@@ -1388,8 +1364,7 @@ mod tests {
     }
 
     /// The thread door is the thread's alone: a human message lands one
-    /// unattributed copy in the served wave's journal, and no journal exists
-    /// anywhere else on disk. Reports from hands arrive on the bus, not here.
+    /// copy in the served wave's journal, and no journal exists elsewhere.
     #[tokio::test]
     async fn a_message_is_recorded_once_in_the_waves_journal() {
         let (base, runtime, tmp) = boot_family().await;
@@ -1408,7 +1383,6 @@ mod tests {
 
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
-        assert_eq!(thread[0].from, None, "human turns carry no byline");
 
         // Exactly one journal on disk: the served wave's, with exactly one row.
         let wave_journal = journal::journal_path(runtime.repo_root(), "ship");

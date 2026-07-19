@@ -13,27 +13,20 @@
 //! and listens on its own wave's `/events?inbox=true` subscription. The
 //! listener holds every pen; the resident holds the vendor.
 //!
-//! The server serves the wave's CHANNEL FAMILY (see [`crate::wave::channel`]):
-//! the primary channel is the wave's name and the only journaled one — the
-//! served mind. Work-line channels (`goals.148e0e02`) are live bus topics: no
-//! journal, no worktree binding. Doors are name-addressed.
-//!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
 //! - `GET /health` → `{status, loop_state, wave, turns, paused, uptime_seconds}`;
-//!   `status` is CHANNEL liveness — always `serving` while this process
+//!   `status` is listener liveness — always `serving` while this process
 //!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
-//!   | failed`), or null before any resident has attached; a served channel whose resident died reads
+//!   | failed`), or null before any resident has attached; a listener whose resident died reads
 //!   `status: "serving", loop_state: "failed"`.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
-//!   passes 12; absent means the whole thread. Primary channel only.
+//!   passes 12; absent means the whole thread.
 //! - `GET /events` → SSE, the served mind's thread. Human subscriptions replay
 //!   the most recent 12 turns by default; optional `?limit=N` overrides that
 //!   tail while every subsequent turn still streams live. Resident inbox
-//!   subscriptions remain complete. It carries the PRIMARY channel and
-//!   nothing else: agent-to-agent traffic is the bus, a table in the shared
-//!   store that no server sits in front of (`crate::wave::bus`).
+//!   subscriptions remain complete.
 //!   Event names:
 //!   - `state`: data is the loop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
@@ -45,15 +38,14 @@
 //!     for that id (upsert, never append-if-seen).
 //!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
 //!     curation. Live-only, no replay — MEMORY.md itself is the durable
-//!     state. Primary channel only (memory is wave identity; work lines have
-//!     none).
+//!     state.
 //!   - `memory-add`: data is the full added fact. Replays on connect for the
-//!     facts since the last curation, then streams live. Primary channel only.
+//!     facts since the last curation, then streams live.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
 //!     is an [`InboxFrame`] — a resident-directed message, typed Task
 //!     observation, or control op. The pending queue (journaled inputs not yet named in any `answers`) replays on
 //!     connect, then live ops stream; a bare interrupt rides live-only with
-//!     `id: null` (nothing journaled). Primary channel only. The default
+//!     `id: null` (nothing journaled). The default
 //!     stream is byte-identical to the pre-resident wire.
 //! - The resident door (token-gated via the `x-lf-resident-token` header —
 //!   401 without this boot's token):
@@ -72,9 +64,7 @@
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success). `text` may be empty only for `interrupt` (400
-//!   otherwise). The thread is human and unattributed: `say` and `from` are
-//!   rejected. Machine speech uses `lf radio pub`, an INSERT on the bus that this
-//!   server later reads back. `turn` is the appended user `Turn`,
+//!   otherwise). `turn` is the appended user `Turn`,
 //!   or null for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
@@ -86,8 +76,7 @@
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
-//!   origin repo. Wave-level only: memory is wave identity, channels don't
-//!   have it.
+//!   origin repo.
 //! - `GET /memory/log` → `{facts}` — add-stream facts since the last
 //!   curation, oldest first. Wave-level only.
 //! - `POST /memory {op, content, summary, receipts}` → `{summary}`. `op` is `"update"`
@@ -239,11 +228,11 @@ impl Default for ShutdownDoor {
 
 #[derive(Debug, Serialize)]
 struct HealthBody {
-    /// Channel liveness: always `"serving"` while this process answers. The
-    /// resident's condition is `loop_state` — a served channel whose resident
+    /// Listener liveness: always `"serving"` while this process answers. The
+    /// resident's condition is `loop_state` — a listener whose resident
     /// died is `status: "serving", loop_state: "failed"`.
     status: String,
-    /// Resident loop state name, or null for a channel with no resident
+    /// Resident loop state name, or null for a listener with no resident
     /// (before any resident attaches).
     loop_state: Option<String>,
     wave: String,
@@ -266,15 +255,12 @@ struct ConversationQuery {
     limit: Option<usize>,
 }
 
-/// `POST /messages` request body. `op` is required — explicit, never inferred
-/// (no serde default; an op-less body is a 422). `from` is accepted only so a
-/// byline can be rejected with a 400 that names the bus, rather than silently
-/// dropped as an unknown field.
+/// `POST /messages` request body. `op` is required — explicit, never inferred.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PostMessage {
     op: MessageOp,
     text: String,
-    from: Option<String>,
 }
 
 /// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
@@ -419,7 +405,7 @@ async fn playhead_handler(
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     // `loop_state` is null until a resident has ever been spawned or attached —
-    // A listener-only test channel has no Loop to report on.
+    // A listener with no resident has no Loop to report on.
     let loop_state = state
         .runtime
         .resident_expected()
@@ -526,7 +512,7 @@ async fn conversation_handler(
 }
 
 /// The door is opaque on resident ops: this handler validates SHAPE only —
-/// `from` rides `say` and nothing else; `text` may be empty only for
+/// `text` may be empty only for
 /// `interrupt` — then hands the op to the runtime uninterpreted
 /// ([`WaveRuntime::try_deliver`]). What steer or interrupt *means* lives with the
 /// resident, not the ear. Honest partial: the `{turn, state}` echo still
@@ -536,24 +522,6 @@ async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
-    // The thread door is the human's: unattributed message/steer/interrupt.
-    // `say` is the journal's vocabulary for folded bus reports — nothing
-    // posts it; agents publish with `lf radio pub` and the listener's bus sweep
-    // records the attributed copy. Rejecting both here is what makes "agents
-    // don't use chat" a wire property instead of doctrine.
-    if matches!(body.op, MessageOp::Say) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "`say` is not a wire op: machine speech rides the bus (`lf radio pub`)".to_string(),
-        ));
-    }
-    if body.from.is_some() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "the thread is unattributed: bylines belong to the bus (`lf radio pub --from`)"
-                .to_string(),
-        ));
-    }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -638,8 +606,7 @@ fn first_line(content: &str) -> Option<String> {
 /// ever older than the replayed snapshot, and the client's delta reconstruction
 /// picks up exactly where the snapshot's open turn left off.
 ///
-/// There is no channel scoping. Agent-to-agent broadcast is the bus — a table,
-/// polled from a cursor, with no server in the path (`crate::wave::bus`).
+/// There is no secondary routing scope inside a Wave listener.
 async fn events_handler(
     State(state): State<ServerState>,
     Query(query): Query<EventsQuery>,
@@ -829,7 +796,6 @@ fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
         id: message.id.0.clone(),
         op: message.op,
         text: message.text.clone(),
-        from: message.from.clone(),
     }
 }
 

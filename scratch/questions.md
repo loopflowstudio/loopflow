@@ -18,3 +18,19 @@
 - Launch attention and its Swift projection remain until `WorkSnapshot.feedback`
   has a delivery surface.
 - Specialized Project/Task controls remain until Home can wake stopped Work.
+
+## PR #1052 carry-forward
+
+The closed `make-task-gate-approval-the` branch should not be revived: its
+Session/Review authority model is obsolete. Preserve these independent safety
+invariants in the current model:
+
+- pin GitHub auto-merge to the exact prepared head SHA;
+- refuse landing while an explicitly authored Feedback checkpoint is open;
+- settle Task completion from durable merged-PR evidence without requiring a
+  live executor or surviving worktree;
+- make mutation guards agree with the projected legal action.
+
+Do not preserve its blanket ban on managed-Task `submit` or recreate approval
+state. `submit` is an explicitly chosen User merge gate; bare `land` means
+continue the Task, and `land -c` means complete it.

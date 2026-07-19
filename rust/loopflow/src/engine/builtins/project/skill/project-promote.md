@@ -27,11 +27,11 @@ child's work.
    Only after the child snapshot is complete, remove the duplicate parent bet
    with `lf pm project archive --wave <parent> --project <slug>`.
 6. Add a child `Process` instruction requiring its first pass to report the
-   newly owned definition and KRs in its own thread, then publish that concise
-   report to the parent with `lf radio pub --parent`.
+   newly owned definition and KRs in its own thread. Parent/child continuity
+   is already represented by the typed Wave and Project relationship.
 
 The command's mechanical postflight links the registry ancestry, launches the
 child residency, waits for `.wave-endpoint`, and sends the bootstrap message
 that starts this first pass. Do not launch a second wave process or impersonate
 the child from the promotion flow. The child's resulting report is the
-checkable proof that the new mind can speak across the boundary on purpose.
+checkable proof that the new Wave can start from the promoted definition.

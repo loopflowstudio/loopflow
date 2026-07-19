@@ -7,8 +7,8 @@
 //! resolves → nothing is added (zero tokens, no headers) — flows stay
 //! wave-agnostic.
 //!
-//! Resolution: explicit `--wave` (the caller passes it) > `LF_CHANNEL` /
-//! `LF_WAVE_ID` from a managed session. Repository location cannot identify a
+//! Resolution: explicit `--wave` (the caller passes it) > `LF_WAVE_ID` from a
+//! managed session. Repository location cannot identify a
 //! Wave: every Wave and Project operates from the same canonical checkout.
 //!
 //! Read path — reads only, the wave server stays the single writer:
@@ -31,15 +31,13 @@ use serde::Deserialize;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::id::{TraceId, WaveId};
+use crate::id::WaveId;
 use crate::wave::journal::{fold_thread, journal_path, read_events};
 use crate::wave::server::endpoint_path;
 use crate::wave::Wave;
 
 /// The durable Wave attributed to this process.
 pub const WAVE_ID_ENV: &str = "LF_WAVE_ID";
-/// The Wave or child channel this process speaks on by default.
-pub const CHANNEL_ENV: &str = "LF_CHANNEL";
 
 /// Turns included in `<lf:wave-chat-recent>` (the newest are kept).
 pub const WAVE_CHAT_RECENT_TURNS: usize = 12;
@@ -48,15 +46,6 @@ pub const WAVE_CHAT_RECENT_TURNS: usize = 12;
 pub const WAVE_CHAT_MAX_CHARS: usize = 4_000;
 /// Per-operation timeout for the live-server read (loopback only).
 const LIVE_READ_TIMEOUT: Duration = Duration::from_secs(1);
-
-/// Which channel a managed process is ambiently inside, before store lookup.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AmbientChannelRef {
-    /// `LF_WAVE_ID` from the env: the id of a wave row in the shared store.
-    WaveId(String),
-    /// `LF_CHANNEL` from the env: the named channel a managed worker owns.
-    Channel(String),
-}
 
 /// Resolve the Wave owned by a managed process.
 ///
@@ -69,38 +58,10 @@ pub fn resolve_ambient_wave(env_wave_id: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// THE ambient-CHANNEL rule: `LF_CHANNEL` (set on every worker)
-/// wins; otherwise the managed process's Wave owns the channel.
-pub fn resolve_ambient_channel(
-    env_channel: Option<&str>,
-    env_wave_id: Option<&str>,
-) -> Option<AmbientChannelRef> {
-    if let Some(channel) = env_channel.map(str::trim).filter(|value| !value.is_empty()) {
-        return Some(AmbientChannelRef::Channel(channel.to_string()));
-    }
-    resolve_ambient_wave(env_wave_id).map(AmbientChannelRef::WaveId)
-}
-
-/// The channel a run is ambiently inside — [`resolve_ambient_channel`] with
-/// this process's env, id-arm resolved through the store. `None` when no
-/// wave context resolves anywhere.
-pub fn resolve_ambient_channel_name() -> Option<String> {
-    let env_channel = std::env::var(CHANNEL_ENV).ok();
-    let env_wave_id = std::env::var(WAVE_ID_ENV).ok();
-    match resolve_ambient_channel(env_channel.as_deref(), env_wave_id.as_deref())? {
-        AmbientChannelRef::WaveId(id) => wave_name_for_id(&id),
-        AmbientChannelRef::Channel(name) => Some(name),
-    }
-}
-
-/// The bus channel owned by a placed trace. The worktree carries a timestamp
-/// for filesystem freshness; the channel stays stable at
-/// `wave.<short-trace-id>`.
-pub fn placed_channel_name(wave_name: &str, trace_id: &TraceId) -> String {
-    format!(
-        "{wave_name}.{}",
-        crate::engine::worktrees::short_run_id(trace_id.as_str())
-    )
+/// Resolve this process's ambient Wave name through the durable Wave id.
+pub fn resolve_ambient_wave_name() -> Option<String> {
+    let env_wave_id = std::env::var(WAVE_ID_ENV).ok()?;
+    wave_name_for_id(&env_wave_id)
 }
 
 /// The run-attribution decision for the current process: the wave name to
@@ -650,10 +611,10 @@ fn render_wave_chat_budget(
 }
 
 fn render_turn_line(turn: &ChatTurn) -> String {
-    let speaker = turn.from.as_deref().unwrap_or(match turn.role {
+    let speaker = match turn.role {
         ChatRole::User => "user",
         ChatRole::Assistant => "wave",
-    });
+    };
     let text = turn.text.trim();
     let tool_items = turn
         .items
@@ -703,20 +664,6 @@ mod tests {
         );
         assert_eq!(resolve_ambient_wave(Some("  ")), None);
         assert_eq!(resolve_ambient_wave(None), None);
-    }
-
-    /// LF_CHANNEL wins; otherwise LF_WAVE_ID identifies the Wave channel.
-    #[test]
-    fn ambient_channel_env_wins_then_wave_id() {
-        assert_eq!(
-            resolve_ambient_channel(Some(" ship.148e "), Some("wave-1")),
-            Some(AmbientChannelRef::Channel("ship.148e".to_string()))
-        );
-        assert_eq!(
-            resolve_ambient_channel(Some(""), Some("wave-1")),
-            Some(AmbientChannelRef::WaveId("wave-1".to_string()))
-        );
-        assert_eq!(resolve_ambient_channel(None, None), None);
     }
 
     /// Trace attribution and `lf home` read the ambient wave through
@@ -772,12 +719,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn placed_channel_uses_the_wave_and_registry_run_id() {
-        let run_id = TraceId::parse("a1b2c3d4-1111-4111-8111-111111111111").unwrap();
-        assert_eq!(placed_channel_name("ship", &run_id), "ship.a1b2c3d4");
-    }
-
     /// A hand lives inside its wave's mind: a run in a work-line worktree reads
     /// the WAVE's thread — the journal lives at the origin, and the worktree
     /// carries none of its own — byte-identical to a run at the wave home.
@@ -820,16 +761,14 @@ mod tests {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: "1970-01-01T00:00:00Z".to_string(),
-            from: None,
             body: None,
             activity: None,
         }
     }
 
     #[test]
-    fn render_notes_status_tools_and_attribution() {
-        let mut worker = turn(ChatRole::User, "worker report: PR landed");
-        worker.from = Some("worker-1".to_string());
+    fn render_notes_status_and_tools() {
+        let worker = turn(ChatRole::User, "worker report: PR landed");
         let mut failed = turn(ChatRole::Assistant, "tried a build");
         failed.status = Lifecycle::Failed;
         failed.items.push(ConversationItem::Tool {
@@ -843,7 +782,7 @@ mod tests {
         let rendered = render_wave_chat(&[worker, failed]).expect("chat renders");
         assert_eq!(
             rendered,
-            "worker-1: worker report: PR landed\nwave: tried a build (1 tool item) [failed]"
+            "user: worker report: PR landed\nwave: tried a build (1 tool item) [failed]"
         );
     }
 
@@ -898,7 +837,6 @@ mod tests {
             id: MessageId(format!("msg-{seq}")),
             op: MessageOp::Message,
             text: text.to_string(),
-            from: None,
         });
         journal.append(|seq| EventKind::TurnStarted {
             turn_id: format!("turn-{seq}"),

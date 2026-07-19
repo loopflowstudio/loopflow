@@ -3,8 +3,7 @@
 //! One JSONL file per served wave at
 //! `.lf/journal/waves/<name>/journal.jsonl` under the origin repo (already
 //! covered by the repo's `.lf/journal/` gitignore entry — the log is
-//! per-machine, never committed). Work-line channels are ephemeral bus topics
-//! and never own journals. Every projection is a fold over the wave's log:
+//! per-machine, never committed). Every projection is a fold over the Wave log:
 //! the thread is the conversation events, the loop state is the last
 //! `LoopState` event, and the message queue is `UserMessage`s not yet named in
 //! any `TurnStarted.answers` or `TurnSteered.answers`. The journal is truth;
@@ -70,11 +69,6 @@ pub enum MessageOp {
     Steer,
     /// Cancel the current turn; non-empty text becomes the next turn.
     Interrupt,
-    /// An attributed emission (`lf radio pub`): a worker report, child-wave
-    /// escalation, or CLI FYI. Lands in the thread as an attributed statement
-    /// AND queues for the loop exactly like `Message` — same consumption
-    /// machinery, `TurnStarted.answers` can name it.
-    Say,
 }
 
 /// Token usage accrued over one turn. Providers report different subsets, so
@@ -123,9 +117,6 @@ pub struct PendingMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
-    /// The byline a `Say` emission arrived under ("worker", "wave goals",
-    /// "bus"); `None` for the unattributed human thread.
-    pub from: Option<String>,
 }
 
 /// One journal row.
@@ -159,12 +150,6 @@ pub enum EventKind {
         id: MessageId,
         op: MessageOp,
         text: String,
-        /// The byline of a `Say` emission; `None` for plain user messages.
-        /// It rides the existing `UserMessage` row (an emission is a user
-        /// message with a byline), so the queue fold — `UserMessage`s not
-        /// named in any `answers` — stays untouched: no new event kind, no
-        /// second inbox to desync.
-        from: Option<String>,
     },
     TurnStarted {
         turn_id: String,
@@ -235,15 +220,6 @@ pub enum EventKind {
     },
     ProjectObserved {
         observation: ProjectObservation,
-    },
-    // -- legacy channels --
-    /// A work-line channel opened under this wave. No current code produces
-    /// this event; retaining the variant lets existing journals replay.
-    ChannelOpened {
-        /// The child channel's name — exactly the worktree basename minus
-        /// the repo prefix (`goals.148e0e02`).
-        name: String,
-        run_id: String,
     },
     // -- memory --
     /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
@@ -440,20 +416,13 @@ impl Narrator {
     /// console.
     fn render(&mut self, kind: &EventKind) -> Narration {
         match kind {
-            EventKind::UserMessage { id, op, text, from } => {
+            EventKind::UserMessage { id, op, text } => {
                 let op_tag = match op {
-                    MessageOp::Message | MessageOp::Say => "",
+                    MessageOp::Message => "",
                     MessageOp::Steer => "(steer) ",
                     MessageOp::Interrupt => "(interrupt) ",
                 };
-                let byline = from
-                    .as_ref()
-                    .map(|from| format!("[{from}] "))
-                    .unwrap_or_default();
-                info(format!(
-                    "chat ← {op_tag}{byline}\"{}\" ({id})",
-                    ellipsize(text, 60)
-                ))
+                info(format!("chat ← {op_tag}\"{}\" ({id})", ellipsize(text, 60)))
             }
             EventKind::TurnStarted {
                 turn_id, answers, ..
@@ -581,9 +550,6 @@ impl Narrator {
                 observation.event_id,
                 ellipsize(&observation.prompt(), 70)
             )),
-            EventKind::ChannelOpened { name, run_id } => {
-                info(format!("channel {name} opened · run {}", short_id(run_id)))
-            }
             EventKind::MemoryUpdated { summary } => {
                 info(format!("memory curated: {}", ellipsize(summary, 70)))
             }
@@ -956,19 +922,8 @@ pub fn memory_facts(events: &[Event]) -> Vec<MemoryFact> {
     facts
 }
 
-/// Materialize a historical `ChannelOpened` event during journal replay.
-fn legacy_channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
-    let mut turn = ChatTurn::user(
-        format!("turn-{}", event.seq),
-        format!("work line {name} opened"),
-    );
-    turn.created_at = event.at_rfc3339();
-    turn.from = Some("worker".to_string());
-    turn
-}
-
 /// The thread-visible turn a `RunCompleted` observation materializes: the
-/// worker's ending as a bylined statement, never queued for the loop (only
+/// worker's ending as a typed observation, never queued for the loop (only
 /// `UserMessage` rows feed the pending queue). Covers the died-silently case
 /// — a worker that never reported still ends visibly, failure summary on the
 /// wire. Shared by the fold and the live append so replay and the live
@@ -985,7 +940,6 @@ pub fn run_completed_turn(
     }
     let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text);
     turn.created_at = event.at_rfc3339();
-    turn.from = Some("observer".to_string());
     turn
 }
 
@@ -1038,16 +992,14 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
 
     for event in events {
         match &event.kind {
-            EventKind::UserMessage { id, op, text, from } => {
+            EventKind::UserMessage { id, op, text } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
-                turn.from = from.clone();
                 turns.push(turn);
                 let message = PendingMessage {
                     id: id.clone(),
                     op: *op,
                     text: text.clone(),
-                    from: from.clone(),
                 };
                 if !consumed_messages.contains(id) {
                     pending_messages.push(message.clone());
@@ -1059,7 +1011,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let turn = ChatTurn::child_activity(
                     format!("turn-{}", event.seq),
                     event.at_rfc3339(),
-                    "task".to_string(),
                     crate::chat::turns::ChildControlActivity::from_task(observation),
                 );
                 turns.push(turn);
@@ -1074,7 +1025,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let turn = ChatTurn::child_activity(
                     format!("turn-{}", event.seq),
                     event.at_rfc3339(),
-                    "project".to_string(),
                     crate::chat::turns::ChildControlActivity::from_project(observation),
                 );
                 turns.push(turn);
@@ -1098,7 +1048,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     status: Lifecycle::Running,
                     items: Vec::new(),
                     created_at: event.at_rfc3339(),
-                    from: None,
                     body: body.as_deref().cloned(),
                     activity: None,
                 });
@@ -1171,9 +1120,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MessagesRequeued { ids } => {
                 restore_pending(&mut pending_messages, &messages, ids);
             }
-            EventKind::ChannelOpened { name, .. } => {
-                turns.push(legacy_channel_opened_turn(event, name));
-            }
             EventKind::RunCompleted {
                 run_id,
                 outcome,
@@ -1217,7 +1163,6 @@ pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
-        from: Some("task".to_string()),
     }
 }
 
@@ -1226,7 +1171,6 @@ pub fn project_observation_message(observation: &ProjectObservation) -> PendingM
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
-        from: Some("project".to_string()),
     }
 }
 
@@ -1343,7 +1287,6 @@ mod tests {
             id: MessageId(format!("msg-{seq}")),
             op: MessageOp::Message,
             text: text.to_string(),
-            from: None,
         }
     }
 
@@ -1442,12 +1385,6 @@ mod tests {
     fn event_round_trips_every_kind() {
         let kinds = vec![
             user_message(1, "hi"),
-            EventKind::UserMessage {
-                id: MessageId("msg-9".into()),
-                op: MessageOp::Say,
-                text: "worker report: PR landed".into(),
-                from: Some("worker".into()),
-            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![MessageId("msg-1".into())],
@@ -1496,10 +1433,6 @@ mod tests {
             },
             EventKind::TaskObserved {
                 observation: task_observation(),
-            },
-            EventKind::ChannelOpened {
-                name: "ship.148e0e02".into(),
-                run_id: "run-1".into(),
             },
             EventKind::MemoryUpdated {
                 summary: "learned the fold".into(),
@@ -1634,10 +1567,6 @@ mod tests {
             EventKind::TaskObserved {
                 observation: task_observation(),
             },
-            EventKind::ChannelOpened {
-                name: "ship.148e0e02".into(),
-                run_id: "run-1".into(),
-            },
             EventKind::ServerStarted {
                 pid: 4242,
                 endpoint: "127.0.0.1:50123".into(),
@@ -1712,7 +1641,6 @@ mod tests {
             id: MessageId("msg-1".into()),
             op: MessageOp::Message,
             text: "how is the reactive server refactor going?".into(),
-            from: None,
         });
         assert_eq!(n.level, NarrationLevel::Info);
         assert_eq!(
@@ -1721,21 +1649,9 @@ mod tests {
         );
 
         let n = render(EventKind::UserMessage {
-            id: MessageId("msg-2".into()),
-            op: MessageOp::Say,
-            text: "run-42 landed: PR #12 merged, one clippy fix on the side".into(),
-            from: Some("worker".into()),
-        });
-        assert_eq!(
-            n.line,
-            "chat ← [worker] \"run-42 landed: PR #12 merged, one clippy fix on the side\" (msg-2)"
-        );
-
-        let n = render(EventKind::UserMessage {
             id: MessageId("msg-3".into()),
             op: MessageOp::Steer,
             text: "focus on the journal tests first".into(),
-            from: None,
         });
         assert_eq!(
             n.line,
@@ -1871,35 +1787,6 @@ mod tests {
             endpoint: "127.0.0.1:50123".into(),
         });
         assert_eq!(n.line, "server started · pid 4242 · 127.0.0.1:50123");
-
-        let n = render(EventKind::ChannelOpened {
-            name: "ship.148e0e02".into(),
-            run_id: "run-8c1d2e3f4a".into(),
-        });
-        assert_eq!(n.line, "channel ship.148e0e02 opened · run run-8c1d");
-    }
-
-    /// Historical `ChannelOpened` rows still fold into a thread-visible turn.
-    #[test]
-    fn fold_materializes_legacy_channel_opened_as_a_worker_turn() {
-        let events = vec![Event {
-            v: FORMAT_VERSION,
-            seq: 1,
-            at: OffsetDateTime::now_utc(),
-            kind: EventKind::ChannelOpened {
-                name: "ship.148e0e02".into(),
-                run_id: "run-7".into(),
-            },
-        }];
-        let fold = fold_thread(&events);
-        assert_eq!(fold.turns.len(), 1);
-        assert_eq!(fold.turns[0].text, "work line ship.148e0e02 opened");
-        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
-        assert_eq!(fold.turns[0].id, "turn-1");
-        assert!(
-            fold.pending_messages.is_empty(),
-            "a channel opening never queues for the loop"
-        );
     }
 
     /// Long text is flattened and cut; a fresh turn resets the prose gist.
@@ -1911,7 +1798,6 @@ mod tests {
             id: MessageId("msg-1".into()),
             op: MessageOp::Message,
             text: long.clone(),
-            from: None,
         });
         assert_eq!(n.line, format!("chat ← \"{}…\" (msg-1)", "x".repeat(60)));
 
@@ -2007,49 +1893,6 @@ mod tests {
                 turn_id: turn_id.clone()
             }
         );
-    }
-
-    /// A `Say` emission is a user message with a byline: the fold puts its
-    /// attribution on the wire turn and queues it as consumable input, and a
-    /// `TurnStarted.answers` naming it consumes it like any other message.
-    #[test]
-    fn fold_treats_say_as_attributed_consumable_input() {
-        let say = |seq: u64| EventKind::UserMessage {
-            id: MessageId(format!("msg-{seq}")),
-            op: MessageOp::Say,
-            text: "landed the parser PR".to_string(),
-            from: Some("worker".into()),
-        };
-        let events = vec![Event {
-            v: FORMAT_VERSION,
-            seq: 1,
-            at: OffsetDateTime::now_utc(),
-            kind: say(1),
-        }];
-        let fold = fold_thread(&events);
-        assert_eq!(fold.turns.len(), 1);
-        assert_eq!(fold.turns[0].role, ChatRole::User);
-        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
-        assert_eq!(fold.pending_messages.len(), 1, "say queues for the loop");
-        assert_eq!(fold.pending_messages[0].op, MessageOp::Say);
-        assert_eq!(fold.pending_messages[0].from.as_deref(), Some("worker"));
-
-        // Consumption: a turn answering it drains the queue.
-        let consumed = vec![
-            events[0].clone(),
-            Event {
-                v: FORMAT_VERSION,
-                seq: 2,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::TurnStarted {
-                    turn_id: "turn-2".into(),
-                    answers: vec![MessageId("msg-1".into())],
-                    body: None,
-                },
-            },
-        ];
-        let fold = fold_thread(&consumed);
-        assert!(fold.pending_messages.is_empty(), "answered say is consumed");
     }
 
     #[test]

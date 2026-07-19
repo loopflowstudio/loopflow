@@ -160,7 +160,6 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = ambient_wave_id {
         command.env("LF_WAVE_ID", id);

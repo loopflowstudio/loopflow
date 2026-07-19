@@ -2802,10 +2802,6 @@ mod tests {
 
     #[test]
     fn chat_parses_text_and_targeting() {
-        assert!(
-            Cli::try_parse_from(["lf", "radio", "pub", "status"]).is_err(),
-            "Radio has no compatibility command"
-        );
         let cli = Cli::try_parse_from(["lf", "chat", "shipped", "the", "parser"]).expect("parse");
         let Some(Commands::Chat {
             text,
@@ -2924,6 +2920,17 @@ mod tests {
         ])
         .is_err());
         assert!(Cli::command().find_subcommand("wavechat").is_none());
+    }
+
+    #[test]
+    fn radio_is_not_a_first_class_command() {
+        assert!(Cli::command().find_subcommand("radio").is_none());
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "radio", "pub", "status"])
+                .expect("unknown names remain eligible for skill discovery")
+                .command,
+            Some(Commands::External(parts)) if parts[0] == "radio"
+        ));
     }
 
     #[test]

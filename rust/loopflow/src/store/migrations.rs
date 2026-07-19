@@ -1817,6 +1817,14 @@ mod tests {
             .iter()
             .any(|object| object.object_type == "table" && object.name == "tasks"));
         let schema = product_schema(&conn).unwrap();
+        for deleted in ["bus_messages", "bus_cursors"] {
+            assert!(
+                !schema
+                    .iter()
+                    .any(|object| object.object_type == "table" && object.name == deleted),
+                "{deleted} must be absent from the current schema"
+            );
+        }
         assert!(!schema.iter().any(|object| {
             object.object_type == "table"
                 && matches!(object.name.as_str(), "task_sessions" | "project_sessions")

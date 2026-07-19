@@ -362,7 +362,7 @@ impl Supervisor {
                 }
                 message.op == MessageOp::Interrupt
             }
-            InboxItem::Task(_) | InboxItem::Project(_) | InboxItem::Promotion(_) => {
+            InboxItem::Task(_) | InboxItem::Project(_) | InboxItem::Promotion { .. } => {
                 if self.spawner.is_some()
                     && self.child.is_none()
                     && matches!(self.runtime.loop_state(), LoopState::Failed { .. })

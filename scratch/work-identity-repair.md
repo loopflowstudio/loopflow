@@ -40,13 +40,13 @@ remove that claim; do not retain evidence that cannot be reproduced.
 
 ## Done when
 
-- [ ] The listed false-Session residue is renamed after reading each context.
-- [ ] A broad current-source/docs/test audit leaves only a documented legitimate
+- [x] The listed false-Session residue is renamed after reading each context.
+- [x] A broad current-source/docs/test audit leaves only a documented legitimate
       Session allowlist.
-- [ ] `RegisteredTask.task` replaces `.session` with no compatibility property.
-- [ ] WorkCensus tests prove both openable and non-openable rows from `launchId`.
-- [ ] Old `ActiveSession(s)`, `SessionAction`, SessionSet types, keys, aliases,
+- [x] `RegisteredTask.task` replaces `.session` with no compatibility property.
+- [x] WorkCensus tests prove both openable and non-openable rows from `launchId`.
+- [x] Old `ActiveSession(s)`, `SessionAction`, SessionSet types, keys, aliases,
       and defaults remain absent.
-- [ ] The Receipt review claim is either backed by a named test or removed.
-- [ ] Focused Rust/Swift tests, DTO fixtures, format, and Clippy pass.
-- [ ] `scratch/feedback-runtime-review.md` records the repair exactly.
+- [x] The Receipt review claim is either backed by a named test or removed.
+- [x] Focused Rust/Swift tests, DTO fixtures, format, and Clippy pass.
+- [x] `scratch/feedback-runtime-review.md` records the repair exactly.

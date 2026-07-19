@@ -3333,8 +3333,8 @@ directions:
 
     #[test]
     fn gather_documents_cross_repo_docs_include_target_docs_only() {
-        let session_repo = init_repo();
-        write_file(session_repo.path(), "CLAUDE.md", "session claude");
+        let source_repo = init_repo();
+        write_file(source_repo.path(), "CLAUDE.md", "source claude");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
@@ -3348,17 +3348,17 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: source_repo.path().to_path_buf(),
             docs: vec!["widgets:src".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session scratch/root docs do not auto-load root markdown.
+        // Source-repo scratch/root docs do not auto-load root markdown.
         assert!(docs
             .iter()
-            .all(|d| d.path != "CLAUDE.md" && d.content != "session claude"));
+            .all(|d| d.path != "CLAUDE.md" && d.content != "source claude"));
 
         // Related repo root docs are not loaded for a directory docs target.
         assert!(!docs
@@ -3373,8 +3373,8 @@ directions:
 
     #[test]
     fn gather_documents_related_repo_docs_not_loaded_without_explicit_target() {
-        let session_repo = init_repo();
-        write_file(session_repo.path(), "CLAUDE.md", "session claude");
+        let source_repo = init_repo();
+        write_file(source_repo.path(), "CLAUDE.md", "source claude");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
@@ -3385,16 +3385,16 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: source_repo.path().to_path_buf(),
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session root docs are not ambient.
+        // Source-repo root docs are not ambient.
         assert!(!docs
             .iter()
-            .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
+            .any(|d| d.path == "CLAUDE.md" && d.content == "source claude"));
 
         // Related repo docs are not loaded without an explicit docs target for that repo.
         assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));

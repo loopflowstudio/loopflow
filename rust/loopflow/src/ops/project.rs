@@ -796,7 +796,7 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
         }
         for _ in 0..100 {
             if let Some(endpoint) = crate::wave::server::live_endpoint(&origin, child).await {
-                wake_child_observer(&endpoint, child).await?;
+                wake_child_observer(&endpoint, parent, child).await;
                 return Ok(promotion_session_name(&origin, child));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -808,19 +808,25 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
 }
 
 /// Nudge the existing typed observer after the durable parent link is visible.
-async fn wake_child_observer(endpoint: &str, wave: &str) -> OpsResult<()> {
+async fn wake_child_observer(endpoint: &str, parent: &str, wave: &str) {
     let response = reqwest::Client::new()
         .post(format!("http://{endpoint}/observations"))
+        .json(&serde_json::json!({ "promotion": { "parent": parent } }))
         .send()
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to wake promoted wave: {err}")))?;
-    if response.status() != reqwest::StatusCode::NO_CONTENT {
-        return Err(OpsError::Message(format!(
-            "promoted wave '{wave}' started, but its observer wake returned HTTP {}",
-            response.status()
-        )));
+        .await;
+    match response {
+        Ok(response) if response.status() == reqwest::StatusCode::NO_CONTENT => {}
+        Ok(response) => tracing::warn!(
+            wave,
+            status = %response.status(),
+            "promoted Wave is resident, but its immediate observer nudge was refused; heartbeat remains available"
+        ),
+        Err(error) => tracing::warn!(
+            wave,
+            %error,
+            "promoted Wave is resident, but its immediate observer nudge failed; heartbeat remains available"
+        ),
     }
-    Ok(())
 }
 
 async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
@@ -956,6 +962,15 @@ mod tests {
             ),
             "what promotion spawns must parse as the Wave entrypoint"
         );
+    }
+
+    #[tokio::test]
+    async fn promotion_observer_nudge_is_best_effort() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind dead endpoint");
+        let endpoint = listener.local_addr().expect("endpoint").to_string();
+        drop(listener);
+
+        wake_child_observer(&endpoint, "platform", "ship").await;
     }
 
     /// The launch resolver for Projects ignores `LF_CONTROL_BIN`. It

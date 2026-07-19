@@ -11,7 +11,7 @@ import Loopflow
 /// stays in the journal.
 ///
 /// Recovered and rebuilt from the conversations `MessageRow` (git 45ab5d36e^),
-/// rebound from the old `SessionMessage`/transcript machinery to the live
+/// rebound from the old transcript machinery to the live
 /// `ChatTurn` wire model.
 struct MessageRow: View {
     @Environment(\.palette) private var palette

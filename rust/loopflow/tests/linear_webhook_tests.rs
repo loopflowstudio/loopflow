@@ -10,7 +10,7 @@ const VIEWER: &str = "user-loopflow";
 
 /// One verified webhook maps onto Task control through the durable substrate: an
 /// issue edit becomes a Steer (once), a user comment becomes another Steer
-/// (once), Loopflow's own change is skipped, and an issue with no Session is a
+/// (once), Loopflow's own change is skipped, and an issue with no registered Task is a
 /// no-op.
 #[test]
 fn verified_webhooks_drive_task_control_exactly_once() {

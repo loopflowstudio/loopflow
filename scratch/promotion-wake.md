@@ -20,6 +20,9 @@ masquerades through the human-only Chat surface.
 - The durable parent relation remains truth. Any process signal is only a wake
   optimization and may be retried without duplicating a promotion fact or
   starting overlapping passes.
+- The promotion command emits that explicit signal. Background child-observation
+  polling must not infer a new promotion occurrence from pre-existing ancestry,
+  and signal failure after ancestry/residency are durable is only a warning.
 - Keep this repair inside the current Wave runtime. Do not pre-choose the
   generic Home/Work server topology or add a second lifecycle model.
 - Add no compatibility command, alias, generic Message aggregate, approval, or
@@ -38,12 +41,16 @@ needed to preserve immediate behavior; do not create a general event bus.
       child pass and does not append a `UserMessage`.
 - [ ] Repeating or replaying the wake cannot create duplicate durable promotion
       facts or overlapping child passes.
+- [ ] A pre-existing parent link does not wake on ordinary observer polling;
+      only an explicit, registry-verified promotion nudge does.
+- [ ] Failure of that best-effort nudge does not turn completed ancestry and
+      residency into a failed promotion.
 - [ ] The human thread still rejects machine-only fields/ops and accepts only
       real User message, steer, and interrupt operations.
 - [ ] The current schema test explicitly proves `bus_messages` and
       `bus_cursors` are absent after migration.
-- [ ] The CLI parser rejects `lf radio`; no hidden compatibility spelling
-      remains.
+- [ ] `Cli::command()` exposes no Radio subcommand, source module, or API;
+      unknown first verbs remain owned by external skill/flow discovery.
 - [ ] Stale byline wording is removed from Wave journal tests/docs.
 - [ ] Focused Wave, promotion, parser, migration, fmt, and Clippy proofs pass.
 - [ ] `scratch/feedback-runtime-review.md` records the repair and replaces its

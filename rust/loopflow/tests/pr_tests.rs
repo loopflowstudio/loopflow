@@ -3,7 +3,7 @@ mod support;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{task_complete, task_snapshot, task_status};
+use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
 use loopflow::ops::{
     create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
 };
@@ -302,7 +302,7 @@ fn github_failure_leaves_publication_intent_observable() {
 }
 
 #[test]
-fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
+fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();
@@ -352,6 +352,56 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
                 .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
         )
         .expect("resolve reconciled Task Work");
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
+
+    let restore = Command::new("git")
+        .current_dir(repo.path())
+        .args([
+            "remote",
+            "set-url",
+            "origin",
+            repo.bare_path().to_str().expect("bare origin path"),
+        ])
+        .status()
+        .expect("restore local origin");
+    assert!(restore.success());
+
+    let next = pr_next(repo.path(), None).expect("rotate merged continuation");
+    assert_eq!(next.sequence, 2);
+    assert_eq!(next.phase(), PrPhase::Working);
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.task.id))
+        .expect("read rotated PR chain");
+    assert_eq!(prs.len(), 2);
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+    assert_eq!(prs[1].id, next.id);
+    assert_eq!(prs[1].sequence, next.sequence);
+    assert_eq!(prs[1].branch, next.branch);
+    assert_eq!(prs[1].phase(), PrPhase::Working);
+
+    let current_branch = Command::new("git")
+        .current_dir(repo.path())
+        .args(["branch", "--show-current"])
+        .output()
+        .expect("read rotated branch");
+    assert!(current_branch.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&current_branch.stdout).trim(),
+        next.branch
+    );
+
+    let durable_task = runtime
+        .block_on(task.store.get_task(&task.task.id))
+        .expect("read rotated Task")
+        .expect("Task remains present");
+    assert!(durable_task.gate_proposal.is_none());
+    assert!(runtime
+        .block_on(task.store.feedback(&work))
+        .expect("read Task Feedback")
+        .is_none());
     assert!(!matches!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
@@ -425,7 +475,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
         "expected a gate refusal naming the unpublished PR, got: {message}"
     );
 
-    // The Session and PR are unchanged: no premature completion, no deleted PR.
+    // The Task and PR are unchanged: no premature completion, no deleted PR.
     let runtime = tokio::runtime::Runtime::new().expect("read runtime");
     let work = runtime
         .block_on(

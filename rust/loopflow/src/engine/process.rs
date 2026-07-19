@@ -465,7 +465,7 @@ mod tests {
 
     /// The launch boundary must resolve the current Home lf (B), never the
     /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
-    /// legacy Sessions. Contrast the two selectors under release provenance:
+    /// legacy Work bodies. Contrast the two selectors under release provenance:
     /// the old override picks the control pin A, the current-Home selector
     /// picks B and has no way to reach A at all.
     #[test]

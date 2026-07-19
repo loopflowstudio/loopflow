@@ -227,7 +227,7 @@ public struct LaunchTargetResolution: Sendable, Hashable {
 /// overall surface, then the embedded Ghostty fallback. A remembered surface is
 /// honored only while it can still `.attach`, so an uninstalled app or a lost
 /// capability falls back visibly to the next candidate rather than opening a
-/// surface that would lie about reaching the Session — and the resolution
+/// surface that would lie about reaching the Launch — and the resolution
 /// reports *why* it fell back so the reason can be shown.
 public enum LaunchTargetResolver {
     public static func resolve(

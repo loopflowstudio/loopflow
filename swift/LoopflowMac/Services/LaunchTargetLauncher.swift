@@ -59,8 +59,8 @@ enum LaunchLaunchResult: Equatable, Sendable {
 
 /// Detects which surfaces the current machine can present and opens them. The
 /// pure resolver decides *which* surface; this is the side effect that reaches
-/// out to `NSWorkspace` and the filesystem. It never creates or names a Session
-/// — it runs the exact shared attach command the store handed back.
+/// out to `NSWorkspace` and the filesystem. It never creates or renames Work —
+/// it runs the exact Launch attach command the store handed back.
 enum LaunchTargetLauncher {
     struct Command: Equatable {
         let cwd: String

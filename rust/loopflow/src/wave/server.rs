@@ -37,8 +37,9 @@
 //!     under the same id — each frame replaces the client's previous state
 //!     for that id (upsert, never append-if-seen).
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
-//!     is an [`InboxFrame`] — a resident-directed message, typed Task
-//!     observation, or control op. The pending queue (journaled inputs not yet named in any `answers`) replays on
+//!     is an [`InboxFrame`] — a resident-directed human message, typed Task or
+//!     Project observation, promotion wake, or control op. The pending queue
+//!     (journaled inputs not yet named in any `answers`) replays on
 //!     connect, then live ops stream; a bare interrupt rides live-only with
 //!     `id: null` (nothing journaled). The default
 //!     stream is byte-identical to the pre-resident wire.
@@ -64,10 +65,11 @@
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
-//! - `POST /observations` drains the Wave's authoritative child-observation
-//!   outbox, journals each pending Project/Task event idempotently, and wakes
-//!   or queues the resident with typed inbox items. Loopback-only internal
-//!   door; child Work never writes the Wave journal.
+//! - `POST /observations` optionally accepts an explicit promotion nudge,
+//!   verifies it against registry parentage, drains the authoritative
+//!   child-observation outbox, and journals each typed input idempotently before
+//!   waking or queueing the resident.
+//!   Loopback-only internal door; child Work never writes the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
 //!
@@ -247,6 +249,18 @@ struct PostMessage {
     text: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservationRequest {
+    promotion: Option<PromotionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromotionRequest {
+    parent: String,
+}
+
 /// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
 /// resident's `inbox` frames (pending replay + live ops) to the subscription;
 /// absent/false leaves the wire byte-identical to the pre-resident stream.
@@ -321,6 +335,7 @@ pub fn router(
 
 async fn observations_handler(
     State(state): State<ServerState>,
+    request: Option<Json<ObservationRequest>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let observer = state.observer.as_ref().ok_or_else(|| {
         (
@@ -328,6 +343,17 @@ async fn observations_handler(
             "child observations require the shared Loopflow registry".to_string(),
         )
     })?;
+    if let Some(promotion) = request.and_then(|Json(request)| request.promotion) {
+        observer
+            .deliver_promotion(&promotion.parent)
+            .await
+            .map_err(|error| {
+                (
+                    StatusCode::CONFLICT,
+                    format!("promotion wake does not match registry truth: {error}"),
+                )
+            })?;
+    }
     observer.poll_once().await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -527,7 +553,10 @@ async fn events_handler(
                         observation: observation.clone(),
                     }
                 } else if let Some(wake) = sub.promotions.get(&message.id) {
-                    InboxFrame::Promotion { wake: wake.clone() }
+                    InboxFrame::Promotion {
+                        parent_wave_id: wake.parent_wave_id.clone(),
+                        parent: wake.parent.clone(),
+                    }
                 } else {
                     pending_inbox_frame(message)
                 };
@@ -682,7 +711,13 @@ fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
         InboxItem::Project(observation) => InboxFrame::Project {
             observation: observation.clone(),
         },
-        InboxItem::Promotion(wake) => InboxFrame::Promotion { wake: wake.clone() },
+        InboxItem::Promotion {
+            parent_wave_id,
+            parent,
+        } => InboxFrame::Promotion {
+            parent_wave_id: parent_wave_id.clone(),
+            parent: parent.clone(),
+        },
         InboxItem::Interrupt => InboxFrame::Interrupt,
         InboxItem::Skip => InboxFrame::Skip,
     }

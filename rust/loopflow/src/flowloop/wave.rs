@@ -535,7 +535,14 @@ impl WaveLoop {
                     self.evidence_queue.push(message);
                 }
             }
-            InboxItem::Promotion(wake) => {
+            InboxItem::Promotion {
+                parent_wave_id,
+                parent,
+            } => {
+                let wake = crate::wave::PromotionWake {
+                    parent_wave_id,
+                    parent,
+                };
                 let message = crate::wave::journal::promotion_wake_message(&wake);
                 if self.seen.insert(message.id.clone()) {
                     self.evidence_queue.push(message);

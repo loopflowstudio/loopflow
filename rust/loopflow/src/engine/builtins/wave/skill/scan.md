@@ -40,7 +40,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 2. **Read runtime state.** For each member wave:
    - `lf status <wave-name> --json` — Wave presence, resident state, Project
-     Sessions, Tasks, next owners, worktrees, PRs, and attention
+     Project Work, Tasks, next owners, worktrees, PRs, and attention
    - `lf task status <issue-id> --json` or
      `lf project status <project-id> --json` only when the Wave snapshot needs
      deeper inspection
@@ -66,7 +66,7 @@ contains `wave/chord-model/` and `wave/signals/`, the wave names are
 
 5. **Read blocks.** Look for signals that a wave is stuck:
    - PRs with failing CI that haven't been fixed
-   - Tasks or Sessions with no recent activity
+   - Tasks or other Work with no recent activity
    - Merge conflicts
    - Open questions in `scratch/questions.md`
 

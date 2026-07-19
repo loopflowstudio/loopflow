@@ -2591,11 +2591,10 @@ async fn reconcile_task_pr_with_authority(
                     CommittedFollowUp::ProvenEmpty
                 );
             if completes {
-                // The completion gate: even with the PR merged, the Task cannot
-                // be completed in the PM until every required review is
-                // approved. The PR is settling in flight, so only the review
-                // half of the gate applies here. Do not weaken the review gate
-                // or infer merge from a green head.
+                // Even with the PR merged, an authored Feedback checkpoint must
+                // be continued before the Task can complete in the PM. The PR is
+                // settling in flight, so only that Feedback fact is checked here;
+                // do not bypass it or infer merge from a green head.
                 let gate = feedback_gate(store, task).await?;
                 if gate.satisfied {
                     let proposal = crate::task::TaskGateProposal {
@@ -3172,8 +3171,9 @@ async fn ensure_working_pr_with_authority(
     }
     let committed_carry = committed_follow_up_range(&task.worktree, &settled)?;
     // A settled completing PR normally never rotates: completion is pending on
-    // the review gate, not on a follow-up PR. `reconcile_task_completion`
-    // commits Work completion once the gate closes. Two things
+    // its explicit Feedback checkpoint, not on a follow-up PR.
+    // `reconcile_task_completion` commits Work completion once that checkpoint
+    // is continued. Two things
     // independently authorize one more serial PR: follow-up committed past the
     // merged tip, which the completion gate refuses to settle over, and a
     // pending directive, which the successor exists to incorporate.
@@ -3476,12 +3476,12 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
                 "Task worktree has uncommitted changes; publish or explicitly abandon them first",
             ));
         }
-        // The completion gate: every active PR must be settled and every required
-        // review approved before the Task can be completed in the PM. Do not
-        // weaken the review gate or infer merge from a green head.
+        // The completion gate requires every active PR to be settled and any
+        // authored Feedback checkpoint to be continued before PM completion.
+        // Do not bypass either fact or infer merge from a green head.
         let gate = task_completion_gate(&store, &task).await?;
         if let Some(refusal) = gate.refusal(&task.directive.identifier) {
-            // Nothing has been written. A refusal here — an open review, a
+            // Nothing has been written. A refusal here — open Feedback, a
             // committed follow-up, anything — leaves a discardable successor
             // active, so the Task keeps its PR and no rotation is provoked.
             return Err(task_error(refusal));

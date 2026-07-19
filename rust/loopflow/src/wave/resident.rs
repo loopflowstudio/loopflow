@@ -214,7 +214,13 @@ fn inbox_item(frame: InboxFrame) -> InboxItem {
         }),
         InboxFrame::Task { observation } => InboxItem::Task(observation),
         InboxFrame::Project { observation } => InboxItem::Project(observation),
-        InboxFrame::Promotion { wake } => InboxItem::Promotion(wake),
+        InboxFrame::Promotion {
+            parent_wave_id,
+            parent,
+        } => InboxItem::Promotion {
+            parent_wave_id,
+            parent,
+        },
         InboxFrame::Interrupt => InboxItem::Interrupt,
         InboxFrame::Skip => InboxItem::Skip,
     }

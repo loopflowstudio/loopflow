@@ -6,8 +6,8 @@
 //! - holds the mind's one journal pen;
 //! - serves the doors: `/messages`, `/events`, `/health`,
 //!   and the token-gated resident door ([`server`]);
-//! - drains typed Project/Task observations ([`registry::StoreObserver`]) and
-//!   typed Project/Task observations;
+//! - verifies explicit promotion nudges and drains typed Project/Task
+//!   observations ([`registry::StoreObserver`]);
 //! - keeps the Wave row and discovery pointer current;
 //! - supervises the resident ([`supervisor`]): process liveness, the respawn
 //!   ladder, the interrupt janitor.
@@ -42,7 +42,7 @@
 //! `.wave-resident-token`.
 //!
 //! The listener also uses the local [`registry`] for a store-polling observer
-//! that carries typed Project/Task events into the Wave journal. The endpoint
+//! that carries explicitly nudged promotion and Project/Task inputs into the Wave journal. The endpoint
 //! file enforces one live listener per Wave. No registry store on the machine
 //! means no child observations; the listener remains otherwise functional.
 
@@ -60,7 +60,8 @@ pub(crate) mod supervisor;
 mod types;
 pub mod wire;
 
-pub use types::{PromotionWake, Wave};
+pub(crate) use types::PromotionWake;
+pub use types::Wave;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};

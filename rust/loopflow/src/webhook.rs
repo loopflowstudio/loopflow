@@ -184,7 +184,7 @@ fn is_human(author_id: Option<&str>, viewer_id: &str) -> bool {
 }
 
 /// Map one verified, parsed event onto the durable Task control substrate.
-/// Resolves the target Task by Linear issue id; a missing Session or a
+/// Resolves the target Task by Linear issue id; a missing Task or a
 /// self-authored change writes nothing.
 pub async fn ingest_event(
     store: &Store,

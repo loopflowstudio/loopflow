@@ -147,35 +147,43 @@ impl StoreObserver {
     /// Deliver every pending typed child observation. Store errors are logged
     /// and retried on the next poll.
     pub async fn poll_once(&self) {
-        self.poll_promotion().await;
         self.poll_child_observations().await;
     }
 
-    async fn poll_promotion(&self) {
-        let wave = match self.store.get_wave(&self.wave_id).await {
-            Ok(Some(wave)) => wave,
-            Ok(None) => return,
-            Err(error) => {
-                tracing::debug!(%error, "wave observer registry read failed");
-                return;
-            }
-        };
-        let Some(parent_wave_id) = wave.parent_wave_id().cloned() else {
-            return;
-        };
-        let parent = match self.store.get_wave(&parent_wave_id).await {
-            Ok(Some(parent)) => parent,
-            Ok(None) => return,
-            Err(error) => {
-                tracing::debug!(%error, %parent_wave_id, "wave observer parent read failed");
-                return;
-            }
-        };
-        self.runtime
+    /// Verify an explicit promotion nudge against registry parentage, then
+    /// deliver its typed wake idempotently. Ordinary polling never infers a
+    /// fresh promotion occurrence from a pre-existing parent link.
+    pub async fn deliver_promotion(&self, expected_parent: &str) -> StoreResult<bool> {
+        let wave = self.store.get_wave(&self.wave_id).await?.ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!(
+                "Wave {} disappeared from the registry",
+                self.wave_id
+            ))
+        })?;
+        let parent_wave_id = wave.parent_wave_id().cloned().ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!(
+                "Wave '{}' has no promotion parent",
+                wave.name()
+            ))
+        })?;
+        let parent = self.store.get_wave(&parent_wave_id).await?.ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!(
+                "promotion parent {parent_wave_id} is absent"
+            ))
+        })?;
+        if parent.name() != expected_parent {
+            return Err(crate::store::StoreError::InvalidData(format!(
+                "Wave '{}' belongs to '{}', not expected parent '{expected_parent}'",
+                wave.name(),
+                parent.name()
+            )));
+        }
+        Ok(self
+            .runtime
             .deliver_promotion_wake(crate::wave::PromotionWake {
                 parent_wave_id,
                 parent: parent.name().to_string(),
-            });
+            }))
     }
 
     async fn poll_child_observations(&self) {
@@ -301,7 +309,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parent_link_yields_one_typed_promotion_wake() {
+    async fn explicit_promotion_nudge_verifies_parent_and_delivers_once() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = temp_store(tmp.path()).await;
         let parent = Wave::new(
@@ -317,21 +325,37 @@ mod tests {
         .with_parent(parent.id().clone());
         store.create_wave(&parent).await.expect("store parent");
         store.create_wave(&child).await.expect("store child");
-        let runtime = WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf())
-            .expect("open runtime");
+        let runtime =
+            WaveRuntime::open("ship".to_string(), tmp.path().to_path_buf()).expect("open runtime");
         let observer = StoreObserver::new(runtime, store, child.id().clone());
 
         observer.poll_once().await;
-        observer.poll_once().await;
-
-        let (_, events) = crate::wave::journal::Journal::open(
+        let (_, before_nudge) = crate::wave::journal::Journal::open(
             &crate::wave::journal::journal_path(tmp.path(), "ship"),
         )
+        .expect("read journal before nudge");
+        assert!(
+            !before_nudge.iter().any(|event| matches!(
+                &event.kind,
+                crate::wave::journal::EventKind::PromotionObserved { .. }
+            )),
+            "background observation polling must not infer a new promotion from old ancestry"
+        );
+        assert!(observer.deliver_promotion("platform").await.unwrap());
+        assert!(!observer.deliver_promotion("platform").await.unwrap());
+
+        let (_, events) = crate::wave::journal::Journal::open(&crate::wave::journal::journal_path(
+            tmp.path(),
+            "ship",
+        ))
         .expect("read journal");
         assert_eq!(
             events
                 .iter()
-                .filter(|event| matches!(&event.kind, crate::wave::journal::EventKind::PromotionObserved { .. }))
+                .filter(|event| matches!(
+                    &event.kind,
+                    crate::wave::journal::EventKind::PromotionObserved { .. }
+                ))
                 .count(),
             1,
             "observer retries do not duplicate the durable promotion input"

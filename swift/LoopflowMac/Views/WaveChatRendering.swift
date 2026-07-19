@@ -4,7 +4,7 @@ import Loopflow
 
 // Shared rendering pieces for WaveChat turns: fenced-code segmentation, the code
 // block + diff views, the streaming cursor, and a hover-reveal copy button.
-// Recovered from the conversations session UI (git 45ab5d36e^) and rebound to the
+// Recovered from the conversations UI (git 45ab5d36e^) and rebound to the
 // live wave chat models.
 
 // MARK: - Fenced-code segmentation

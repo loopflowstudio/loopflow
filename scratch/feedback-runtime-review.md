@@ -22,6 +22,23 @@ Proof: exact deleted-symbol/dead-field searches are empty; the action behavior
 tests and migration test pass; `cargo fmt --check` passes. The automated
 `lf code` wrapper made no source change and was rejected as evidence.
 
+Reopened proof audit, July 19: the required `lf code` loop again made no source
+change and was rejected. The named integration proof
+`merged_continue_task_rotates_to_a_working_pr_without_review_state` now starts
+from a durable PR N, reconciles GitHub's merged reading with authored
+`ContinueTask`, and crosses the production `pr_next` /
+`ensure_working_pr_with_authority` store-and-worktree rotation. It observes a
+pushed current branch and durable working PR N+1 while Work stays open and both
+the Task gate proposal and Feedback checkpoint remain absent.
+
+`observed_merge_completes_a_pr_marked_to_complete_the_task` separately proves
+that `CompleteTask` reaches Done with only the one merged PR. Generic “review
+gate” comments and wait reasons now name the explicit Task Gate Feedback or
+the exact completion facts they enforce; no approval state was added. Both PR
+proofs pass, as do Task actions 2/2, Task model 15/15, the historical
+`review`-to-`continue_task` migration proof, `cargo fmt --check`, and all-target
+Clippy with warnings denied.
+
 ## Slice 2 — Radio and channel identity
 
 Accepted. The Radio CLI and hidden subscription compatibility surface, bus
@@ -33,14 +50,44 @@ surface; ordinary Rust channels and prompt system/task channels are unrelated.
 
 Migration `0.12.001_drop_agent_bus.sql` drops both bus tables. Historical
 schema fixtures retain their old table definitions so the current migration
-is exercised. Project promotion now reports in its typed child-Wave thread and
-does not publish a second lossy copy.
+is exercised. Project promotion never enters that human thread: an explicit
+promotion nudge asks the existing observer to verify the durable parent link,
+then deliver one typed `PromotionWake`. It is journaled under a deterministic
+parent-link id and replayed through the existing resident inbox. Background
+child-observation polling never infers a fresh promotion from old ancestry. The
+scheduler consumes the wake once; repeated nudges do not append another input
+or start an overlapping pass.
 
-Proof: exact current-source Radio/channel-identity search is empty; all 36
-migration tests, 7 Wave journal tests, and 3 Wave resolution-matrix tests pass;
-Swift contract tests and `cargo check -p loopflow` passed during implementation;
-`cargo fmt --check` passes. The first migration proof caught and corrected a
-missing registration and a current probe that still queried the dropped table.
+Reopened promotion repair, July 19: `complete_promotion` nudges the existing
+`/observations` door after the child listener is live. It cannot invoke `lf
+chat` or `/messages`; the observer refuses a nudge that does not match registry
+truth. Once ancestry and residency are durable, transport/refusal failure is a
+best-effort warning rather than a false promotion failure; heartbeat remains
+the fallback. The required `lf code -b -m opencode --max-turns 12 --docs
+scratch/promotion-wake.md` loop exited successfully but made no source change
+and was rejected as evidence.
+
+Proof: the full-wire promotion test proves one typed wake starts exactly one
+three-step child-Wave flow, records one `PromotionObserved`, answers its
+deterministic id, and records no `UserMessage`. The reopen proof consumes that
+id, closes and reopens the journal, and proves a repeated nudge cannot restore
+or duplicate it. The registry proof shows background polling over existing
+ancestry records nothing, while two explicit verified nudges still journal one
+wake. The best-effort transport proof shows a dead observer endpoint cannot
+turn completed ancestry/residency into promotion failure. The human door rejection/acceptance and
+fresh-schema Agent Bus absence tests pass. `Cli::command()` has no Radio
+subcommand, source module, or API; unknown first verbs remain owned by external
+skill/flow discovery, with no Radio tombstone parser branch. Wave journal tests
+pass 12/12, and `cargo check -p loopflow --tests` plus `cargo fmt --check` pass.
+Swift contract tests passed during the original implementation. The first
+migration proof caught and corrected a missing registration and a current
+probe that still queried the dropped table.
+
+Focused repair rerun: typed full-wire pass 1/1, explicit registry verification
+1/1, consumed close/reopen dedupe 1/1, best-effort dead-endpoint nudge 1/1,
+human-door contract 1/1, current-schema absence 1/1, and structural Radio
+absence 1/1. `PromotionWake` and its delivery method remain crate-private; the
+repair adds no public Radio, bus, Message, Session, or generic server API.
 
 ## Slice 3 — file-only memory
 
@@ -175,10 +222,14 @@ URL-to-repository helper. Generic typed outcomes such as `SteerReceipt`,
 `AdvanceReceipt`, and `TaskStartReceipt` remain because they report completed
 operations rather than pretending to be evidence links.
 
-Proof: the first-class command is absent, an authored flow rejects `receipt`,
-Task behavior 15/15 and the Wave resolution matrix 3/3 pass, and the exact
-evidence API/docs search is empty. `cargo fmt --check` and all-target Clippy
-with warnings denied pass. No tombstone command or compatibility alias exists.
+Proof: `evidence_receipt_command_is_absent` shows that the first-class command
+is absent and unknown `receipt` input remains eligible for external skill
+discovery. Task behavior 15/15 and the Wave resolution matrix 3/3 pass, and the
+exact evidence API/docs search is empty. `cargo fmt --check` and all-target
+Clippy with warnings denied pass. No tombstone command or compatibility alias
+exists. The earlier claim that an authored flow rejects `receipt` was removed:
+there is no such named fixture or test, and command absence is the relevant
+contract.
 
 ## Slice 6D1 — honest Work and Launch identity
 
@@ -221,6 +272,29 @@ fixtures 7/7, and RegistryQuery 17/17 pass with the full Mac target compiled.
 The follow-up Task 15/15, store persistence 2/2, and reteam 12/12 proofs pass.
 Exact old projection/wire-key and false stable-Work Session searches are empty;
 `cargo fmt --check` and all-target Clippy with warnings denied pass.
+
+### Slice 6D repair — completion audit
+
+Accepted after a fresh completion audit found and removed residue that made the
+earlier broad-deletion statement false. `RegisteredTask.task` replaces the
+fixture's false `.session` field and every caller with no compatibility
+property. Stable Task identity in the Mac terminal workspace is `taskId`, while
+the remaining Session names refer only to provider continuation/configuration,
+usage windows, URLSession, tmux/Ghostty/browser surfaces, human work periods,
+or explicitly historical migration/architecture/release text.
+
+`WorkCensusTests.launchIdentityControlsOpenability` now proves both halves of
+the projection contract: a row carrying `launchId` is openable and a row
+without one is view-only. `WorkActivity` still has no action enum or array, and
+the exact `ActiveSession(s)|SessionAction|SessionSet*|SessionLane` search is
+empty. The Context Lab `LaunchSet` contract and DTO fixture are unchanged.
+
+Proof: the touched Rust integration suites pass 52/52; the named Receipt 1/1,
+prompt-document 9/9, and Context Lab fixture 1/1 Rust proofs pass. Swift Work
+Census 1/1, DTO fixtures 7/7, and Context Lab 10/10 pass, with the Mac target
+compiling as part of the Swift package build. Exact stable-Work Session and
+retired projection searches are empty outside the documented allowlist. `cargo
+fmt --check` and all-target Clippy with warnings denied pass.
 
 ## Final architecture review
 

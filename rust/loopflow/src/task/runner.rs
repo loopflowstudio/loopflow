@@ -699,8 +699,8 @@ async fn run_task_with(
                                 .as_ref()
                                 .and_then(|pr| pr.head_sha().map(str::to_string));
                             // Merged, not merely settled: the branch below reports
-                            // this PR as merged and waits on its review gate, which
-                            // is false of an abandoned one.
+                            // this PR as merged and waits on its explicit Task Gate
+                            // Feedback checkpoint, which is false of an abandoned one.
                             let merged_completing_pr = observed_pr.as_ref().is_some_and(|pr| {
                                 pr.phase() == crate::task::PrPhase::Merged
                                     && pr
@@ -732,18 +732,18 @@ async fn run_task_with(
                                     "Task flow step interrupted; waiting for resume or another instruction".to_string(),
                                 )
                             } else if merged_completing_pr {
-                                // The PR merged to complete the Task, but a required review is
-                                // still open. Wait for the gate to close before completion; do
-                                // not rotate to another PR.
+                                // The PR merged to complete the Task, but its authored Task
+                                // Gate Feedback checkpoint is still open. Wait for explicit
+                                // continuation before completion; do not rotate another PR.
                                 let number = observed_pr
                                     .as_ref()
                                     .and_then(|pr| pr.github())
                                     .map(|github| github.number);
                                 let reason = match number {
                                     Some(number) => format!(
-                                        "pull request #{number} merged; awaiting required review before completion"
+                                        "pull request #{number} merged; awaiting Task Gate Feedback continuation before completion"
                                     ),
-                                    None => "pull request merged; awaiting required review before completion"
+                                    None => "pull request merged; awaiting Task Gate Feedback continuation before completion"
                                         .to_string(),
                                 };
                                 (false, reason)

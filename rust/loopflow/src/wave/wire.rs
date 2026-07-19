@@ -39,7 +39,6 @@ use serde::{Deserialize, Serialize};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
-use crate::wave::PromotionWake;
 use crate::wave::journal::MessageOp;
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
@@ -193,7 +192,8 @@ pub enum InboxFrame {
         observation: ProjectObservation,
     },
     Promotion {
-        wake: PromotionWake,
+        parent_wave_id: crate::id::WaveId,
+        parent: String,
     },
     Interrupt,
     Skip,

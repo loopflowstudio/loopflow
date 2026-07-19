@@ -5,9 +5,9 @@
 //! covered by the repo's `.lf/journal/` gitignore entry — the log is
 //! per-machine, never committed). Every projection is a fold over the Wave log:
 //! the thread is the conversation events, the loop state is the last
-//! `LoopState` event, and the message queue is `UserMessage`s not yet named in
-//! any `TurnStarted.answers` or `TurnSteered.answers`. The journal is truth;
-//! SSE is liveness.
+//! `LoopState` event, and the input queue is human messages and typed
+//! observations not yet named in any `TurnStarted.answers` or
+//! `TurnSteered.answers`. The journal is truth; SSE is liveness.
 //!
 //! These events are internal persistence, NOT wire DTOs — there is no
 //! Swift/Python mirror obligation. The no-defaults discipline still applies:
@@ -39,8 +39,8 @@ use crate::wave::PromotionWake;
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;
 
-/// Identifies one user message within a wave (`"msg-<seq>"`, from the seq of
-/// its `UserMessage` event).
+/// Identifies one pending Wave input: `"msg-<seq>"` for human messages and a
+/// deterministic typed id for observations and promotion wakes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct MessageId(pub String);
@@ -108,7 +108,7 @@ impl WorkerOutcome {
     }
 }
 
-/// A journaled user message that has not yet been consumed by a turn.
+/// One journaled prompt input that has not yet been consumed by a turn.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMessage {
     pub id: MessageId,
@@ -150,8 +150,7 @@ pub enum EventKind {
     },
     TurnStarted {
         turn_id: String,
-        /// Consumption marker: the queued user messages this turn's prompt
-        /// consumed. Queue = `UserMessage`s not named in any `answers`.
+        /// Consumption marker: the queued inputs this turn's prompt consumed.
         answers: Vec<MessageId>,
         /// Exact body attempt producing this assistant span. Instantaneous
         /// injected turns carry `None`.
@@ -219,7 +218,8 @@ pub enum EventKind {
         observation: ProjectObservation,
     },
     PromotionObserved {
-        wake: PromotionWake,
+        parent_wave_id: crate::id::WaveId,
+        parent: String,
     },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
@@ -531,10 +531,12 @@ impl Narrator {
                 observation.event_id,
                 ellipsize(&observation.prompt(), 70)
             )),
-            EventKind::PromotionObserved { wake } => info(format!(
+            EventKind::PromotionObserved {
+                parent_wave_id,
+                parent,
+            } => info(format!(
                 "observed promotion from Wave {} · {}",
-                wake.parent,
-                wake.parent_wave_id
+                parent, parent_wave_id
             )),
             EventKind::ServerStarted { pid, endpoint } => {
                 info(format!("server started · pid {pid} · {endpoint}"))
@@ -854,19 +856,19 @@ pub struct ThreadFold {
     /// Last durable playhead snapshot, absent before the first resident or
     /// enqueue initializes the default wave flow.
     pub playhead: Option<Playhead>,
-    /// User messages not named by any `TurnStarted.answers` or
-    /// `TurnSteered.answers` (minus what `MessagesRequeued` restored); this
-    /// seeds the scheduler queue on restart.
+    /// Human messages and typed inputs not named by any `answers` event (minus
+    /// what `MessagesRequeued` restored); this seeds the scheduler queue on
+    /// restart.
     pub pending_messages: Vec<PendingMessage>,
-    /// Every journaled user message by id — `MessagesRequeued` restores
-    /// pending entries from it (an id alone can't rebuild the text/op/from).
+    /// Every journaled input by id — `MessagesRequeued` restores pending
+    /// entries from it.
     pub messages: HashMap<MessageId, PendingMessage>,
     /// Typed Task observations indexed by their synthetic consumption id.
     pub tasks: HashMap<MessageId, TaskObservation>,
     /// Typed Project observations indexed by their synthetic consumption id.
     pub projects: HashMap<MessageId, ProjectObservation>,
     /// Promotion wakes indexed by their deterministic parent-link id.
-    pub promotions: HashMap<MessageId, PromotionWake>,
+    pub(crate) promotions: HashMap<MessageId, PromotionWake>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
@@ -985,12 +987,19 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 projects.insert(message.id.clone(), observation.clone());
                 messages.insert(message.id.clone(), message);
             }
-            EventKind::PromotionObserved { wake } => {
-                let message = promotion_wake_message(wake);
+            EventKind::PromotionObserved {
+                parent_wave_id,
+                parent,
+            } => {
+                let wake = PromotionWake {
+                    parent_wave_id: parent_wave_id.clone(),
+                    parent: parent.clone(),
+                };
+                let message = promotion_wake_message(&wake);
                 if !consumed_messages.contains(&message.id) {
                     pending_messages.push(message.clone());
                 }
-                promotions.insert(message.id.clone(), wake.clone());
+                promotions.insert(message.id.clone(), wake);
                 messages.insert(message.id.clone(), message);
             }
             EventKind::TurnStarted {
@@ -1127,7 +1136,7 @@ pub fn project_observation_message(observation: &ProjectObservation) -> PendingM
     }
 }
 
-pub fn promotion_wake_message(wake: &PromotionWake) -> PendingMessage {
+pub(crate) fn promotion_wake_message(wake: &PromotionWake) -> PendingMessage {
     PendingMessage {
         id: MessageId(wake.inbox_id()),
         op: MessageOp::Message,

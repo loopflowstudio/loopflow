@@ -14,13 +14,13 @@
 //! - the SSE broadcast is liveness only — a subscriber that lags resyncs from
 //!   the store.
 //!
-//! Two independent inputs feed the journal: the resident's wire deltas
+//! Three inputs feed the journal: the resident's wire deltas
 //! ([`WaveRuntime::apply_resident_delta`] — the old in-process `TurnSink`
-//! vocabulary, now arriving over `POST /resident/deltas`) and user messages
-//! (HTTP → journal + inbox broadcast). All appends go through one lock, so
-//! journal order, cache order, and broadcast order agree — one writer appends
-//! and broadcasts. This module is vendor-free: the harness lives with the
-//! resident process, never here.
+//! vocabulary, now arriving over `POST /resident/deltas`), human messages, and
+//! typed registry inputs. All appends go through one lock, so journal order,
+//! cache order, and broadcast order agree — one writer appends and broadcasts.
+//! This module is vendor-free: the harness lives with the resident process,
+//! never here.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -147,7 +147,10 @@ pub enum InboxItem {
     /// A typed Project ledger observation.
     Project(ProjectObservation),
     /// The one-time typed wake derived from this Wave's durable parent link.
-    Promotion(PromotionWake),
+    Promotion {
+        parent_wave_id: crate::id::WaveId,
+        parent: String,
+    },
     /// A bare interrupt (no text): cancel the open turn. Nothing is journaled
     /// for it — the `LoopState` transition records the interrupt itself.
     Interrupt,
@@ -170,12 +173,12 @@ pub struct Subscription {
     pub state_rx: broadcast::Receiver<LoopState>,
     pub playhead: Option<PlayheadView>,
     pub playhead_rx: broadcast::Receiver<PlayheadView>,
-    /// The pending queue as of the snapshot: journaled user messages not yet
-    /// named in any `answers` — the resident's boot replay.
+    /// The pending queue as of the snapshot: human messages and typed inputs
+    /// not yet named in any `answers` — the resident's boot replay.
     pub pending: Vec<PendingMessage>,
     pub tasks: HashMap<MessageId, TaskObservation>,
     pub projects: HashMap<MessageId, ProjectObservation>,
-    pub promotions: HashMap<MessageId, PromotionWake>,
+    pub(crate) promotions: HashMap<MessageId, PromotionWake>,
     /// Live resident-directed ops sent after the snapshot.
     pub inbox_rx: broadcast::Receiver<InboxItem>,
 }
@@ -220,8 +223,7 @@ struct Inner {
     last_assistant_turn_id: Option<String>,
     /// Durable scheduler queue folded from the journal on boot.
     pending_messages: Vec<PendingMessage>,
-    /// Every journaled user message by id — requeues restore pending entries
-    /// from it (an id alone can't rebuild the text/op/from).
+    /// Every journaled input by id — requeues restore pending entries from it.
     messages: HashMap<MessageId, PendingMessage>,
     tasks: HashMap<MessageId, TaskObservation>,
     projects: HashMap<MessageId, ProjectObservation>,
@@ -896,19 +898,23 @@ impl WaveRuntime {
     }
 
     /// Journal and queue the typed promotion wake exactly once per parent link.
-    pub fn deliver_promotion_wake(&self, wake: PromotionWake) -> bool {
+    pub(crate) fn deliver_promotion_wake(&self, wake: PromotionWake) -> bool {
         let mut inner = self.inner();
         let pending = promotion_wake_message(&wake);
         if inner.promotions.contains_key(&pending.id) {
             return false;
         }
         inner.journal.append(|_| EventKind::PromotionObserved {
-            wake: wake.clone(),
+            parent_wave_id: wake.parent_wave_id.clone(),
+            parent: wake.parent.clone(),
         });
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner.promotions.insert(pending.id.clone(), wake.clone());
         inner.pending_messages.push(pending);
-        let _ = self.inbox_tx.send(InboxItem::Promotion(wake));
+        let _ = self.inbox_tx.send(InboxItem::Promotion {
+            parent_wave_id: wake.parent_wave_id,
+            parent: wake.parent,
+        });
         true
     }
 
@@ -1565,6 +1571,40 @@ mod tests {
             replayed.projects.get(&MessageId(observation.inbox_id())),
             Some(&observation)
         );
+    }
+
+    #[test]
+    fn consumed_promotion_stays_consumed_and_deduplicated_after_reopen() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wake = crate::wave::PromotionWake {
+            parent_wave_id: crate::id::WaveId::new(),
+            parent: "platform".to_string(),
+        };
+        let id = wake.inbox_id();
+        let rt = open_runtime(tmp.path());
+        assert!(rt.deliver_promotion_wake(wake.clone()));
+        rt.apply_resident_delta(d_opened(&[&id]));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+        assert!(rt.pending_messages().is_empty());
+        drop(rt);
+
+        let reopened = open_runtime(tmp.path());
+        assert!(reopened.pending_messages().is_empty());
+        assert!(
+            !reopened.deliver_promotion_wake(wake),
+            "replay keeps the deterministic promotion id deduplicated"
+        );
+        let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("read journal");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(&event.kind, EventKind::PromotionObserved { .. }))
+                .count(),
+            1
+        );
+        assert!(!events
+            .iter()
+            .any(|event| matches!(&event.kind, EventKind::UserMessage { .. })));
     }
 
     #[test]

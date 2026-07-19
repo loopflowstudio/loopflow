@@ -4,7 +4,11 @@ produces: PR ready, assigned to a human to merge
 ---
 Submit the current branch for a human to land. Rebase, clear scratch, create/update the PR, mark it ready, and assign it — then stop. Nothing merges until a human clicks merge.
 
-Use `submit` (not `land`) whenever a person should land the work by hand. `land` is for headless/auto runs where loopflow merges hands-off; `submit` leaves the one required merge click to a human. (GitHub blocks approving your own PR, so the gate is the merge click, not a review approval — the button unlocks once checks pass.)
+Use `pr-submit` (not `pr-land`) whenever a person should land the work by hand.
+`pr-land` is for headless/auto runs where loopflow merges hands-off;
+`pr-submit` leaves the one required merge click to a human. (GitHub blocks
+approving your own PR, so the gate is the merge click, not a review approval —
+the button unlocks once checks pass.)
 
 ## Orientation
 
@@ -81,7 +85,8 @@ lf pr submit --create-pr --title "<title>" --body "<body>"
 
 Include `-m "<message>"` if the working tree was dirty in step 1.
 
-If `lf pr submit` fails due to rebase conflicts, launch a sub-agent to run the `rebase` step, then retry `lf pr submit`.
+If `lf pr submit` fails due to rebase conflicts, launch a sub-agent to run the
+`rebase-conflicts` skill, then retry `lf pr submit`.
 
 ## Notes
 
@@ -90,4 +95,7 @@ If `lf pr submit` fails due to rebase conflicts, launch a sub-agent to run the `
 
 ## Adaptation
 
-If you discovered repo-specific submit conventions — assignee, branch protection rules, CI wait behavior — encode them. Most belong in repo docs where all steps benefit. Copy this step to `.lf/steps/submit.md` when the repo needs submit to work differently.
+If you discovered repo-specific submit conventions — assignee, branch
+protection rules, CI wait behavior — encode them. Most belong in repo docs
+where all skills benefit. Copy this skill to `.lf/skills/pr-submit.md` when the
+repo needs submission to work differently.

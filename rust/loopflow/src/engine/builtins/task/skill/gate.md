@@ -52,9 +52,13 @@ Make the implementation as clean as possible.
    Example: Run through the main user flows the branch touches. Click every button. Time the response. If something feels sluggish, profile it.
 
 4. **Tests and lints**
-   Run the affected suites and required lint checks once for the current tree.
+   Run the affected suites and required formatting/static-analysis checks once
+   for the current tree.
    - Follow the repo's documented guidance first (`TESTING.md`, `README.md`, and relevant module docs).
-   - Use the repo's standard command entrypoints and CI definitions.
+   - Cross-check CI so formatting and static-analysis commands match what the
+     repository enforces.
+   - Use the repo's standard command entrypoints and auto-fix modes where
+     available. Fix remaining formatting or static-analysis failures manually.
    - Prefer a changed-aware runner. If it can reuse a passing result only for
      identical tracked/untracked content and the same plan, enable that reuse.
    - Do not run the full local matrix merely to mirror parallel CI. Run it only
@@ -156,10 +160,14 @@ If nothing needs fixing and tests pass, say so—but still write the design revi
 git diff main...HEAD     # see what changed
 ```
 
-Find lint/test commands from repo guidance (`TESTING.md`, `README.md`, docs)
-and map the touched files to the checks that can fail because of them. CI owns
-the full parallel matrix.
+Find test, formatting, and static-analysis commands from repo guidance
+(`TESTING.md`, `README.md`, docs) and map the touched files to the checks that
+can fail because of them. CI owns the full parallel matrix.
 
 ## Adaptation
 
-Did you discover a quality check this repo always needs? A linter, a type check, a build step that should run every time? Encode it so the next gate is faster. Most discoveries belong in repo docs (CLAUDE.md, TESTING.md) where all steps can see them. Copy this step to `.lf/steps/gate.md` when the repo needs gate to work differently — a changed workflow, different quality bar, or team preferences about what gate checks and how.
+Did you discover a quality check this repo always needs? A formatter, a type
+check, a build step that should run every time? Encode it so the next gate is
+faster. Most discoveries belong in repo docs (CLAUDE.md, TESTING.md) where all
+skills can see them. Copy this skill to `.lf/skills/gate.md` when the repo needs
+gate to work differently.

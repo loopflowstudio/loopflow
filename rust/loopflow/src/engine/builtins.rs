@@ -12,7 +12,7 @@ pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md")
 
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
-    BUILTIN_STEPS.get(name).copied()
+    BUILTIN_SKILLS.get(name).copied()
 }
 
 /// One-line description for a built-in skill. Prefers the `description:` frontmatter
@@ -113,10 +113,10 @@ pub fn get_builtin_goal(name: &str) -> Option<&'static str> {
 /// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
 /// that key. Returns `None` for no match or ambiguous matches.
 pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
-    if let Some((key, _)) = BUILTIN_STEPS.get_key_value(name) {
+    if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(name) {
         return Some(key);
     }
-    resolve_bare_in_map(name, &BUILTIN_STEPS)
+    resolve_bare_in_map(name, &BUILTIN_SKILLS)
 }
 
 /// Resolve a bare name to its builtin flow key. Returns the exact match if one
@@ -159,14 +159,9 @@ pub fn get_builtin_direction(name: &str) -> Option<&'static str> {
     BUILTIN_DIRECTIONS.get(name).copied()
 }
 
-/// Returns the content of a built-in ops prompt, if it exists.
-pub fn get_builtin_ops_prompt(name: &str) -> Option<&'static str> {
-    BUILTIN_OPS_PROMPTS.get(name).copied()
-}
-
 /// List of all built-in skill names.
 pub fn builtin_skill_names() -> Vec<&'static str> {
-    BUILTIN_STEPS.keys().copied().collect()
+    BUILTIN_SKILLS.keys().copied().collect()
 }
 
 /// List of all built-in flow names.
@@ -202,7 +197,6 @@ include!(concat!(env!("OUT_DIR"), "/builtin_flow_categories.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_skill_categories.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_directions.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_direction_groups.rs"));
-include!(concat!(env!("OUT_DIR"), "/builtin_ops_prompts.rs"));
 
 #[cfg(test)]
 mod tests {
@@ -281,6 +275,32 @@ mod tests {
     }
 
     #[test]
+    fn init_connects_the_distributed_system_before_customizing_skills() {
+        let init = get_builtin_skill("init").expect("init skill");
+
+        for command in [
+            "lf auth status",
+            "lf route show",
+            "lf home id --json",
+            "lf ls --json",
+            "lf status <wave> --json",
+            "lf roadmap --wave <wave> --json",
+            "lf task run <ISSUE-ID>",
+            "lf home observe <home-id>",
+            "lf home probe <wave> --json",
+        ] {
+            assert!(init.contains(command), "init omits {command:?}");
+        }
+
+        assert!(init.contains("Loopflow is not primarily a prompt launcher"));
+        assert!(init.contains("Installed harnesses are a capability of this Home"));
+        assert!(init.contains("team-wide repo configuration"));
+        assert!(init.contains("`MEMORY.md`; the Wave runtime owns compiled memory"));
+        assert!(!init.contains("git remote -v"));
+        assert!(!init.contains("lf doctor --json"));
+    }
+
+    #[test]
     fn execution_context_grants_delegation_by_tier() {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
@@ -346,7 +366,7 @@ mod tests {
             "lf project request-decision",
         ];
 
-        for (name, skill) in BUILTIN_STEPS.iter() {
+        for (name, skill) in BUILTIN_SKILLS.iter() {
             for command in retired {
                 assert!(
                     !skill.contains(command),
@@ -399,19 +419,19 @@ mod tests {
     #[test]
     fn build_is_one_bounded_pass_without_delivery() {
         let flow = get_builtin_flow("build").expect("build flow");
-        for step in ["kickoff", "implement", "compress", "lint", "gate"] {
-            assert!(flow.contains(&format!("- {step}")));
-        }
+        assert!(flow.contains("- kickoff"));
+        assert!(flow.contains("flow: code"));
         assert!(flow.contains("name: review-design"));
         assert!(flow.contains("feedback: true"));
         assert!(!flow.contains("loop:"));
+        assert!(!flow.contains("- gate"));
         assert!(!flow.contains("deploy"));
         assert!(!flow.contains("pr land"));
     }
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "qa", "research", "rebase"] {
+        for name in ["implement", "gate", "qa", "research", "rebase-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");

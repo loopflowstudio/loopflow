@@ -1,7 +1,7 @@
 - step:
     name: design
     feedback: true
-- implement
+- flow: code
 - reduce
 - polish
 - deploy

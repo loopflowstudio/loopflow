@@ -2266,7 +2266,7 @@ Be careful.
         let tmp = TempDir::new().unwrap();
         let flow = load_flow("code", tmp.path()).unwrap();
         let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 4); // implement, compress, lint, gate
+        assert_eq!(items.len(), 2); // implement, compress
     }
 
     #[test]

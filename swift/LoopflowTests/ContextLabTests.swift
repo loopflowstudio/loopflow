@@ -48,9 +48,9 @@ struct ContextLabTests {
         ).query
 
         #expect(contextRelativeSourcePath(
-            "/src/loopflow/rust/loopflow/src/engine/builtins/build/skill/refine.md",
+            "/src/loopflow/rust/loopflow/src/engine/builtins/task/skill/refine.md",
             repoPath: query.repoPaths[0]
-        ) == "rust/loopflow/src/engine/builtins/build/skill/refine.md")
+        ) == "rust/loopflow/src/engine/builtins/task/skill/refine.md")
         #expect(contextRelativeSourcePath(
             "/src/loopflow-other/refine.md",
             repoPath: query.repoPaths[0]

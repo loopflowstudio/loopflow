@@ -61,7 +61,8 @@ disabled, so unrelated paths are never staged with it.
 
 Run the smallest behavioral test that exercises the reconciled behavior, once,
 after the rebase completes. Do not expand into the whole project suite or
-unrelated lint/build checks here. Gate and CI own that broader proof.
+unrelated static-analysis or build checks here. Gate and CI own that broader
+proof.
 
 Do not push. Exit after the focused proof; the waiting `lf rebase` process owns
 Git postconditions and the single push.

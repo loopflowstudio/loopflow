@@ -18,7 +18,14 @@ cat release/SCHEDULE.md      # shared loopflow + cadenza release cadence
 `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`, and
 install it into the local bin dir.
 
-Use `release/` to keep the rationale and notes for each shipped version close to the code.
+Use `release/` to keep the rationale and notes for each shipped version close
+to the code.
+
+`lf release run` owns the portable lifecycle: exact change evidence, version
+intent, an isolated release PR, the tag, and observed completion. This
+repository owns migration checks and preparation in `.lf/config.yaml`, plus
+package builds, signing, notarization, uploads, deployment, smoke tests, and
+secrets in its workflows and scripts.
 
 | Path | What it does |
 |------|--------------|
@@ -56,6 +63,15 @@ Nightly packages prove release artifacts while keeping deployment out of the loo
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 
-Interactive runs may append those decisions as they happen. Headless runs do not. If `release/unreleased/` exists, `lf release run` promotes it to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative notes, and writes the final notes to both `RELEASE_NOTES.md` and `release/v<version>/NOTES.md`. If the directory is absent, the workflow still runs and falls back to merged PR history.
+Interactive runs may append those decisions as they happen. Headless runs do
+not. If `release/unreleased/` exists, `lf release run` promotes it to
+`release/v<version>/`, uses `DECISIONS.md` to shape the narrative notes, and
+writes the final notes to both `RELEASE_NOTES.md` and
+`release/v<version>/NOTES.md`. The exact first-parent commit range is always
+the shipped-behavior ledger; matching PRs add narrative context. If the
+decisions directory is absent, the same commit evidence still produces notes.
 
-Scheduled releases prefer the same agent-backed `release-notes` step. When the runner has no Claude, Codex, or OpenCode CLI, `lf release run` writes deterministic notes from the collected PRs and archived decisions instead of blocking the patch release.
+Scheduled releases prefer the same agent-backed `release-notes` skill. When
+the runner has no Claude, Codex, or OpenCode CLI, `lf release run` writes
+deterministic notes from the exact commits, matching PRs, and archived
+decisions instead of blocking the patch release.

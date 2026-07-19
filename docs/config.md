@@ -100,6 +100,53 @@ Flows are YAML files in `.lf/flows/`:
 
 ---
 
+## Releases
+
+Keep the lifecycle in Loopflow and the repository-specific work in commands the
+repository owns:
+
+```yaml
+release:
+  targets:
+    cli:
+      area: [packages/cli/]
+      tag_prefix: cli/
+      manifests: [packages/cli/package.json]
+      verify:
+        - scripts/check-release cli
+      prepare:
+        - scripts/prepare-release cli {version}
+      workflow: .github/workflows/release-cli.yml
+      completion: github-release
+```
+
+`lf release run patch --target cli` selects changes from the exact
+`cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
+merged commit, and waits for the configured completion evidence. `area` scopes
+the range. `manifests` use Loopflow's built-in semantic-version adapters;
+omit them to auto-detect supported manifests.
+
+`verify` runs during `lf release run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf release check`
+only reads that evidence; it does not execute repository hooks. `prepare` runs
+after manifest bumps inside the isolated release worktree. Both hook types
+accept `{target}`, `{version}`, and `{previous_tag}` placeholders. Put
+compilation, signing, packaging, migration, registry upload, deployment, smoke
+tests, and secret use in these repo-owned commands or the workflow—not in
+built-in release policy.
+
+Completion is explicit:
+
+- `tag` — pushing the tag completes the release.
+- `workflow` — the configured GitHub Actions workflow must succeed.
+- `github-release` — a GitHub Release for the tag must exist.
+
+Without `completion`, targets with `workflow` use `workflow`; other targets use
+`tag`. The first release requires an explicit `X.Y.Z`; bump keywords require a
+previous target tag.
+
+---
+
 ## Options Reference
 
 ### Loopflow Guidance

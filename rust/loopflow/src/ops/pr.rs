@@ -4,9 +4,9 @@ use std::process::Command;
 use serde::Deserialize;
 
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, get_default_branch, rev_parse};
+use crate::engine::load_skill;
 use crate::engine::worktrees::{list_worktrees, main_repo_root};
 
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -219,8 +219,10 @@ pub fn generate_pr_copy(
     progress: &impl Progress,
     agent_override: Option<&str>,
 ) -> OpsResult<PrCopy> {
-    let template = get_builtin_ops_prompt("pr_message")
-        .ok_or_else(|| OpsError::Message("builtin pr_message prompt not found".to_string()))?;
+    let template = load_skill("pr-message", repo)
+        .map_err(|err| OpsError::Message(format!("pr-message skill not found: {err}")))?
+        .content
+        .ok_or_else(|| OpsError::Message("pr-message skill has no content".to_string()))?;
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
     let stack = crate::ops::task::task_stack(repo)?;

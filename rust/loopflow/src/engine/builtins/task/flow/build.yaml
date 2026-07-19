@@ -2,8 +2,5 @@
 - step:
     name: review-design
     feedback: true
-- implement
-- compress
-- lint
+- flow: code
 - review-slice
-- gate

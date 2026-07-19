@@ -10,5 +10,15 @@ pm:
 linear:
   team: "60558c53-2169-49f8-a76a-1f4586705aa9"
 
+release:
+  targets:
+    loopflow:
+      workflow: .github/workflows/release.yml
+      verify:
+        - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
+      prepare:
+        - uv run python scripts/canonicalize_migrations.py {version} --release-cut
+      completion: github-release
+
 internal:
   use_rust: true

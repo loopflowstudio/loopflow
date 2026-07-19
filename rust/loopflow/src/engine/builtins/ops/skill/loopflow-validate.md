@@ -2,19 +2,20 @@
 requires: none
 produces: validation report
 ---
-Validate flows, steps, and directions. Report broken references.
+Validate flows, skills, and directions. Report broken references.
 
 ## Workflow
 
 1. List all flows in `.lf/flows/` and builtins
-2. For each flow, check that all referenced steps exist
+2. For each flow, check that all referenced skills exist
 3. Check that all referenced directions exist
 4. Check that all referenced flows exist (for nested flow calls)
 5. Report any broken references
 
 ## Checks
 
-**Step existence.** Every `step:` or `- stepname` in a flow must resolve to an existing step file.
+**Skill existence.** Every `step:` or `- skillname` in a flow must resolve to an
+existing skill file.
 
 **Direction existence.** Every `direction:` must resolve to an existing direction file.
 
@@ -29,12 +30,11 @@ Print validation results:
 ```
 Validating flows...
 
-✓ code/build.yaml
+✓ task/build.yaml
   - implement ✓
   - compress ✓
-  - gate ✓
 
-✗ code/broken.yaml
+✗ task/broken.yaml
   - implement ✓
   - nonexistent ✗ (step not found)
 

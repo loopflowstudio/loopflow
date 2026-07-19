@@ -91,9 +91,9 @@ lf task wait <issue-id> --until terminal
 | `prompt` | Author or audit a skill, direction, Wave goal, or inline prompt |
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
-| `gate` | Ship-ready check: tests, quality, PR description |
+| `compress` | Simplify the implementation without changing behavior |
+| `gate` | Verify the branch for shipping: tests, static checks, docs, PR description |
 | `qa` | Thorough quality assessment of the current branch |
-| `lint` | Run ruff, fix issues |
 
 ### How steps chain
 
@@ -109,14 +109,15 @@ lf task wait <issue-id> --until terminal
 Chain skills manually, or use a named flow (a flow is a sequence of steps; each step names a skill, an op, or a subflow):
 
 ```bash
-lf design && lf implement && lf gate    # manual chain
-lf build                                # one design → code → review-slice → gate pass
+lf design && lf implement && lf compress # manual coding chain
+lf build                                 # one design → code → reviewable Task slice
+lf ship                                  # final Task gate → learnings → land
 ```
 
-Flows automate steps within one bounded pass. `build` runs kickoff →
-review-design → implement → compress → lint → review-slice → gate. Use `ship` or
-`deploy` for the explicit delivery workflow. Repetition belongs to Wave,
-Project, and Task runtimes.
+Flows automate skills within one bounded pass. `build` runs kickoff →
+review-design → implement → compress → review-slice. `ship` and `deploy` own
+the shipping gate and delivery. Repetition belongs to Wave, Project, and Task
+runtimes.
 
 ### Custom skills
 

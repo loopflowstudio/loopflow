@@ -85,7 +85,7 @@ A flow chains skills with commits between them:
 ```yaml
 # .lf/flows/ship-api.yaml
 - implement
-- lint
+- compress
 - gate
 ```
 
@@ -100,8 +100,8 @@ lf gate --direction ux            # optimize for user experience
 lf gate --direction ux,clarity    # stack intents
 ```
 
-Built-ins cover the common ground: `debug`, `design`, `implement`, `gate`,
-`qa`, `lint`, the `build` flow, and more. Repo skills in `.lf/skills/`
+Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
+`gate`, `qa`, the `build` flow, and more. Repo skills in `.lf/skills/`
 override and extend them. [Authoring](authoring.md) covers writing each of
 these well.
 

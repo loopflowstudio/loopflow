@@ -5,8 +5,11 @@
       "wave": {
         "id": "wave-1",
         "name": "product",
-        "status": "running",
-        "paused": false,
+        "status": {
+          "running": {
+            "run_id": "run_00000000000000000000000000000002"
+          }
+        },
         "goal": "Conduct goal-authored work everywhere.",
         "repo": "/src/loopflow",
         "active_tasks": 2,
@@ -16,11 +19,10 @@
         "created_at": "2026-07-01T00:00:00Z",
         "parent_wave_id": null,
         "home": {
-          "address": "jack@local",
-          "owner": "jack",
-          "location": {
-            "kind": "local"
-          }
+          "id": "home_00000000000000000000000000000001",
+          "route": "local",
+          "created_at": "1970-01-01T00:00:00Z",
+          "observed_at": "1970-01-01T00:00:00Z"
         }
       },
       "projects": {
@@ -42,10 +44,10 @@
               ]
             },
             "runtime": {
-              "session_id": "ps_11111111111111111111111111111111",
-              "status": "waiting",
+              "work_id": "ps_11111111111111111111111111111111",
+              "status": "ready",
               "reason": "supervised Tasks are active",
-              "status_at": "2026-07-14T20:00:00Z",
+              "updated_at": "2026-07-14T20:00:00Z",
               "iteration": 2,
               "pending_observations": 0,
               "provider": "codex",
@@ -53,7 +55,7 @@
               "observation": {
                 "category": "needs_input",
                 "reason": "supervised Tasks are active",
-                "owner": "human",
+                "owner": "user",
                 "controls": [
                   "decide",
                   "resume",
@@ -89,17 +91,21 @@
                   }
                 },
                 "runtime": {
-                  "session_id": "ts_now00000000000000000000000000000",
-                  "project_session_id": "ps_11111111111111111111111111111111",
-                  "status": "running",
+                  "work_id": "ts_now00000000000000000000000000000",
+                  "project_id": "ps_11111111111111111111111111111111",
+                  "status": {
+                    "running": {
+                      "run_id": "run_00000000000000000000000000000005"
+                    }
+                  },
                   "reason": "Task flow iteration 1, step 2/3: task_pursue",
-                  "status_at": "2026-07-14T23:44:00Z",
+                  "updated_at": "2026-07-14T23:44:00Z",
                   "provider": "claude",
                   "process_alive": true,
                   "observation": {
                     "category": "working",
                     "reason": "Task flow iteration 1, step 2/3: task_pursue",
-                    "owner": "session",
+                    "owner": "work",
                     "controls": [
                       "attach",
                       "steer",
@@ -123,41 +129,14 @@
                   "next_owner": "task",
                   "actions": {
                     "recommended": "no_action",
-                    "actions": [
-                      {
-                        "action": "recover",
-                        "available": false,
-                        "reason": "body is alive; use attach/interrupt to interact"
-                      },
-                      {
-                        "action": "resume",
-                        "available": false,
-                        "reason": "body is working; nothing to resume"
-                      },
-                      {
-                        "action": "review",
-                        "available": false,
-                        "reason": "no open PR to review"
-                      },
-                      {
-                        "action": "start_next_pr",
-                        "available": false,
-                        "reason": "no merged PR to advance from"
-                      },
-                      {
-                        "action": "complete",
-                        "available": false,
-                        "reason": "implementation not finished"
-                      },
-                      {
-                        "action": "no_action",
-                        "available": true,
-                        "reason": "Task body is working"
-                      }
-                    ]
+                    "reason": "Task body is working"
                   },
                   "pm_completed": false,
-                  "session_status": "running",
+                  "work_status": {
+                    "running": {
+                      "run_id": "run_00000000000000000000000000000005"
+                    }
+                  },
                   "process": {
                     "state": "observed",
                     "alive": true,
@@ -195,17 +174,17 @@
                   }
                 },
                 "runtime": {
-                  "session_id": "ts_review00000000000000000000000000",
-                  "project_session_id": "ps_11111111111111111111111111111111",
-                  "status": "waiting",
+                  "work_id": "ts_review00000000000000000000000000",
+                  "project_id": "ps_11111111111111111111111111111111",
+                  "status": "ready",
                   "reason": "PR open for review",
-                  "status_at": "2026-07-14T22:00:00Z",
+                  "updated_at": "2026-07-14T22:00:00Z",
                   "provider": "claude",
                   "process_alive": false,
                   "observation": {
                     "category": "needs_input",
                     "reason": "PR open for review",
-                    "owner": "human",
+                    "owner": "user",
                     "controls": [
                       "decide",
                       "resume",
@@ -228,41 +207,10 @@
                   "next_owner": "review",
                   "actions": {
                     "recommended": "review",
-                    "actions": [
-                      {
-                        "action": "recover",
-                        "available": false,
-                        "reason": "body is not dead; PR is open for review"
-                      },
-                      {
-                        "action": "resume",
-                        "available": false,
-                        "reason": "awaiting review; resume after review to address feedback"
-                      },
-                      {
-                        "action": "review",
-                        "available": true,
-                        "reason": "checks passed; awaiting review"
-                      },
-                      {
-                        "action": "start_next_pr",
-                        "available": false,
-                        "reason": "PR is open, not merged"
-                      },
-                      {
-                        "action": "complete",
-                        "available": false,
-                        "reason": "PR is open, not merged"
-                      },
-                      {
-                        "action": "no_action",
-                        "available": false,
-                        "reason": "action available: review the PR"
-                      }
-                    ]
+                    "reason": "checks passed; awaiting review"
                   },
                   "pm_completed": false,
-                  "session_status": "waiting",
+                  "work_status": "ready",
                   "process": {
                     "state": "not_expected",
                     "alive": null,
@@ -327,41 +275,10 @@
                   "next_owner": "project",
                   "actions": {
                     "recommended": null,
-                    "actions": [
-                      {
-                        "action": "recover",
-                        "available": false,
-                        "reason": "no Task Session; start one with `lf task run`"
-                      },
-                      {
-                        "action": "resume",
-                        "available": false,
-                        "reason": "no Task Session; start one with `lf task run`"
-                      },
-                      {
-                        "action": "review",
-                        "available": false,
-                        "reason": "no Task Session; start one with `lf task run`"
-                      },
-                      {
-                        "action": "start_next_pr",
-                        "available": false,
-                        "reason": "no Task Session; start one with `lf task run`"
-                      },
-                      {
-                        "action": "complete",
-                        "available": false,
-                        "reason": "no Task Session; start one with `lf task run`"
-                      },
-                      {
-                        "action": "no_action",
-                        "available": false,
-                        "reason": "no Task Session; start one with `lf task run`"
-                      }
-                    ]
+                    "reason": "Task is ready to start"
                   },
                   "pm_completed": false,
-                  "session_status": null,
+                  "work_status": null,
                   "process": {
                     "state": "not_applicable",
                     "alive": null,
@@ -399,11 +316,11 @@
                   }
                 },
                 "runtime": {
-                  "session_id": "ts_later000000000000000000000000000",
-                  "project_session_id": "ps_11111111111111111111111111111111",
-                  "status": "completed",
+                  "work_id": "ts_later000000000000000000000000000",
+                  "project_id": "ps_11111111111111111111111111111111",
+                  "status": "done",
                   "reason": "Research delivered in merged PR",
-                  "status_at": "2026-07-14T21:00:00Z",
+                  "updated_at": "2026-07-14T21:00:00Z",
                   "provider": "claude",
                   "process_alive": false,
                   "observation": {
@@ -428,41 +345,10 @@
                   "next_owner": "project",
                   "actions": {
                     "recommended": "no_action",
-                    "actions": [
-                      {
-                        "action": "recover",
-                        "available": false,
-                        "reason": "Task is terminal"
-                      },
-                      {
-                        "action": "resume",
-                        "available": false,
-                        "reason": "Task is terminal"
-                      },
-                      {
-                        "action": "review",
-                        "available": false,
-                        "reason": "Task is terminal"
-                      },
-                      {
-                        "action": "start_next_pr",
-                        "available": false,
-                        "reason": "Task is terminal"
-                      },
-                      {
-                        "action": "complete",
-                        "available": false,
-                        "reason": "Task is terminal"
-                      },
-                      {
-                        "action": "no_action",
-                        "available": true,
-                        "reason": "Task is completed"
-                      }
-                    ]
+                    "reason": "Task is completed"
                   },
                   "pm_completed": true,
-                  "session_status": "completed",
+                  "work_status": "done",
                   "process": {
                     "state": "not_expected",
                     "alive": null,
@@ -490,8 +376,7 @@
       "wave": {
         "id": "wave-2",
         "name": "context",
-        "status": "idle",
-        "paused": false,
+        "status": "ready",
         "goal": "context",
         "repo": "/src/context",
         "active_tasks": 0,
@@ -501,13 +386,10 @@
         "created_at": null,
         "parent_wave_id": null,
         "home": {
-          "address": "ssh://jack@mini-heart",
-          "owner": "jack",
-          "location": {
-            "kind": "ssh",
-            "host": "mini-heart",
-            "port": null
-          }
+          "id": "home_00000000000000000000000000000002",
+          "route": "ssh://jack@mini-heart",
+          "created_at": "1970-01-01T00:00:00Z",
+          "observed_at": "1970-01-01T00:00:00Z"
         }
       },
       "projects": {

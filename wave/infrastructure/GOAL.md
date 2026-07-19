@@ -5,7 +5,7 @@ crons:
 pm:
   provider: linear
   linear_initiative: 218967b6-a760-4b7c-9a46-11d9d61a42c2
-  linear_team: 60558c53-2169-49f8-a76a-1f4586705aa9
+  linear_team: 08c8d501-791d-4db0-a14c-15599d365955
 ---
 
 ## Objective

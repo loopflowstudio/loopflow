@@ -1,6 +1,6 @@
 mod support;
 
-use loopflow::child_session::{ChildCommand, ChildCommandKind, ChildCommandSource, ChildRef};
+use loopflow::child::ChildRef;
 use loopflow::ops::linear_observe::reconcile_linear_observation;
 use loopflow::pm::IssueObservation;
 use loopflow_test_support::TestRepo;
@@ -20,20 +20,10 @@ fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
     }
 }
 
-fn follow_up_command(target: &ChildRef, body: &str) -> ChildCommand {
-    ChildCommand::new(
-        target.clone(),
-        ChildCommandSource::Linear,
-        ChildCommandKind::FollowUp {
-            text: body.to_string(),
-        },
-    )
-}
-
 /// The durable substrate under the webhook receiver: the cursor is seeded at
-/// Session creation, an issue edit becomes exactly one versioned directive (and
-/// a stale/duplicate delivery reverts nothing), and a human comment becomes one
-/// FIFO follow-up that a redelivered webhook cannot double-apply.
+/// Session creation, an issue edit becomes exactly one Steer (and a
+/// stale/duplicate delivery reverts nothing), and a user comment becomes one
+/// FIFO Steer that a redelivered webhook cannot double-apply.
 #[test]
 fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -60,7 +50,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert_eq!(seeded.last_title, task.session.launch.issue.title);
     assert_eq!(seeded.last_revision, "");
 
-    // 1. A human edits title + description → one replacement directive.
+    // 1. A user edits title + description → one Steer.
     let outcome = rt
         .block_on(reconcile_linear_observation(
             &task.store,
@@ -71,21 +61,20 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         ))
         .expect("edit");
     assert!(!outcome.baselined);
-    assert!(outcome.directive_applied);
+    assert!(outcome.content_steer_applied);
 
     let session = rt
-        .block_on(task.store.get_task_session(&task.session.id))
+        .block_on(task.store.get_task(&task.session.id))
         .expect("read session")
         .expect("session");
-    assert_eq!(session.current_directive_version, 1);
-    let commands = rt
-        .block_on(task.store.list_child_commands(&target))
-        .expect("commands");
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0].source, ChildCommandSource::Linear);
-    assert!(
-        matches!(&commands[0].kind, ChildCommandKind::Steer { text } if text.contains("New title"))
-    );
+    let work = rt
+        .block_on(task.store.work_for_child(&target))
+        .expect("work");
+    let seed = rt
+        .block_on(task.store.boundary_seed(&work))
+        .expect("boundary seed");
+    assert_eq!(seed.steers.len(), 1);
+    assert!(seed.steers[0].text.contains("New title"));
 
     // 2. Re-deliver the same edit → no duplicate directive.
     let outcome = rt
@@ -97,14 +86,14 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
             now,
         ))
         .expect("re-deliver");
-    assert!(!outcome.directive_applied);
+    assert!(!outcome.content_steer_applied);
 
-    // 3. A human comment → one FIFO follow-up; a redelivered webhook adds nothing.
+    // 3. A user comment → one FIFO Steer; a redelivered webhook adds nothing.
     let created = rt
         .block_on(task.store.apply_linear_comment(
             &task.session.id,
             "c-1".to_string(),
-            follow_up_command(&target, "please prioritize"),
+            "please prioritize".to_string(),
             now,
         ))
         .expect("comment");
@@ -113,19 +102,17 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .block_on(task.store.apply_linear_comment(
             &task.session.id,
             "c-1".to_string(),
-            follow_up_command(&target, "please prioritize"),
+            "please prioritize".to_string(),
             now,
         ))
         .expect("duplicate comment");
     assert!(duplicate.is_none(), "redelivery is a no-op");
 
-    let commands = rt
-        .block_on(task.store.list_child_commands(&target))
-        .expect("commands");
-    assert_eq!(commands.len(), 2, "one directive + one follow-up, no dup");
-    assert!(commands
-        .iter()
-        .any(|c| matches!(&c.kind, ChildCommandKind::FollowUp { text } if text.contains("please prioritize"))));
+    let seed = rt
+        .block_on(task.store.boundary_seed(&work))
+        .expect("boundary seed");
+    assert_eq!(seed.steers.len(), 2, "one edit + one comment, no dup");
+    assert!(seed.steers[1].text.contains("please prioritize"));
 
     // 4. A stale, out-of-order edit (older revision, older content) is dropped.
     let outcome = rt
@@ -142,7 +129,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         ))
         .expect("stale edit");
     assert!(
-        !outcome.directive_applied,
+        !outcome.content_steer_applied,
         "stale content never reverts direction"
     );
     let cursor = rt

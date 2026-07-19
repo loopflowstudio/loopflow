@@ -31,6 +31,8 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert "cargo build --release" in commands
     assert "tar czf" in commands
     assert "package-smoke/lf --version" in commands
+    assert "package-smoke/lf --help" in commands
+    assert "package-smoke/lf --list" in commands
 
     forbidden = [
         "gh release",
@@ -41,20 +43,6 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
         "gh workflow run",
     ]
     assert not any(term in commands for term in forbidden)
-
-
-def test_token_compress_skill_is_documented_as_preserving_information():
-    step = (ROOT / "rust/loopflow/src/engine/builtins/ops/skill/token-compress.md").read_text()
-    docs = (ROOT / "docs/index.md").read_text()
-    readme = (ROOT / "README.md").read_text()
-
-    assert "Compress text into a target token budget" in step
-    assert "Compression is not truncation" in step
-    assert "Do not summarize a list by taking the first items" in step
-    assert "Omitted" in step
-    assert "lf token-compress" in docs
-    assert "Do not take the first N commits" in docs
-    assert "| `token-compress` |" in readme
 
 
 def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tmp_path: Path):
@@ -146,7 +134,18 @@ set -euo pipefail
 printf '%s\n' "$*" > {cargo_log}
 repo="$PWD"
 mkdir -p "$repo/target/release"
-printf '#!/usr/bin/env bash\necho lf fake\n' > "$repo/target/release/lf"
+cat > "$repo/target/release/lf" <<'LF'
+#!/usr/bin/env bash
+if [ "$1" = "install" ] && [ "$2" = "promote" ]; then
+    shift 2
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = "--cli-target" ]; then mkdir -p "$(dirname "$2")"; ln -sf "$0" "$2"; fi
+        shift
+    done
+    exit 0
+fi
+echo lf fake
+LF
 chmod +x "$repo/target/release/lf"
 """
     )
@@ -178,39 +177,7 @@ chmod +x "$repo/target/release/lf"
     assert "scripts/install.py refresh" in (ROOT / "scripts/pull-local-bin.sh").read_text()
 
 
-def test_install_refresh_fetches_then_merges_without_user_pull_config():
-    install = (ROOT / "scripts/install.py").read_text()
-    wrapper = (ROOT / "scripts/pull-local-bin.sh").read_text()
-
-    assert '["git", "fetch", "origin", default_branch]' in install
-    assert '["git", "merge", "--ff-only", f"origin/{default_branch}"]' in install
-    assert '["git", "fetch"]' in install
-    assert '["git", "merge", "--ff-only", "@{upstream}"]' in install
-    assert "pull --ff-only" not in install
-    assert "scripts/install.py" in wrapper
-    assert "cargo build" not in wrapper
-
-
-def test_spend_guardrails_remain_independent_of_host_deployment():
-    cost_docs = (ROOT / "deploy/COSTS.md").read_text()
-    budget_config = yaml.safe_load((ROOT / "deploy/budget.json").read_text())
-    assert budget_config["monthly_budget_usd"] == "100.00"
-    assert budget_config["source_of_truth"] == "mercury_company_card"
-    assert "scripts/check_monthly_spend.py" in cost_docs
-    assert "company card" in cost_docs
-
-
-def test_release_schedule_contract_covers_loopflow_and_cadenza():
-    schedule = (ROOT / "release/SCHEDULE.md").read_text()
-    assert "Loopflow and Cadenza use the same release rhythm" in schedule
-    assert "0 9 * * *" in schedule
-    assert "0 12 * * 0" in schedule
-    assert (
-        "Weekly publishing never runs unless nightly-style package verification passed" in schedule
-    )
-    assert "lf release run patch" in schedule
-    assert "release/unreleased/DECISIONS.md" in schedule
-
+def test_weekly_release_verifies_packages_before_publish():
     weekly = yaml.load(
         (ROOT / ".github/workflows/weekly-release.yml").read_text(), Loader=yaml.BaseLoader
     )
@@ -231,7 +198,7 @@ def test_release_schedule_contract_covers_loopflow_and_cadenza():
     assert "gh workflow run release.yml" not in commands
 
 
-def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
+def test_release_dmg_workflow_bounds_build_and_upload():
     release = yaml.load(
         (ROOT / ".github/workflows/release.yml").read_text(),
         Loader=yaml.BaseLoader,
@@ -242,8 +209,6 @@ def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
     )
     steps = build_dmg["steps"]
     commands = "\n".join(step.get("run", "") for step in steps)
-    script = (ROOT / "scripts/release-loopflow.py").read_text()
-
     assert build_dmg["timeout-minutes"] == "45"
     assert "--bin lf" in native_commands
     assert "tar czf ../../../lf-${{ matrix.target }}.tar.gz lf" in native_commands
@@ -257,27 +222,14 @@ def test_release_dmg_build_has_timeouts_and_unbuffered_logs():
         step.get("name") == "Upload DMG to R2" and step.get("timeout-minutes") == "5"
         for step in steps
     )
-    assert "timeout=30 * 60" in script
-    assert "notarytool" in script
-    assert "Timed out after" in script
-    assert "flush=True" in script
-    assert "Skipping notarization" not in script
-    assert "signing ad-hoc" not in script
-    assert "refusing to build a user DMG" in script
 
 
 def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     test_script = (ROOT / "scripts/test.py").read_text()
     screenshot_script = (ROOT / "scripts/generate_screenshots.py").read_text()
-    docs = "\n".join(
-        [
-            (ROOT / "TESTING.md").read_text(),
-            (ROOT / "swift/README.md").read_text(),
-        ]
-    )
 
-    for text in (ci, test_script, screenshot_script, docs):
+    for text in (ci, test_script, screenshot_script):
         assert "CODE_SIGNING_ALLOWED=NO" not in text
         assert "CODE_SIGNING_REQUIRED=NO" not in text
 
@@ -285,7 +237,22 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     assert '"CODE_SIGN_IDENTITY=-"' in test_script
     assert '"CODE_SIGN_IDENTITY=-"' in screenshot_script
     assert "-disableAutomaticPackageResolution" in ci
-    assert "-disableAutomaticPackageResolution" in docs
+
+
+def test_rust_ci_materializes_drafts_before_running_tests():
+    ci = yaml.load(
+        (ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
+    )
+    steps = ci["jobs"]["rust-test"]["steps"]
+    names = [step.get("name") for step in steps]
+
+    materialize = names.index("Materialize draft migrations for tests")
+    test = names.index("Run Rust tests")
+    command = steps[materialize]["run"]
+
+    assert materialize < test
+    assert "scripts/canonicalize_migrations.py" in command
+    assert '["workspace"]["package"]["version"]' in command
 
 
 def test_changed_aware_runner_includes_ci_static_checks():

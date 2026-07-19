@@ -25,8 +25,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
+DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
 MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
+# A draft file is `<name>__<id>.sql`; the readable name never contains `__`, and
+# the id is an immutable 128-bit token (32 hex chars).
+DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
+# `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
+# value would swallow the newline and capture the next SQL line.
+DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
+DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 VERSION_LINE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
 
 # One `Migration { .. }` entry of the MIGRATIONS registry in migrations.rs.
@@ -224,6 +232,95 @@ def _check_current_main(local: dict[tuple[int, int, int], str]) -> None:
             _fail(f"{local_name} differs from origin/main and is already durable history")
 
 
+def _draft_cycle(drafts: dict[str, list[str]]) -> list[str] | None:
+    """A dependency cycle among drafts as a node path, or None. Ordinals are
+    assigned at the release cut by a topological sort, so a cycle has no order
+    and must fail before any release rather than pick one arbitrarily."""
+    white, gray, black = 0, 1, 2
+    color = {name: white for name in drafts}
+    stack: list[str] = []
+
+    def visit(node: str) -> list[str] | None:
+        color[node] = gray
+        stack.append(node)
+        for dependency in drafts.get(node, []):
+            if color.get(dependency) == gray:
+                return stack[stack.index(dependency) :] + [dependency]
+            if color.get(dependency) == white:
+                found = visit(dependency)
+                if found:
+                    return found
+        stack.pop()
+        color[node] = black
+        return None
+
+    for name in sorted(drafts):
+        if color[name] == white:
+            found = visit(name)
+            if found:
+                return found
+    return None
+
+
+def _check_drafts(released_names: set[str]) -> None:
+    """Draft migrations carry a stable name and no ordinal, so parallel branches
+    never contend for one. The release cut is what assigns canonical ids; this
+    only proves the drafts are well-formed and orderable before then."""
+    if not DRAFTS_DIR.is_dir():
+        return
+
+    drafts: dict[str, list[str]] = {}
+    for path in sorted(DRAFTS_DIR.iterdir()):
+        if path.is_dir() or path.suffix != ".sql":
+            continue
+        match = DRAFT_FILE.match(path.name)
+        if not match:
+            _fail(
+                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
+                "— run scripts/new_migration.py"
+            )
+        name = match.group(1)
+        text = path.read_text()
+        header = DRAFT_HEADER_NAME.search(text)
+        if not header:
+            _fail(f"draft {path.name} has no `-- name:` header")
+        if header.group(1) != name:
+            _fail(f"draft {path.name} header names {header.group(1)!r}, not {name!r}")
+        if name in released_names:
+            _fail(f"draft {name} collides with a released migration of the same name")
+        if name in drafts:
+            _fail(
+                f"two drafts share the readable name {name!r} — rename one "
+                "before releasing"
+            )
+        depends = DRAFT_HEADER_DEPENDS.search(text)
+        dependencies: list[str] = []
+        if depends:
+            raw = depends.group(1).strip()
+            if raw and raw.lower() != "none":
+                dependencies = [part.strip() for part in raw.split(",") if part.strip()]
+        drafts[name] = dependencies
+
+    for name, dependencies in drafts.items():
+        for dependency in dependencies:
+            if dependency == name:
+                _fail(f"draft {name} depends on itself")
+            # A dependency resolves against another draft or an already-released
+            # migration (a released upstream is ordered before the whole cut).
+            if dependency not in drafts and dependency not in released_names:
+                _fail(
+                    f"draft {name} depends on {dependency!r}, which is neither a draft "
+                    "nor a released migration"
+                )
+
+    cycle = _draft_cycle(drafts)
+    if cycle:
+        _fail(f"draft dependencies form a cycle: {' -> '.join(cycle)}")
+
+    if drafts:
+        print(f"{len(drafts)} draft migration(s): {', '.join(sorted(drafts))}")
+
+
 def _fail(message: str) -> None:
     print(f"migration check failed: {message}", file=sys.stderr)
     raise SystemExit(1)
@@ -237,6 +334,9 @@ def main() -> None:
 
     ids: dict[tuple[int, int, int], str] = {}
     for path in sorted(MIGRATIONS_DIR.iterdir()):
+        if path.is_dir():
+            # `drafts/` holds unordered draft migrations, checked separately.
+            continue
         match = MIGRATION_NAME.match(path.name)
         if not match:
             _fail(
@@ -260,6 +360,11 @@ def main() -> None:
 
     _check_registry(ids)
     _check_current_main(ids)
+
+    released_names = {
+        match.group(4) for name in ids.values() if (match := MIGRATION_NAME.match(name))
+    }
+    _check_drafts(released_names)
 
     # Deterministic order across namespaces is the numeric tuple, never the string:
     # `0.10.001` sorts before `0.9.001` lexically.

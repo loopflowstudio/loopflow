@@ -3,33 +3,21 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::child_session::ChildProcessGeneration;
 use loopflow::id::WaveId;
-use loopflow::project_session::{ProjectSession, ProjectSessionId, ProjectSessionStatus};
-use loopflow::session_context::{
+use loopflow::launch_context::{
     LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
     ProjectLaunchReceipt, TaskLaunchReceipt,
 };
+use loopflow::project::{Project, ProjectId};
 use loopflow::store::{open_store, StorageConfig, Store, CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV};
-
-/// Ambient identity vars a live `lf __task` process exports. When the test suite
-/// itself runs inside a Task Session, these leak in and steer `task_for_worktree`
-/// at the wrong (real) session's store, and `command_source` classification at the
-/// ambient Wave. Every `EnvGuard` clears them so task-aware tests resolve by
-/// worktree path, restoring them on drop.
-const AMBIENT_TASK_ENV: [&str; 5] = [
-    "LF_TASK_SESSION_ID",
-    "LF_TASK_GENERATION",
-    "LF_TASK_LEASE_TOKEN",
-    "LF_WAVE_ID",
-    "LF_PROJECT_SESSION_ID",
-];
-use loopflow::task::{
-    PmWritebackState, TaskPr, TaskPrId, TaskSession, TaskSessionId, TaskSessionStatus,
-};
+use loopflow::task::{PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::wave::Wave;
 use tempfile::TempDir;
 use time::OffsetDateTime;
+
+/// Ambient authority a live agent process exports. Tests must never inherit the
+/// real Run that invoked the suite.
+const AMBIENT_AGENT_ENV: [&str; 3] = ["LF_RUN_CONTEXT", "LF_RUN_LEASE", "LF_WAVE_ID"];
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -102,7 +90,7 @@ pub struct EnvGuard {
     previous_db_path: Option<OsString>,
     previous_control_home: Option<OsString>,
     previous_control_db_path: Option<OsString>,
-    previous_ambient_task: Vec<(&'static str, Option<OsString>)>,
+    previous_ambient_authority: Vec<(&'static str, Option<OsString>)>,
     _bin: TempDir,
     _lf_home: TempDir,
 }
@@ -110,20 +98,33 @@ pub struct EnvGuard {
 impl EnvGuard {
     #[allow(dead_code)] // Shared helper compiled into multiple test crates.
     pub fn new(entries: &[(&str, &str)]) -> Self {
-        Self::with_home(entries, None)
+        Self::_with_home_and_path(entries, None, true)
+    }
+
+    #[allow(dead_code)] // Shared helper used by tests that require PATH isolation.
+    pub fn new_isolated(entries: &[(&str, &str)]) -> Self {
+        Self::_with_home_and_path(entries, None, false)
     }
 
     #[allow(dead_code)] // Shared helper used only by tests that need HOME isolation.
     pub fn with_home(entries: &[(&str, &str)], home: Option<&Path>) -> Self {
+        Self::_with_home_and_path(entries, home, true)
+    }
+
+    fn _with_home_and_path(
+        entries: &[(&str, &str)],
+        home: Option<&Path>,
+        include_existing_path: bool,
+    ) -> Self {
         let lock = env_lock().lock().unwrap_or_else(|err| err.into_inner());
         let bin = TempDir::new().expect("temp bin dir");
         for (name, content) in entries {
             write_executable(bin.path(), name, content);
         }
         let previous_path = env::var("PATH").ok();
-        let new_path = match &previous_path {
-            Some(prev) => format!("{}:{}", bin.path().display(), prev),
-            None => bin.path().display().to_string(),
+        let new_path = match (&previous_path, include_existing_path) {
+            (Some(prev), true) => format!("{}:{}", bin.path().display(), prev),
+            _ => bin.path().display().to_string(),
         };
         env::set_var("PATH", new_path);
         let previous_home = env::var("HOME").ok();
@@ -134,7 +135,7 @@ impl EnvGuard {
         let previous_db_path = env::var_os("LF_DB_PATH");
         let previous_control_home = env::var_os(CONTROL_HOME_ENV);
         let previous_control_db_path = env::var_os(CONTROL_DB_PATH_ENV);
-        let previous_ambient_task = AMBIENT_TASK_ENV
+        let previous_ambient_authority = AMBIENT_AGENT_ENV
             .iter()
             .map(|name| {
                 let prev = env::var_os(name);
@@ -161,7 +162,7 @@ impl EnvGuard {
             previous_db_path,
             previous_control_home,
             previous_control_db_path,
-            previous_ambient_task,
+            previous_ambient_authority,
             _bin: bin,
             _lf_home: lf_home,
         }
@@ -203,7 +204,7 @@ impl Drop for EnvGuard {
             Some(prev) => env::set_var(CONTROL_DB_PATH_ENV, prev),
             None => env::remove_var(CONTROL_DB_PATH_ENV),
         }
-        for (name, prev) in &self.previous_ambient_task {
+        for (name, prev) in &self.previous_ambient_authority {
             match prev {
                 Some(prev) => env::set_var(name, prev),
                 None => env::remove_var(name),
@@ -215,7 +216,7 @@ impl Drop for EnvGuard {
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
     pub store: Store,
-    pub session: TaskSession,
+    pub session: Task,
     pub pr: TaskPr,
 }
 
@@ -256,8 +257,8 @@ fn register_task_with_process(
         "task-pr-tests".to_string(),
         worktree.display().to_string(),
     );
-    let project = ProjectSession {
-        id: ProjectSessionId::new(),
+    let project = Project {
+        id: ProjectId::new(),
         launch: ProjectLaunchReceipt {
             project: LinearProjectSnapshot {
                 id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
@@ -268,36 +269,18 @@ fn register_task_with_process(
             pm_snapshot_synced_at: now.unix_timestamp(),
         },
         wave_id: wave.id().clone(),
-        current_directive_version: 0,
-        incorporated_directive_version: 0,
-        status: ProjectSessionStatus::Running,
-        status_reason: "test project is running".to_string(),
-        status_at: now,
         iteration: 1,
         observation_cursor: 0,
         last_state_fingerprint: None,
         agent: "codex".to_string(),
         provider: "codex".to_string(),
         provider_session_id: Some("task-pr-project".to_string()),
-        latest_process: Some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "task-pr-project".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("task-pr-project".to_string()),
-            started_at: now,
-            state: loopflow::child_session::ChildLeaseState::Legacy,
-            outcome: None,
-            provenance: None,
-        }),
         abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
-    let session = TaskSession {
-        id: TaskSessionId::new(),
+    let session = Task {
+        id: TaskId::new(),
         launch: TaskLaunchReceipt {
             issue: LinearIssueSnapshot {
                 id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
@@ -310,20 +293,7 @@ fn register_task_with_process(
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
-        project_session_id: project.id.clone(),
-        current_directive_version: 0,
-        incorporated_directive_version: 0,
-        status: if active {
-            TaskSessionStatus::Running
-        } else {
-            TaskSessionStatus::Waiting
-        },
-        status_reason: if active {
-            "test Task is running".to_string()
-        } else {
-            "test Task is waiting".to_string()
-        },
-        status_at: now,
+        project_id: project.id.clone(),
         worktree: worktree.to_path_buf(),
         workspace_slug: "task-pr-proof".to_string(),
         lifecycle: loopflow::task::TaskLifecyclePlan::standard("task"),
@@ -336,19 +306,6 @@ fn register_task_with_process(
         agent: "codex".to_string(),
         provider: "codex".to_string(),
         provider_session_id: None,
-        latest_process: active.then_some(ChildProcessGeneration {
-            generation: 1,
-            pid: None,
-            process_group_id: None,
-            tmux_name: "task-github-cache".to_string(),
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: Some("task-github-cache".to_string()),
-            started_at: now,
-            state: loopflow::child_session::ChildLeaseState::Legacy,
-            outcome: None,
-            provenance: None,
-        }),
         abandon_intent: None,
         created_at: now,
         updated_at: now,
@@ -356,7 +313,7 @@ fn register_task_with_process(
     };
     let pr = TaskPr {
         id: TaskPrId::new(),
-        task_session_id: session.id.clone(),
+        task_id: session.id.clone(),
         sequence: 1,
         slug: session.workspace_slug.clone(),
         branch: branch.to_string(),
@@ -376,13 +333,107 @@ fn register_task_with_process(
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
         store
-            .create_project_session(&project)
+            .create_project(&project)
             .await
             .expect("create test project");
         store
-            .create_task_session(&session, &pr)
+            .create_task(&session, &pr)
             .await
             .expect("create test Task");
+        let work = store
+            .work_for_child(&loopflow::child::ChildRef::Task(session.id.clone()))
+            .await
+            .expect("resolve test Task Work");
+        let (_, lease) = store
+            .reserve_run(&work, loopflow::durable::RunTrigger::User)
+            .await
+            .expect("reserve completed test Task Run");
+        let loopflow::durable::AdvanceReceipt::Launch(launch) = store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::LaunchStarting {
+                    route: loopflow::durable::LaunchRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    containment: loopflow::durable::Containment::ProcessGroup { id: 1 },
+                    cwd: worktree.to_path_buf(),
+                    surface: "test".to_string(),
+                    opaque: false,
+                    resume_token: None,
+                },
+            )
+            .await
+            .expect("start test Task Launch")
+        else {
+            unreachable!("LaunchStarting returns Launch")
+        };
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::LaunchLive {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("activate test Task Launch");
+        let loopflow::durable::AdvanceReceipt::Turn(turn) = store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::TurnStarting {
+                    launch_id: launch.id.clone(),
+                },
+            )
+            .await
+            .expect("start test Task Turn")
+        else {
+            unreachable!("TurnStarting returns Turn")
+        };
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::TurnActive {
+                    turn_id: turn.id.clone(),
+                    provider_turn_id: None,
+                },
+            )
+            .await
+            .expect("activate test Task Turn");
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::TurnEnded {
+                    turn_id: turn.id,
+                    outcome: loopflow::durable::BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .expect("finish test Task Turn");
+        store
+            .advance_run(
+                &lease,
+                loopflow::durable::RunAdvance::LaunchEnded {
+                    launch_id: launch.id,
+                    outcome: loopflow::durable::BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .expect("finish test Task Launch");
+        store
+            .stop_run(
+                &lease,
+                loopflow::durable::StopCause::Requested,
+                loopflow::durable::ContainmentObservation::Absent,
+            )
+            .await
+            .expect("finish test Task Run");
+        if active {
+            store
+                .reserve_run(&work, loopflow::durable::RunTrigger::User)
+                .await
+                .expect("reserve test Task Run");
+        }
     });
     RegisteredTask { store, session, pr }
 }

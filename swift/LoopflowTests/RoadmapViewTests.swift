@@ -27,16 +27,14 @@ struct RoadmapViewTests {
         #expect(roadmapTaskAction(tasks[3]) == nil)
     }
 
-    @Test("A blocked action explains the blocking fact")
-    func blockedActionsCarryTheirReason() throws {
+    @Test("The recommended action explains itself")
+    func recommendedActionCarriesItsReason() throws {
         let snapshot = try loadRoadmapFixture()
         let project = try #require(snapshot.waves.first?.projects.items.first)
         let reviewing = project.tasks[1].attention.actions
 
-        let resume = try #require(reviewing.status(.resume))
-        #expect(!resume.available)
-        #expect(resume.reason == "awaiting review; resume after review to address feedback")
-        #expect(reviewing.actions.allSatisfy { !$0.reason.isEmpty })
+        #expect(reviewing.recommended == .review)
+        #expect(reviewing.reason == "checks passed; awaiting review")
     }
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {

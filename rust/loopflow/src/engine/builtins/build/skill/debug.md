@@ -38,6 +38,19 @@ git diff main...HEAD -- <file>
 
 **Reproduce first.** Before fixing, understand how to trigger the error. A fix you can't verify isn't a fix.
 
+**Write the causal prediction.** State the violated invariant, the leading
+explanations, and what each predicts before editing. Preserve the reproduction
+as observed evidence; keep guesses labeled as guesses.
+
+**Discriminate before patching.** Run the smallest safe check whose outcomes
+separate the leading causes. If the result contradicts the current explanation,
+stop dependent edits and revise the model. Repeatedly patching the same
+assumption is a signal that the representation is wrong.
+
+**Replay the whole workflow.** After the candidate fix, run the original
+reproduction, the relevant regression tests, and the user-visible path that
+previously failed. The latest green check does not erase older counterexamples.
+
 ## Output
 
 Fix the bug directly. If the cause isn't obvious from the fix, add a brief inline comment.

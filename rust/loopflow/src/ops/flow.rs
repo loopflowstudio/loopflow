@@ -27,9 +27,10 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             manual,
             continue_rebase,
             abort,
+            adopt,
             onto,
         }) => {
-            if manual || continue_rebase || abort {
+            if manual || continue_rebase || abort || adopt {
                 return Err(OpsError::Message(
                     "manual rebase recovery is only available from the CLI".to_string(),
                 ));

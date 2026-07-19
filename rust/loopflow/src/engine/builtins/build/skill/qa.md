@@ -1,7 +1,6 @@
 ---
 requires: code on branch
 produces: scratch/qa-findings.md
-default_agent: codex
 action_style: procedural
 ---
 Thorough quality assessment of the current branch state.
@@ -27,7 +26,8 @@ Find every issue that would block deploy or embarrass the team. One deep pass be
 
 ## Workflow
 
-1. Read the diff against main. Understand what changed and why.
+1. Read the diff against main. Derive the exact contract: observable success,
+   plausible near-misses that do not count, affected boundaries, and proof.
 2. Run the full test suite. Note failures, flaky tests, and missing coverage.
 3. Read scratch/ for design intent. Check whether the implementation matches.
 4. Walk through the code changes looking for:
@@ -35,7 +35,15 @@ Find every issue that would block deploy or embarrass the team. One deep pass be
    - Regressions: existing behavior broken by the changes
    - Security: injection, auth bypass, data exposure
    - Edge cases: empty inputs, large inputs, concurrent access
+   - Model gaps: a test or implementation that fits the happy path but cannot
+     explain older fixtures, failure cases, or another affected consumer
 5. If the codebase has a UI, verify the user-facing changes work correctly.
+
+Build adversarial cases from the contract rather than a generic checklist. A
+candidate is not ready until it survives the named absent states, malformed or
+partial inputs, boundary values, concurrency or retry behavior when relevant,
+and every consumer the design claims to cover. Treat each mismatch as a
+counterexample to the ship claim; investigate it before continuing the audit.
 
 ## Output
 

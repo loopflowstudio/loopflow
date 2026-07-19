@@ -29,15 +29,17 @@ Three commitment levels — pick by how done the work is and who lands it. All
 three publish the PR headlessly and open no browser:
 
 - **`lf pr publish`** — push and create or refresh the PR while work is still in
-  flight. Rebases only if behind, writes title/body, prints state + URL, leaves
-  the PR up. Use it to make work visible mid-stream; nothing is finalized and
-  nothing is presented. This is the agent's default "make a PR" verb.
+  flight. Never rebases: a PR may honestly remain behind until an explicit
+  integration command. Writes title/body, prints state + URL, and leaves the PR
+  up. Use it to make work visible mid-stream; nothing is finalized or presented.
+  This is the agent's default "make a PR" verb.
 - **`lf pr submit`** — the work is done and a **human** lands it. Rebases onto
-  main, clears `scratch/`, marks the PR ready, and assigns it to you. Stops
-  there: no auto-merge. Your merge click on GitHub is the one required gate —
-  the button unlocks once checks pass. (GitHub blocks approving your own PR, so
-  the gate is the merge click, not a review approval.) Use this as the default
-  finish for anything a person should land by hand.
+  main, clears `scratch/`, collapses checkpoint history into one authored
+  commit, verifies and pushes once, marks the PR ready, and assigns it to you.
+  Stops there: no auto-merge. Your merge click on GitHub is the one required
+  gate — the button unlocks once checks pass. (GitHub blocks approving your own
+  PR, so the gate is the merge click, not a review approval.) Use this as the
+  default finish for anything a person should land by hand.
 - **`lf pr land`** — the work is done and **loopflow** lands it hands-off. Does
   everything `submit` does, then arms auto-merge so it merges when checks pass.
   Use it in headless/auto runs where no human is gating. Inside a Task, bare
@@ -60,6 +62,23 @@ convention (`<repo>.<name>`) is load-bearing, so never use raw `git worktree`.
 
 The current process and worktree are the default execution surface. Do the
 assigned work here with direct reads, edits, commands, and tests.
+
+## Evidence Loop
+
+Make the finish line explicit before acting: the observable result, the proof
+that distinguishes it from a plausible story, and the near-misses that do not
+count. When uncertainty is material, keep observed facts separate from the
+current hypothesis in a durable artifact outside the provider transcript.
+
+Prefer the smallest safe check whose possible outcomes distinguish the leading
+explanations. Verify a candidate against all relevant recorded evidence, not
+only the latest case. Treat unexpected tool, test, or user output as a
+counterexample: stop dependent steps, revise the model or plan, then continue.
+Never rewrite an observation to preserve a favored explanation.
+
+Move cheap search into code, tests, fixtures, or a local sandbox when possible.
+Cross a side-effect boundary only after the candidate survives the available
+checks, then record the consequential result durably.
 
 Delegation must make the problem smaller. Delegate only a strict subset that
 can finish independently; never hand the whole seed to another agent, and never
@@ -85,6 +104,38 @@ reported output-token throughput for the last hour and the currently running
 `lf` and provider processes; use it as machine-health evidence, not as a
 lifecycle control.
 
+## Inspect
+
+When the human asks about Loopflow state, use the shared read surfaces instead
+of reconstructing it from processes, worktrees, or Linear:
+
+```bash
+lf ls --json              # every durable Wave and its Home/runtime evidence
+lf status <wave> --json   # one Wave's Work hierarchy, Runs, and attention
+lf roadmap --json         # current plan across Waves joined to runtime truth
+```
+
+`lf status` is the focused operational view. `lf roadmap` is the planning
+overlay, not a second runtime model.
+
+## Place And Run
+
+Execution placement is durable state, not authored goal text. A Work names one
+stable Home authority; the Home's SSH route may change without moving the Work.
+
+```bash
+lf home id                                      # this machine's HomeId
+lf work place wave <wave-id> <home-id>          # only while no Run is live
+lf start <wave>                                 # route to its placed Home
+lf stop <wave>                                  # leave the Home keeper and siblings running
+lf ssh <home-id> --remote-native -- lf status <wave> --json
+```
+
+Use `--remote-native` for durable remote lifecycle. It forwards no provider,
+GitHub, PM, or secret authority; the remote Home uses its installed authority.
+Use ordinary `lf ssh <host> -- <command>` only for foreground work that should
+borrow the origin's short-lived credential lease.
+
 ## Speak
 
 Answer a human message in your turn text. Use `lf radio pub` for proactive progress,
@@ -95,7 +146,7 @@ channel, or when the active skill requires it. Never guess a channel.
 one and a live wave is available. A stopped server must not block the assigned
 work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
 
-`lf chat` is the human surface. Agents use `lf radio pub`.
+`lf chat` is the User surface. Loopflow-launched agents use `lf radio pub`.
 
 ## Where To Write
 
@@ -199,6 +250,15 @@ Choose the surface that most directly proves each claim:
   programmatic claims.
 - **Operations:** inspect admin state, logs, counters, stats, or metrics when
   the result is observable there rather than in the product.
+
+Prefer the real configured or deployed path when it can be exercised through a
+normal user action, a read-only observation, or disposable data. Use a local
+simulation only when the real boundary is unavailable or unsafe, and label the
+claim as simulated. Never mutate production solely to make a demo possible.
+
+Product proof and automated proof are peers. A real workflow can prove that
+the system delivers value; focused tests still protect deterministic contracts
+and edge cases that a demo cannot cover.
 
 A diff proves construction, not behavior. Use code alone only when the Done
 When is itself structural. For authentication, account, or permissions work,

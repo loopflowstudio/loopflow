@@ -31,7 +31,7 @@ use serde::Deserialize;
 
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
-use crate::id::{RunId, WaveId};
+use crate::id::{TraceId, WaveId};
 use crate::wave::journal::{fold_thread, journal_path, read_events};
 use crate::wave::server::endpoint_path;
 use crate::wave::Wave;
@@ -93,12 +93,13 @@ pub fn resolve_ambient_channel_name() -> Option<String> {
     }
 }
 
-/// The bus channel owned by a placed run. The worktree carries a timestamp for
-/// filesystem freshness; the channel stays stable at `wave.<short-run-id>`.
-pub fn placed_channel_name(wave_name: &str, run_id: &RunId) -> String {
+/// The bus channel owned by a placed trace. The worktree carries a timestamp
+/// for filesystem freshness; the channel stays stable at
+/// `wave.<short-trace-id>`.
+pub fn placed_channel_name(wave_name: &str, trace_id: &TraceId) -> String {
     format!(
         "{wave_name}.{}",
-        crate::engine::worktrees::short_run_id(run_id.as_str())
+        crate::engine::worktrees::short_run_id(trace_id.as_str())
     )
 }
 
@@ -773,7 +774,7 @@ mod tests {
 
     #[test]
     fn placed_channel_uses_the_wave_and_registry_run_id() {
-        let run_id = RunId::parse("a1b2c3d4-1111-4111-8111-111111111111").unwrap();
+        let run_id = TraceId::parse("a1b2c3d4-1111-4111-8111-111111111111").unwrap();
         assert_eq!(placed_channel_name("ship", &run_id), "ship.a1b2c3d4");
     }
 

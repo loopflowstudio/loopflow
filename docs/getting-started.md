@@ -1,8 +1,3 @@
----
-layout: default
-title: Get Started
----
-
 # Get Started
 
 ## Install
@@ -21,9 +16,9 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | I want to... | Start here |
 |---|---|
 | Try loopflow from terminal | `lf init` |
-| Run autonomous waves | `lf init` → `lf wave <name>` |
-| Use Wave Chat (macOS) | Download Loopflow and open a repository |
-| Run on another machine | SSH into the host and run `lf wave <name>` there |
+| Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
+| Steer and inspect from terminal | `lf start <name>` → `lf chat --steer` / `lf status` |
+| Run on another machine | Observe its HomeId, place the Wave, then `lf start <name>` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -93,6 +88,7 @@ lf task wait <issue-id> --until terminal
 
 | Skill | What it does |
 |------|--------------|
+| `prompt` | Author or audit a skill, direction, Wave goal, or inline prompt |
 | `design` | Explore the problem, write spec to `scratch/<branch>.md` |
 | `implement` | Read spec, build it |
 | `gate` | Ship-ready check: tests, quality, PR description |
@@ -117,14 +113,20 @@ lf design && lf implement && lf gate    # manual chain
 lf build                                # one design → code → demo/review → gate pass
 ```
 
-Flows automate handoffs within one bounded pass. `build` runs kickoff →
+Flows automate steps within one bounded pass. `build` runs kickoff →
 review-design → implement → compress → lint → demo/review → gate. Use `ship` or
 `deploy` for the explicit delivery workflow. Repetition belongs to Wave,
 Project, and Task runtimes.
 
 ### Custom skills
 
-Add your own in `.lf/skills/`:
+Author one from intent:
+
+```bash
+lf prompt: create a dependency-audit skill
+```
+
+Or add one directly in `.lf/skills/`:
 
 ```markdown
 # .lf/skills/audit.md
@@ -136,12 +138,15 @@ Focus on input validation and auth boundaries.
 lf audit    # runs your custom skill
 ```
 
+The [Prompt Authoring guide](https://loopflow.studio/docs/prompts) covers prompt
+contracts, evidence loops, Wave goals, and directions.
+
 ### Shipping
 
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
-lf pr land    # submit to merge queue
+lf pr land      # arm auto-merge; GitHub merges after required checks pass
 ```
 
 ---
@@ -155,54 +160,65 @@ when chat, child observations, crons, or a heartbeat wake them.
 Linear Projects and tasks, starts durable Task Sessions, and supervises their
 results.
 
-Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional frontmatter sets machine config such as `crons:` and `pm:`), then run the agent:
-
-```bash
-lf wave shipper
-```
+Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
+frontmatter sets machine config such as `crons:` and `pm:`), then open it in
+**Loopflow** (macOS) — the home for running waves. Select the repository and
+the Wave to get its persistent conversation beside the Linear-backed
+Project → Task work map; the app starts the Wave's resident process when
+needed. From the CLI, `lf start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
 <issue-id>`, and stays steerable while the Task Session works in its immutable
 worktree. CI failures and review feedback return to the same session; linked
 events land in the Wave thread.
 
-**Loopflow** (macOS) is the native Wave experience. Select a repository and a
-Wave to open its persistent conversation beside the Linear-backed Project →
-Task work map. The app queries local state through its bundled `lf` and starts
-the selected Wave's `lf wave` process when needed.
-
-Detached processes use named tmux sessions:
+Detached processes use named tmux sessions for process lifetime and read-only
+inspection:
 
 ```bash
 tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf project attach <project>` or `lf task attach <issue>` for a writable,
-audited control prompt. Stop a foreground Wave with Ctrl-C or run
-`lf stop <name>`.
+Use `lf queue`, then `lf work feedback <kind> <id>`, for work that
+needs you. Stop a running Wave with `lf stop <name>`.
 
-You can draft wave content with `lf design` locally, or write it by hand. Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
+Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
+`lf design` to explore an uncertain operating context, or write it by hand.
+Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
-[Wave Authoring Guide →](wave-authoring.md) · [Waves Reference →](waves.md)
+[Waves →](waves.md) · [Conducting →](conducting.md)
 
 ---
 
 ## Go Remote
 
-Run agents while you sleep. SSH into a server, install Loopflow, and run
-`lf wave <name>` there. The Wave process owns its listener and resident loop;
-there is no machine-wide service to install.
+Run agents while you sleep. A Home is stable execution authority; its SSH
+route is a mutable observation. Bootstrap the remote identity once:
 
-Remote Loopflow/Cadenza is future work; for now, use SSH as the remote control
-surface.
+```bash
+lf ssh jack@mini.local --remote-native -- lf home id --json
+lf home observe <home-id> ssh://jack@mini.local
+lf ls --json
+lf work place wave <wave-id> <home-id>
+lf start shipper
+```
 
-Auth connects your providers:
+The remote host needs `lf`, SSH, and its own credentials. `lf start` routes
+through `lf ssh <home-id> --remote-native`: it forwards no origin credentials,
+and the remote Home verifies that the addressed HomeId is its own before
+changing lifecycle state. One Home keeper serves every placed Wave.
+
+Use ordinary `lf ssh <host> -- <command>` for foreground work that should borrow
+the origin's short-lived credential lease. Use `--remote-native` for durable
+remote work that must outlive SSH.
+
+Auth connects your providers locally:
 
 ```bash
 lf auth github    # connect GitHub
 lf auth claude    # connect Claude
-lf auth linear     # connect Linear with OAuth
+lf auth linear    # connect Linear with OAuth
 lf auth status    # check connections
 ```
 
@@ -218,15 +234,26 @@ set -g @plugin 'loopflowstudio/loopflow.tmux'
 run '~/.tmux/plugins/tpm/tpm'
 ```
 
-Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`.
+Status bar shows wave state: `[lf: main]` or `[lf: 3 waves | engbot]`. Customize with `@loopflow_status_format` (variables: `#{status}`, `#{branch}`, `#{skill}`, `#{waves}`, `#{wave}`):
+
+```bash
+# .tmux.conf
+set -g @loopflow_status_format '[lf: #{status}]'    # default
+```
 
 | Key | Action |
 |-----|--------|
 | `prefix+l r` | Run skill/wave |
 | `prefix+l s` | Stop |
 | `prefix+l o` | Open logs |
+| `prefix+l p` | Open PR |
+| `prefix+l n` | New worktree |
+| `prefix+l d` | Land PR |
 | `prefix+l w` | Pick wave/worktree |
 | `prefix+l L` | Pick layout |
+| `prefix+l ?` | Help |
+
+Works without `lf` installed — status shows a placeholder and keybindings explain themselves.
 
 Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3 worktree workers).
 
@@ -234,4 +261,4 @@ Two built-in layouts: `lf-dev` (editor + agent + shell), `lf-swarm` (monitor + 3
 
 ## Reference
 
-[`lf` commands](lf.md) · [`lf` operations](ops.md) · [Configuration](config.md) · [Wave Authoring](wave-authoring.md) · [Waves](waves.md)
+[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Waves](waves.md) · [The Agent API](agent-api.md)

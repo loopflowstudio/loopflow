@@ -3,10 +3,9 @@ import Loopflow
 import SwiftUI
 
 /// Where the tokens went. Every chart here reads one payload — `lf usage --json`,
-/// which applies the cumulative-diff rule so each boundary row carries what that
-/// skill (or that inline run) actually spent. The rows are additive: they sum to
-/// the totals `lf usage` prints. If a chart disagrees with that table, the chart
-/// is wrong.
+/// where each row is one provider-measured Turn. The rows are additive: they
+/// sum to the totals `lf usage` prints. If a chart disagrees with that table,
+/// the chart is wrong.
 struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
@@ -15,7 +14,7 @@ struct TelemetryDashboardView: View {
     /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
     private static let codebaseDays = 365
 
-    @State private var spend: [TraceSpan] = []
+    @State private var spend: [TurnSpend] = []
     @State private var doctor: DoctorReport?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
@@ -97,7 +96,7 @@ struct TelemetryDashboardView: View {
 
     /// A boundary with no skill is a run that never entered one — an inline
     /// prompt. Naming it keeps the series honest rather than dropping the spend.
-    private static func skillKey(_ span: TraceSpan) -> String {
+    private static func skillKey(_ span: TurnSpend) -> String {
         span.skill ?? "(inline)"
     }
 
@@ -353,14 +352,14 @@ private struct DailyBucket: Identifiable {
 /// One stacked bar per day. `key` picks the dimension — skill, or provider:model.
 private struct DailyTokensChart: View {
     @Environment(\.palette) private var palette
-    let spend: [TraceSpan]
-    let key: (TraceSpan) -> String
+    let spend: [TurnSpend]
+    let key: (TurnSpend) -> String
 
     private var buckets: [DailyBucket] {
         var totals: [String: DailyBucket] = [:]
         for span in spend where span.totalTokens > 0 {
             let day = Calendar.current.startOfDay(
-                for: Date(timeIntervalSince1970: TimeInterval(span.startedAt))
+                for: Date(timeIntervalSince1970: TimeInterval(span.at))
             )
             let series = key(span)
             let id = "\(day.timeIntervalSince1970)-\(series)"
@@ -588,7 +587,7 @@ private struct CachePoint: Identifiable {
 
 private struct CacheRatioChart: View {
     @Environment(\.palette) private var palette
-    let spend: [TraceSpan]
+    let spend: [TurnSpend]
 
     private var points: [CachePoint] {
         spend
@@ -597,7 +596,7 @@ private struct CacheRatioChart: View {
                 guard denominator > 0 else { return nil }
                 return CachePoint(
                     id: span.id,
-                    date: Date(timeIntervalSince1970: TimeInterval(span.startedAt)),
+                    date: Date(timeIntervalSince1970: TimeInterval(span.at)),
                     ratio: Double(span.cacheReadTokens ?? 0) / Double(denominator),
                     agent: span.agent
                 )

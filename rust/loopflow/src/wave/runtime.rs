@@ -32,7 +32,7 @@ use tokio::sync::broadcast;
 use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::engine::wave_config::read_wave_config;
-use crate::project_session::ProjectObservation;
+use crate::project::ProjectObservation;
 use crate::receipt::Receipt;
 use crate::security::sanitize_fs_component;
 use crate::task::TaskObservation;
@@ -1465,7 +1465,6 @@ fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
     }
 }
 
-/// Current time as an RFC3339 string for `op` frame timestamps.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1619,14 +1618,11 @@ mod tests {
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
         let observation = crate::task::TaskObservation {
-            session_id: crate::task::TaskSessionId::from_raw("ts_example"),
+            task_id: crate::task::TaskId::from_raw("task_example"),
             issue_identifier: "INF-123".to_string(),
             event_id: 7,
-            control_source: None,
-            event: crate::task::TaskEventKind::DecisionRequested {
-                decision_id: crate::child_session::ChildDecisionId::new(),
-                prompt: "Approve the plan?".to_string(),
-                options: vec!["approve".to_string(), "revise".to_string()],
+            event: crate::task::TaskEventKind::Progress {
+                summary: "Task needs parent attention".to_string(),
             },
         };
 
@@ -1688,12 +1684,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let rt = open_runtime(tmp.path());
         let mut rx = rt.subscribe_inbox();
-        let observation = crate::project_session::ProjectObservation {
-            session_id: crate::project_session::ProjectSessionId::from_raw("ps_example"),
+        let observation = crate::project::ProjectObservation {
+            project_id: crate::project::ProjectId::from_raw("proj_example"),
             project: "developer-efficiency".to_string(),
             event_id: 8,
-            control_source: None,
-            event: crate::project_session::ProjectEventKind::Completed {
+            event: crate::project::ProjectEventKind::Completed {
                 summary: "all KRs hold".to_string(),
             },
         };

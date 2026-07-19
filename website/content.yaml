@@ -3,34 +3,46 @@
 
 homepage:
   hero:
-    tagline: "Coding agents that work in a team and build over time."
+    tagline: "Living software, conducted by you."
+    subline: >-
+      Waves are persistent agents that hold a goal, remember what they learn,
+      and stay steerable. The organization is recursive — waves conduct
+      projects, projects conduct tasks, agents launch agents — and no Loopflow
+      server sits at the center.
     loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 
-  video:
-    poster: "/static/loopflow-main.png"
-    src: null
-
-  install:
-    command_display: |
-      curl -fsSL https://loopflow.studio/install.sh | sh
-      lf init
-    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"
-
-  capabilities:
-    heading: "Built for teams of agents, not one-shot chats."
+  showcase:
     items:
-      - title: "Persistent memory across runs"
-        description: "Each wave keeps a memory its agent writes as it works — so it builds on what it learned, not just what you typed."
-      - title: "Prompt files you can diff"
-        description: "Skills, directions, and goals live in your repo, so prompt changes get reviewed like code."
-      - title: "Delegation you can watch"
-        description: "A wave directs Projects and Tasks; each Task keeps one steerable Session and one PR through merge."
-      - title: "From manual to autonomous"
-        description: "Run a wave by hand, or let it loop — picking work, reacting to merges, firing on a schedule."
-      - title: "Human control at shipping time"
-        description: "Agents do the work; you decide whether to ship, iterate, or branch."
-      - title: "Works across surfaces"
-        description: "The same wave runs in the terminal, headless automation, and Loopflow with context intact."
+      - image: "/static/wave-surface.png"
+        image_alt: "A Wave with its objective, projects, tasks, and live conversation"
+        caption: "A Wave: its goal, its work, and a conversation you can steer."
+
+  pillars:
+    heading: "What makes it alive"
+    items:
+      - title: "Agents conduct agents"
+        description: >-
+          `lf` is the API. A wave delegates work with `lf task run`, redirects
+          it mid-turn with `lf task steer`, and proves the redirect landed
+          with a receipt. The same verbs you type.
+      - title: "The whole lifecycle, not just the code"
+        description: >-
+          Plans live in Linear. PRs publish, survive review, and land after
+          required checks pass. CI failures get repaired; releases cut on a
+          cadence; worktrees clean themselves up. Waves run the process
+          around the code — building, deploying, and maintaining software,
+          not just writing it.
+      - title: "Self-organizing, all the way down"
+        description: >-
+          Waves supervise projects; projects supervise tasks. Sessions keep
+          journals and receipts; Waves fold durable learning into memory.
+          Coordination lives in the repo, Linear, and GitHub — no Loopflow
+          server sits between them.
+      - title: "The whole system on one screen"
+        description: >-
+          `lf roadmap` buckets every open task by what it needs from you.
+          Trace what any agent was told, what it spent, and what it shipped.
+          The Mac app renders the same JSON the CLI reads.
 
   building_blocks:
     heading: "Building blocks"
@@ -40,19 +52,34 @@ homepage:
         content: |
           ## Objective
 
-          Unify authentication. Each loop, pick the next gap — duplicate token
-          validation, session refresh, a slow startup path — create or direct
-          the concrete Task that closes it, and record what shipped in memory.
+          Unify authentication. Each wake, pick the next gap — duplicate
+          token validation, session refresh, a slow startup path — direct
+          the concrete Task that closes it, and record what shipped in
+          memory.
 
           ## Measures
 
           - **Key Results**: one auth path across web and desktop.
           - **Quality**: auth startup under 200ms.
-
-          ## Process
-
-          Use the build flow for implementation work; write a scratch design
-          first when a change crosses storage, tokens, or public auth behavior.
+      - label: "A project"
+        filename: "Linear · created via lf pm"
+        content: |
+          lf pm project create --wave auth \
+            --title "Unified sign-in" \
+            --definition "One auth path across
+              web and desktop." \
+            --kr "Over one week of real sign-ins,
+              every flow rides the new path
+              unattended — zero rescues."
+      - label: "A task"
+        filename: "terminal"
+        content: |
+          lf task start "Unify token validation" \
+            --project unified-sign-in
+          lf task steer AUTH-12 \
+            "prefer the middleware approach"
+          lf task status AUTH-12 --json
+          lf pr land -c
       - label: "A skill"
         filename: ".lf/skills/implement.md"
         content: |
@@ -62,49 +89,12 @@ homepage:
           1. Understand the design
           2. Implement data structures and functions
           3. Verify with tests and done-when checks
-      - label: "A direction"
-        filename: ".lf/directions/craft.md"
-        content: |
-          Prioritize clarity over cleverness.
 
-          - Match existing patterns in this codebase
-          - Prefer explicit data flow to hidden magic
-          - Ship complete milestones, not partial layers
-      - label: "A flow"
-        filename: ".lf/flows/ship-wave.yaml"
-        content: |
-          skills:
-            - design
-            - implement
-            - review
-            - polish
-
-  products:
-    heading: "Free and open source"
-    loopflow:
-      name: "Loopflow"
-      note: "Mac and iOS"
-      description: "Visual podium for running waves across branches and repos."
-      image: "/static/loopflow-main.png"
-      image_alt: "Loopflow showing active and idle waves"
-      details:
-        - "Stay creative — interactive sessions where you play the lead part, not approve permissions"
-        - "Arrange the symphony — create, configure, and launch waves visually"
-        - "Maintain focus — easily find where your attention is most needed"
-    cli:
-      name: "CLI"
-      note: "One local command"
-      description: "Manage prompts, context, Waves, Projects, and Tasks with `lf`."
-      details:
-        - "Run one resident Wave process with its own listener and memory"
-        - "Keep Project and Task lifecycle state in local SQLite"
-        - "Connect provider accounts directly with `lf auth`"
-      terminal_lines:
-        - type: "command"
-          content: "lf wave billing"
-        - type: "output"
-          content: "wave agent · reading GOAL.md + MEMORY.md"
-        - type: "output"
-          content: "dispatch · worker: build \"generate invoices\""
-        - type: "output"
-          content: "session billing-w3 · tmux attach -r -t billing-w3"
+  install:
+    heading: "Get Loopflow"
+    note: "The Mac app bundles the CLI; every wave it runs is steerable from either."
+    cli_label: "Or just the CLI (macOS or Linux):"
+    command_display: |
+      curl -fsSL https://loopflow.studio/install.sh | sh
+      lf init
+    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"

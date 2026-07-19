@@ -126,7 +126,7 @@ fn replay_opencode_trace(file_name: &str) -> Vec<ConversationEvent> {
         .and_then(Value::as_str)
         .expect("session create payload should include canonical id")
         .to_string();
-    let mut state = opencode_mapping::ReaderState::new(session_id);
+    let mut state = opencode_mapping::ReaderState::new(session_id, None, "opencode");
     let mut events = Vec::new();
 
     for line in lines {
@@ -327,7 +327,7 @@ fn codex_rpc_error_response_maps_to_error_event() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         events[0],
-        ConversationEvent::Error { ref code, ref message }
+        ConversationEvent::Error { ref code, ref message, .. }
             if code == "-32600" && message == "Invalid request: missing field `input`"
     ));
 }

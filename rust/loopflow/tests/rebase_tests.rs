@@ -1,6 +1,6 @@
 use loopflow::ops::{
-    plan_rebase, rebase_with_recovery, NullProgress, OpsError, RebaseClass, RebaseOptions,
-    RebaseStrategy,
+    continue_rebase_for_resolution, plan_rebase, rebase_with_recovery, recover_rebase,
+    NullProgress, OpsError, RebaseClass, RebaseOptions, RebaseRecovery, RebaseStrategy,
 };
 use loopflow_test_support::TestRepo;
 use std::process::Command;
@@ -17,6 +17,42 @@ fn git(repo: &std::path::Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn create_conflicting_repo() -> TestRepo {
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("conflict.txt", "feature line\n");
+    repo.stage_all();
+    repo.commit("feature work");
+
+    repo.checkout("main");
+    repo.create_file("conflict.txt", "main line\n");
+    repo.stage_all();
+    repo.commit("main work");
+    repo.push();
+    repo.checkout("feature");
+    repo
+}
+
+fn start_conflicting_recovery(repo: &TestRepo) -> RebaseRecovery {
+    let error = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("fixture must conflict");
+    match error {
+        OpsError::RebaseConflict {
+            recovery: Some(recovery),
+            ..
+        } => *recovery,
+        other => panic!("expected owned recovery, got {other:?}"),
+    }
 }
 
 #[test]
@@ -48,19 +84,7 @@ fn rebase_onto_main_succeeds() {
 
 #[test]
 fn rebase_conflict_returns_error() {
-    let repo = TestRepo::new();
-    repo.create_branch("feature");
-    repo.create_file("conflict.txt", "feature line\n");
-    repo.stage_all();
-    repo.commit("feature work");
-
-    repo.checkout("main");
-    repo.create_file("conflict.txt", "main line\n");
-    repo.stage_all();
-    repo.commit("main work");
-    repo.push();
-
-    repo.checkout("feature");
+    let repo = create_conflicting_repo();
     let result = rebase_with_recovery(
         repo.path(),
         &RebaseOptions {
@@ -75,6 +99,243 @@ fn rebase_conflict_returns_error() {
         matches!(result, Err(OpsError::RebaseConflict { ref onto, .. }) if onto == "origin/main"),
         "expected rebase conflict, got {result:?}"
     );
+    assert_eq!(
+        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        Some("rebase"),
+        "the owned conflict must remain available to the recovery child"
+    );
+}
+
+#[test]
+fn second_identical_conflict_reuses_resolution_without_recovery() {
+    let repo = create_conflicting_repo();
+    let original_head = repo.head_sha();
+    let recovery = start_conflicting_recovery(&repo);
+    recover_rebase(recovery, |_context| {
+        repo.create_file("conflict.txt", "reviewed resolution\n");
+        let result = loopflow::engine::git::continue_rebase(repo.path())?;
+        assert!(result.success, "the reviewed resolution must complete");
+        Ok(())
+    })
+    .expect("record first reviewed resolution");
+
+    git(repo.path(), &["reset", "--hard", &original_head]);
+    rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .expect("rerere should finish the repeated conflict mechanically");
+
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("conflict.txt")).expect("resolved file"),
+        "reviewed resolution\n"
+    );
+    assert_eq!(
+        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn preexisting_rebase_is_refused_without_abort_or_head_movement() {
+    let repo = create_conflicting_repo();
+    let output = Command::new("git")
+        .args(["rebase", "origin/main"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "fixture must stop on a conflict");
+    let conflicted_head = git(repo.path(), &["rev-parse", "HEAD"]);
+
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("already exists")),
+        "expected a preflight refusal, got {result:?}"
+    );
+    assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), conflicted_head);
+    assert_eq!(
+        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        Some("rebase")
+    );
+}
+
+#[test]
+fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
+    let repo = create_conflicting_repo();
+    let recovery = start_conflicting_recovery(&repo);
+
+    let result = recover_rebase(recovery, |_context| Ok(()));
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("still reports an active rebase")),
+        "expected a postcondition failure, got {result:?}"
+    );
+    assert_eq!(
+        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        Some("rebase")
+    );
+}
+
+#[test]
+fn recovery_abort_cannot_masquerade_as_success() {
+    let repo = create_conflicting_repo();
+    let recovery = start_conflicting_recovery(&repo);
+
+    let result = recover_rebase(recovery, |_context| {
+        git(repo.path(), &["rebase", "--abort"]);
+        Ok(())
+    });
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("pinned target") && message.contains("not an ancestor")),
+        "expected target ancestry failure, got {result:?}"
+    );
+}
+
+#[test]
+fn recovery_on_wrong_branch_cannot_masquerade_as_success() {
+    let repo = create_conflicting_repo();
+    let recovery = start_conflicting_recovery(&repo);
+
+    let result = recover_rebase(recovery, |_context| {
+        git(repo.path(), &["rebase", "--abort"]);
+        git(repo.path(), &["checkout", "main"]);
+        Ok(())
+    });
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("expected branch feature, found main")),
+        "expected branch postcondition failure, got {result:?}"
+    );
+}
+
+#[test]
+fn recovery_with_detached_head_cannot_masquerade_as_success() {
+    let repo = create_conflicting_repo();
+    let recovery = start_conflicting_recovery(&repo);
+
+    let result = recover_rebase(recovery, |_context| {
+        git(repo.path(), &["rebase", "--abort"]);
+        git(repo.path(), &["checkout", "--detach"]);
+        Ok(())
+    });
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("HEAD is detached")),
+        "expected detached-HEAD postcondition failure, got {result:?}"
+    );
+}
+
+#[test]
+fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
+    let repo = create_conflicting_repo();
+    let recovery = start_conflicting_recovery(&repo);
+
+    let result = recover_rebase(recovery, |_context| {
+        repo.create_file("conflict.txt", "resolved\n");
+        git(repo.path(), &["add", "conflict.txt"]);
+        git(
+            repo.path(),
+            &["-c", "core.editor=true", "rebase", "--continue"],
+        );
+        repo.create_file("conflict.txt", "dirty after resolution\n");
+        Ok(())
+    });
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("new tracked dirty state")),
+        "expected dirty-state postcondition failure, got {result:?}"
+    );
+}
+
+#[test]
+fn stale_owned_rebase_can_be_explicitly_continued() {
+    let repo = create_conflicting_repo();
+    let result = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+    assert!(matches!(result, Err(OpsError::RebaseConflict { .. })));
+    drop(result);
+
+    repo.create_file("conflict.txt", "main and feature\n");
+    continue_rebase_for_resolution(repo.path(), false).expect("adopt and continue stale rebase");
+
+    assert_eq!(
+        loopflow::engine::git::intervention_state(repo.path()).unwrap(),
+        None
+    );
+    assert_eq!(
+        git(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "feature"
+    );
+}
+
+#[test]
+fn linked_worktrees_own_rebases_independently() {
+    let repo = TestRepo::new();
+    repo.create_file("conflict.txt", "base\n");
+    repo.stage_all();
+    repo.commit("shared base");
+    repo.push();
+    repo.create_branch("feature-one");
+    repo.create_file("conflict.txt", "feature one\n");
+    repo.stage_all();
+    repo.commit("feature one");
+    repo.checkout("main");
+    let second = repo.create_named_worktree("feature-two");
+    std::fs::write(second.join("conflict.txt"), "feature two\n").unwrap();
+    git(&second, &["add", "conflict.txt"]);
+    git(&second, &["commit", "-m", "feature two"]);
+    repo.create_file("conflict.txt", "main advance\n");
+    repo.stage_all();
+    repo.commit("main advance");
+    repo.push();
+    repo.checkout("feature-one");
+
+    let first = rebase_with_recovery(
+        repo.path(),
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+    let second_result = rebase_with_recovery(
+        &second,
+        &RebaseOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(matches!(first, Err(OpsError::RebaseConflict { .. })));
+    assert!(matches!(
+        second_result,
+        Err(OpsError::RebaseConflict { .. })
+    ));
 }
 
 #[test]
@@ -237,7 +498,6 @@ fn dirty_scratch_only_branch_resets_to_base() {
     assert_eq!(plan.class, RebaseClass::ScratchOnly);
     assert_eq!(plan.strategy, RebaseStrategy::ResetToBase);
     assert_eq!(plan.unique_commits, 0);
-    assert!(!plan.protected);
 }
 
 #[test]
@@ -269,5 +529,4 @@ fn wave_changes_are_protected() {
     let plan = plan_rebase(repo.path(), None, None).expect("plan rebase");
     assert_eq!(plan.class, RebaseClass::Protected);
     assert_eq!(plan.strategy, RebaseStrategy::DirectRebase);
-    assert!(plan.protected);
 }

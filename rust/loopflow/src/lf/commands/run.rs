@@ -1,4 +1,3 @@
-use crate::engine::fast_path::{try_fast_path, FailureContext, FastPathResult};
 use crate::engine::{
     check_cli_available, launch_agent, load_config_or_default, parse_agent, prepare_launch_prompt,
     write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
@@ -24,35 +23,7 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
-    let mut built = build_prompt(skill, message, cli)?;
-
-    // Try fast-path: run the command before spinning up an agent.
-    if let Some(ref cmd) = built.fast_path {
-        info!(cmd = cmd, "trying fast-path");
-        match try_fast_path(cmd, &built.repo_root) {
-            Ok(FastPathResult::Success) => {
-                info!("fast-path succeeded, skipping agent");
-                return Ok(());
-            }
-            Ok(FastPathResult::Failed {
-                exit_code,
-                stdout,
-                stderr,
-            }) => {
-                info!(exit_code, "fast-path failed, falling back to agent");
-                let ctx = FailureContext {
-                    cmd,
-                    exit_code,
-                    stdout: &stdout,
-                    stderr: &stderr,
-                };
-                built.agent_config.task_prompt = format!("{ctx}{}", built.agent_config.task_prompt);
-            }
-            Err(err) => {
-                info!(error = %err, "fast-path execution error, falling back to agent");
-            }
-        }
-    }
+    let built = build_prompt(skill, message, cli)?;
 
     print_context_header(&built, cli);
     launch_prompt(&built, cli)
@@ -72,7 +43,6 @@ struct PromptBuild {
     model: Option<String>,
     skill_name: Option<String>,
     log_name: String,
-    fast_path: Option<String>,
     context_gather_ms: u64,
     context_render_ms: u64,
 }
@@ -141,7 +111,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         "loaded config"
     );
     trace!(
-        agent = config.agent.as_deref().unwrap_or("claude:opus"),
+        agent = config.agent(),
         ?config.yolo,
         "loaded config"
     );
@@ -232,7 +202,6 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
-    let fast_path = discovered_skill.as_ref().and_then(|s| s.fast_path.clone());
     let mut agent_config = prepared.config;
     let mut prompt = prepared.prompt;
     // Interactive handoffs use the vendor skill sigil because the vendor owns
@@ -290,7 +259,6 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         model,
         skill_name,
         log_name,
-        fast_path,
         context_gather_ms,
         context_render_ms,
     })
@@ -501,6 +469,11 @@ fn launch_prompt(built: &PromptBuild, cli: &Cli) -> Result<()> {
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
+    } else if let Some(failure) = &result.failure {
+        Err(anyhow!(
+            "agent stopped after {failure}. Check {} for details.",
+            capture.artifact_dir().display()
+        ))
     } else {
         Err(anyhow!(
             "agent exited with code {}. Check {} for details.",
@@ -525,6 +498,8 @@ fn begin_capture(built: &PromptBuild, surface: &str) -> Result<crate::trace::Cap
             gather_ms: built.context_gather_ms,
             render_ms: built.context_render_ms,
             raw_provider: surface == "headless",
+            basis: None,
+            control: None,
         },
     )
     .map_err(|error| anyhow!("failed to establish trace capture before agent launch: {error}"))

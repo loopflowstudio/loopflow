@@ -35,13 +35,6 @@ fn run_event(run: &str, seq: i64) -> RunEventRow {
         skill: None,
         step_index: None,
         error: None,
-        input_tokens: None,
-        output_tokens: None,
-        cache_read_tokens: None,
-        cost_usd: None,
-        duration_secs: None,
-        provider: None,
-        model: None,
     }
 }
 

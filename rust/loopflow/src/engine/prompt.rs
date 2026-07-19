@@ -1860,7 +1860,7 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
 /// File format: `{timestamp}-{run_id}-{flow_parents}.{skill}.md`, with the
-/// `{run_id}` segment present only when `LF_RUN_ID` is set (daemon-dispatched
+/// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
 /// runs) — it joins the log to the run's journal and token-usage records.
 ///
 /// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
@@ -1883,7 +1883,7 @@ pub fn write_prompt_log(
         }
         _ => safe_skill,
     };
-    let run_part = std::env::var(crate::journal::LF_RUN_ID_ENV)
+    let run_part = std::env::var(crate::journal::LF_TRACE_ID_ENV)
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
@@ -2097,8 +2097,13 @@ mod tests {
         let prompt = render_full_prompt(components);
         assert_eq!(prompt.matches("<lf:loopflow>").count(), 1);
         assert!(prompt.contains("Execute Here First"));
+        assert!(prompt.contains("Evidence Loop"));
+        assert!(prompt.contains("all relevant recorded evidence"));
+        assert!(prompt.contains("Treat unexpected tool, test, or user output as a"));
         assert!(prompt.contains("lf pr land"));
         assert!(prompt.contains("lf memory add"));
+        assert!(!prompt.contains("## Prompt layers"));
+        assert!(!prompt.contains("## Search portfolios"));
         assert!(!prompt.contains("lf pm show"));
         assert!(!prompt.contains("lf loop <flow>"));
         assert!(!prompt.contains("tmux attach"));
@@ -2373,7 +2378,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             ..Default::default()
         };
@@ -2396,7 +2401,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             ..Default::default()
         };
@@ -2496,7 +2501,7 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -3089,7 +3094,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             ..Default::default()
         };
@@ -3125,7 +3130,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             ..Default::default()
         };
@@ -3170,7 +3175,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             ..Default::default()
         };
@@ -3209,7 +3214,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -3230,7 +3235,7 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                fast_path: None,
+                feedback: false,
             }),
             ..Default::default()
         };

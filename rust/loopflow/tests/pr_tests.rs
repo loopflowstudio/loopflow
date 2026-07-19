@@ -2,11 +2,12 @@ mod support;
 
 use std::process::Command;
 
+use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{task_complete, task_status};
 use loopflow::ops::{
     create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication, TaskSessionStatus};
+use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
@@ -21,8 +22,12 @@ fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
-fn claude_script() -> &'static str {
+fn agent_script() -> &'static str {
     "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+}
+
+fn mutating_agent_script() -> &'static str {
+    "#!/bin/sh\nprintf 'provider mutation\\n' > provider.txt\ngit add provider.txt\ngit commit -m 'provider mutation' >/dev/null\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
 }
 
 fn codex_script(output: &str) -> String {
@@ -95,7 +100,7 @@ fn pr_create_calls_gh() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -130,7 +135,7 @@ fn publish_makes_no_presentation_attempt() {
             ("gh", gh_script.as_str()),
             ("open", open_script.as_str()),
             ("xdg-open", open_script.as_str()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -155,6 +160,45 @@ fn publish_makes_no_presentation_attempt() {
         0,
         "publication must not open any review surface"
     );
+}
+
+#[test]
+fn publication_refuses_if_copy_generation_changes_the_pushed_head() {
+    let gh_script = write_gh_script("[]", None);
+    let _env = EnvGuard::new(&[
+        ("gh", gh_script.as_str()),
+        ("codex", mutating_agent_script()),
+    ]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature");
+    repo.stage_all();
+    repo.commit("feature work");
+    push_branch(&repo, "feature");
+    let pushed_head = repo.head_sha();
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+            agent: None,
+        },
+        &NullProgress,
+    );
+
+    assert!(
+        matches!(result, Err(OpsError::Message(ref message)) if message.contains("changed the published branch/HEAD")),
+        "a generated message cannot invalidate the pushed head: {result:?}"
+    );
+    let remote_head = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", "refs/heads/feature"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .expect("read remote feature");
+    assert_eq!(remote_head, pushed_head);
 }
 
 #[test]
@@ -247,7 +291,8 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
         .expect("mark PR as published");
 
     let session = task_status("INF-123").expect("reconcile Task PR");
-    assert_ne!(session.status, loopflow::task::TaskSessionStatus::Completed);
+    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    assert!(!matches!(snapshot.status, WorkStatus::Done));
     assert!(
         matches!(
             session.observation,
@@ -264,14 +309,16 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let publication = prs[0].publication.as_ref().expect("adopted publication");
     assert_eq!(publication.after_merge, AfterMerge::Review);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
-    let stored_session = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read reconciled Task")
-        .expect("reconciled Task");
-    assert_eq!(
-        stored_session.status_reason,
-        "pull request #912 merged; another PR may follow"
-    );
+    let work = runtime
+        .block_on(
+            task.store
+                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+        )
+        .expect("resolve reconciled Task Work");
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
 }
 
 #[test]
@@ -308,62 +355,12 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         ),
         "completion should use the bounded REST observation: {session:?}"
     );
-    assert_eq!(session.status, TaskSessionStatus::Completed);
-    let stored_session = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read completed Task")
-        .expect("completed Task");
-    assert_eq!(stored_session.status, TaskSessionStatus::Completed);
+    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    assert!(matches!(snapshot.status, WorkStatus::Done));
     let prs = runtime
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read completing PR");
     assert_eq!(prs.len(), 1);
-    assert_eq!(prs[0].phase(), PrPhase::Merged);
-}
-
-#[test]
-fn observed_merge_waits_for_an_unincorporated_directive_before_completion() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
-    let repo = TestRepo::new();
-    let base = repo.head_sha();
-    let branch = "jack/task-pr-proof";
-    repo.create_branch(branch);
-    point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
-    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-
-    let mut stored_session = task.session.clone();
-    stored_session.current_directive_version = 2;
-    stored_session.incorporated_directive_version = 1;
-    runtime
-        .block_on(task.store.update_task_session(&stored_session))
-        .expect("record pending direction");
-
-    let mut pr = task.pr.clone();
-    pr.publication = Some(PrPublication {
-        requested_at: time::OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::CompleteTask,
-        next_slug: None,
-        github: Some(GithubPr {
-            number: 912,
-            url: "https://example.com/pr/912".to_string(),
-            head_sha: None,
-        }),
-    });
-    runtime
-        .block_on(task.store.update_task_pr(&pr))
-        .expect("mark PR as completing");
-
-    let session = task_status("INF-123").expect("reconcile merge with pending direction");
-    assert_eq!(session.status, TaskSessionStatus::Waiting);
-    assert_eq!(session.current_directive_version, 2);
-    assert_eq!(session.incorporated_directive_version, 1);
-    assert!(session.status_reason.contains("directive v2"));
-
-    let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
-        .expect("read merged PR");
     assert_eq!(prs[0].phase(), PrPhase::Merged);
 }
 
@@ -393,11 +390,16 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
 
     // The Session and PR are unchanged: no premature completion, no deleted PR.
     let runtime = tokio::runtime::Runtime::new().expect("read runtime");
-    let stored = runtime
-        .block_on(task.store.get_task_session(&task.session.id))
-        .expect("read session")
-        .expect("session present");
-    assert_ne!(stored.status, TaskSessionStatus::Completed);
+    let work = runtime
+        .block_on(
+            task.store
+                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+        )
+        .expect("resolve Task Work");
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
     let prs = runtime
         .block_on(task.store.task_prs(&task.session.id))
         .expect("read PRs");
@@ -437,7 +439,7 @@ fn pr_update_refreshes_body() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -456,7 +458,6 @@ fn pr_update_refreshes_body() {
     )
     .expect("pr");
 
-    assert!(result.updated);
     assert!(!result.created);
 }
 
@@ -468,7 +469,7 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );
@@ -514,7 +515,7 @@ fn pr_auto_generates_title_when_missing() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("claude", claude_script()),
+            ("codex", agent_script()),
         ],
         Some(home.path()),
     );

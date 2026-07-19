@@ -1,6 +1,5 @@
 ---
 description: Implement one pass of work toward the task PR.
-default_agent: codex
 action_style: procedural
 ---
 Work the task PR.
@@ -15,24 +14,23 @@ selection. Follow the repo style guide.
 
 ## Work
 
-- Acknowledge the seed's current directive before editing with the exact `lf
-  task acknowledge` command it provides. Summarize how that direction changes
-  the execution plan; provider acceptance alone is not incorporation.
+- Honor every Steer included in the seed and summarize how it changes the
+  execution plan. The boundary Basis is fixed; provider acceptance alone is
+  not application.
 - Own execution in this process and worktree. Operational Loopflow children such
   as `lf commit`, `lf pr land`, `lf rebase`, and direct skill or flow calls are
   part of that execution and remain available. Do not boot a server, create a
-  second Task Session, or delegate the task seed. If scoped PM reads fail,
+  second Task, or delegate the task seed. If scoped PM reads fail,
   note the failure and continue from the seed rather than repairing auth.
 - Delegate only bounded, independent checks through the execution tools already
   available to this process, and keep responsibility for integrating the result.
 - Implement the smallest coherent slice described by the design doc.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
-- When progress requires supervisor judgment, run `lf task request-decision
-  <issue-id> "question" --option "first" --option "second" --wait`. The Task's
-  required Project Session resolves the routine choice or explicitly escalates
-  it to the Wave. Do not invent a provider-specific approval path or start
-  unrelated work while it is pending.
+- When progress requires supervisor judgment, state the exact question and
+  alternatives in the interactive step, then stop dependent work. The derived
+  Feedback routes the Turn to the parent; do not invent a provider-specific
+  decision command or start unrelated work while it is pending.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for
   `lf pr open` only when a human explicitly asked to see the PR for review.
@@ -46,7 +44,7 @@ selection. Follow the repo style guide.
   forward — no manual git surgery.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
-- Report consequential progress through the Task Session; its linked events
+- Report consequential progress through the Task; its linked events
   keep the owning Wave informed without copying raw tool chatter.
 
 Stay scoped to the task. Put unresolved ambiguity in `scratch/questions.md`.

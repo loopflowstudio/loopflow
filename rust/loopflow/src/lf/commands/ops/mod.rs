@@ -21,10 +21,11 @@ use crate::lf::{
 use crate::ops::OpsError;
 use crate::ops::{
     abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
-    create_or_update_pr, current_pr, land, plan_rebase, rebase_class_name, rebase_strategy_name,
-    rebase_with_recovery, release_bump, release_check, release_notes, release_run, release_status,
-    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
-    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    create_or_update_pr, current_pr, finish_land_after_rebase, finish_submit_after_rebase, land,
+    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
+    release_bump, release_check, release_notes, release_run, release_status, release_tag,
+    start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec, LandOptions,
+    PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -171,6 +172,7 @@ pub fn run_rebase(
     manual: bool,
     continue_rebase: bool,
     abort: bool,
+    adopt: bool,
 ) -> Result<()> {
     let progress = &CliProgress;
     let repo_root = find_repo_root()?;
@@ -179,13 +181,18 @@ pub fn run_rebase(
             "a rebase target cannot be combined with --continue or --abort"
         ));
     }
+    if adopt && !(continue_rebase || abort) {
+        return Err(anyhow!(
+            "--adopt is only valid with `lf rebase --continue` or `lf rebase --abort`"
+        ));
+    }
     if continue_rebase {
-        continue_rebase_for_resolution(&repo_root)?;
+        continue_rebase_for_resolution(&repo_root, adopt)?;
         progress.status("Rebase complete; branch remains local.");
         return Ok(());
     }
     if abort {
-        abort_rebase_for_resolution(&repo_root)?;
+        abort_rebase_for_resolution(&repo_root, adopt)?;
         progress.status("Rebase aborted.");
         return Ok(());
     }
@@ -223,9 +230,10 @@ pub fn run_rebase(
             },
             progress,
         )
+        .map(|_| ())
         .map_err(Into::into);
     }
-    match rebase_with_recovery(
+    let (verification, agent_launched) = match rebase_with_recovery(
         &repo_root,
         &RebaseOptions {
             onto: onto_ref.clone(),
@@ -234,43 +242,42 @@ pub fn run_rebase(
         },
         progress,
     ) {
-        Ok(()) => {
-            if let Some(stacked) = stacked.as_ref() {
-                let new_base = crate::engine::git::rev_parse(&repo_root, &onto_ref)?;
-                crate::ops::task::record_stack_rebase(
-                    stacked,
-                    &new_base,
-                    stacked.parent_branch.is_none(),
-                )?;
-            }
-            record_ops_metric(
-                &repo_root,
-                serde_json::json!({
-                    "op": "rebase",
-                    "branch": plan.branch,
-                    "base_ref": plan.base_ref,
-                    "class": rebase_class_name(&plan.class),
-                    "strategy": rebase_strategy_name(&plan.strategy),
-                    "unique_commits": plan.unique_commits,
-                    "changed_files": plan.changed_files.len(),
-                    "protected": plan.protected,
-                    "scratch_stashed": plan.scratch_stashed,
-                    "agent_launched": false,
-                    "duration_ms": started.elapsed().as_millis(),
-                    "exit_status": "ok",
-                }),
-            );
-            Ok(())
-        }
-        Err(OpsError::RebaseConflict { onto, detail }) => {
-            let context = format!(
-                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
-            );
-            progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(&repo_root, "rebase", Some(&context))
-        }
-        Err(err) => Err(err.into()),
+        Ok(verification) => (verification, false),
+        Err(OpsError::RebaseConflict {
+            onto,
+            detail,
+            recovery,
+        }) => (
+            resolve_rebase_conflict(&repo_root, &onto, &detail, recovery, progress)?,
+            true,
+        ),
+        Err(err) => return Err(err.into()),
+    };
+    if let Some(stacked) = stacked.as_ref() {
+        crate::ops::task::record_stack_rebase(
+            stacked,
+            &verification.target_sha,
+            stacked.parent_branch.is_none(),
+        )?;
     }
+    record_ops_metric(
+        &repo_root,
+        serde_json::json!({
+            "op": "rebase",
+            "branch": plan.branch,
+            "base_ref": plan.base_ref,
+            "class": rebase_class_name(&plan.class),
+            "strategy": rebase_strategy_name(&plan.strategy),
+            "unique_commits": verification.unique_commits,
+            "changed_files": plan.changed_files.len(),
+            "protected": matches!(plan.class, crate::ops::RebaseClass::Protected),
+            "scratch_stashed": plan.scratch_stashed,
+            "agent_launched": agent_launched,
+            "duration_ms": started.elapsed().as_millis(),
+            "exit_status": "ok",
+        }),
+    );
+    Ok(())
 }
 
 fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
@@ -283,8 +290,32 @@ fn print_rebase_plan(plan: &crate::ops::RebasePlan) {
     println!("strategy: {}", rebase_strategy_name(&plan.strategy));
     println!("unique_commits: {}", plan.unique_commits);
     println!("changed_files: {}", plan.changed_files.len());
-    println!("protected: {}", plan.protected);
-    println!("agent_launched: false");
+    println!(
+        "protected: {}",
+        matches!(plan.class, crate::ops::RebaseClass::Protected)
+    );
+}
+
+/// Hand a conflicted rebase to exactly one recovery agent under the owning
+/// operation's scoped ids. The agent continues the existing sequencer; the
+/// caller keeps ownership and performs verification and the single push.
+fn resolve_rebase_conflict(
+    repo_root: &Path,
+    onto: &str,
+    detail: &str,
+    recovery: Option<Box<crate::ops::RebaseRecovery>>,
+    progress: &impl Progress,
+) -> Result<crate::ops::RebaseVerification> {
+    let recovery =
+        recovery.ok_or_else(|| anyhow!("rebase conflict has no owned recovery operation"))?;
+    let context = format!(
+        "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another rebase or push.\n</lf:rebase-conflict>"
+    );
+    progress.status("Launching rebase agent to resolve conflicts...");
+    Ok(recover_rebase(*recovery, |env| {
+        launch_skill_agent(repo_root, "rebase", Some(&context), Some(env))
+            .map_err(|error| OpsError::Message(error.to_string()))
+    })?)
 }
 
 /// Run a PR-mutating op; on a rebase conflict, launch the rebase agent to
@@ -293,18 +324,18 @@ fn with_rebase_retry<T>(
     repo_root: &Path,
     label: &str,
     progress: &impl Progress,
-    op: impl Fn(&Path) -> Result<T, OpsError>,
+    op: impl Fn(&Path, bool) -> Result<T, OpsError>,
 ) -> Result<T> {
-    match op(repo_root) {
+    match op(repo_root, false) {
         Ok(value) => Ok(value),
-        Err(OpsError::RebaseConflict { onto, detail }) => {
-            let context = format!(
-                "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\n</lf:rebase-conflict>"
-            );
-            progress.status("Launching rebase agent to resolve conflicts...");
-            launch_skill_agent(repo_root, "rebase", Some(&context))?;
+        Err(OpsError::RebaseConflict {
+            onto,
+            detail,
+            recovery,
+        }) => {
+            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, progress)?;
             progress.status(&format!("Retrying {label} after rebase..."));
-            op(repo_root).map_err(Into::into)
+            op(repo_root, true).map_err(Into::into)
         }
         Err(err) => Err(err.into()),
     }
@@ -313,16 +344,24 @@ fn with_rebase_retry<T>(
 fn land_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
     // The wave home stays put on land — no rotation, no cd.
-    with_rebase_retry(&repo_root, "land", progress, |repo| {
-        land(repo, options, progress)
+    with_rebase_retry(&repo_root, "land", progress, |repo, integrated| {
+        if integrated {
+            finish_land_after_rebase(repo, options, progress)
+        } else {
+            land(repo, options, progress)
+        }
     })?;
     Ok(())
 }
 
 fn submit_current(options: &LandOptions, progress: &impl Progress) -> Result<()> {
     let repo_root = find_repo_root()?;
-    with_rebase_retry(&repo_root, "submit", progress, |repo| {
-        submit(repo, options, progress)
+    with_rebase_retry(&repo_root, "submit", progress, |repo, integrated| {
+        if integrated {
+            finish_submit_after_rebase(repo, options, progress)
+        } else {
+            submit(repo, options, progress)
+        }
     })?;
     progress.status("Ready to land — click merge on the PR once checks pass.");
     Ok(())
@@ -337,17 +376,15 @@ fn publish_current(
     progress: &impl Progress,
 ) -> Result<crate::ops::PrResult> {
     let repo_root = find_repo_root()?;
-    let result = with_rebase_retry(&repo_root, "PR publication", progress, |repo| {
-        create_or_update_pr(
-            repo,
-            &PrOptions {
-                title: title.clone(),
-                body: body.clone(),
-                agent: agent_override.map(str::to_string),
-            },
-            progress,
-        )
-    })?;
+    let result = create_or_update_pr(
+        &repo_root,
+        &PrOptions {
+            title,
+            body,
+            agent: agent_override.map(str::to_string),
+        },
+        progress,
+    )?;
     Ok(result)
 }
 
@@ -897,30 +934,21 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
 
     if !result.deferrals.is_empty() {
         println!(
-            "  deferred — protected writing Task body ({}):",
+            "  deferred — protected active Task Run ({}):",
             result.deferrals.len()
         );
         for deferral in &result.deferrals {
             println!(
-                "    {}  {}  (Session {})",
+                "    {}  {}  ({})",
                 deferral.identifier, deferral.title, deferral.reason
             );
         }
     }
-    if result.session_updates > 0 {
-        println!(
-            "  reconciled Task Session identifiers: {}",
-            result.session_updates
-        );
+    if result.task_updates > 0 {
+        println!("  reconciled Task identifiers: {}", result.task_updates);
     }
     if result.already > 0 {
         println!("  already in team: {} (skipped)", result.already);
-    }
-    if result.historical > 0 {
-        println!(
-            "  left as historical: {} completed issue(s) stay in the shared team",
-            result.historical
-        );
     }
 }
 
@@ -1659,17 +1687,25 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {
-            let sessions = runtime
-                .block_on(store.list_task_sessions(None))
-                .map_err(|error| {
-                    anyhow!("cannot verify Task worktree ownership before pruning: {error}")
-                })?;
-            protected.extend(
-                sessions
-                    .into_iter()
-                    .filter(|session| !session.status.is_terminal())
-                    .map(|session| session.worktree),
-            );
+            let sessions = runtime.block_on(store.list_tasks(None)).map_err(|error| {
+                anyhow!("cannot verify Task worktree ownership before pruning: {error}")
+            })?;
+            for session in sessions {
+                let work = runtime
+                    .block_on(
+                        store.work_for_child(&crate::child::ChildRef::Task(session.id.clone())),
+                    )
+                    .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
+                let status = runtime
+                    .block_on(store.work_status(&work))
+                    .map_err(|error| anyhow!("cannot read Task Work status: {error}"))?;
+                if !matches!(
+                    status,
+                    crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+                ) {
+                    protected.insert(session.worktree);
+                }
+            }
         }
         Err(RegistryUnavailable::MissingFile { .. }) => {}
         Err(RegistryUnavailable::Unresolved { error }) => {
@@ -1869,7 +1905,12 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 ///
 /// Used when mechanical operations hit a situation that requires agent
 /// reasoning — e.g., rebase conflicts that need conflict resolution.
-fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>) -> Result<()> {
+fn launch_skill_agent(
+    repo_root: &Path,
+    skill_name: &str,
+    context: Option<&str>,
+    env: Option<&std::collections::BTreeMap<String, String>>,
+) -> Result<()> {
     let skill = discover_skill(repo_root, skill_name)?;
     let config = load_config_or_default(Some(repo_root));
 
@@ -1906,7 +1947,7 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
         &prepared.config.task_prompt,
         &prepared.deduplicated_docs,
     );
-    let agent = prepared.config.agent.as_deref().unwrap_or("claude:opus");
+    let agent = prepared.config.agent();
     let (provider, model) = crate::engine::parse_agent(agent);
     let capture_context =
         crate::journal::trace_capture_context(repo_root, None, Some(skill_name.to_string()))
@@ -1922,6 +1963,8 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
             gather_ms: 0,
             render_ms: 0,
             raw_provider: true,
+            basis: None,
+            control: None,
         },
     )?;
 
@@ -1929,6 +1972,7 @@ fn launch_skill_agent(repo_root: &Path, skill_name: &str, context: Option<&str>)
         auto: true,
         stream: true,
         capture: Some(capture.clone()),
+        env: env.cloned().unwrap_or_default(),
         ..Default::default()
     };
     let capabilities = AgentCapabilities {

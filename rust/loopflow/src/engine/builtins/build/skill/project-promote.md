@@ -1,6 +1,5 @@
 ---
 description: Promote a project into a resident child wave.
-default_agent: codex
 action_style: procedural
 ---
 Promote the named project. The seed names the project slug and its parent wave.

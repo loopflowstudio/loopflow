@@ -7,7 +7,7 @@
 //!
 //! The ingress path is a durable delivery inbox: each signed Linear delivery is
 //! persisted to `provider_deliveries` *before* it is acknowledged, deduplicated
-//! by `(delivery_id, provider)`, and routed to the owning Task Session through
+//! by `(delivery_id, provider)`, and routed to the owning Task through
 //! the existing domain ops (`webhook::ingest_event`). The inbox deduplicates
 //! *deliveries*; the domain tables deduplicate *events*. Both gates are needed
 //! — a redelivered webhook is dropped at the inbox; an out-of-order or
@@ -129,7 +129,7 @@ async fn status_handler(State(state): State<LfdState>) -> Json<StatusBody> {
 }
 
 /// Receive a signed Linear delivery, persist it to the durable inbox, and route
-/// it to the owning Task Session. Idempotent across retries and restarts: a
+/// it to the owning Task. Idempotent across retries and restarts: a
 /// duplicate delivery in a terminal state is dropped; one left `pending` by a
 /// crash is re-processed (the domain gate makes re-processing a no-op).
 async fn webhook_handler(
@@ -324,14 +324,14 @@ async fn github_webhook_handler(
 
 /// Map a processing outcome onto the delivery row's terminal status and the
 /// target kind it routed to. `Ignored` and `NoTarget` carry no target; a
-/// self-authored or applied edit/comment resolved a Task Session.
+/// self-authored or applied edit/comment resolved a Task.
 fn map_outcome(outcome: &WebhookOutcome) -> (DeliveryStatus, Option<&'static str>) {
     match outcome {
         WebhookOutcome::Ignored => (DeliveryStatus::Ignored, None),
         WebhookOutcome::NoTarget => (DeliveryStatus::NoTarget, None),
-        WebhookOutcome::SelfAuthored => (DeliveryStatus::Processed, Some("task_session")),
-        WebhookOutcome::Edit { .. } => (DeliveryStatus::Processed, Some("task_session")),
-        WebhookOutcome::Comment { .. } => (DeliveryStatus::Processed, Some("task_session")),
+        WebhookOutcome::SelfAuthored => (DeliveryStatus::Processed, Some("task")),
+        WebhookOutcome::Edit { .. } => (DeliveryStatus::Processed, Some("task")),
+        WebhookOutcome::Comment { .. } => (DeliveryStatus::Processed, Some("task")),
     }
 }
 
@@ -369,7 +369,7 @@ fn derive_delivery_id(event: &WebhookEvent, webhook_timestamp: i64, body: &[u8])
 struct OutcomeSummary<'a> {
     outcome: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    directive_applied: Option<bool>,
+    steer_applied: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     delivered: Option<bool>,
 }
@@ -379,27 +379,27 @@ impl<'a> From<&'a WebhookOutcome> for OutcomeSummary<'a> {
         match outcome {
             WebhookOutcome::Ignored => Self {
                 outcome: "ignored",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: None,
             },
             WebhookOutcome::NoTarget => Self {
                 outcome: "no_target",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: None,
             },
             WebhookOutcome::SelfAuthored => Self {
                 outcome: "self_authored",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: None,
             },
-            WebhookOutcome::Edit { directive_applied } => Self {
+            WebhookOutcome::Edit { steer_applied } => Self {
                 outcome: "edit",
-                directive_applied: Some(*directive_applied),
+                steer_applied: Some(*steer_applied),
                 delivered: None,
             },
             WebhookOutcome::Comment { delivered } => Self {
                 outcome: "comment",
-                directive_applied: None,
+                steer_applied: None,
                 delivered: Some(*delivered),
             },
         }
@@ -433,7 +433,7 @@ fn scan_wave_endpoints(repo_root: &Path) -> Vec<String> {
 
 async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
     let mut candidates = vec![state.repo_root.clone()];
-    if let Ok(sessions) = state.store.list_task_sessions(None).await {
+    if let Ok(sessions) = state.store.list_tasks(None).await {
         candidates.extend(
             sessions
                 .into_iter()
@@ -454,15 +454,19 @@ async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
 
 async fn protected_worktree_paths(state: &LfdState) -> anyhow::Result<HashSet<PathBuf>> {
     let mut protected = crate::lf::commands::top::running_workspace_paths();
-    protected.extend(
-        state
+    for task in state.store.list_tasks(None).await? {
+        let work = state
             .store
-            .list_task_sessions(None)
-            .await?
-            .into_iter()
-            .filter(|session| !session.status.is_terminal())
-            .map(|session| session.worktree),
-    );
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
+            .await?;
+        let status = state.store.work_status(&work).await?;
+        if !matches!(
+            status,
+            crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+        ) {
+            protected.insert(task.worktree);
+        }
+    }
     let production = crate::store::production_database_path();
     if production.exists() {
         protected.extend(crate::store::read_nonterminal_task_worktrees(&production)?);
@@ -560,19 +564,33 @@ async fn maintenance_sweep(state: &LfdState) {
     }
 
     let now = OffsetDateTime::now_utc();
-    if let Ok(sessions) = state.store.list_task_sessions(None).await {
-        let active = sessions
-            .iter()
-            .filter(|session| !session.status.is_terminal())
-            .map(|session| session.worktree.clone())
-            .collect::<HashSet<_>>();
-        let terminal = sessions
-            .into_iter()
-            .filter(|session| session.status.is_terminal())
-            .filter(|session| session.updated_at <= now - time::Duration::hours(1))
-            .map(|session| session.worktree)
-            .filter(|path| path.exists() && !active.contains(path))
-            .collect::<HashSet<_>>();
+    if let Ok(sessions) = state.store.list_tasks(None).await {
+        let mut active = HashSet::new();
+        let mut terminal = HashSet::new();
+        for session in sessions {
+            let Ok(work) = state
+                .store
+                .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
+                .await
+            else {
+                continue;
+            };
+            let Ok(status) = state.store.work_status(&work).await else {
+                continue;
+            };
+            if matches!(
+                status,
+                crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
+            ) {
+                if session.updated_at <= now - time::Duration::hours(1) && session.worktree.exists()
+                {
+                    terminal.insert(session.worktree);
+                }
+            } else {
+                active.insert(session.worktree);
+            }
+        }
+        terminal.retain(|path| !active.contains(path));
         for path in terminal {
             let Ok(root) = main_repo_root(&path) else {
                 continue;
@@ -1014,17 +1032,17 @@ mod tests {
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::SelfAuthored),
-            (DeliveryStatus::Processed, Some("task_session"))
+            (DeliveryStatus::Processed, Some("task"))
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::Edit {
-                directive_applied: false
+                steer_applied: false
             }),
-            (DeliveryStatus::Processed, Some("task_session"))
+            (DeliveryStatus::Processed, Some("task"))
         );
         assert_eq!(
             map_outcome(&WebhookOutcome::Comment { delivered: true }),
-            (DeliveryStatus::Processed, Some("task_session"))
+            (DeliveryStatus::Processed, Some("task"))
         );
     }
 

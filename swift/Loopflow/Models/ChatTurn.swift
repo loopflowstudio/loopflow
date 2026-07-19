@@ -18,73 +18,9 @@ public enum ChildActivitySubject: String, Codable, Sendable, Hashable {
 
 public enum ChildActivityKind: String, Codable, Sendable, Hashable {
     case stateChanged = "state_changed"
-    case controlApplied = "control_applied"
-    case controlUncertain = "control_uncertain"
-    case directed
-    case incorporated
-    case decisionRequired = "decision_required"
-    case decisionResolved = "decision_resolved"
     case prOpened = "pr_opened"
     case completed
     case failed
-}
-
-public enum ChildCommandEffect: String, Codable, Sendable, Hashable {
-    case liveSteer = "live_steer"
-    case nextTurn = "next_turn"
-    case replacement
-    case decision
-}
-
-public enum ChildControlSource: Codable, Sendable, Hashable {
-    case wave(id: String)
-    case project(id: String)
-    case human
-    case attachment
-    case system
-    case linear
-
-    public var label: String {
-        switch self {
-        case .wave: "Wave"
-        case .project: "Project"
-        case .human: "Human"
-        case .attachment: "Terminal"
-        case .system: "System"
-        case .linear: "Linear"
-        }
-    }
-
-    private enum CodingKeys: String, CodingKey { case kind, id }
-    private enum Kind: String, Codable { case wave, project, human, attachment, system, linear }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(Kind.self, forKey: .kind) {
-        case .wave: self = .wave(id: try container.decode(String.self, forKey: .id))
-        case .project: self = .project(id: try container.decode(String.self, forKey: .id))
-        case .human: self = .human
-        case .attachment: self = .attachment
-        case .system: self = .system
-        case .linear: self = .linear
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case let .wave(id):
-            try container.encode(Kind.wave, forKey: .kind)
-            try container.encode(id, forKey: .id)
-        case let .project(id):
-            try container.encode(Kind.project, forKey: .kind)
-            try container.encode(id, forKey: .id)
-        case .human: try container.encode(Kind.human, forKey: .kind)
-        case .attachment: try container.encode(Kind.attachment, forKey: .kind)
-        case .system: try container.encode(Kind.system, forKey: .kind)
-        case .linear: try container.encode(Kind.linear, forKey: .kind)
-        }
-    }
 }
 
 public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
@@ -95,20 +31,11 @@ public struct ChildControlActivity: Codable, Sendable, Hashable, Identifiable {
     public let kind: ChildActivityKind
     public let title: String
     public let summary: String
-    public let directiveVersion: UInt32?
-    public let commandId: String?
-    public let effect: ChildCommandEffect?
-    public let source: ChildControlSource?
-    public let decisionId: String?
-    public let options: [String]
 
     private enum CodingKeys: String, CodingKey {
-        case id, subject, kind, title, summary, effect, source, options
+        case id, subject, kind, title, summary
         case subjectId = "subject_id"
         case sessionId = "session_id"
-        case directiveVersion = "directive_version"
-        case commandId = "command_id"
-        case decisionId = "decision_id"
     }
 }
 

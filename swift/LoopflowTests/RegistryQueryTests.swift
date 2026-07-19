@@ -11,8 +11,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}}
+          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -22,7 +22,7 @@ struct RegistryQueryTests {
 
         let waves = try await query.waves(repoPath: "/tmp/repo-a")
         #expect(waves.map(\.id) == ["goals"])
-        #expect(waves[0].status == .running)
+        #expect(waves[0].status.isRunning)
         #expect(waves[0].repo == "/tmp/repo-a")
     }
 
@@ -30,8 +30,8 @@ struct RegistryQueryTests {
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":"running","paused":false,"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
-          {"id":"other","name":"other","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}}
+          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
         ]
         """
         let counter = CallCounter()
@@ -51,27 +51,27 @@ struct RegistryQueryTests {
     func statusMapsWork() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
+          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":"turning",
           "projects":[{
             "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","krs":[{"text":"Fast loops","holds":false}]},
-            "runtime":{"session_id":"ps_1","status":"waiting","reason":"supervised Tasks are active","status_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"observation":{"category":"needs_input","reason":"supervised Tasks are active","owner":"human","controls":["decide","resume","abandon"],"progress_age_secs":null,"deadline_in_secs":null,"step":"iteration 2"}},
+            "runtime":{"work_id":"project-1","status":{"waiting":{"wait":{"id":"wait_00000000000000000000000000000001","work":{"kind":"project","id":"project-1"},"epoch_id":"epoch_00000000000000000000000000000001","on":{"kind":"input","after":{"epoch_id":"epoch_00000000000000000000000000000001","revision":1}},"created_at":"2026-07-06T00:00:00Z","resolved_at":null}}},"reason":"supervised Tasks are active","updated_at":"2026-07-06T00:00:00Z","iteration":2,"pending_observations":0,"provider":"codex","process_alive":false,"observation":{"category":"needs_input","reason":"supervised Tasks are active","owner":"user","controls":["decide","resume","abandon"],"progress_age_secs":null,"deadline_in_secs":null,"step":"iteration 2"}},
             "directive":null,
             "next_move":{"owner":"project","reason":"supervised Tasks are active"},
             "tasks":[{
               "task":{"id":"issue-1","identifier":"INF-123","name":"Wire it","description":"","rank":1,"completed":false,"assignee":null},
               "reference":{"issue_url":"https://linear.app/loopflow/issue/INF-123/wire-it","workspace":{"slug":"wire-it","branch":"jack/inf-123","worktree":"/task-wt"}},
-              "runtime":{"session_id":"ts_1","project_session_id":"ps_1","status":"running","reason":"provider turn is active","status_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true,"observation":{"category":"working","reason":"provider turn is active","owner":"session","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
+              "runtime":{"work_id":"issue-1","project_id":"project-1","status":{"running":{"run_id":"run_00000000000000000000000000000002"}},"reason":"provider turn is active","updated_at":"2026-07-06T00:00:00Z","provider":"codex","process_alive":true,"observation":{"category":"working","reason":"provider turn is active","owner":"work","controls":["attach","steer","interrupt","stop"],"progress_age_secs":60,"deadline_in_secs":1740,"step":"iterate"}},
               "directive":null,
               "next_move":{"owner":"task","reason":"provider turn is active"},
-              "attention":{"level":"green","reason":"provider turn is active","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","actions":[{"action":"recover","available":false,"reason":"body is alive; use attach/interrupt to interact"},{"action":"resume","available":false,"reason":"body is working; nothing to resume"},{"action":"review","available":false,"reason":"no open PR to review"},{"action":"start_next_pr","available":false,"reason":"no merged PR to advance from"},{"action":"complete","available":false,"reason":"implementation not finished"},{"action":"no_action","available":true,"reason":"Task body is working"}]},"pm_completed":false,"session_status":"running","process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
+              "attention":{"level":"green","reason":"provider turn is active","observed_at":"2026-07-06T00:01:00Z","evidence_age_secs":60,"next_owner":"task","actions":{"recommended":"no_action","reason":"Task body is working"},"pm_completed":false,"work_status":{"running":{"run_id":"run_00000000000000000000000000000002"}},"process":{"state":"observed","alive":true,"reason":null},"local_progress":{"state":"observed","unsettled":false,"dirty":false,"authored_commits":false,"recovery_required":false,"reason":null},"active_pr_phase":null},
               "prs":[],
               "active_pr":null
             }]
           }],
           "runs":{"state":"ok","truncated":false,"items":[{"id":"launch-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task_pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
           "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"review","reason":"PR is open","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
-          "home_runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home":"jack@local"}}
+          "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
         """
         let query = RegistryQuery { args, _ in
@@ -83,12 +83,14 @@ struct RegistryQueryTests {
         #expect(result.wave.id == "goals")
         #expect(result.wave.goal == "g")
         #expect(result.homeRuntime.state == .stopped)
-        #expect(result.homeRuntime.action == .start(home: "jack@local"))
+        #expect(result.homeRuntime.action == .start(homeId: "home_00000000000000000000000000000001"))
         #expect(result.loopState == "turning")
         #expect(result.workMap.projects[0].project.slug == "developer-efficiency")
-        #expect(result.workMap.projects[0].runtime?.status == .waiting)
+        if case .waiting = result.workMap.projects[0].runtime?.status {} else {
+            Issue.record("expected Project Work to be waiting")
+        }
         #expect(result.workMap.projects[0].tasks[0].task.identifier == "INF-123")
-        #expect(result.workMap.projects[0].tasks[0].runtime?.projectSessionId == "ps_1")
+        #expect(result.workMap.projects[0].tasks[0].runtime?.projectId == "project-1")
         #expect(result.workMap.projects[0].tasks[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")
@@ -136,9 +138,9 @@ struct RegistryQueryTests {
     @Test("lf home probe decodes the state and the one contextual action")
     func homeProbeDecodesStateAndAction() async throws {
         let json = #"""
-        {"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},
+        {"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},
          "state":"stopped","reason":"reachable, no resident","endpoint":null,
-         "action":{"kind":"start","home":"jack@local"}}
+         "action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         """#
         let query = RegistryQuery { args, cwd in
             #expect(args == ["home", "probe", "product", "--json"])
@@ -149,27 +151,29 @@ struct RegistryQueryTests {
         let runtime = try await query.homeProbe(wave: "product", cwd: "/tmp/repo")
         #expect(runtime.state == .stopped)
         #expect(runtime.endpoint == nil)
-        #expect(runtime.action == .start(home: "jack@local"))
+        #expect(runtime.action == .start(homeId: "home_00000000000000000000000000000001"))
     }
 
-    @Test("lf home start returns the idempotency flag and the attach identity")
-    func homeStartReturnsAttachIdentity() async throws {
+    @Test("lf start returns the existing Wave status contract")
+    func startReturnsWaveStatus() async throws {
         let json = #"""
-        {"wave":"product","started":true,
-         "runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},
-          "state":"running","reason":"resident answering","endpoint":"127.0.0.1:7777",
-          "action":{"kind":"attach","endpoint":"127.0.0.1:7777"}}}
+        [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
+          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":true,
+          "endpoint":"127.0.0.1:7777","created_at":"2026-07-17T00:00:00Z",
+          "parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001",
+          "route":"local","created_at":"2026-07-17T00:00:00Z",
+          "observed_at":"2026-07-17T00:00:00Z"}}]
         """#
         let query = RegistryQuery { args, cwd in
-            #expect(args == ["home", "start", "product", "--json"])
+            #expect(args == ["start", "product", "--json"])
             #expect(cwd == "/tmp/repo")
             return json
         }
 
-        let result = try await query.homeStart(wave: "product", cwd: "/tmp/repo")
-        #expect(result.started)
-        #expect(result.runtime.state == .running)
-        #expect(result.runtime.action == .attach(endpoint: "127.0.0.1:7777"))
+        let result = try await query.start(wave: "product", cwd: "/tmp/repo")
+        #expect(result[0].live)
+        #expect(result[0].endpoint == "127.0.0.1:7777")
+        #expect(result[0].home.id == "home_00000000000000000000000000000001")
     }
 
     /// Unreadable evidence must reach the surface as its reason, never as an
@@ -178,12 +182,12 @@ struct RegistryQueryTests {
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"idle","paused":false,"goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}}},
+          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":null,
           "projects":[],
           "runs":{"state":"unavailable","reason":"run ledger unavailable: disk is gone"},
           "attention":{"state":"ok","truncated":false,"items":[]},
-          "home_runtime":{"home":{"address":"jack@local","owner":"jack","location":{"kind":"local"}},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home":"jack@local"}}
+          "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
         """
         let query = RegistryQuery { _, _ in json }
@@ -259,25 +263,23 @@ struct RegistryQueryTests {
         #expect(runs[1].task == nil)
     }
 
-    @Test("lf usage --json preserves lineage and unspent spans")
+    @Test("lf usage --json decodes one additive Turn row")
     func spendDecodes() async throws {
         let json = """
-        [{"run_id":"abc","process_id":"child","parent_process_id":"parent","seq":7,"node":"run","name":"lf pm show","repo":null,"wave":null,"flow":null,"skill":null,"started_at":100,"ended_at":null,"status":"open","input_tokens":null,"output_tokens":null,"cache_read_tokens":null,"cost_usd":null,"duration_secs":null,"provider":null,"model":null}]
+        [{"turn_id":"turn-1","launch_id":"launch-1","trace_id":"abc","exec_id":"child","repo":"/src/loopflow","wave":null,"flow":"build","skill":"gate","provider":"claude","model":"opus","at":100,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25}]
         """
         let query = RegistryQuery { args, _ in
             #expect(args == ["usage", "--json", "--days", "30"])
             return json
         }
 
-        let spans = try await query.spend()
-        #expect(spans[0].processId == "child")
-        #expect(spans[0].id == "child-7")
-        #expect(spans[0].parentProcessId == "parent")
-        #expect(spans[0].status == "open")
-        #expect(spans[0].endedAt == nil)
-        // A span that spent nothing carries nulls, not zeros.
-        #expect(spans[0].totalTokens == 0)
-        #expect(spans[0].agent == "unattributed")
+        let turns = try await query.spend()
+        #expect(turns[0].id == "turn-1")
+        #expect(turns[0].launchId == "launch-1")
+        #expect(turns[0].traceId == "abc")
+        #expect(turns[0].execId == "child")
+        #expect(turns[0].totalTokens == 1200)
+        #expect(turns[0].agent == "claude:opus")
     }
 
     @Test("lf doctor decodes every check")
@@ -379,7 +381,7 @@ struct RegistryQueryTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
-    @Test("Task handoff refreshes the Wave plan before launch")
+    @Test("Task launch refreshes the Wave plan before launch")
     func planCanSyncProjects() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["pm", "show", "--wave", "goals", "--json", "--sync"])

@@ -149,7 +149,7 @@ fn lf(home: &Path, repo: &Path, args: &[&str], wave_id: Option<&str>) -> std::pr
         .env_remove("LF_DB_PATH")
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_TRACE_ID")
         .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = wave_id {
@@ -175,7 +175,7 @@ fn wave_field(output: &std::process::Output) -> String {
 
 /// The original reproduction: from a resident wave's environment
 /// (`LF_WAVE_ID=<uuid>`, no `--wave`), both `lf pm show` and `lf status` resolve
-/// the same wave. The Mac Project Session inherits the identical `LF_WAVE_ID`,
+/// the same wave. The Mac Project inherits the identical `LF_WAVE_ID`,
 /// so this cell stands for both.
 #[test]
 fn pm_show_and_status_agree_from_a_resident_uuid() {

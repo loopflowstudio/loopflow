@@ -147,7 +147,7 @@ async fn lfd_dedups_signed_deliveries_across_restart() {
     assert_eq!(status["waves"], 0);
     assert_eq!(status["deliveries"], 0);
 
-    // Send a valid signed webhook. No Task Session matches the issue id, so the
+    // Send a valid signed webhook. No Task matches the issue id, so the
     // delivery is classified `no_target` — but it is still persisted and 200'd.
     let (body, sig) = signed_issue_webhook(SECRET.as_bytes());
     let resp = reqwest::Client::new()

@@ -1,6 +1,5 @@
 ---
 description: Judge and advance one Task's PR after implementation.
-default_agent: codex
 action_style: procedural
 ---
 Judge the Task change against its directive and design.

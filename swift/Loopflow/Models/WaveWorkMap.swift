@@ -70,18 +70,18 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let assignee: String?
 }
 
-/// The observed state of a Session's current body, distinct from durable intent.
+/// The observed state of a Work item's current body, distinct from durable intent.
 /// `status` records intent; `BodyObservation` records what the current body is
 /// observed doing. Working versus Stalled is exactly the difference between a
 /// live body that advanced recently and one silent past its deadline.
 public enum BodyCategory: String, Decodable, Sendable, Hashable {
     case working, stalled, recovering
     case needsInput = "needs_input"
-    case stopped, failed, terminal, unobservable
+    case stopped, terminal, unobservable
 }
 
 public enum BodyOwner: String, Decodable, Sendable, Hashable {
-    case session, loopflow, human, nobody, unknown
+    case work, loopflow, user, nobody, unknown
 }
 
 public enum BodyControl: String, Decodable, Sendable, Hashable {
@@ -105,10 +105,10 @@ public struct BodyObservation: Decodable, Sendable, Hashable {
 }
 
 public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
-    public let sessionId: String
-    public let status: ProjectSessionStatus
+    public let workId: String
+    public let status: WorkStatus
     public let reason: String
-    public let statusAt: String
+    public let updatedAt: String
     public let iteration: UInt32
     public let pendingObservations: UInt32
     public let provider: String
@@ -117,39 +117,37 @@ public struct ProjectRuntimeSnapshot: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case status, reason, iteration, provider, observation
-        case sessionId = "session_id"
-        case statusAt = "status_at"
+        case workId = "work_id"
+        case updatedAt = "updated_at"
         case pendingObservations = "pending_observations"
         case processAlive = "process_alive"
     }
 }
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
-    public let sessionId: String
-    public let projectSessionId: String
-    /// The live Project Session this Task routes to (a successor when the
-    /// historical owner is terminal). Nil when the chain is broken.
-    public let routingProjectSessionId: String?
-    public let status: TaskSessionStatus
+    public let workId: String
+    public let projectId: String
+    public let routingProjectId: String?
+    public let status: WorkStatus
     public let reason: String
-    public let statusAt: String
+    public let updatedAt: String
     public let provider: String
     public let processAlive: Bool
     public let observation: BodyObservation
 
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, observation
-        case sessionId = "session_id"
-        case projectSessionId = "project_session_id"
-        case routingProjectSessionId = "routing_project_session_id"
-        case statusAt = "status_at"
+        case workId = "work_id"
+        case projectId = "project_id"
+        case routingProjectId = "routing_project_id"
+        case updatedAt = "updated_at"
         case processAlive = "process_alive"
     }
 }
 
 /// Stable Task references shared by `lf status` and `lf roadmap`. The issue URL
-/// comes from the cached PM snapshot; workspace evidence comes from the durable
-/// Task Session and remains after execution finishes.
+/// comes from the cached PM snapshot; workspace evidence comes from durable
+/// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     public let issueUrl: URL?
     public let workspace: TaskWorkspaceSnapshot?
@@ -206,14 +204,6 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     }
 }
 
-public enum ProjectSessionStatus: String, Decodable, Sendable, Hashable {
-    case created, starting, running, waiting, blocked, failed, completed, abandoned
-}
-
-public enum TaskSessionStatus: String, Decodable, Sendable, Hashable {
-    case created, starting, running, waiting, blocked, failed, completed, abandoned
-}
-
 public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {
     public let version: UInt32
     public let kind: WorkDirectiveKind
@@ -237,7 +227,7 @@ public enum WorkDirectiveKind: String, Decodable, Sendable, Hashable {
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
-    case human
+    case user
     case wave
     case project
     case task
@@ -252,10 +242,10 @@ public struct WorkNextMove: Decodable, Sendable, Hashable {
 }
 
 public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
-    case green, red, black, unknown
+    case green, red, blue, black, unknown
 }
 
-/// The six lifecycle actions a Task Session can take. Mirrors the Rust
+/// The six lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
 public enum TaskAction: String, Decodable, Sendable, Hashable {
     case recover, resume, review
@@ -264,24 +254,11 @@ public enum TaskAction: String, Decodable, Sendable, Hashable {
     case noAction = "no_action"
 }
 
-/// One action's legal status: the reason explains why it is legal when
-/// available, and names the blocking fact when it is not.
-public struct TaskActionStatus: Decodable, Sendable, Hashable {
-    public let action: TaskAction
-    public let available: Bool
-    public let reason: String
-}
-
-/// The complete legal-action model: all six actions in canonical order.
-/// `recommended` is always one of the available actions, or nil when no
-/// Task Session exists.
+/// The next legal action and why. A nil recommendation means Task Work has not
+/// started; callers do not reconstruct a matrix of blocked alternatives.
 public struct TaskActionModel: Decodable, Sendable, Hashable {
     public let recommended: TaskAction?
-    public let actions: [TaskActionStatus]
-
-    public func status(_ action: TaskAction) -> TaskActionStatus? {
-        actions.first { $0.action == action }
-    }
+    public let reason: String
 }
 
 public enum TaskProcessEvidenceState: String, Decodable, Sendable, Hashable {
@@ -326,7 +303,7 @@ public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
     public let nextOwner: WorkNextMoveOwner
     public let actions: TaskActionModel
     public let pmCompleted: Bool
-    public let sessionStatus: TaskSessionStatus?
+    public let workStatus: WorkStatus?
     public let process: TaskProcessEvidence
     public let localProgress: LocalProgressEvidence
     public let activePrPhase: PrPhase?
@@ -337,7 +314,7 @@ public struct TaskAttentionSnapshot: Decodable, Sendable, Hashable {
         case evidenceAgeSeconds = "evidence_age_secs"
         case nextOwner = "next_owner"
         case pmCompleted = "pm_completed"
-        case sessionStatus = "session_status"
+        case workStatus = "work_status"
         case localProgress = "local_progress"
         case activePrPhase = "active_pr_phase"
     }
@@ -441,8 +418,8 @@ public enum WaveAttentionKind: String, Decodable, Sendable, Hashable {
     case task
 }
 
-/// One Session waiting on somebody. Mirrors Rust `AttentionItem`. `ageSeconds`
-/// is nil when the Session's timestamp cannot be read — an unknown age is never
+/// One Work item waiting on somebody. Mirrors Rust `AttentionItem`. `ageSeconds`
+/// is nil when the Work timestamp cannot be read — an unknown age is never
 /// a zero one.
 public struct WaveAttentionItem: Decodable, Sendable, Hashable, Identifiable {
     public let kind: WaveAttentionKind

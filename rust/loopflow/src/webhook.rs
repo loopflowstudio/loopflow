@@ -2,9 +2,8 @@
 //!
 //! Linear pushes each issue/comment change to a Loopflow receiver. This module
 //! is the receiver's brain: verify the signature, parse the event, and map it
-//! onto the durable Task control substrate — a title/description edit becomes a
-//! replacement directive, a human comment becomes a FIFO follow-up. Delivery,
-//! acknowledgment, and exactly-once all live in the store
+//! onto the durable Task input spine — a title/description edit or a human
+//! comment becomes an ordered Steer. Exactly-once lives in the store
 //! ([`crate::ops::linear_observe`] + the `task_linear_*` tables); this module
 //! never bypasses them, so a redelivered or out-of-order webhook is a no-op.
 //!
@@ -25,8 +24,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 use time::OffsetDateTime;
 
-use crate::child_session::ChildRef;
-use crate::ops::linear_observe::{linear_follow_up_command, reconcile_linear_observation};
+use crate::ops::linear_observe::{linear_follow_up_text, reconcile_linear_observation};
 use crate::pm::IssueObservation;
 use crate::store::{Store, StoreError};
 
@@ -171,12 +169,12 @@ pub fn parse_event(raw_body: &[u8]) -> Result<(WebhookEvent, i64), WebhookError>
 pub enum WebhookOutcome {
     /// Not an event that carries direction (metadata edit, removal, unknown).
     Ignored,
-    /// A real event on an issue that has no Task Session — nothing to steer.
+    /// A real event on an issue that has no Task — nothing to steer.
     NoTarget,
     /// Loopflow's own edit/comment, skipped to avoid a feedback loop.
     SelfAuthored,
-    /// A title/description edit; `directive_applied` is false for a duplicate.
-    Edit { directive_applied: bool },
+    /// A title/description edit; `steer_applied` is false for a duplicate.
+    Edit { steer_applied: bool },
     /// A human comment; `delivered` is false for a duplicate delivery.
     Comment { delivered: bool },
 }
@@ -186,7 +184,7 @@ fn is_human(author_id: Option<&str>, viewer_id: &str) -> bool {
 }
 
 /// Map one verified, parsed event onto the durable Task control substrate.
-/// Resolves the target Task Session by Linear issue id; a missing Session or a
+/// Resolves the target Task by Linear issue id; a missing Session or a
 /// self-authored change writes nothing.
 pub async fn ingest_event(
     store: &Store,
@@ -200,7 +198,7 @@ pub async fn ingest_event(
         }
         WebhookEvent::Ignored => return Ok(WebhookOutcome::Ignored),
     };
-    let Some(session) = store.get_task_session_by_issue(&issue_id).await? else {
+    let Some(session) = store.get_task_by_issue(&issue_id).await? else {
         return Ok(WebhookOutcome::NoTarget);
     };
     match event {
@@ -223,7 +221,7 @@ pub async fn ingest_event(
             let outcome =
                 reconcile_linear_observation(store, &session, observation, viewer_id, now).await?;
             Ok(WebhookOutcome::Edit {
-                directive_applied: outcome.directive_applied,
+                steer_applied: outcome.content_steer_applied,
             })
         }
         WebhookEvent::Comment {
@@ -235,9 +233,9 @@ pub async fn ingest_event(
             if !is_human(author_id.as_deref(), viewer_id) {
                 return Ok(WebhookOutcome::SelfAuthored);
             }
-            let command = linear_follow_up_command(ChildRef::Task(session.id.clone()), &body);
+            let text = linear_follow_up_text(&body);
             let created = store
-                .apply_linear_comment(&session.id, comment_id, command, now)
+                .apply_linear_comment(&session.id, comment_id, text, now)
                 .await?;
             Ok(WebhookOutcome::Comment {
                 delivered: created.is_some(),

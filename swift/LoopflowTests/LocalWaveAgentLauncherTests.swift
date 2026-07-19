@@ -10,6 +10,12 @@ import Testing
 struct LocalWaveAgentLauncherTests {
     // MARK: - Command construction
 
+    @Test("canonical local and remote Homes route once")
+    func canonicalHomeRouting() {
+        #expect(!LaunchTargetLauncher.isRemoteHome("jack@local"))
+        #expect(LaunchTargetLauncher.isRemoteHome("ssh://jack@builder.example:22"))
+    }
+
     @Test("launch command is a detached tmux session at the wave's repo")
     func launchCommandShape() {
         let args = LocalWaveAgentLauncher.waveLaunchCommand(
@@ -84,8 +90,8 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
-        #expect(LocalWaveAgentLauncher.taskAttachCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "task", "attach", "W2-131",
+        #expect(LocalWaveAgentLauncher.taskFeedbackCommand(lfPath: lf, taskId: "task_131") == [
+            lf, "work", "feedback", "task", "task_131", "--continue-on-exit",
         ])
     }
 

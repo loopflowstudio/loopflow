@@ -79,13 +79,7 @@ private func childActivity(_ kind: ChildActivityKind) -> ChildControlActivity {
         sessionId: "ps_1",
         kind: kind,
         title: "Wave chat",
-        summary: "…",
-        directiveVersion: nil,
-        commandId: nil,
-        effect: nil,
-        source: .wave(id: "w1"),
-        decisionId: nil,
-        options: []
+        summary: "…"
     )
 }
 
@@ -216,16 +210,12 @@ struct WaveChatTranscriptTests {
         #expect(!view.hasSteps)
     }
 
-    /// Decisions and reports are conversation; lifecycle churn is not.
-    @Test func decisionsStayAndChurnGoes() {
-        #expect(isConversational(childActivity(.decisionRequired)))
+    /// Delivery reports are conversation; lifecycle churn is not.
+    @Test func reportsStayAndChurnGoes() {
         #expect(isConversational(childActivity(.prOpened)))
         #expect(isConversational(childActivity(.failed)))
         #expect(isConversational(childActivity(.completed)))
         #expect(!isConversational(childActivity(.stateChanged)))
-        #expect(!isConversational(childActivity(.controlApplied)))
-        #expect(!isConversational(childActivity(.directed)))
-        #expect(!isConversational(childActivity(.incorporated)))
     }
 
     /// The whole transcript: what a human sees of a long-running task.
@@ -243,7 +233,7 @@ struct WaveChatTranscriptTests {
             try turn(id: "turn-4", role: .user, status: .completed, from: "project wave-chat",
                      activity: childActivity(.stateChanged)),
             try turn(id: "turn-5", role: .user, status: .completed, from: "project wave-chat",
-                     activity: childActivity(.decisionRequired)),
+                     activity: childActivity(.prOpened)),
             try turn(
                 id: "turn-6",
                 text: "PR is up.",

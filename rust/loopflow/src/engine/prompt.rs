@@ -183,9 +183,6 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
-    /// Ambient wave context: compact rendering of the wave's recent thread.
-    /// `None` when no wave resolves or the wave has no conversation yet.
-    pub wave_chat: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
     /// User message (positional args after skill/flow name)
@@ -451,27 +448,23 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Ambient wave context: every run born inside a wave inherits recent chat
-    // and memory. Explicit --wave wins; otherwise LF_WAVE_ID resolves the Wave.
-    // No wave (or no wave state) → both stay empty and the prompt gains nothing.
-    let ambient_start = Instant::now();
+    // Wave memory follows durable ownership. Explicit --wave wins; otherwise
+    // LF_WAVE_ID resolves the Wave. Conversation is never included by recency.
+    let memory_start = Instant::now();
     let ambient_wave = opts
         .wave
         .clone()
         .or_else(crate::engine::wave_context::resolve_ambient_wave_name);
-    let wave_chat = ambient_wave
-        .as_deref()
-        .and_then(|wave| crate::engine::wave_context::gather_wave_chat(repo_root, wave));
     if wave_memory.is_none() {
         if let Some(wave) = ambient_wave.as_deref() {
             wave_memory = gather_wave_memory_doc(repo_root, Some(wave))?;
         }
     }
     debug!(
-        elapsed_ms = ambient_start.elapsed().as_millis(),
+        elapsed_ms = memory_start.elapsed().as_millis(),
         wave = ambient_wave.as_deref(),
-        has_chat = wave_chat.is_some(),
-        "gathered ambient wave context"
+        has_memory = wave_memory.is_some(),
+        "gathered wave memory"
     );
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
@@ -487,7 +480,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
-        wave_chat,
         operate: opts.operate,
         message: opts.message.clone(),
         message_context: None,
@@ -1557,41 +1549,27 @@ pub fn loopflow_section() -> String {
     )
 }
 
-/// The two ambient wave sections — `<lf:wave-memory>` and
-/// `<lf:wave-chat-recent>` — the context every run born inside a wave
-/// inherits, whatever the launch surface (assembled prompts and vendor-skill
-/// seeds alike). Emitted ONLY when non-empty: no wave, no headers, no tokens.
+/// The Wave memory section inherited by every run born inside a Wave, whatever
+/// the launch surface (assembled prompts and vendor-skill seeds alike). Emitted
+/// only when non-empty: no memory, no header, no tokens.
 ///
 /// Memory goes through the one injector
 /// ([`crate::engine::flow::wave_memory_section`], shared with the wave
 /// agent's `render_goal`) and is skipped when the task message already
 /// carries the tag — a wave-agent seed embeds its own memory, and injecting
 /// it twice would double the context.
-pub fn format_wave_context_sections(components: &PromptComponents) -> Vec<String> {
-    let mut parts = Vec::new();
-
+pub fn format_wave_memory_section(components: &PromptComponents) -> Option<String> {
     let message_carries_memory = components
         .message
         .as_deref()
         .is_some_and(|message| message.contains("<lf:wave-memory>"));
-    if !message_carries_memory {
-        if let Some(section) = components
-            .wave_memory
-            .as_ref()
-            .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
-        {
-            parts.push(section);
-        }
+    if message_carries_memory {
+        return None;
     }
-
-    if let Some(ref chat) = components.wave_chat {
-        parts.push(format!(
-            "The wave's recent conversation — the thread this run is part of.\n\n\
-             <lf:wave-chat-recent>\n{chat}\n</lf:wave-chat-recent>"
-        ));
-    }
-
-    parts
+    components
+        .wave_memory
+        .as_ref()
+        .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
 }
 
 /// Render user-content reference sections (docs, diffs, wave context).
@@ -1633,10 +1611,11 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Ambient wave context: the wave's memory and recent conversation flow
-    // into every run born inside the wave. Both sections cost zero tokens
-    // when absent.
-    parts.extend(format_wave_context_sections(components));
+    // Durable Wave memory flows into every run born inside the Wave and costs
+    // zero tokens when absent. Conversation requires explicit selection.
+    if let Some(memory) = format_wave_memory_section(components) {
+        parts.push(memory);
+    }
 
     let scratch_docs: Vec<Document> = components
         .docs
@@ -2149,14 +2128,13 @@ mod tests {
     }
 
     #[test]
-    fn ambient_wave_sections_render_without_an_explicit_wave() {
+    fn wave_memory_renders_without_an_explicit_wave_block() {
         let components = PromptComponents {
             wave_memory: Some(Document {
                 path: "wave/goals/MEMORY.md".to_string(),
                 content: "- land real product code".to_string(),
                 source: DocumentSource::WaveMemory,
             }),
-            wave_chat: Some("user: status?\nwave: two PRs open".to_string()),
             ..Default::default()
         };
 
@@ -2166,16 +2144,12 @@ mod tests {
             "no wave block ambiently"
         );
         assert!(prompt.contains("<lf:wave-memory>\n- land real product code\n</lf:wave-memory>"));
-        assert!(prompt.contains(
-            "<lf:wave-chat-recent>\nuser: status?\nwave: two PRs open\n</lf:wave-chat-recent>"
-        ));
     }
 
     #[test]
     fn no_wave_context_renders_no_wave_sections() {
         let prompt = render_full_prompt(PromptComponents::default());
         assert!(!prompt.contains("<lf:wave-memory>"));
-        assert!(!prompt.contains("<lf:wave-chat-recent>"));
         assert!(!prompt.contains("<lf:wave"));
     }
 

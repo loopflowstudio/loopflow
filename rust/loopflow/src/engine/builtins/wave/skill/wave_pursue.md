@@ -9,7 +9,7 @@ flow.
 
 Resolve the exact wave from the prompt or its `wave/<wave>/GOAL.md`; never infer
 an approximate name. Read GOAL/MEMORY, the PM snapshot's Project definitions,
-KRs, and tasks, recent chat, and Task state. If that reader fails,
+KRs and tasks, the selected Turn, and Task state. If that reader fails,
 report the failure once and select from memory; repairing PM or auth is not
 this wave's new objective. Trust worker summaries; do not reread worker
 transcripts. Each project belongs to exactly one wave and owns KRs, not memory

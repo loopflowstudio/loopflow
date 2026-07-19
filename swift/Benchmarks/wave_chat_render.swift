@@ -1,7 +1,7 @@
 // Baseline for the Wave Chat token path's render stage: what one provider text
 // delta costs the Mac surface's main actor.
 //
-//   swift swift/Benchmarks/wave_chat_render.swift scratch/turn626.json
+//   swift <this-file> scratch/turn626.json
 //
 // The listener broadcasts the whole open turn on every delta (wave/runtime.rs
 // `append_turn_item_locked`), so per token the Mac does two things on the main

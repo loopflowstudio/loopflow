@@ -60,3 +60,19 @@ Proof: journal 12/12, runtime 24/24, Wave context 17/17, thread 9/9, CLI memory
 81/81, cron 7/7, golden parity 1/1, Swift Wave chat 24/24, and Swift DTO fixture
 7/7 pass. Exact current-source searches are empty; `cargo fmt --check` and
 all-target Clippy with warnings denied pass.
+
+## Slice 4 — explicit prompt context
+
+Accepted. `PromptComponents` and launch seeding have no recent-Wave-chat field,
+tag, budget, renderer, gatherer, trace asset, or debug projection. Skill launch
+seeding accepts one optional Wave memory section rather than an arbitrary list
+of ambient Wave sections. Wave conversation, journal, `ChatTurn`, `lf chat`,
+and Mac chat UI remain unchanged as product surfaces.
+
+Separate Project and Task integration proofs seed a complete real Wave journal
+turn, build `project_pursue` and `task_pursue` prompts, and prove both sides of
+the unrelated conversation are absent while `MEMORY.md` is present.
+
+Proof: Wave context 7/7, prompt 81/81, run 35/35, and context integration 22/22
+pass. Exact forbidden-symbol/tag search is empty; `cargo fmt --check` and
+all-target Clippy with warnings denied pass.

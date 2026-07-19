@@ -24,7 +24,7 @@ An external harness opened by a person is a Loopflow **User**, the same caller
 kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with or steer a Wave.
 
-A Wave, Project, or Task agent launched by Loopflow is an internal participant.
+A Loopflow-launched Wave, Project, or Task agent is an internal participant.
 It receives `LOOPFLOW.md`; typed Work observations and Feedback carry
 coordination across the parent relationship.
 

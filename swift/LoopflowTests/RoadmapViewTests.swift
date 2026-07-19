@@ -22,7 +22,7 @@ struct RoadmapViewTests {
         #expect(roadmapTaskAction(tasks[1]) == .openPr)
         #expect(!roadmapTaskCanInterrupt(tasks[1]))
 
-        // No Session yet, and a terminal Task offers nothing.
+        // No Task Work yet, and a terminal Task offers nothing.
         #expect(roadmapTaskAction(tasks[2]) == .run)
         #expect(roadmapTaskAction(tasks[3]) == nil)
     }

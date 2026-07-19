@@ -548,7 +548,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one `tmux list-sessions` for the whole
-/// read, bounded Git probes for Tasks with Sessions, and no network. `lf status`
+/// read, bounded Git probes for Task Work, and no network. `lf status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
@@ -589,7 +589,7 @@ pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
                 .map_err(|err| anyhow!("failed to read wave registry: {err}"))?,
             Err(other) => return Err(anyhow!(other)),
         };
-        // One tmux reading for every Session on the machine, taken once.
+        // One tmux reading for every Work process on the machine, taken once.
         let liveness = TmuxLiveness::snapshot().await;
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {

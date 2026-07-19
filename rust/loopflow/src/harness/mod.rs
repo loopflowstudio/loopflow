@@ -296,7 +296,7 @@ pub trait Harness: Send + Sync {
     fn provider_session_id(&self) -> Option<String>;
     /// Independently isolated provider process group, when the harness owns
     /// one. Providers that remain in the runner's process group return None;
-    /// the Session receipt retains the runner group recorded at activation.
+    /// the Launch record retains the runner group recorded at activation.
     fn process_group_id(&self) -> Option<u32> {
         None
     }

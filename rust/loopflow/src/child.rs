@@ -84,8 +84,8 @@ pub struct ChildBodyHandoffRequest {
     pub reason: String,
 }
 
-/// Typed audit record for a body handoff. Session identity and durable work are
-/// intentionally absent: they do not change during this transition.
+/// Typed audit record for a body handoff. Work and Run identity are intentionally
+/// absent: they do not change during this transition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildBodyHandoff {
     pub from_agent: String,
@@ -95,10 +95,10 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The `lf` binary, store, and home a Session launches through, resolved fresh
-/// at the launch boundary from the current Home — never persisted as Session
-/// state. A transient bundle carried from the resolver to the tmux spawn; a
-/// Session no longer pins a binary of its own.
+/// The `lf` binary, store, and home a child Work launch uses, resolved fresh at
+/// the launch boundary from the current Home — never persisted as Work state. A
+/// transient bundle carried from the resolver to the tmux spawn; Work no longer
+/// pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {
     pub lf_bin: PathBuf,
@@ -106,13 +106,12 @@ pub struct ChildExecutionContext {
     pub lf_home: PathBuf,
 }
 
-/// A recorded request to end a Session, durable from the moment the Abandon
+/// A recorded request to end Work, durable from the moment the Abandon
 /// command is queued rather than from the moment a runner consumes it.
 ///
 /// The gap between those two moments is where a supervisor used to restart a
-/// Session someone had already ended: the pending command carried the intent,
-/// but the Session row still read `Running`, and every launch path reads the
-/// Session.
+/// Work item someone had already ended: the pending command carried the intent,
+/// but the Work row still read `Running`, and every launch path reads that Work.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonIntent {
     pub requested_at: OffsetDateTime,

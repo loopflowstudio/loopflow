@@ -374,7 +374,7 @@ lf memory show -w intelligence              # read a named Wave while it is stop
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory show` | Read the selected Wave's origin `MEMORY.md` directly; no listener or provider is required |
 
-Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
+Managed Work processes default to their invoking Wave through `LF_WAVE_ID`. From a
 human shell, pass `--wave`; repository location does not identify one of the
 Waves sharing `main`.
 
@@ -453,7 +453,7 @@ spend from the local execution ledger.
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a
 trace. `lf trace` accepts an exec or trace id and leaves killed processes open instead
-of hiding them. `lf context` aggregates one filtered session set without opening
+of hiding them. `lf context` aggregates one filtered Launch set without opening
 bodies. Its Project and Task filters use captured control identity rather than
 inferring ownership from a worktree path. The research-state flags require an
 observed steer or a launch containing a current resolvable file-backed instruction

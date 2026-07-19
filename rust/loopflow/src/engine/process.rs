@@ -70,11 +70,11 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
         .map(PathBuf::from)
 }
 
-/// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
+/// Resolve the `lf` a Work launch will use: an absolute path that exists.
 ///
 /// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
 /// against the *login* shell's PATH inside tmux — a third binary, chosen by
-/// neither the Session nor its launcher. A Session that cannot name its own
+/// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     let candidate = resolve_lf_binary();
@@ -83,14 +83,14 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
             Ok(candidate)
         } else {
             Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the lf this Session should run",
+                "lf binary {} does not exist; set LF_BIN to the lf this Work should run",
                 candidate.display()
             ))
         };
     }
     which_on_path(&candidate).ok_or_else(|| {
         anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Session should run",
+            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Work should run",
             candidate.display()
         )
     })
@@ -108,11 +108,11 @@ pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
 
 /// Capture the current process's control context — this process's `lf`, store,
 /// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
-/// build this honors `LF_CONTROL_*`, so a running body hands its own session's
-/// context (not the machine's Home) to the provider CLI it spawns.
+/// build this honors `LF_CONTROL_*`, so a running body hands its own Run context
+/// (not the machine's Home) to the provider CLI it spawns.
 ///
 /// This is NOT the launch resolver. Use [`current_home_execution_context`] to
-/// launch or relaunch a Session: launching through the control context would
+/// launch or relaunch Work: launching through the control context would
 /// perpetuate the historical binary a legacy body was created with.
 pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
@@ -184,10 +184,10 @@ fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
     })
 }
 
-/// Resolve the current Home execution context for launching a Session: the
+/// Resolve the current Home execution context for launching Work: the
 /// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
 ///
-/// This is the launch/relaunch boundary resolver. A Session created under one
+/// This is the launch/relaunch boundary resolver. Work created under one
 /// binary and resumed under another launches through the current Home — its
 /// worktree, provider history, and directives are unaffected by which binary
 /// first created it.
@@ -216,8 +216,8 @@ pub(crate) fn shell_escape(value: &str) -> String {
 /// Whether this machine can look for tmux sessions at all.
 ///
 /// Ask PATH, not the binary. A generic `--version` probe reports tmux as absent
-/// on every machine — tmux only accepts `-V` — which silently downgrades Session
-/// liveness to "unknowable" and hides processes that are actually gone.
+/// on every machine — tmux only accepts `-V` — which silently downgrades Work
+/// process liveness to "unknowable" and hides processes that are actually gone.
 pub(crate) fn tmux_installed() -> bool {
     which_on_path(Path::new("tmux")).is_some()
 }
@@ -515,7 +515,7 @@ mod tests {
 
     /// The probe must agree with whether tmux can actually be run. The previous
     /// `--version` probe disagreed on every machine that has tmux, which pinned
-    /// Session liveness to "unknowable" and let gone processes read as running.
+    /// Work-process liveness to "unknowable" and let gone processes read as running.
     #[test]
     fn tmux_probe_agrees_with_running_tmux() {
         // Both sides of this comparison resolve through `PATH`.

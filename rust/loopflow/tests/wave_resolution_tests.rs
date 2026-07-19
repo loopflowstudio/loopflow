@@ -33,7 +33,7 @@ async fn resolver_matrix_agrees_across_every_environment() {
     let uuid = wave.id().as_str();
 
     // Wave / Project / Task processes all inherit the same durable UUID — the
-    // Project/Task session ids never touch wave identity, so one cell covers
+    // Project/Task Work ids never touch Wave identity, so one cell covers
     // all three. UUID first: mapped to its registry name.
     assert_eq!(
         resolve_managed_wave_name(Some(&store), None, Some(uuid))

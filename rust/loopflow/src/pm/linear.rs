@@ -763,7 +763,7 @@ impl LinearClient {
     }
 
     /// Move an issue into another team and return its **new** identifier. The
-    /// issue UUID is preserved (Session/PR/comment ownership survives); only the
+    /// issue UUID is preserved (Task/PR/comment ownership survives); only the
     /// number changes, and Linear assigns it at move time, so we read it back.
     pub async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
         let response: IssueUpdateIdentifierData = self

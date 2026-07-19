@@ -19,7 +19,7 @@ pub struct ContextSourceOverrides {
     pub clipboard: Option<bool>,
 }
 
-/// Canonical launch-prep input shared by CLI and session call sites.
+/// Canonical launch-prep input shared by CLI and Work-runner call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchPromptInput {
     pub repo_root: PathBuf,

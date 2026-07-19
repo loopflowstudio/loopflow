@@ -201,7 +201,7 @@ From Cursor and Stripe:
 - **Visual token budget**: Show what's included, what's truncated
 - **Privacy controls**: `.cursorignore` equivalent for sensitive files
 
-### Session Tracking
+### Work Tracking
 
 From loopflowstudio existing patterns:
 

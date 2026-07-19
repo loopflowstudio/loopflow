@@ -3,7 +3,7 @@
 //! the relevant Turn explicitly.
 //!
 //! Resolution: explicit `--wave` (the caller passes it) > `LF_WAVE_ID` from a
-//! managed session. Repository location cannot identify a
+//! managed Work process. Repository location cannot identify a
 //! Wave: every Wave and Project operates from the same canonical checkout.
 //!
 //! Wave state (journal, endpoint pointer, MEMORY.md) lives under the ORIGIN

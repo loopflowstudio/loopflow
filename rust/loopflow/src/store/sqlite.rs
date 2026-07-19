@@ -1971,7 +1971,7 @@ impl SqliteStore {
         Ok(turns)
     }
 
-    /// One agent turn by its UUID — the trace receipt drill target.
+    /// One agent turn by its UUID.
     pub fn agent_turn(&self, id: &str) -> StoreResult<Option<AgentTurnRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(

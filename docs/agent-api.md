@@ -100,19 +100,15 @@ worktree.
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.
 
-## Memory and evidence
+## Memory
 
 ```bash
 lf memory show -w infrastructure
-lf receipt show chat_turn:turn-3 --json
-lf receipt show pr:acme/app#42 --json
 ```
 
 `wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
 the ordinary repository workflow; `lf memory show` is a read-only convenience
-that also works while the Wave is stopped. Keep evidence in its canonical
-record. A receipt token (`kind:reference` — `chat_turn:`, `run:`, `pr:`, …)
-drills into that record without creating a second memory store.
+that also works while the Wave is stopped.
 
 ## Ship
 

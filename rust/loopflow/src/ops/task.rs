@@ -2281,7 +2281,7 @@ pub(crate) fn decide_open_pr_status(
 ) -> (OpenPrDisposition, String) {
     let number = pr
         .github()
-        .expect("open Task PR requires a GitHub receipt")
+        .expect("open Task PR requires a GitHub PR record")
         .number;
     if let Some(reason) = github_degraded {
         return (
@@ -2430,7 +2430,8 @@ fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
     if observation.state != CiState::Failing {
         return None;
     }
-    let identity = pr.pr_identity()?;
+    let github = pr.github()?;
+    let repo = github_repo_slug_from_pr_url(&github.url)?;
     let failure_set = observation.failure_set();
     let mut digest = Sha256::new();
     for check in &failure_set {
@@ -2440,15 +2441,15 @@ fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
     Some(CiIncident {
         identity: format!(
             "github:ci:{}:{}:{}:{}",
-            identity.repo,
-            identity.number,
+            repo,
+            github.number,
             observation.head_sha,
             hex::encode(digest.finalize())
         ),
         task_id: pr.task_id.clone(),
         pr_id: pr.id.clone(),
-        repo: identity.repo,
-        pr_number: identity.number,
+        repo,
+        pr_number: github.number,
         failed_head_sha: observation.head_sha.clone(),
         repaired_head_sha: None,
         failure_set,
@@ -2464,6 +2465,14 @@ fn ci_incident(pr: &TaskPr, observation: &CiObservation) -> Option<CiIncident> {
         created_at: observation.observed_at,
         updated_at: observation.observed_at,
     })
+}
+
+fn github_repo_slug_from_pr_url(url: &str) -> Option<String> {
+    let path = url.split("github.com/").nth(1)?;
+    let mut parts = path.split('/');
+    let owner = parts.next().filter(|part| !part.is_empty())?;
+    let repo = parts.next().filter(|part| !part.is_empty())?;
+    Some(format!("{owner}/{repo}"))
 }
 
 // Local control commands often arrive in a burst (`status`, then `follow-up`,

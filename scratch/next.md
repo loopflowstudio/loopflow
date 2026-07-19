@@ -14,8 +14,8 @@
 
 ## Done when
 
-- [ ] the evidence Receipt module and CLI command are absent.
-- [ ] no current producer, parser, resolver, DTO, or docs remain.
-- [ ] PR/CI behavior uses direct Task PR fields without receipt identity types.
-- [ ] authored flows reject `receipt` as a command and focused behavior, fmt,
+- [x] the evidence Receipt module and CLI command are absent.
+- [x] no current producer, parser, resolver, DTO, or docs remain.
+- [x] PR/CI behavior uses direct Task PR fields without receipt identity types.
+- [x] authored flows reject `receipt` as a command and focused behavior, fmt,
       and all-target clippy pass.

@@ -367,15 +367,12 @@ lf chat --follow -w intelligence            # watch and speak from one terminal 
 lf chat --history --json -w intelligence    # read the saved tail while stopped
 lf memory show                              # print the wave's MEMORY.md
 lf memory show -w intelligence              # read a named Wave while it is stopped
-lf receipt show chat_turn:turn-3            # drill one receipt to its record
-lf receipt show pr:loopflow/loopflow#912 --json
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
 | `lf memory show` | Read the selected Wave's origin `MEMORY.md` directly; no listener or provider is required |
-| `lf receipt show TOKEN` | Drill one evidence receipt (`kind:reference`) to its canonical local record — a journal turn, run-events report, trace turn, PM snapshot item, or Task PR. `--json` emits the resolved record |
 
 Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
 human shell, pass `--wave`; repository location does not identify one of the

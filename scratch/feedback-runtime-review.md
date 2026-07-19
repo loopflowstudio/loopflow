@@ -139,3 +139,22 @@ round-trip, migration mapping, and two reviewer integration tests pass. The
 integration proof changes an existing Task to Parent while its open Feedback
 remains routed to User. Exact current-reader and retired-policy searches are
 empty; `cargo fmt --check` and all-target Clippy with warnings denied pass.
+
+## Slice 6C — delete producerless evidence Receipts
+
+Accepted. The evidence `Receipt` model, five evidence kinds, parser, resolver
+DTOs, and `lf receipt` command are deleted. File-only Wave memory has no
+structural receipt authoring, and no other current feature produced these
+pointers; keeping a universal local resolver created API without a writer.
+
+Receipt-only PR reference and identity types, `TaskPr::pr_identity`, and the
+repository-wide `all_task_prs` query are also deleted. CI incident identity
+uses the current Task PR's GitHub record directly and keeps its small private
+URL-to-repository helper. Generic typed outcomes such as `SteerReceipt`,
+`AdvanceReceipt`, and `TaskStartReceipt` remain because they report completed
+operations rather than pretending to be evidence links.
+
+Proof: the first-class command is absent, an authored flow rejects `receipt`,
+Task behavior 15/15 and the Wave resolution matrix 3/3 pass, and the exact
+evidence API/docs search is empty. `cargo fmt --check` and all-target Clippy
+with warnings denied pass. No tombstone command or compatibility alias exists.

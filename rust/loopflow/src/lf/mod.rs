@@ -545,11 +545,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: MemoryCommand,
     },
-    /// Resolve one evidence receipt to its canonical local record
-    Receipt {
-        #[command(subcommand)]
-        cmd: ReceiptCommand,
-    },
     /// Run a command on a Home or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
@@ -760,21 +755,6 @@ pub enum MemoryCommand {
     Show {
         #[command(flatten)]
         target: WaveTargetArgs,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ReceiptCommand {
-    /// Drill one receipt to its canonical local record
-    Show {
-        /// Receipt token: `kind:reference` (e.g. `chat_turn:turn-3`, `run:run-9`)
-        token: String,
-        /// Wave name (default: the ambient wave)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Emit the resolved record as JSON
-        #[arg(long)]
-        json: bool,
     },
 }
 
@@ -2974,26 +2954,11 @@ mod tests {
     }
 
     #[test]
-    fn receipt_show_parses_token_wave_and_json() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "receipt",
-            "show",
-            "chat_turn:turn-3",
-            "--wave",
-            "ship",
-            "--json",
-        ])
-        .expect("parse");
-        let Some(Commands::Receipt {
-            cmd: ReceiptCommand::Show { token, wave, json },
-        }) = cli.command
-        else {
-            panic!("expected receipt show");
-        };
-        assert_eq!(token, "chat_turn:turn-3");
-        assert_eq!(wave.as_deref(), Some("ship"));
-        assert!(json);
+    fn evidence_receipt_command_is_absent() {
+        assert!(Cli::command().find_subcommand("receipt").is_none());
+        let cli = Cli::try_parse_from(["lf", "receipt", "show", "chat_turn:turn-3"])
+            .expect("unknown names remain eligible for skill discovery");
+        assert!(matches!(cli.command, Some(Commands::External(_))));
     }
 
     #[test]

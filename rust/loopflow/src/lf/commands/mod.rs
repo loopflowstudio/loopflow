@@ -14,7 +14,6 @@ pub mod list;
 pub mod memory;
 pub mod ops;
 pub mod profile;
-pub mod receipt;
 pub mod run;
 pub mod runs;
 pub mod ssh;

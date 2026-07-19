@@ -153,14 +153,6 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "receipt show",
-        path: &["receipt", "show"],
-        base_args: &["receipt", "show", "chat_turn:turn-1"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "home probe",
         path: &["home", "probe"],
         base_args: &["home", "probe", "--json"],

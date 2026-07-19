@@ -261,6 +261,36 @@ impl ProviderAccountRoute {
             })
         })
     }
+
+    pub(crate) fn record_credential_invalidated_blocking(
+        &self,
+        reason: &str,
+    ) -> Result<(), ProviderAccountError> {
+        let route = self.clone();
+        let reason = reason.to_string();
+        _run_blocking_account(self.provider, "invalidate", move |runtime| {
+            runtime.block_on(async {
+                match &route.authority {
+                    AccountRouteAuthority::Local { store, .. } => {
+                        store
+                            .record_provider_account_credential_invalidated(
+                                route.provider.as_str(),
+                                &route.account_id,
+                                &reason,
+                            )
+                            .await?
+                    }
+                    AccountRouteAuthority::Lease { client, .. } => client
+                        .record_credential_invalidated(
+                            route.provider,
+                            &route.account_id,
+                            &reason,
+                        )?,
+                }
+                Ok(())
+            })
+        })
+    }
 }
 
 /// Record a provider rate-limit signal against a store: health row plus any

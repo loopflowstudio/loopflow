@@ -590,6 +590,21 @@ impl Store {
         .await
     }
 
+    pub async fn record_provider_account_credential_invalidated(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        reason: &str,
+    ) -> StoreResult<()> {
+        let provider = provider.to_string();
+        let account_id = account_id.clone();
+        let reason = reason.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_provider_account_credential_invalidated(&provider, &account_id, &reason)
+        })
+        .await
+    }
+
     pub async fn record_provider_account_health(
         &self,
         provider: &str,

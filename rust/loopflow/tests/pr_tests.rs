@@ -78,6 +78,13 @@ fn push_branch(repo: &TestRepo, name: &str) {
         .status();
 }
 
+fn create_changed_branch(repo: &TestRepo, name: &str) {
+    repo.create_branch(name);
+    repo.create_file("feature.txt", name);
+    repo.stage_all();
+    repo.commit("feature work");
+}
+
 fn point_origin_at_github(repo: &TestRepo) {
     let status = Command::new("git")
         .current_dir(repo.path())
@@ -105,7 +112,7 @@ fn pr_create_calls_gh() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -140,7 +147,7 @@ fn publish_makes_no_presentation_attempt() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -429,6 +436,44 @@ fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
 }
 
 #[test]
+fn empty_non_task_range_refuses_before_copy_or_github_mutation() {
+    let markers = tempfile::TempDir::new().expect("markers");
+    let agent_marker = markers.path().join("agent");
+    let github_marker = markers.path().join("github");
+    let codex = format!(
+        "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
+        agent_marker.display()
+    );
+    let gh = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\ncase \"$1 $2\" in\n  'pr create'|'pr edit'|'pr ready') printf called > '{}';;\nesac\nif [ \"$1 $2\" = \"pr list\" ]; then echo '[]'; fi\nexit 0\n",
+        github_marker.display()
+    );
+    let _env = EnvGuard::new(&[("gh", gh.as_str()), ("codex", codex.as_str())]);
+    let repo = TestRepo::new();
+    repo.create_branch("already-landed");
+    push_branch(&repo, "already-landed");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+            agent: Some("codex".to_string()),
+        },
+        &NullProgress,
+    );
+
+    assert!(matches!(
+        result,
+        Err(OpsError::Message(message))
+            if message.contains("no changes")
+                && message.contains("before PR copy generation or GitHub mutation")
+    ));
+    assert!(!agent_marker.exists(), "PR-copy agent must not launch");
+    assert!(!github_marker.exists(), "GitHub must not mutate");
+}
+
+#[test]
 fn pr_update_refreshes_body() {
     let gh_script = write_gh_script(
         r#"[{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1}]"#,
@@ -444,7 +489,7 @@ fn pr_update_refreshes_body() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -474,7 +519,7 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -520,7 +565,7 @@ fn pr_auto_generates_title_when_missing() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -560,7 +605,7 @@ Body:
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(

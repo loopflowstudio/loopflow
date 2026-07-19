@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use crate::durable::{
     AdvanceReceipt, BoundaryState, Containment, Launch, LaunchRoute, RunAdvance, RunLease, WorkRef,
 };
-use crate::engine::process::{current_home_execution_context, start_lf_session_with_env};
+use crate::engine::process::{
+    current_home_execution_context, pin_control_binary, start_lf_session_with_env,
+};
 use crate::id::WaveId;
 use crate::store::SharedStore;
 
@@ -55,14 +57,16 @@ pub(crate) async fn launch_in_run(
     let AdvanceReceipt::Launch(launch) = receipt else {
         unreachable!("LaunchStarting returns a Launch receipt")
     };
+    let control_bin = pin_control_binary(&execution.lf_bin)
+        .to_string_lossy()
+        .to_string();
     let argv = vec![
-        execution.lf_bin.to_string_lossy().to_string(),
+        control_bin.clone(),
         "__work".to_string(),
         request.work.kind().to_string(),
         request.work.id().to_string(),
     ];
     let run_lease = lease.env_value().to_string();
-    let control_bin = execution.lf_bin.to_string_lossy().to_string();
     let db_path = execution.db_path.to_string_lossy().to_string();
     let lf_home = execution.lf_home.to_string_lossy().to_string();
     let environment = [

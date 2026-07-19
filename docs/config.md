@@ -17,7 +17,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
-| Interactive launch surface | `--tui` / `--ide` | `session.launch: tui` |
+| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
 
 ## Context Assembly
 
@@ -319,9 +319,10 @@ session:
   launch: tui          # tui | ide
 ```
 
-`tui` opens the vendor CLI/TUI in the current terminal. `ide` opens the Codex or
-Claude app by URL scheme and falls back to `tui` if no app handles the link.
-OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override this default.
+`tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
+Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
+link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
+this default.
 
 ### Summaries
 
@@ -343,6 +344,8 @@ Connect providers once, then route each repository through managed accounts:
 ```bash
 lf auth status                   # GitHub / Claude / Codex / OpenCode Zen / Linear
 lf auth github                   # connect a provider in your browser
+lf auth opencode                 # connect OpenCode Zen in your browser
+lf auth configure opencode       # store OPENCODE_API_KEY from the environment
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
 lf auth accounts claude          # cached account state; no network request
 lf auth accounts --verify        # compare cached state with every provider now
@@ -361,6 +364,19 @@ record the ordered logins a provider may use. A provider child stays pinned to
 its selected login for its lifetime. Shared logins are tried once and share one
 cooldown. Profiles, bindings, and repo routes live in the local database —
 Loopflow sends no account topology to a central service.
+
+Managed Claude and Codex launches use the repository route, then the default
+route. Without either route, every automatic managed login is eligible.
+Missing, disabled, cooling, and limited logins are skipped. With no managed
+login, the provider CLI uses its ambient default credentials.
+
+An active usage window at 95% or above demotes that login behind accounts below
+the threshold. Declared route order decides ties.
+
+OpenCode Zen uses one provider credential rather than the managed subscription
+account route. Its stored credential applies to local headless and terminal
+OpenCode launches and foreground SSH; subscription polling and the 95% demotion
+threshold do not apply.
 
 `auth connect <provider> <email-prefix> --chrome-profile` opens the selected
 Chrome directory and binds the verified login. Codex

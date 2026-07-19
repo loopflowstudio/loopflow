@@ -135,6 +135,10 @@ it forwards the extracted Claude or Codex access token in the remote process
 environment. Configure a managed route or pass `--only-account` when provider
 authority must stay behind the broker.
 
+OpenCode Zen is not a managed subscription account. Foreground SSH forwards
+its locally resolved API key in the remote process environment; commands using
+`--remote-native` forward none.
+
 Nested `lf` processes inherit the same fixed grant through the handle. They
 cannot widen, narrow, or reorder it; nested `--account` and `--only-account`
 flags fail. A resumed provider session stays on its recorded account when that

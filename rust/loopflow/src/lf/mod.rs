@@ -83,11 +83,11 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch", short_alias = 'B')]
     pub batch: bool,
 
-    /// Hand off to an interactive vendor session in the terminal (overrides session.launch)
+    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
     #[arg(long, conflicts_with = "ide")]
     pub tui: bool,
 
-    /// Hand off to an interactive vendor session in the vendor app (overrides session.launch)
+    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
     #[arg(long)]
     pub ide: bool,
 

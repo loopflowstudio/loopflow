@@ -34,7 +34,9 @@ use crate::pm::PmProviderKind;
 use crate::provider_account::lease::{
     self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
 };
-use crate::provider_auth::{extract_claude_token, extract_codex_access_token};
+use crate::provider_auth::{
+    extract_claude_token, extract_codex_access_token, extract_opencode_zen_token,
+};
 
 pub const EXPECTED_HOME_ID_ENV: &str = "LF_EXPECTED_HOME_ID";
 
@@ -47,6 +49,7 @@ pub const DEFAULT_REPO: &str = "src/loopflow";
 struct Credentials {
     gh_token: Option<String>,
     provider_authority: ProviderAuthority,
+    opencode_token: Option<String>,
     pm_token: Option<String>,
     /// PM provider the token belongs to (e.g. `linear`).
     pm_provider: Option<String>,
@@ -100,6 +103,7 @@ impl std::fmt::Debug for Credentials {
             .debug_struct("Credentials")
             .field("gh_token", &self.gh_token.is_some())
             .field("provider_authority", &provider_authority)
+            .field("opencode_token", &self.opencode_token.is_some())
             .field("pm_token", &self.pm_token.is_some())
             .field("pm_provider", &self.pm_provider)
             .field(
@@ -410,6 +414,7 @@ async fn resolve_credentials(
     Ok(Credentials {
         gh_token: resolve_gh_token(),
         provider_authority,
+        opencode_token: _resolve_opencode_token(&home).await,
         pm_token: resolve_pm_token().await,
         pm_provider: Some(PmProviderKind::Linear.as_str().to_string()),
         secrets,
@@ -459,12 +464,19 @@ fn resolve_doppler_secret(name: &str) -> anyhow::Result<String> {
 /// PM/Linear access token from the local store credential store. Absent when no
 /// store exists or no Linear credential is stored.
 async fn resolve_pm_token() -> Option<String> {
+    _resolve_stored_provider_token(PmProviderKind::Linear.as_str()).await
+}
+
+async fn _resolve_opencode_token(home: &std::path::Path) -> Option<String> {
+    _resolve_stored_provider_token("opencodezen")
+        .await
+        .or_else(|| extract_opencode_zen_token(home).map(|token| token.access_token))
+}
+
+async fn _resolve_stored_provider_token(provider: &str) -> Option<String> {
     let cfg = crate::store::storage_config_from_env().ok()?;
     let store = crate::store::open_store(&cfg).await.ok()?;
-    let token = store
-        .get_provider_token(PmProviderKind::Linear.as_str())
-        .await
-        .ok()??;
+    let token = store.get_provider_token(provider).await.ok()??;
     Some(token.access_token)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -545,6 +557,9 @@ fn build_preamble(
         if let Some(token) = nonempty(codex_token) {
             lines.push(format!("export CODEX_ACCESS_TOKEN={}", sh_quote(token)));
         }
+    }
+    if let Some(token) = nonempty(&credentials.opencode_token) {
+        lines.push(format!("export OPENCODE_API_KEY={}", sh_quote(token)));
     }
     if let Some(lease_handle) = lease_handle {
         match lease_handle.encode() {
@@ -802,6 +817,7 @@ mod tests {
         Credentials {
             gh_token: Some("gh-secret".to_string()),
             provider_authority: ProviderAuthority::default(),
+            opencode_token: Some("opencode-secret".to_string()),
             pm_token: Some("linear-secret".to_string()),
             pm_provider: Some("linear".to_string()),
             secrets: vec![("STRIPE_KEY".to_string(), "sk-live-123".to_string())],
@@ -869,6 +885,7 @@ mod tests {
         );
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
+        assert!(preamble.contains("export OPENCODE_API_KEY='opencode-secret'"));
         assert!(!preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN="));
         assert!(!preamble.contains("export CODEX_ACCESS_TOKEN="));
         assert!(preamble.contains(&format!("export {}=", lease::ACCOUNT_LEASE_ENV)));
@@ -952,6 +969,7 @@ mod tests {
             "GH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CODEX_ACCESS_TOKEN",
+            "OPENCODE_API_KEY",
             "LF_FORWARDED_PM_TOKEN",
             lease::ACCOUNT_LEASE_ENV,
         ] {
@@ -982,6 +1000,7 @@ mod tests {
 
         assert!(!debug.contains("gh-secret"));
         assert!(!debug.contains("linear-secret"));
+        assert!(!debug.contains("opencode-secret"));
         assert!(!debug.contains("sk-live-123"));
         assert!(debug.contains("STRIPE_KEY"));
     }

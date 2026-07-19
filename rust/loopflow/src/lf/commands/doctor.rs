@@ -265,29 +265,86 @@ fn check_capture(
     let mut failures = Vec::new();
     let mut prompt_only = 0;
     let mut pruned = 0;
+    let mut interrupted = 0;
+    let mut lost = 0;
     for launch in &launches {
         if launch.capture_status == "pruned" {
             // Tombstoned by `lf runs reconcile`: the artifact is known-absent
             // and the absence is acknowledged. Counted, never a failure — must
             // short-circuit before the file-resolution checks below, which would
             // otherwise flag the known-absent file as a fresh failure.
+            if launch
+                .incomplete_reason
+                .as_deref()
+                .is_none_or(|reason| reason.trim().is_empty())
+            {
+                failures.push(format!("{} is pruned without a reason", launch.id));
+            }
             pruned += 1;
             continue;
         }
-        if crate::trace::resolve_artifact(&launch.artifact_dir).is_err()
-            || crate::trace::resolve_artifact(&launch.conversation_path).is_err()
-            || launch
-                .provider_events_path
-                .as_deref()
-                .is_some_and(|path| crate::trace::resolve_artifact(path).is_err())
-        {
+        let artifact_dir = crate::trace::resolve_artifact(&launch.artifact_dir);
+        let conversation_path = crate::trace::resolve_artifact(&launch.conversation_path);
+        let provider_events_path = launch
+            .provider_events_path
+            .as_deref()
+            .map(crate::trace::resolve_artifact)
+            .transpose();
+        if artifact_dir.is_err() || conversation_path.is_err() || provider_events_path.is_err() {
             failures.push(format!("{} has an unsafe artifact path", launch.id));
         }
         if launch.capture_status == "prompt_only" {
             prompt_only += 1;
         }
         if launch.capture_status == "partial" {
-            failures.push(format!("{} is partial", launch.id));
+            let reason = launch
+                .incomplete_reason
+                .as_deref()
+                .unwrap_or("reason unknown");
+            failures.push(format!("{} is partial: {reason}", launch.id));
+        }
+        if matches!(launch.capture_status.as_str(), "interrupted" | "lost") {
+            if launch.capture_status == "interrupted" {
+                interrupted += 1;
+                if launch.outcome != "interrupted" {
+                    failures.push(format!(
+                        "{} is capture-interrupted but its launch outcome is {}",
+                        launch.id, launch.outcome
+                    ));
+                }
+            } else {
+                lost += 1;
+            }
+            if launch
+                .incomplete_reason
+                .as_deref()
+                .is_none_or(|reason| reason.trim().is_empty())
+            {
+                failures.push(format!(
+                    "{} is {} without a reason",
+                    launch.id, launch.capture_status
+                ));
+            }
+            if !artifact_dir.as_ref().is_ok_and(|path| path.is_dir())
+                || !conversation_path.as_ref().is_ok_and(|path| path.is_file())
+                || !provider_events_path
+                    .as_ref()
+                    .is_ok_and(|path| path.as_ref().is_none_or(|path| path.is_file()))
+            {
+                failures.push(format!(
+                    "{} is {} but its retained capture is missing",
+                    launch.id, launch.capture_status
+                ));
+            }
+            if turns
+                .iter()
+                .any(|turn| turn.launch_id == launch.id && turn.status == "running")
+            {
+                failures.push(format!(
+                    "{} is {} over a running turn",
+                    launch.id, launch.capture_status
+                ));
+            }
         }
         if launch.capture_status == "capturing"
             && events.iter().any(|event| {
@@ -302,7 +359,6 @@ fn check_capture(
             ));
         }
         if launch.capture_status == "complete" {
-            let conversation_path = crate::trace::resolve_artifact(&launch.conversation_path);
             let conversation_read = match &conversation_path {
                 Ok(path) => {
                     crate::trace::read_conversation_status(path).map_err(|error| error.to_string())
@@ -346,9 +402,15 @@ fn check_capture(
         .iter()
         .map(|launch| launch.artifact_dir.as_str())
         .collect();
+    let orphan_guard =
+        OffsetDateTime::now_utc().unix_timestamp() - super::runs::RECONCILE_AGE_GUARD_HOURS * 3600;
     for artifact in crate::trace::list_launch_artifact_dirs()? {
         if !known_artifacts.contains(artifact.as_str()) {
-            failures.push(format!("orphan trace artifact {artifact}"));
+            let path = crate::trace::resolve_artifact(&artifact)?;
+            let (_, modified) = super::runs::directory_size_and_mtime(&path);
+            if modified < orphan_guard {
+                failures.push(format!("orphan trace artifact {artifact}"));
+            }
         }
     }
 
@@ -389,16 +451,26 @@ fn check_capture(
         }
     }
 
-    let pruned_clause = if pruned > 0 {
-        format!(", {pruned} pruned")
-    } else {
+    let mut terminal_counts = Vec::new();
+    if pruned > 0 {
+        terminal_counts.push(format!("{pruned} pruned"));
+    }
+    if interrupted > 0 {
+        terminal_counts.push(format!("{interrupted} interrupted"));
+    }
+    if lost > 0 {
+        terminal_counts.push(format!("{lost} lost"));
+    }
+    let terminal_clause = if terminal_counts.is_empty() {
         String::new()
+    } else {
+        format!(", {}", terminal_counts.join(", "))
     };
     if !failures.is_empty() {
         return Ok(Check::fail(
             "capture",
             format!(
-                "{} failure(s); {} launches, {} turns, {} bytes{pruned_clause}: {}",
+                "{} failure(s); {} launches, {} turns, {} bytes{terminal_clause}: {}",
                 failures.len(),
                 launches.len(),
                 turns.len(),
@@ -414,7 +486,7 @@ fn check_capture(
         return Ok(Check::warn(
             "capture",
             format!(
-                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only{pruned_clause}",
+                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only{terminal_clause}",
                 launches.len(),
                 turns.len()
             ),
@@ -423,7 +495,7 @@ fn check_capture(
     Ok(Check::ok(
         "capture",
         format!(
-            "{} launches, {} turns, {} assets, {} bytes{pruned_clause}",
+            "{} launches, {} turns, {} assets, {} bytes{terminal_clause}",
             launches.len(),
             turns.len(),
             assets.len(),
@@ -990,6 +1062,14 @@ mod tests {
         guard: &crate::journal::TestLedgerGuard,
         skill: &str,
     ) -> (String, std::path::PathBuf) {
+        captured_launch_with_outcome(guard, skill, "completed")
+    }
+
+    fn captured_launch_with_outcome(
+        guard: &crate::journal::TestLedgerGuard,
+        skill: &str,
+        outcome: &str,
+    ) -> (String, std::path::PathBuf) {
         let capture = crate::trace::CaptureHandle::begin(
             crate::trace::TraceCaptureContext {
                 run_id: crate::id::TraceId::new(),
@@ -1017,7 +1097,7 @@ mod tests {
         )
         .unwrap();
         capture.begin_turn("message", "follow up").unwrap();
-        capture.finish("completed", false).unwrap();
+        capture.finish(outcome, false).unwrap();
 
         let store = crate::journal::open_ledger().unwrap();
         let launch = store
@@ -1030,6 +1110,38 @@ mod tests {
         let conversation = crate::trace::resolve_artifact(&launch.conversation_path).unwrap();
         assert!(conversation.is_file());
         (launch.id, conversation)
+    }
+
+    fn capturing_launch(guard: &crate::journal::TestLedgerGuard, skill: &str) -> String {
+        let capture = crate::trace::CaptureHandle::begin(
+            crate::trace::TraceCaptureContext {
+                run_id: crate::id::TraceId::new(),
+                process_id: crate::id::ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("infrastructure".to_string()),
+                project: None,
+                task: Some("ENG-117".to_string()),
+                flow: None,
+                skill: Some(skill.to_string()),
+            },
+            crate::trace::PreparedTurnContext::from_prompts("system", "task"),
+            crate::trace::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+                basis: None,
+                control: None,
+            },
+        )
+        .unwrap();
+        let launch_id = capture.launch_id().to_string();
+        drop(capture);
+        launch_id
     }
 
     /// The same production path, but with the provider reporting what it
@@ -1104,6 +1216,30 @@ mod tests {
     }
 
     #[test]
+    fn normal_terminal_outcomes_create_complete_resolvable_captures() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        for outcome in ["completed", "failed", "interrupted"] {
+            captured_launch_with_outcome(&guard, outcome, outcome);
+        }
+        let store = crate::journal::open_ledger().unwrap();
+
+        let launches = store.agent_launches_since(0).unwrap();
+        assert_eq!(launches.len(), 3);
+        assert!(launches
+            .iter()
+            .all(|launch| launch.capture_status == "complete"));
+        assert_eq!(
+            launches
+                .iter()
+                .map(|launch| launch.outcome.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from(["completed", "failed", "interrupted"])
+        );
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+    }
+
+    #[test]
     fn a_tombstoned_capture_is_counted_while_fresh_loss_still_fails() {
         // The whole point of W2-235: acknowledged historical loss goes green
         // and stays visible as a count, but the surface must remain sensitive
@@ -1122,10 +1258,9 @@ mod tests {
 
         // Acknowledge it the way `lf runs reconcile --apply` does.
         store
-            .reconcile_launch_capture(
+            .prune_launch_capture(
                 &historical,
-                "pruned",
-                Some("conversation artifact absent at reconcile"),
+                "conversation artifact absent at reconcile",
                 500,
             )
             .unwrap();
@@ -1141,6 +1276,112 @@ mod tests {
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
         assert!(check.detail.contains("1 failure(s)"), "{}", check.detail);
         assert!(check.detail.contains("1 pruned"), "{}", check.detail);
+    }
+
+    #[test]
+    fn interrupting_an_intact_capture_closes_its_launch_and_turn_atomically() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let launch_id = capturing_launch(&guard, "implement");
+        let store = crate::journal::open_ledger().unwrap();
+
+        store
+            .interrupt_launch_capture(
+                &launch_id,
+                "capture interrupted; process ended without finalizing",
+                500,
+            )
+            .unwrap();
+
+        let launch = store
+            .agent_launches_since(0)
+            .unwrap()
+            .into_iter()
+            .find(|launch| launch.id == launch_id)
+            .unwrap();
+        assert_eq!(launch.capture_status, "interrupted");
+        assert_eq!(launch.outcome, "interrupted");
+        assert_eq!(launch.ended_at, Some(500));
+        assert!(launch
+            .incomplete_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("process ended")));
+        let turns = store
+            .agent_turns_for_launches(std::slice::from_ref(&launch_id))
+            .unwrap();
+        assert!(!turns.is_empty());
+        assert!(turns
+            .iter()
+            .all(|turn| { turn.status == "interrupted" && turn.ended_at == Some(500) }));
+
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+        assert!(check.detail.contains("1 interrupted"), "{}", check.detail);
+    }
+
+    #[test]
+    fn acknowledged_write_loss_stays_distinct_and_validates_retained_evidence() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let (launch_id, conversation) = captured_launch(&guard, "implement");
+        let store = crate::journal::open_ledger().unwrap();
+        let connection = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+        connection
+            .execute(
+                "UPDATE agent_launches
+                 SET capture_status = 'partial', incomplete_reason = 'ENOSPC while syncing'
+                 WHERE id = ?1",
+                [&launch_id],
+            )
+            .unwrap();
+        drop(connection);
+
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+        assert!(
+            check.detail.contains("is partial: ENOSPC"),
+            "{}",
+            check.detail
+        );
+
+        store.lose_launch_capture(&launch_id, 500).unwrap();
+        let launch = store
+            .agent_launches_since(0)
+            .unwrap()
+            .into_iter()
+            .find(|launch| launch.id == launch_id)
+            .unwrap();
+        assert_eq!(launch.capture_status, "lost");
+        assert_eq!(launch.outcome, "completed");
+        assert_eq!(
+            launch.incomplete_reason.as_deref(),
+            Some("ENOSPC while syncing")
+        );
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
+        assert!(check.detail.contains("1 lost"), "{}", check.detail);
+
+        std::fs::remove_file(conversation).unwrap();
+        let check = check_capture(&store, &[]).unwrap();
+        assert_eq!(check.status, Status::Fail, "{}", check.detail);
+        assert!(
+            check.detail.contains("retained capture is missing"),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn a_fresh_directory_before_its_launch_row_is_not_an_orphan_failure() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let directory = guard
+            .home()
+            .join("traces/run-fresh/process-fresh/launch-fresh");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("conversation.jsonl"), "{\"seq\":0}\n").unwrap();
+        let store = crate::journal::open_ledger().unwrap();
+
+        let check = check_capture(&store, &[]).unwrap();
+
+        assert_eq!(check.status, Status::Ok, "{}", check.detail);
     }
 
     fn row(run_id: &str, ts: i64, node: &str, event: &str) -> RunEventRow {

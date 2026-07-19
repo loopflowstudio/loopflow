@@ -405,6 +405,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "delete_sessions",
         sql: include_str!("migrations/0.11.036_delete_sessions.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 11,
+            ordinal: 37,
+        },
+        name: "capture_terminal_states",
+        sql: include_str!("migrations/0.11.037_capture_terminal_states.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1817,7 +1826,139 @@ mod tests {
     }
 
     #[test]
-    fn the_capture_pruned_rebuild_restores_every_launch_index() {
+    fn capture_terminal_states_preserve_history_and_keep_the_enum_closed() {
+        let conn = open();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, prefix_before("capture_terminal_states")).unwrap();
+        assert!(!capture_status_accepts(&conn, "interrupted"));
+        assert!(!capture_status_accepts(&conn, "lost"));
+
+        for (position, status) in ["capturing", "complete", "partial", "prompt_only", "pruned"]
+            .into_iter()
+            .enumerate()
+        {
+            conn.execute(
+                "INSERT INTO agent_launches (
+                     id, run_id, process_id, started_at, ended_at, repo, worktree,
+                     provider, surface, capture_status, incomplete_reason, outcome,
+                     artifact_dir, conversation_path, conversation_event_count,
+                     conversation_bytes
+                 ) VALUES (?1, ?2, ?3, 100, 200, '/repo', '/repo', 'codex',
+                     'headless', ?4, 'historical reason', ?5, ?6, ?7, 7, 4096)",
+                rusqlite::params![
+                    format!("history-{status}"),
+                    format!("run-{position}"),
+                    format!("process-{position}"),
+                    status,
+                    if status == "capturing" {
+                        "running"
+                    } else {
+                        "completed"
+                    },
+                    format!("history-{status}/dir"),
+                    format!("history-{status}/conversation.jsonl"),
+                ],
+            )
+            .unwrap();
+        }
+
+        apply_sqlite(&conn).unwrap();
+
+        let mut statuses = conn
+            .prepare(
+                "SELECT capture_status FROM agent_launches
+                 WHERE id LIKE 'history-%' ORDER BY capture_status",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            vec!["capturing", "complete", "partial", "prompt_only", "pruned"]
+        );
+        for status in [
+            "capturing",
+            "complete",
+            "partial",
+            "prompt_only",
+            "pruned",
+            "interrupted",
+            "lost",
+        ] {
+            assert!(capture_status_accepts(&conn, status), "{status}");
+        }
+        assert!(!capture_status_accepts(&conn, "invented"));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn capture_terminal_states_repairs_half_control_trace_receipts() {
+        let conn = open();
+        apply_set(&conn, prefix_before("run_launch_attention")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO agent_launches (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 provider, surface, capture_status, outcome, artifact_dir,
+                 conversation_path, provider_session_id,
+                 conversation_event_count, conversation_bytes
+             ) VALUES ('legacy-trace', 'trace-run', 'trace-process', 100, 200,
+                 '/repo', '/repo', 'codex', 'headless', 'complete', 'completed',
+                 'trace/dir', 'trace/conversation.jsonl', 'provider-receipt', 7, 4096)",
+        )
+        .unwrap();
+
+        apply_set(&conn, prefix_before("capture_terminal_states")).unwrap();
+        conn.execute_batch(
+            "INSERT INTO agent_launches (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 provider, surface, capture_status, outcome, artifact_dir,
+                 conversation_path, provider_session_id,
+                 conversation_event_count, conversation_bytes, launch_state,
+                 containment_kind, containment_id, resume_token
+             ) VALUES ('control-shaped', 'control-run', 'control-process', 100, 200,
+                 '/repo', '/repo', 'codex', 'headless', 'complete', 'completed',
+                 'control/dir', 'control/conversation.jsonl', 'provider-receipt',
+                 7, 4096, 'ended', 'process_group', 'control-process',
+                 'explicit-resume')",
+        )
+        .unwrap();
+
+        apply_sqlite(&conn).unwrap();
+
+        let legacy_trace = conn
+            .query_row(
+                "SELECT product_run_id, home_id, containment_kind, containment_id,
+                        resume_token
+                 FROM agent_launches WHERE id = 'legacy-trace'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(legacy_trace, (None, None, None, None, None));
+        assert_eq!(
+            conn.query_row(
+                "SELECT resume_token FROM agent_launches WHERE id = 'control-shaped'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "explicit-resume"
+        );
+    }
+
+    #[test]
+    fn capture_rebuilds_restore_every_launch_index() {
         // A rebuild drops the table, and with it its indexes. Losing one would
         // silently degrade every `lf runs`/`lf trace` lookup.
         let conn = open();

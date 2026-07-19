@@ -18,6 +18,7 @@ REGISTRY = """const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 1,
         },
         name: "initial",
@@ -145,6 +146,16 @@ def test_depends_on_records_a_draft_dependency(repo: Path) -> None:
 
 def test_depends_on_accepts_a_released_migration(repo: Path) -> None:
     result = run(repo, "backfill_colour", "--depends-on", "initial")
+    assert result.returncode == 0, result.stderr
+
+
+def test_depends_on_accepts_a_draft_published_inside_a_release_batch(repo: Path) -> None:
+    (repo / MIGRATIONS / "0.11.2.001_release.sql").write_text(
+        "-- draft: add_wave_colour\nSELECT 1;\n"
+    )
+
+    result = run(repo, "backfill_colour", "--depends-on", "add_wave_colour")
+
     assert result.returncode == 0, result.stderr
 
 

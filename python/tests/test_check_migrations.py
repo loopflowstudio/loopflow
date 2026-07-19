@@ -20,24 +20,34 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
-def _registry(*entries: tuple[int, int, int, str]) -> str:
+def _registry(*entries: tuple) -> str:
     """A MIGRATIONS registry in Rust, shaped as migrations.rs writes it."""
-    body = "".join(
-        f"""Migration {{
+    rendered = []
+    for entry in entries:
+        if len(entry) == 4:
+            major, minor, ordinal, name = entry
+            patch = None
+            filename = f"{major}.{minor}.{ordinal:03d}_{name}.sql"
+        else:
+            major, minor, patch, ordinal, name = entry
+            filename = f"{major}.{minor}.{patch}.{ordinal:03d}_{name}.sql"
+        patch_value = "None" if patch is None else f"Some({patch})"
+        rendered.append(
+            f"""Migration {{
     id: MigrationId {{
         major: {major},
         minor: {minor},
+        patch: {patch_value},
         ordinal: {ordinal},
     }},
     name: "{name}",
-    sql: include_str!("migrations/{major}.{minor}.{ordinal:03d}_{name}.sql"),
+    sql: include_str!("migrations/{filename}"),
 }}, """
-        for major, minor, ordinal, name in entries
-    )
-    return f"const MIGRATIONS: &[Migration] = &[{body}];\n"
+        )
+    return f"const MIGRATIONS: &[Migration] = &[{''.join(rendered)}];\n"
 
 
-def _register(repo: Path, *entries: tuple[int, int, int, str]) -> None:
+def _register(repo: Path, *entries: tuple) -> None:
     (repo / MIGRATIONS_RS).write_text(_registry(*entries))
 
 
@@ -76,9 +86,11 @@ def test_a_shipped_migration_left_alone_passes(repo: Path):
     assert "unchanged since v0.10.1" in result.stdout
 
 
-def test_appending_a_migration_to_the_active_namespace_passes(repo: Path):
-    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "add_note"))
+def test_a_batch_matching_the_active_package_release_passes(repo: Path):
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text(
+        "-- draft: add_note\nALTER TABLE waves ADD note TEXT;\n"
+    )
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
 
     result = check(repo)
     assert result.returncode == 0, result.stderr
@@ -86,7 +98,9 @@ def test_appending_a_migration_to_the_active_namespace_passes(repo: Path):
 
 def test_a_migration_file_nobody_registered_fails(repo: Path):
     """An unregistered migration never runs — shipping one is shipping a no-op."""
-    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text(
+        "-- draft: add_note\nALTER TABLE waves ADD note TEXT;\n"
+    )
 
     result = check(repo)
     assert result.returncode == 1
@@ -170,7 +184,7 @@ def test_moving_the_migration_directory_does_not_void_the_check(repo: Path):
 
 
 def test_a_migration_ahead_of_the_package_version_fails(repo: Path):
-    (repo / MIGRATIONS / "0.11.001_too_new.sql").write_text("SELECT 1;\n")
+    (repo / MIGRATIONS / "0.11.0.001_release.sql").write_text("-- draft: too_new\nSELECT 1;\n")
 
     result = check(repo)
     assert result.returncode == 1
@@ -180,14 +194,56 @@ def test_a_migration_ahead_of_the_package_version_fails(repo: Path):
 def test_a_new_canonical_migration_behind_the_active_namespace_fails(repo: Path):
     (repo / "Cargo.toml").write_text('[workspace.package]\nversion = "0.11.0"\n')
     (repo / "pyproject.toml").write_text('[project]\nversion = "0.11.0"\n')
-    (repo / MIGRATIONS / "0.10.002_too_old.sql").write_text("SELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "too_old"))
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: too_old\nSELECT 1;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
 
     result = check(repo)
 
     assert result.returncode == 1
-    assert "namespaced behind the active package namespace 0.11" in result.stderr
+    assert "namespaced behind the active package namespace 0.11.0" in result.stderr
     assert "ordinal-free draft" in result.stderr
+
+
+def test_a_batch_from_an_older_patch_release_fails(repo: Path):
+    (repo / "Cargo.toml").write_text('[workspace.package]\nversion = "0.10.2"\n')
+    (repo / "pyproject.toml").write_text('[project]\nversion = "0.10.2"\n')
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: too_old\nSELECT 1;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "active package namespace 0.10.2" in result.stderr
+
+
+def test_a_new_legacy_three_part_migration_fails(repo: Path):
+    (repo / MIGRATIONS / "0.10.002_add_note.sql").write_text("SELECT 1;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 2, "add_note"))
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "legacy three-part format" in result.stderr
+
+
+def test_a_release_cannot_publish_more_than_its_single_batch(repo: Path):
+    (repo / MIGRATIONS / "0.10.1.002_release.sql").write_text("-- draft: add_note\nSELECT 1;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 2, "release"))
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "single `<version>.001_release.sql`" in result.stderr
+
+
+def test_a_release_batch_requires_draft_provenance(repo: Path):
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("SELECT 1;\n")
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"))
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "carries no `-- draft:` provenance" in result.stderr
 
 
 def test_a_malformed_migration_name_fails(repo: Path):
@@ -296,6 +352,15 @@ def test_a_draft_dependency_cycle_fails(repo: Path):
     result = check(repo)
     assert result.returncode == 1
     assert "cycle" in result.stderr
+
+
+def test_a_draft_cannot_forge_release_provenance(repo: Path):
+    _draft(repo, "add_wave_colour", body="-- draft: invented\nSELECT 1;\n")
+
+    result = check(repo)
+
+    assert result.returncode == 1
+    assert "reserved `-- draft:`" in result.stderr
 
 
 def test_a_draft_colliding_with_a_released_name_fails(repo: Path):

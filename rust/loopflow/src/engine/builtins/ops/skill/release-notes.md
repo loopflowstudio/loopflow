@@ -9,7 +9,9 @@ Write release notes that fuse release intent with shipped behavior.
 
 1. Read `LF_RELEASE_NOTES_CONTEXT` and parse the JSON.
 2. Treat `decisions` as the intent ledger: what changed in product direction, release policy, operations, and user experience during this cycle.
-3. Treat `merged_prs` and, when needed, `git diff <prev_tag>..HEAD`, as the behavior ledger: what actually shipped.
+3. Treat `commits` as the behavior ledger: the exact first-parent git range in
+   the target area. Use `merged_prs` to recover intent and discussion. When
+   `prev_tag` exists, use `git diff <prev_tag>..HEAD` only to inspect details.
 4. Fuse them. The release notes should explain what users, operators, and contributors can do differently now. Use commits/PRs to ground every claim.
 5. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
 6. Write `RELEASE_NOTES.md`.
@@ -37,7 +39,8 @@ Structure:
 - PR titles are source material, not release notes. Do not dump them chronologically.
 - If decisions and commits disagree, trust the commits for what shipped and use decisions to explain why.
 - If decisions mention future work that did not ship, either omit it or mark it clearly as “not included.”
-- If there are no decisions, build the narrative from merged PRs and diffs.
+- If there are no decisions, build the narrative from commits, merged PRs, and
+  diffs.
 - If there are decisions but no matching shipped behavior, keep the note cautious: describe the policy/intent change, not an implementation that is absent.
 
 ## Style
@@ -50,4 +53,6 @@ Structure:
 
 ## Quality bar
 
-A good release note could not be generated from PR titles alone. It reads the intent from the merged PRs (their descriptions, not just titles), proves it against shipped changes, and leaves a concise operational record. Per-decision context lives in each wave's `MEMORY.md`, not a central ledger.
+A good release note could not be generated from PR titles alone. It reads the
+intent from decisions and merged PR descriptions, proves it against the exact
+commits being tagged, and leaves a concise operational record.

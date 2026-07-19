@@ -133,6 +133,22 @@ pub struct ReleaseTargetConfig {
     pub manifests: Vec<String>,
     #[serde(default)]
     pub workflow: Option<String>,
+    /// Commands that must pass before a release is prepared.
+    #[serde(default)]
+    pub verify: Vec<String>,
+    /// Commands that mutate the isolated release worktree after version bumps.
+    #[serde(default)]
+    pub prepare: Vec<String>,
+    #[serde(default)]
+    pub completion: Option<ReleaseCompletion>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReleaseCompletion {
+    Tag,
+    Workflow,
+    GithubRelease,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -705,6 +721,11 @@ release:
       manifests:
         - packages/cli/package.json
       workflow: .github/workflows/release-cli.yml
+      verify:
+        - scripts/check-release
+      prepare:
+        - scripts/prepare-release {version}
+      completion: github-release
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         let target = config.release.targets.get("cli").expect("cli target");
@@ -715,6 +736,9 @@ release:
             target.workflow.as_deref(),
             Some(".github/workflows/release-cli.yml")
         );
+        assert_eq!(target.verify, vec!["scripts/check-release"]);
+        assert_eq!(target.prepare, vec!["scripts/prepare-release {version}"]);
+        assert_eq!(target.completion, Some(ReleaseCompletion::GithubRelease));
     }
 
     // ==========================================================================

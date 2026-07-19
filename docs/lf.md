@@ -47,7 +47,7 @@ Names resolve in this order:
 1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
-4. Core built-in skills — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
+4. Core built-in skills — `task/`, `project/`, `wave/`, `ops/` (run `lf --list` for the full catalog)
 5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
@@ -62,23 +62,18 @@ Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
 ### Builtin Catalog
 
-Skills and flows are organized into three categories by agency: **build**
-(manual work you drive), **govern** (autonomous coordination the system
-drives), **ops** (side-channel utilities). Run `lf --list` for the live
-catalog.
+Skills and flows are organized by the thing they act on: **task**, **project**,
+**wave**, and **ops**. The categories share one flat command namespace. Run
+`lf --list` for the live catalog.
 
-Build skills — you invoke these, often interactively:
+Task skills — concrete implementation, investigation, review, and delivery:
 
 | Skill | What it does |
 |------|--------------|
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `research` | Map the territory — architecture, complexity, quality, potential |
-| `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
 | `iterate` | Read research, write design to address it |
 | `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
-| `reduce` | Find simplification opportunities |
-| `polish` | Find polish priorities |
-| `expand` | Find expansion opportunities |
 | `5whys` | Root cause analysis on a bug fix |
 | `implement` | Build from a design doc |
 | `compress` | Simplify touched code |
@@ -93,9 +88,16 @@ Build skills — you invoke these, often interactively:
 | `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
-| `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
+Project skills — shape and pursue measured bets inside a Wave:
 
-Govern skills — crons and waves-watching-waves drive these:
+| Skill | What it does |
+|------|--------------|
+| `project_clarify` / `project_pursue` / `project_mutate` | Clarify, advance, and judge a Project |
+| `project-promote` | Promote a Project into a resident child Wave |
+| `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
+| `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
+
+Wave skills — maintain the durable operating context and its portfolio:
 
 | Skill | What it does |
 |------|--------------|
@@ -104,26 +106,29 @@ Govern skills — crons and waves-watching-waves drive these:
 | `wave-report` | Read health signals across all waves |
 | `mutate` | Compose and apply coordinated mutations across member waves |
 | `review` | Review mutations, amend or revert if needed |
+| `wave_clarify` / `wave_pursue` / `wave_mutate` | Clarify, direct, and evolve a Wave |
+| `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
+| `update-wave` / `split-wave` | Maintain Wave structure and memory |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
 | `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
 | `s4-scan` / `s4-assess` | Intelligence: dependencies, advisories, upstream APIs, what they imply |
 | `s5-scan` / `s5-assess` | Identity: wave roster, policy, boundary and autonomy drift |
 
-Ops skills — wrappers around git, PR, release, and wave state:
+Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 
 | Skill | What it does |
 |------|--------------|
-| `init` | Set up loopflow in this repo |
-| `commit` | Commit with generated message |
-| `rebase` | Rebase onto main |
-| `pr` | Generate PR title/body and call `lf pr publish --title --body` |
-| `land` | Land the PR and prune its merged worker worktree |
-| `lint` | Run linter, fix issues |
-| `update-wave` | Create, update, or delete wave state |
-| `release` | Run the full release workflow (notes, PR, tag, status) |
+| `init` | Connect the repo to Homes, accounts, Waves, and task execution |
+| `loopflow-validate` | Validate flows, skills, and directions |
+| `commit-message` | Generate a commit message without committing |
+| `rebase-conflicts` | Resolve conflicts after the mechanical rebase stops |
+| `pr-message` | Generate a PR title and body without publishing |
+| `pr-publish` | Generate PR copy and call `lf pr publish` |
+| `pr-submit` | Prepare a PR for a human to land |
+| `pr-land` | Prepare and land a PR through Loopflow's git machinery |
+| `release-run` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
 | `token-compress` | Compress text into a token budget without silently dropping information |
-| `validate` | Validate flows, skills, and directions |
 
 ## Context Flags
 
@@ -215,8 +220,8 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → review-design → implement → compress → lint → review-slice → gate |
-| `code` | implement → compress → lint → gate |
+| `build` | kickoff → review-design → code → review-slice |
+| `code` | implement → compress |
 | `pair` | design → code |
 | `task-design` | kickoff → review-design |
 | `slice` | code → review-slice → publish/refresh Task PR |
@@ -231,7 +236,6 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 | `govern-control` | s3-scan → s3-assess → mutate |
 | `govern-intelligence` | s4-scan → s4-assess → mutate |
 | `govern-identity` | s5-scan → s5-assess → mutate |
-| `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream |
 
 `sync` rebases the current branch and refreshes the default branch. The
@@ -619,7 +623,7 @@ lf npx/vercel-labs/deep-research   # fetch + run from the npx skills catalog
 lf npx/explain-code                # already-cached skill (no network)
 ```
 
-`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. Core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
+`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The core `task/` / `project/` / `wave/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
 
 ## PR Operations
 
@@ -760,9 +764,9 @@ in `GOAL.md` frontmatter are separate — the resident fires those; see
 [Waves](waves.md#crons).)
 
 ```bash
-lf cron add --wave memory --flow export-memory --schedule daily
+lf cron add --wave coordination --flow govern-coordination --schedule daily
 lf cron list
-lf cron remove --wave memory --flow export-memory
+lf cron remove --wave coordination --flow govern-coordination
 ```
 
 `add` writes `~/Library/LaunchAgents/loopflow.cron.<wave>.<flow>.plist` and
@@ -829,8 +833,8 @@ Mechanical release subcommands; `lf release run` is the full workflow.
 
 ```bash
 lf release run patch          # full release workflow
-lf release check              # PRs merged since last tag?
-lf release notes 1.2.3        # narrative RELEASE_NOTES.md from decisions + PRs
+lf release check              # exact commits in the target range
+lf release notes 1.2.3        # narrative notes from decisions + commits + PRs
 lf release bump 1.2.3         # bump manifests
 lf release tag 1.2.3          # create + push git tag
 lf release status             # workflow + GitHub Release status
@@ -846,10 +850,13 @@ lf release status             # workflow + GitHub Release status
 Interactive runs append durable product and process decisions to the
 unreleased ledger; headless runs do not. The release workflow promotes
 `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` as the
-intent source and merged PRs as the shipped-behavior source, and archives
-the generated notes. If the ledger is absent, notes fall back to merged PR
-history. Headless release automation needs no runner-local agent CLI — if no
-harness can start, Loopflow writes deterministic notes from the same context.
+intent source, the exact git range as shipped-behavior truth, and merged PRs as
+narrative context, then archives the generated notes. If the ledger is absent,
+notes fall back to commits and PR history. Headless release automation needs no
+runner-local agent CLI — if no harness can start, Loopflow writes deterministic
+notes from the same context. Configure repository-specific verification,
+preparation, and completion evidence under `release.targets`; see
+[Configuration](config.md).
 
 ## See Also
 

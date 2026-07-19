@@ -9,7 +9,7 @@ use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
 use loopflow::engine::load_flow;
 use loopflow::lf::discovery::{
     builtin_skill_description, builtin_skills, discover_skill, discover_target, list_all_skills,
-    list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_STEP_CATEGORIES,
+    list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -224,7 +224,7 @@ fn discover_target_errors_for_unknown() {
 #[test]
 fn categorized_listing_includes_known_skills() {
     let builtins = builtin_skills();
-    for (_category, skills) in BUILTIN_STEP_CATEGORIES {
+    for (_category, skills) in BUILTIN_SKILL_CATEGORIES {
         for skill in *skills {
             assert!(
                 builtins.contains(*skill),
@@ -242,7 +242,7 @@ fn categorized_listing_includes_known_skills() {
 fn every_builtin_skill_is_categorized_and_discoverable() {
     let tmp = TempDir::new().expect("tempdir");
 
-    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_STEP_CATEGORIES
+    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_SKILL_CATEGORIES
         .iter()
         .flat_map(|(cat, names)| names.iter().map(move |n| (*n, *cat)))
         .collect();
@@ -251,7 +251,7 @@ fn every_builtin_skill_is_categorized_and_discoverable() {
         // Appears in exactly one category.
         assert!(
             categorized.contains_key(name),
-            "builtin skill {name} is missing from BUILTIN_STEP_CATEGORIES",
+            "builtin skill {name} is missing from BUILTIN_SKILL_CATEGORIES",
         );
 
         // Resolves by exact name.
@@ -278,7 +278,7 @@ fn every_builtin_skill_is_categorized_and_discoverable() {
     // Every category entry must be a known builtin — no phantom names.
     let known: std::collections::HashSet<&'static str> =
         builtin_skill_names().into_iter().collect();
-    for (_cat, names) in BUILTIN_STEP_CATEGORIES {
+    for (_cat, names) in BUILTIN_SKILL_CATEGORIES {
         for name in *names {
             assert!(
                 known.contains(*name),

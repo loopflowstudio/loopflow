@@ -7,7 +7,8 @@ Run release as a one-shot operation that owns the full lifecycle.
 
 ## Input
 
-`lf release <version>` passes `<version>` as message text. Interpret the first token as:
+`lf release-run <version>` passes `<version>` as message text. Interpret the
+first token as:
 
 - `patch` / `minor` / `major` (bump from latest tag)
 - explicit version: `vX.Y.Z` or `X.Y.Z`
@@ -23,18 +24,24 @@ lf release run <version>
 ```
 
 That command is responsible for:
-- checking there are merged PRs since the previous tag
+- checking the exact target-scoped git range since the previous tag
 - bumping manifests and generating release notes
 - promoting any staged `release/unreleased/` artifacts to `release/v<version>/`
 - archiving the generated root `RELEASE_NOTES.md` to `release/v<version>/NOTES.md`
 - creating and landing the release PR
 - waiting for merge queue completion
 - tagging the merged commit
-- waiting for release workflow completion
+- waiting for the target's configured completion evidence
+
+The repository owns `verify` and `prepare` commands plus the selected workflow
+under `release.targets` in `.lf/config.yaml`. Keep builds, signing, packaging,
+migrations, registry uploads, deployments, smoke tests, and secret handling in
+those repo-owned commands or workflows.
 
 ## Re-entry
 
-`lf release run` should be safe to re-run after interruptions.
+`lf release run` resumes an existing release PR or incomplete latest tag after
+interruptions.
 
 ## Guardrails
 
@@ -44,4 +51,7 @@ That command is responsible for:
 
 ## Adaptation
 
-If you discovered repo-specific release conventions — changelog format, tag scheme, deploy hooks, version file locations — encode them. Most belong in repo docs where all steps benefit. Copy this step to `.lf/steps/release.md` when the repo needs release to work differently — a changed workflow, or team preferences about how releases happen.
+If you discovered repo-specific release conventions — changelog format, tag
+scheme, deploy hooks, version file locations — encode them in `.lf/config.yaml`
+or repo-owned scripts. Copy this skill to `.lf/skills/release-run.md` only when
+the release judgment itself needs to differ.

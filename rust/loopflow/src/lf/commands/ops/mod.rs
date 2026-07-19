@@ -313,7 +313,7 @@ fn resolve_rebase_conflict(
     );
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
-        launch_skill_agent(repo_root, "rebase", Some(&context), Some(env))
+        launch_skill_agent(repo_root, "rebase-conflicts", Some(&context), Some(env))
             .map_err(|error| OpsError::Message(error.to_string()))
     })?)
 }
@@ -1183,24 +1183,32 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
 
 fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let prs = release_check(&repo_root, target_name)?;
+    let changes = release_check(&repo_root, target_name)?;
 
-    if prs.is_empty() {
-        eprintln!("No PRs merged since last tag.");
+    if changes.commits.is_empty() {
+        eprintln!("No commits in the target area since the last tag.");
         std::process::exit(1);
     }
 
     let is_tty = std::io::stdout().is_terminal();
     if is_tty {
-        for pr in &prs {
+        for commit in &changes.commits {
+            let short_sha = commit.sha.get(..7).unwrap_or(&commit.sha);
+            println!("{short_sha} {}", commit.title);
+        }
+        for pr in &changes.merged_prs {
             println!(
                 "#{:<6} {} (+{} -{}, {} files)",
                 pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
             );
         }
-        println!("\n{} PR(s) merged since last tag.", prs.len());
+        println!(
+            "\n{} commit(s), {} merged PR(s) in the release range.",
+            changes.commits.len(),
+            changes.merged_prs.len()
+        );
     } else {
-        let json = serde_json::to_string_pretty(&prs)?;
+        let json = serde_json::to_string_pretty(&changes)?;
         println!("{}", json);
     }
 

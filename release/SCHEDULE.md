@@ -34,7 +34,9 @@ choices, and release manifests for Cadenza.
 
 - Nightly jobs prove release artifacts without deploying them.
 - Weekly publishing never runs unless nightly-style package verification passed in the same workflow run.
-- Weekly publishing uses the canonical `lf release run patch` path, including the `release-notes` step and `release/unreleased/DECISIONS.md` narrative context. Do not duplicate release-note generation in workflow YAML.
+- Weekly publishing uses the canonical `lf release run patch` path, including
+  the `release-notes` skill and `release/unreleased/DECISIONS.md` narrative
+  context. Do not duplicate release-note generation in workflow YAML.
 - Release-note generation uses token compression: read the full release context, group repetition, preserve decisions and unique facts, and never substitute first-N commits or lines for summarization.
 - Secrets stay in Doppler or host-local env files, never committed config.
 - Local updater scripts refuse to pull a non-default branch unless explicitly told not to pull.

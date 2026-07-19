@@ -2459,7 +2459,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let builtin = directory
             .path()
-            .join("rust/loopflow/src/engine/builtins/build/skill/compress.md");
+            .join("rust/loopflow/src/engine/builtins/task/skill/compress.md");
         let local = directory.path().join(".lf/skills/compress.md");
         fs::create_dir_all(builtin.parent().unwrap()).unwrap();
         fs::create_dir_all(local.parent().unwrap()).unwrap();
@@ -2498,7 +2498,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let builtin = directory
             .path()
-            .join("rust/loopflow/src/engine/builtins/build/skill/assess.md");
+            .join("rust/loopflow/src/engine/builtins/wave/skill/assess.md");
         fs::create_dir_all(builtin.parent().unwrap()).unwrap();
         fs::write(&builtin, "Assess instructions\n").unwrap();
         let current_hash = hash_current_source(

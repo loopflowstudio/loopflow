@@ -35,14 +35,15 @@ Example body:
 ## Usage
 
 \`\`\`bash
-lf pr open create -a
-lf pr open update -a
+lf code
+lf ship
 \`\`\`
 
-PR create and update now generate title/body via Claude API instead of reading from .lf/COMMIT. The -a flag adds, commits, and pushes before creating/updating.
+Coding and shipping now have separate flows. `code` stops after implementation
+and compression; `ship` owns the gate and PR lifecycle.
 
 ## Changes
 
-- New llm_http module for structured LLM responses
-- Builtin prompts stored in package, separate from user .lf/ tasks
+- Removed the standalone lint skill
+- Moved gate into shipping flows
 ```

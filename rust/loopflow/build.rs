@@ -10,7 +10,7 @@ use std::process::Command;
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
-const CORE_CATEGORIES: &[&str] = &["build", "govern", "ops"];
+const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
 fn main() {
     let manifest_dir =
@@ -26,7 +26,7 @@ fn main() {
         &builtins_dir,
         "skill",
         "md",
-        "BUILTIN_STEPS",
+        "BUILTIN_SKILLS",
         &out_dir.join("builtin_skills.rs"),
     );
 
@@ -56,7 +56,7 @@ fn main() {
         &builtins_dir,
         "skill",
         "md",
-        "BUILTIN_STEP_CATEGORIES",
+        "BUILTIN_SKILL_CATEGORIES",
         &out_dir.join("builtin_skill_categories.rs"),
     );
 
@@ -70,13 +70,6 @@ fn main() {
     generate_direction_groups(
         &builtins_dir.join("directions"),
         &out_dir.join("builtin_direction_groups.rs"),
-    );
-
-    generate_map(
-        &builtins_dir.join("ops/prompt"),
-        "md",
-        "BUILTIN_OPS_PROMPTS",
-        &out_dir.join("builtin_ops_prompts.rs"),
     );
 
     // Re-run if any file in the builtins tree changes
@@ -207,9 +200,10 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
 }
 
 /// Collect files of the given extension from `<builtins_dir>/<cat>/<kind>/`
-/// for each top-level category directory. Core categories (build/govern/ops)
-/// share one flat namespace — duplicate stems across cores panic. Non-core
-/// categories get their name as a prefix: `gstack/office-hours`.
+/// for each top-level category directory. Core categories
+/// (task/project/wave/ops) share one flat namespace — duplicate stems across
+/// cores panic. Non-core categories get their name as a prefix:
+/// `vendor/review`.
 fn generate_kind_map(
     builtins_dir: &Path,
     kind: &str,
@@ -299,7 +293,7 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
 /// Generate a `<MAP_NAME>: &[(category, &[name])]` constant from
 /// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased. Names
 /// for core categories stay bare; names for non-core categories get the
-/// `<cat>/` prefix so they match the keys in BUILTIN_STEPS / BUILTIN_FLOWS.
+/// `<cat>/` prefix so they match the keys in BUILTIN_SKILLS / BUILTIN_FLOWS.
 fn generate_category_map(
     builtins_dir: &Path,
     kind: &str,

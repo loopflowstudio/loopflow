@@ -11,7 +11,7 @@ where agents or humans repeatedly pay for the same proof.
 ## Orientation
 
 Read the repository guidance, test entrypoints, CI workflows, release gates,
-demo/production checks, and any local run or trace ledger. Keep raw prompts,
+review-slice/production checks, and any local run or trace ledger. Keep raw prompts,
 commands, output, credentials, and customer data private; reports contain only
 aggregates and named repository artifacts.
 
@@ -48,10 +48,10 @@ Write findings and the change design to `scratch/testing-audit.md`.
      or implementation structure unless they protect a concrete safety rule.
    - Replace broad inner-loop runs with focused behavior, affected-suite gates,
      and exact-tree evidence reuse.
-   - Give implement, compress, lint, rebase, gate, CI/release, and demo distinct
+   - Give implement, compress, rebase, gate, CI/release, and review-slice distinct
      proof ownership so a phase transition does not trigger a redundant run.
    - Prefer real configured/deployed product proof when it is safe and
-     observable. Never mutate production solely for an audit or demo.
+     observable. Never mutate production solely for an audit or review.
 
 6. **Change the system**
    Implement the highest-leverage safe improvements: runner selection/reuse,
@@ -61,7 +61,7 @@ Write findings and the change design to `scratch/testing-audit.md`.
 
 7. **Verify the audit**
    Run focused tests for the infrastructure changed. Exercise timing/reporting
-   against a safe real or copied ledger. Demo one real path. Review the diff for
+   against a safe real or copied ledger. Exercise one real path. Review the diff for
    privacy, false confidence, and whether each new test asserts behavior.
 
 ## Output

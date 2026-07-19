@@ -189,7 +189,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 
 | Flag | Description |
 |------|-------------|
-| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
+| `--tui` / `--ide` | Hand off Claude, Codex, or OpenCode to the terminal, or Claude/Codex to their app; overrides `session.launch` |
 
 ## Browser Automation
 
@@ -211,7 +211,7 @@ lf ship -w feature-branch
 | `--docs PATH[,PATH...]` | Prefetch docs into context—files, globs, or dirs (default: none) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
-| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
+| `--tui` / `--ide` | Hand off Claude, Codex, or OpenCode to the terminal, or Claude/Codex to their app; overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
@@ -463,9 +463,15 @@ a missing credential continues through the healthy fallback route.
 selected provider accounts. Both flags are repeatable and accept
 `claude=<selector>` or `codex=<selector>`. They cannot be combined.
 
-Use the flags for interactive vendor sessions too (`--tui`): logging into a
-managed login with a bare `codex login` creates a second session and evicts
-the managed one ("needs re-login"); entering through lf shares one session.
+Use the flags for Claude and Codex terminal sessions too (`--tui`): logging
+into a managed login with a bare `codex login` creates a second session and
+evicts the managed one ("needs re-login"); entering through lf shares one
+session.
+
+Without an account flag, managed Claude and Codex launches use the repository
+route, then the default route. If neither exists, all automatic managed logins
+are eligible and Loopflow skips known cooling or limited accounts. If no
+managed login exists, the provider CLI uses its ambient default credentials.
 
 `lf usage` leads with each managed account's subscription state — provider-
 reported plan, session and weekly windows as percent *used*, reset times —
@@ -592,7 +598,7 @@ mechanical git/PR operations. Tier skills add scoped delegation. Use
 lf debug -c    # include current clipboard text in the prompt
 ```
 
-### Launch an interactive vendor session
+### Launch Claude, Codex, or OpenCode interactively
 
 ```bash
 lf design                 # interactive skill → uses session.launch (default: tui)
@@ -600,8 +606,9 @@ lf gate --tui             # force a terminal handoff for a normally-headless ski
 lf : "fix the bug" --ide -m codex   # force the Codex app instead
 ```
 
-`--tui` and `--ide` override the repo default. Set `session.launch: ide` in
-`.lf/config.yaml` to make the vendor app the default for interactive skills.
+`--tui` opens Claude, Codex, or OpenCode in the terminal. `--ide` opens Claude
+or Codex in its app. Both override the repo default. Set `session.launch: ide`
+in `.lf/config.yaml` to make the app the default for interactive skills.
 
 ### External skills
 

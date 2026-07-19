@@ -1293,12 +1293,9 @@ fn _launch_agent_once(
         cmd.env("LOOPFLOW_DIRECTIVE_FILE", relay_path);
     }
 
-    // Never forward API keys to agent subprocesses. Claude Code, Codex, etc.
-    // should use their own auth (subscription/OAuth). A stray ANTHROPIC_API_KEY
-    // in the shell causes Claude Code to silently bill the API instead.
-    cmd.env_remove("ANTHROPIC_API_KEY");
-    cmd.env_remove("OPENAI_API_KEY");
-    cmd.env_remove("GEMINI_API_KEY");
+    // Ambient API keys are filtered by executable. Explicitly stored provider
+    // credentials are then restored only for the executable that owns them.
+    crate::provider_auth::apply_provider_env_to_command(program, &mut cmd);
     crate::harness::configure_vendor_std_env(&mut cmd)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
 

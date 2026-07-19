@@ -931,7 +931,7 @@ mod tests {
         let candidate = project_route_candidate(
             route("claude", Some("work")),
             Some(&account),
-            &[limit("work", 80, Some(NOW + 60))],
+            &[limit("work", 95, Some(NOW + 60))],
             evidence(),
             NOW,
             today(),

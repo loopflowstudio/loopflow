@@ -108,6 +108,12 @@ tokens, retries the wake, and prints the recorded Answer to stdout. The
 provider sees an ordinary long-running shell command; Loopflow needs no
 provider-specific injected tool or mid-turn message transport.
 
+Each Task Ask and Answer also enqueues a Linear issue comment in the same
+transaction. Linear publishes afterward: failures remain in the durable outbox
+for retry and cannot roll back the exchange or delay `lf ask` after the Answer
+commits. A stable marker lets recovery adopt a remotely-created comment instead
+of posting it twice.
+
 ## Flow execution
 
 Task flows run serially. A Turn blocked inside `lf ask` remains the current

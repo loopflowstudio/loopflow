@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
@@ -22,6 +23,12 @@ async fn run_async(args: &[String]) -> anyhow::Result<()> {
             tracing::warn!(ask_id = %ask.id, %error, "Ask parent wake failed; will retry");
         }
     }
+    let publication_store = store.clone();
+    let publication = tokio::spawn(async move {
+        if let Err(error) = crate::ops::publish_pending_ask_comments(&publication_store).await {
+            tracing::warn!(%error, "Ask comment outbox publication failed");
+        }
+    });
     let answer = wait_for_answer(
         &store,
         &lease,
@@ -32,6 +39,7 @@ async fn run_async(args: &[String]) -> anyhow::Result<()> {
         true,
     )
     .await?;
+    publication.abort();
     println!("{answer}");
     Ok(())
 }
@@ -126,11 +134,13 @@ async fn wake_parent(store: &Store, route: &AnswerRoute) -> anyhow::Result<()> {
     }
 }
 
-async fn open_shared_store() -> anyhow::Result<Store> {
+async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
-    open_store(&config)
-        .await
-        .context("open the shared Loopflow store")
+    Ok(Arc::new(
+        open_store(&config)
+            .await
+            .context("open the shared Loopflow store")?,
+    ))
 }
 
 #[cfg(test)]

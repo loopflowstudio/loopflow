@@ -13,7 +13,7 @@ use crate::wave::Wave;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
-pub(crate) use durable::TaskWriterState;
+pub(crate) use durable::{AskCommentWrite, TaskWriterState};
 pub mod migrations;
 pub mod provider_deliveries;
 pub mod rows;

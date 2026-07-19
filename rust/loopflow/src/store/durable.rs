@@ -16,6 +16,40 @@ pub(crate) struct TaskWriterState {
     pub run: Option<Run>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AskCommentTransition {
+    Ask,
+    Answer,
+}
+
+impl AskCommentTransition {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Answer => "answer",
+        }
+    }
+
+    pub(crate) fn marker(self, ask_id: &AskId) -> String {
+        format!("<!-- loopflow:{ask_id}:{} -->", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AskCommentWrite {
+    pub ask_id: AskId,
+    pub transition: AskCommentTransition,
+    pub issue_id: String,
+    pub body: String,
+    pub repo: String,
+    pub wave: String,
+    pub attempt_count: u32,
+    pub attempt_started_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub linear_comment_id: Option<String>,
+    pub delivered_at: Option<i64>,
+}
+
 impl Store {
     pub(crate) async fn task_writer_state(
         &self,
@@ -214,6 +248,56 @@ impl Store {
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.answer_ask(lease.as_ref(), &ask_id, &text)
+        })
+        .await
+    }
+
+    pub(crate) async fn pending_ask_comment_writes(&self) -> StoreResult<Vec<AskCommentWrite>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.pending_ask_comment_writes()
+        })
+        .await
+    }
+
+    pub(crate) async fn claim_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        attempted_at: i64,
+        stale_before: i64,
+    ) -> StoreResult<Option<AskCommentWrite>> {
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_ask_comment_write(&ask_id, transition, attempted_at, stale_before)
+        })
+        .await
+    }
+
+    pub(crate) async fn complete_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        comment_id: &str,
+        delivered_at: i64,
+    ) -> StoreResult<()> {
+        let ask_id = ask_id.clone();
+        let comment_id = comment_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_ask_comment_write(&ask_id, transition, &comment_id, delivered_at)
+        })
+        .await
+    }
+
+    pub(crate) async fn fail_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        error: &str,
+    ) -> StoreResult<()> {
+        let ask_id = ask_id.clone();
+        let error = error.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.fail_ask_comment_write(&ask_id, transition, &error)
         })
         .await
     }

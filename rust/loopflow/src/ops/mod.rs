@@ -1,4 +1,5 @@
 mod abandon;
+mod ask_comments;
 mod child;
 mod commit;
 pub mod cron;
@@ -23,6 +24,7 @@ pub mod trace;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
+pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::{ambient_run_lease, required_run_lease};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{

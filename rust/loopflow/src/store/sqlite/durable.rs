@@ -13,6 +13,7 @@ use crate::durable::{
 };
 use crate::id::WaveId;
 use crate::project::Project;
+use crate::store::durable::{AskCommentTransition, AskCommentWrite};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::Task;
@@ -687,6 +688,7 @@ impl SqliteStore {
             answer: None,
         };
         insert_ask(&tx, &ask)?;
+        enqueue_ask_comment(&tx, &ask)?;
         tx.commit()?;
         Ok(ask)
     }
@@ -735,10 +737,11 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let ask = ask_by_id_in(&tx, ask_id)?;
         validate_answer_caller(&tx, caller, &ask.route)?;
-        if let Some(answer) = ask.answer {
+        if let Some(answer) = ask.answer.as_ref() {
             if answer.text == text {
+                enqueue_answer_comment(&tx, &ask, answer)?;
                 tx.commit()?;
-                return Ok(answer);
+                return Ok(answer.clone());
             }
             return Err(StoreError::InvalidAuthority(format!(
                 "Ask {ask_id} was already answered"
@@ -782,8 +785,111 @@ impl SqliteStore {
             text: text.to_string(),
             answered_at,
         };
+        enqueue_answer_comment(&tx, &ask, &answer)?;
         tx.commit()?;
         Ok(answer)
+    }
+
+    pub(crate) fn pending_ask_comment_writes(&self) -> StoreResult<Vec<AskCommentWrite>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT o.ask_id, o.transition, o.issue_id, o.body,
+                    w.repo, w.name, o.attempt_count, o.attempt_started_at,
+                    o.last_error, o.linear_comment_id, o.delivered_at
+             FROM ask_linear_comment_outbox o
+             JOIN tasks t ON t.id=o.task_id
+             JOIN projects p ON p.id=t.project_id
+             JOIN waves w ON w.id=p.wave_id
+             WHERE o.delivered_at IS NULL
+             ORDER BY o.created_at, o.ask_id,
+                      CASE o.transition WHEN 'ask' THEN 0 ELSE 1 END",
+        )?;
+        let rows = statement
+            .query_map([], read_ask_comment_write_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.into_iter().map(parse_ask_comment_write_row).collect()
+    }
+
+    pub(crate) fn claim_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        attempted_at: i64,
+        stale_before: i64,
+    ) -> StoreResult<Option<AskCommentWrite>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
+            "UPDATE ask_linear_comment_outbox
+             SET attempt_count=attempt_count + 1, attempt_started_at=?3
+             WHERE ask_id=?1 AND transition=?2 AND delivered_at IS NULL
+               AND (attempt_started_at IS NULL OR attempt_started_at <= ?4)",
+            params![
+                ask_id.as_str(),
+                transition.as_str(),
+                attempted_at,
+                stale_before
+            ],
+        )?;
+        let write = if changed == 1 {
+            Some(ask_comment_write_in(&tx, ask_id, transition)?)
+        } else {
+            None
+        };
+        tx.commit()?;
+        Ok(write)
+    }
+
+    pub(crate) fn complete_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        comment_id: &str,
+        delivered_at: i64,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE ask_linear_comment_outbox
+             SET linear_comment_id=?3, delivered_at=?4,
+                 attempt_started_at=NULL, last_error=NULL
+             WHERE ask_id=?1 AND transition=?2 AND delivered_at IS NULL",
+            params![
+                ask_id.as_str(),
+                transition.as_str(),
+                comment_id,
+                delivered_at
+            ],
+        )?;
+        if changed == 0 {
+            let existing = ask_comment_write_in(&conn, ask_id, transition)?;
+            if existing.linear_comment_id.as_deref() == Some(comment_id) {
+                return Ok(());
+            }
+            return Err(StoreError::InvalidData(format!(
+                "Ask {ask_id} {} comment write completed concurrently",
+                transition.as_str()
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn fail_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE ask_linear_comment_outbox
+             SET attempt_started_at=NULL, last_error=?3
+             WHERE ask_id=?1 AND transition=?2 AND delivered_at IS NULL",
+            params![ask_id.as_str(), transition.as_str(), error],
+        )? == 0
+        {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     pub fn pending_asks_for_parent(&self, parent: &WorkRef) -> StoreResult<Vec<AskExchange>> {
@@ -2276,6 +2382,164 @@ fn insert_ask(conn: &Connection, ask: &AskExchange) -> StoreResult<()> {
         ],
     )?;
     Ok(())
+}
+
+fn enqueue_ask_comment(conn: &Connection, ask: &AskExchange) -> StoreResult<()> {
+    let route = match &ask.route {
+        AnswerRoute::User => "User".to_string(),
+        AnswerRoute::Parent(work) => format!("{} `{}`", work.kind(), work.id()),
+    };
+    let transition = AskCommentTransition::Ask;
+    let body = format!(
+        "### Loopflow Ask\n\n**Route:** {route}\n\n{}\n\n{}",
+        ask.question,
+        transition.marker(&ask.id)
+    );
+    enqueue_ask_comment_write(
+        conn,
+        &ask.id,
+        &ask.turn_id,
+        transition,
+        &body,
+        ask.asked_at.unix_timestamp(),
+    )
+}
+
+fn enqueue_answer_comment(
+    conn: &Connection,
+    ask: &AskExchange,
+    answer: &Answer,
+) -> StoreResult<()> {
+    let author = match &answer.author {
+        Author::User => "User".to_string(),
+        Author::Run(run_id) => format!("Run `{run_id}`"),
+    };
+    let transition = AskCommentTransition::Answer;
+    let body = format!(
+        "### Loopflow Answer\n\n**Author:** {author}\n\n{}\n\n{}",
+        answer.text,
+        transition.marker(&ask.id)
+    );
+    enqueue_ask_comment_write(
+        conn,
+        &ask.id,
+        &ask.turn_id,
+        transition,
+        &body,
+        answer.answered_at.unix_timestamp(),
+    )
+}
+
+fn enqueue_ask_comment_write(
+    conn: &Connection,
+    ask_id: &AskId,
+    turn_id: &TurnId,
+    transition: AskCommentTransition,
+    body: &str,
+    created_at: i64,
+) -> StoreResult<()> {
+    let (_, work) = ask_epoch_work_in(conn, turn_id)?;
+    let WorkRef::Task(task_id) = work else {
+        return Ok(());
+    };
+    let issue_id: String = conn.query_row(
+        "SELECT external_issue_id FROM tasks WHERE id=?1",
+        [task_id.as_str()],
+        |row| row.get(0),
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO ask_linear_comment_outbox (
+            ask_id, transition, task_id, issue_id, body, created_at,
+            attempt_count, attempt_started_at, last_error,
+            linear_comment_id, delivered_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, NULL, NULL, NULL)",
+        params![
+            ask_id.as_str(),
+            transition.as_str(),
+            task_id.as_str(),
+            issue_id,
+            body,
+            created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+type AskCommentWriteRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+);
+
+fn read_ask_comment_write_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AskCommentWriteRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+    ))
+}
+
+fn parse_ask_comment_write_row(row: AskCommentWriteRow) -> StoreResult<AskCommentWrite> {
+    let transition = match row.1.as_str() {
+        "ask" => AskCommentTransition::Ask,
+        "answer" => AskCommentTransition::Answer,
+        value => {
+            return Err(StoreError::InvalidData(format!(
+                "invalid Ask comment transition {value:?}"
+            )))
+        }
+    };
+    Ok(AskCommentWrite {
+        ask_id: AskId::parse(&row.0).map_err(invalid_durable)?,
+        transition,
+        issue_id: row.2,
+        body: row.3,
+        repo: row.4,
+        wave: row.5,
+        attempt_count: u32::try_from(row.6).map_err(|_| {
+            StoreError::InvalidData("invalid Ask comment attempt count".to_string())
+        })?,
+        attempt_started_at: row.7,
+        last_error: row.8,
+        linear_comment_id: row.9,
+        delivered_at: row.10,
+    })
+}
+
+fn ask_comment_write_in(
+    conn: &Connection,
+    ask_id: &AskId,
+    transition: AskCommentTransition,
+) -> StoreResult<AskCommentWrite> {
+    let row = conn.query_row(
+        "SELECT o.ask_id, o.transition, o.issue_id, o.body,
+                w.repo, w.name, o.attempt_count, o.attempt_started_at,
+                o.last_error, o.linear_comment_id, o.delivered_at
+         FROM ask_linear_comment_outbox o
+         JOIN tasks t ON t.id=o.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         WHERE o.ask_id=?1 AND o.transition=?2",
+        params![ask_id.as_str(), transition.as_str()],
+        read_ask_comment_write_row,
+    )?;
+    parse_ask_comment_write_row(row)
 }
 
 pub(super) fn ask_by_id_in(conn: &Connection, ask_id: &AskId) -> StoreResult<AskExchange> {

@@ -70,12 +70,40 @@ pub struct PmKr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectFlowPlan {
+    pub first: Option<String>,
+    #[serde(rename = "loop")]
+    pub loop_: Option<String>,
+    pub finally: Option<String>,
+}
+
+impl ProjectFlowPlan {
+    pub fn empty() -> Self {
+        Self {
+            first: None,
+            loop_: None,
+            finally: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectContent {
+    pub definition: String,
+    pub flows: ProjectFlowPlan,
+    pub krs: Vec<PmKr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PmProject {
     pub id: String,
     pub slug: String,
     pub name: String,
     pub summary: String,
     pub definition: String,
+    /// `None` means this provider snapshot predates Project flow configuration.
+    /// Fresh provider reads always resolve it to `Some`, including an empty plan.
+    pub flows: Option<ProjectFlowPlan>,
     pub krs: Vec<PmKr>,
     pub initiative_ids: Vec<String>,
     /// Stable ids of the Linear teams this Project belongs to. `None` when the
@@ -192,15 +220,17 @@ pub fn project_slug(name: &str) -> String {
     slug
 }
 
-pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
+pub fn parse_project_content(content: &str) -> ProjectContent {
     enum Section {
         None,
         Definition,
+        Flows,
         Krs,
     }
 
     let mut section = Section::None;
     let mut definition = Vec::new();
+    let mut flows = ProjectFlowPlan::empty();
     let mut krs = Vec::new();
     let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
@@ -220,6 +250,13 @@ pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
                 section = Section::Krs;
                 continue;
             }
+            "## Flows" => {
+                if let Some(kr) = current_kr.take() {
+                    krs.push(kr);
+                }
+                section = Section::Flows;
+                continue;
+            }
             _ => {}
         }
 
@@ -233,6 +270,21 @@ pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
 
         match section {
             Section::Definition => definition.push(line),
+            Section::Flows => {
+                let Some((name, value)) = trimmed.split_once(':') else {
+                    continue;
+                };
+                let value = match value.trim() {
+                    "" => None,
+                    value => Some(value.to_string()),
+                };
+                match name.trim() {
+                    "first" => flows.first = value,
+                    "loop" => flows.loop_ = value,
+                    "finally" => flows.finally = value,
+                    _ => {}
+                }
+            }
             Section::Krs => {
                 let item = if let Some(text) = trimmed.strip_prefix("- [x] ") {
                     Some((true, text))
@@ -268,12 +320,29 @@ pub fn parse_project_content(content: &str) -> (String, Vec<PmKr>) {
         krs.push(kr);
     }
 
-    (definition.join("\n").trim().to_string(), krs)
+    ProjectContent {
+        definition: definition.join("\n").trim().to_string(),
+        flows,
+        krs,
+    }
 }
 
-pub fn render_project_content(definition: &str, krs: &[PmKr]) -> String {
-    let mut content = format!("## Definition\n\n{}\n\n## KRs", definition.trim());
-    for kr in krs {
+pub fn render_project_content(project: &ProjectContent) -> String {
+    let mut content = format!("## Definition\n\n{}", project.definition.trim());
+    if project.flows != ProjectFlowPlan::empty() {
+        content.push_str("\n\n## Flows\n");
+        if let Some(flow) = &project.flows.first {
+            content.push_str(&format!("\nfirst: {}", flow.trim()));
+        }
+        if let Some(flow) = &project.flows.loop_ {
+            content.push_str(&format!("\nloop: {}", flow.trim()));
+        }
+        if let Some(flow) = &project.flows.finally {
+            content.push_str(&format!("\nfinally: {}", flow.trim()));
+        }
+    }
+    content.push_str("\n\n## KRs");
+    for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
         content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
     }
@@ -442,6 +511,25 @@ mod tests {
     }
 
     #[test]
+    fn project_snapshot_without_flows_remains_readable() {
+        let project: PmProject = serde_json::from_str(
+            r#"{
+                "id":"project-1",
+                "slug":"incident-management",
+                "name":"Incident Management",
+                "summary":"Restore service and prevent recurrence.",
+                "definition":"Incidents are resolved at every causal layer.",
+                "krs":[],
+                "initiative_ids":["initiative-1"],
+                "team_ids":null
+            }"#,
+        )
+        .expect("legacy project snapshot");
+
+        assert_eq!(project.flows, None);
+    }
+
+    #[test]
     fn project_content_round_trips_linear_markdown() {
         let krs = vec![
             PmKr {
@@ -453,22 +541,29 @@ mod tests {
                 holds: false,
             },
         ];
-        let rendered = render_project_content("A measured bet.", &krs);
-        assert_eq!(
-            parse_project_content(&rendered),
-            ("A measured bet.".to_string(), krs.clone())
-        );
+        let project = ProjectContent {
+            definition: "A measured bet.".to_string(),
+            flows: ProjectFlowPlan {
+                first: Some("incident".to_string()),
+                loop_: Some("ship-5whys".to_string()),
+                finally: Some("ship".to_string()),
+            },
+            krs: krs.clone(),
+        };
+        let rendered = render_project_content(&project);
+        assert_eq!(parse_project_content(&rendered), project);
 
         let local = "# Project Name\n\nA measured bet.\n\n## KRs\n\n- One proof holds\n  across wrapped lines.\n";
         assert_eq!(
             parse_project_content(local),
-            (
-                "A measured bet.".to_string(),
-                vec![PmKr {
+            ProjectContent {
+                definition: "A measured bet.".to_string(),
+                flows: ProjectFlowPlan::empty(),
+                krs: vec![PmKr {
                     text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,
-                }]
-            )
+                }],
+            }
         );
     }
 }

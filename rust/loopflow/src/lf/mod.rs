@@ -973,9 +973,15 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         name: Option<String>,
-        /// Use this Task flow instead of the Project/default flow
+        /// Override the Project's first flow for a new Task
         #[arg(long, value_name = "FLOW")]
-        flow: Option<String>,
+        first: Option<String>,
+        /// Override the Project's loop flow for a new Task
+        #[arg(long = "loop", value_name = "FLOW")]
+        loop_: Option<String>,
+        /// Override the Project's finally flow for a new Task
+        #[arg(long, value_name = "FLOW")]
+        finally: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -989,14 +995,21 @@ pub enum TaskCommand {
     },
     /// Create a Linear task, ensure its Project, then start its Task
     Start {
-        title: String,
-        #[arg(short = 'p', long = "project")]
+        /// Required Linear Project id or slug
         project_id: String,
+        /// Task title; omitted when stdin supplies the report and first line
+        title: Option<String>,
         #[arg(long)]
         name: Option<String>,
-        /// Use this Task flow instead of the Project/default flow
+        /// Override the Project's first flow
         #[arg(long, value_name = "FLOW")]
-        flow: Option<String>,
+        first: Option<String>,
+        /// Override the Project's loop flow
+        #[arg(long = "loop", value_name = "FLOW")]
+        loop_: Option<String>,
+        /// Override the Project's finally flow
+        #[arg(long, value_name = "FLOW")]
+        finally: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -1380,8 +1393,17 @@ pub enum PmProjectCommand {
         /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
         #[arg(long = "kr", required = true)]
         krs: Vec<String>,
+        /// Flow run once when each Task starts
+        #[arg(long)]
+        first: Option<String>,
+        /// Flow repeated while each Task makes progress
+        #[arg(long = "loop")]
+        loop_: Option<String>,
+        /// Flow run to gate, learn from, and land each Task
+        #[arg(long)]
+        finally: Option<String>,
     },
-    /// Replace a Linear Project's definition and KRs
+    /// Update a Linear Project's content or Task flows
     Update {
         #[arg(short = 'w', long = "wave")]
         wave: Option<String>,
@@ -1390,10 +1412,19 @@ pub enum PmProjectCommand {
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "definition")]
-        definition: String,
-        /// Key result; repeat for each KR. Prefix with `[x] ` when it holds.
-        #[arg(long = "kr", required = true)]
+        definition: Option<String>,
+        /// Replace KRs; repeat for each KR. Prefix with `[x] ` when it holds.
+        #[arg(long = "kr")]
         krs: Vec<String>,
+        /// Flow run once when each Task starts
+        #[arg(long)]
+        first: Option<String>,
+        /// Flow repeated while each Task makes progress
+        #[arg(long = "loop")]
+        loop_: Option<String>,
+        /// Flow run to gate, learn from, and land each Task
+        #[arg(long)]
+        finally: Option<String>,
     },
     /// Archive a Linear Project and refresh the wave snapshot
     Archive {
@@ -2147,16 +2178,35 @@ mod tests {
     }
 
     #[test]
-    fn task_run_accepts_an_explicit_flow() {
-        let cli = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--flow", "iterate"])
-            .expect("parse task review policy");
+    fn task_run_accepts_lifecycle_flow_overrides() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "run",
+            "INF-123",
+            "--first",
+            "incident",
+            "--loop",
+            "ship-5whys",
+            "--finally",
+            "ship",
+        ])
+        .expect("parse task lifecycle overrides");
         let Some(Commands::Task {
-            cmd: TaskCommand::Run { flow, .. },
+            cmd:
+                TaskCommand::Run {
+                    first,
+                    loop_,
+                    finally,
+                    ..
+                },
         }) = cli.command
         else {
             panic!("expected task run command");
         };
-        assert_eq!(flow.as_deref(), Some("iterate"));
+        assert_eq!(first.as_deref(), Some("incident"));
+        assert_eq!(loop_.as_deref(), Some("ship-5whys"));
+        assert_eq!(finally.as_deref(), Some("ship"));
     }
 
     #[test]
@@ -2167,9 +2217,8 @@ mod tests {
                 "lf",
                 "task",
                 "start",
-                "Ship auth",
-                "--project",
                 "project-1",
+                "Ship auth",
                 "--headless",
             ],
         ] {
@@ -2182,6 +2231,23 @@ mod tests {
                 })
             ));
         }
+    }
+
+    #[test]
+    fn task_start_requires_project_and_allows_piped_title_omission() {
+        let cli = Cli::try_parse_from(["lf", "task", "start", "incident-management"])
+            .expect("parse Task start with required Project");
+        let Some(Commands::Task {
+            cmd: TaskCommand::Start {
+                project_id, title, ..
+            },
+        }) = cli.command
+        else {
+            panic!("expected task start command");
+        };
+        assert_eq!(project_id, "incident-management");
+        assert_eq!(title, None);
+        assert!(Cli::try_parse_from(["lf", "task", "start"]).is_err());
     }
 
     #[test]

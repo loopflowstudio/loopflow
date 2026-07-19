@@ -742,18 +742,24 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             }
         },
         PmCommand::Project { cmd } => {
-            let (wave, project, title, definition, krs) = match cmd {
+            let (wave, project, title, definition, krs, first, loop_, finally) = match cmd {
                 PmProjectCommand::Create {
                     wave,
                     title,
                     definition,
                     krs,
+                    first,
+                    loop_,
+                    finally,
                 } => (
                     wave.clone(),
                     None,
                     Some(title.clone()),
-                    definition.clone(),
+                    Some(definition.clone()),
                     krs.clone(),
+                    first.clone(),
+                    loop_.clone(),
+                    finally.clone(),
                 ),
                 PmProjectCommand::Update {
                     wave,
@@ -761,12 +767,18 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     title,
                     definition,
                     krs,
+                    first,
+                    loop_,
+                    finally,
                 } => (
                     wave.clone(),
                     Some(project.clone()),
                     title.clone(),
                     definition.clone(),
                     krs.clone(),
+                    first.clone(),
+                    loop_.clone(),
+                    finally.clone(),
                 ),
                 PmProjectCommand::Archive { wave, project } => {
                     let result = crate::ops::pm::pm_project_archive(
@@ -792,6 +804,9 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     title,
                     definition,
                     krs,
+                    first,
+                    loop_,
+                    finally,
                 },
                 progress,
             )?;

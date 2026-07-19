@@ -34,14 +34,11 @@ selection. Follow the repo style guide.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for
   `lf pr open` only when a human explicitly asked to see the PR for review.
-- A merged PR settles that PR. Use `lf pr land -c` only when that merge
-  completes the Task; use bare `lf pr land --next <slug>` when another serial
-  PR follows. Use `lf task complete <issue> --summary "..."` for clean
-  work that needs no PR. Do not write Task completion directly through PM.
-- If a PR merged out of band (GitHub auto-merge, not settled by `lf pr land
-  -c`) and follow-up work remains, `lf pr next [slug]` reconciles the merge and
-  rotates to the next serial PR, carrying committed and uncommitted follow-up
-  forward — no manual git surgery.
+- Do not land or complete the Task from this loop. The pinned final flow owns
+  its gate, learning record, and landing disposition.
+- If a prior PR merged out of band and follow-up work remains, `lf pr next
+  [slug]` reconciles the merge and rotates to the next serial PR, carrying
+  committed and uncommitted follow-up forward — no manual git surgery.
 - File a concrete follow-up with `lf pm task create` when new work belongs later
   under a known project. Filing does not authorize launching it in this task.
 - Report consequential progress through the Task; its linked events

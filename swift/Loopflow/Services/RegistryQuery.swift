@@ -282,6 +282,7 @@ private struct PmProjectSnapshot: Decodable {
     let name: String
     let summary: String
     let definition: String
+    let flows: ProjectFlowPlanSnapshot
     let krs: [PmKrSnapshot]
     let initiativeIds: [String]
     // Stable ids of the Linear teams the Project belongs to. Optional: a snapshot
@@ -290,7 +291,7 @@ private struct PmProjectSnapshot: Decodable {
     let teamIds: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, summary, definition, krs
+        case id, slug, name, summary, definition, flows, krs
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"
     }

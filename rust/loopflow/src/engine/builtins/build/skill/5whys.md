@@ -1,5 +1,5 @@
 ---
-requires: diff from debug step
+requires: restored incident and recorded evidence
 produces: scratch/<branch>.md
 ---
 Perform root cause analysis on a bug fix. What systemic issues allowed this bug to exist?
@@ -36,7 +36,7 @@ re-derive what these already record.
 3. Take that answer and ask "why?" again
 4. Keep asking until you hit something systemic
 5. Look back: what questions did you skip? What branches unexplored?
-6. For each level, ask: what change to prompts, process, code, or tests would have prevented this?
+6. For each level, ask: what change to prompts, process, migrations, code, or tests would have prevented this?
 
 ## Output format
 
@@ -89,4 +89,4 @@ Problem → Cause 1 → Cause 2 → Cause 3 → Root Cause
 - [ ] <specific change 2>
 ```
 
-The `build` flow following this step will implement the structural and systemic fixes.
+The Task's loop flow implements these changes one coherent prevention at a time.

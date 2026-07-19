@@ -215,7 +215,6 @@ mod tests {
         let update_wave = get_builtin_skill("update-wave").expect("update-wave prompt");
         let design = get_builtin_skill("design").expect("design prompt");
         let scan_waves = get_builtin_skill("scan").expect("scan prompt");
-        let split_wave = get_builtin_skill("split-wave").expect("split-wave prompt");
 
         // The roadmap lives in Linear, reached via `lf pm` — no local N-*.md files.
         assert!(update_wave.contains("lf pm"));
@@ -225,7 +224,6 @@ mod tests {
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
         assert!(scan_waves.contains("lf pm show"));
-        assert!(split_wave.contains("lf pm"));
         assert!(WAVES_DOC.contains("GOAL.md"));
         assert!(WAVES_DOC.contains("Linear"));
         assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
@@ -237,8 +235,6 @@ mod tests {
     #[test]
     fn interactive_skills_support_human_and_parent_feedback() {
         for name in [
-            "code-review",
-            "demo",
             "design",
             "explore",
             "refine",
@@ -266,19 +262,22 @@ mod tests {
             );
         }
 
-        let demo = get_builtin_skill("demo").expect("demo skill");
+        let review_slice = get_builtin_skill("review-slice").expect("review-slice skill");
         for evidence in [
-            "every Done When",
-            "product",
-            "code",
-            "admin state",
-            "logs",
-            "stats",
-            "metrics",
-            "real sign-in/login path",
+            "interactive: false",
+            "production-like path",
+            "Done when",
+            "Implemented behavior",
+            "complete diff",
+            "lf pr publish",
         ] {
-            assert!(demo.contains(evidence), "demo omits {evidence:?} evidence");
+            assert!(
+                review_slice.contains(evidence),
+                "review-slice omits {evidence:?} evidence"
+            );
         }
+        assert!(get_builtin_skill("demo").is_none());
+        assert!(get_builtin_skill("code-review").is_none());
     }
 
     #[test]
@@ -299,7 +298,7 @@ mod tests {
         let task = get_builtin_skill("task_pursue").expect("task pursue");
         assert!(task.contains("second Task"));
         assert!(task.contains("lf pr land"));
-        assert!(task.contains("lf task complete"));
+        assert!(task.contains("pinned final flow"));
         assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
@@ -309,7 +308,6 @@ mod tests {
                 "project",
                 ["project_clarify", "project_pursue", "project_mutate"],
             ),
-            ("task", ["task_clarify", "task_pursue", "task_mutate"]),
         ] {
             let flow = get_builtin_flow(flow).expect("tier flow");
             for step in steps {
@@ -317,6 +315,17 @@ mod tests {
             }
             assert!(!flow.contains("loop:"));
         }
+
+        assert!(get_builtin_flow("task").is_none());
+        assert!(get_builtin_flow("task-design")
+            .expect("Task first flow")
+            .contains("- kickoff"));
+        assert!(get_builtin_flow("slice")
+            .expect("Task loop flow")
+            .contains("- review-slice"));
+        assert!(get_builtin_flow("ship")
+            .expect("Task final flow")
+            .contains("- op: pr land -c"));
     }
 
     #[test]
@@ -420,17 +429,8 @@ mod tests {
     }
 
     #[test]
-    fn export_memory_skill_is_registered() {
-        let skill = get_builtin_skill("export-memory").expect("export-memory skill");
-
-        assert!(skill.contains("lf memory show --wave <wave>"));
-        assert!(skill.contains("lf memory log --wave <wave>"));
-        assert!(skill.contains("lf memory update --wave <wave>"));
-        assert!(skill.contains("lf commit -m \"export-memory: compile MEMORY.md\""));
-        assert!(skill.contains("write `wave/<wave>/MEMORY.md` directly"));
-        // Typed blocks: a starting vocabulary the agent owns, not an enforced schema.
-        assert!(skill.contains("Organize into typed blocks"));
-        assert!(skill.contains("starting vocabulary, not a schema"));
+    fn retired_export_memory_skill_is_not_registered() {
+        assert!(get_builtin_skill("export-memory").is_none());
     }
 
     #[test]

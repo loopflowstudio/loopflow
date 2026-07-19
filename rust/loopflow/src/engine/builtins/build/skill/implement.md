@@ -37,6 +37,9 @@ The design doc and style guides are in your context.
    - Data structures first—get the core types right
    - Functions one at a time, following the signatures
    - Match existing patterns in the codebase
+   - A large design proceeds in slices—one coherent piece at a time, each
+     checked against the design doc—but the branch ships as one PR. Don't
+     stage the landing with flags, v2s, or setups nothing uses yet.
 
 3. **Verify**
    - Run the smallest behavioral test that proves the behavior you changed

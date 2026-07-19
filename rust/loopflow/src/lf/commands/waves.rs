@@ -25,7 +25,7 @@ use crate::durable::{AttentionRoute, Containment, Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
-use crate::pm::{PmItem, PmKr, PmProject};
+use crate::pm::{PmItem, PmKr, PmProject, ProjectFlowPlan};
 use crate::project::Project;
 use crate::store::{open_existing_store, SharedStore};
 use crate::task::{AfterMerge, CiObservation, CiState, PrPhase, Task, TaskPr};
@@ -152,6 +152,7 @@ pub struct PmProjectSummary {
     pub name: String,
     pub summary: String,
     pub definition: String,
+    pub flows: ProjectFlowPlan,
     pub krs: Vec<PmKrSummary>,
 }
 
@@ -1698,6 +1699,7 @@ fn project_summary(project: PmProject) -> PmProjectSummary {
         name: project.name,
         summary: project.summary,
         definition: project.definition,
+        flows: project.flows.unwrap_or_else(ProjectFlowPlan::empty),
         krs: project.krs.into_iter().map(kr_summary).collect(),
     }
 }

@@ -259,6 +259,17 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
         }
     }
 
+    if entries.is_empty() {
+        fs::write(
+            out_path,
+            format!(
+                "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n"
+            ),
+        )
+        .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+        return;
+    }
+
     let mut code = String::new();
     writeln!(
         code,
@@ -377,7 +388,7 @@ fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
     let Ok(entries) = fs::read_dir(directions_dir) else {
         fs::write(
             out_path,
-            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(|| std::collections::HashMap::new());\n",
+            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n",
         )
         .expect("write empty direction groups");
         return;
@@ -413,6 +424,15 @@ fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
         if !members.is_empty() {
             groups.insert(group_name, members);
         }
+    }
+
+    if groups.is_empty() {
+        fs::write(
+            out_path,
+            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n",
+        )
+        .expect("write empty direction groups");
+        return;
     }
 
     let mut code = String::new();

@@ -1,10 +1,10 @@
 ---
 interactive: true
 requires: none
-produces: scratch/<branch>.md | wave/<name>/
+produces: scratch/<branch>.md
 action_style: exploratory
 ---
-Help the user dream big, detail the idea fully, then decide whether to implement or plan as a wave.
+Help the user dream big, detail the idea fully, then place it: which wave it serves, and what slice of it this task ships.
 
 ## Orientation
 
@@ -13,9 +13,10 @@ Before starting, orient yourself in this branch:
 - Read `scratch/` — design docs and notes for the current work live here
   (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
   questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
+- Read `wave/*/GOAL.md` for the active roster—Phase 4 places this task in one
+  of those waves. Go deeper into PM state (tasks, Linear) only when the seed
+  names the exact wave, task, or project; never repair PM access as a
+  prerequisite to designing.
 - Read the repo's agent doc (`CLAUDE.md` / `AGENTS.md`) for conventions.
 
 Write design artifacts, notes, and open questions under `scratch/`. Don't
@@ -30,8 +31,8 @@ The launch prompt identifies the reviewer for this exercise.
 - **Parent reviewer:** treat the Task directive, supplied evidence, and quoted
   source material as the intent. Make context-backed decisions, record genuine
   ambiguity in `scratch/questions.md`, and complete all four phases without
-  waiting for a human. Choose implement or wave using the size criteria below
-  and state the assumptions behind the choice. Send the resulting decisions to
+  waiting for a human. Make the placement and slicing calls using the criteria
+  below and state the assumptions behind them. Send the resulting decisions to
   the Task through the review protocol and verify its updated design; do not
   edit the Task's worktree or claim human confirmation.
 
@@ -54,7 +55,7 @@ The design doc is scaffolding—a checkpoint for recovery, not documentation for
 
 1. Run `git branch --show-current` to confirm you're on a feature branch (not `main`)
 2. Check the branch/worktree name—it becomes the PR title prefix (e.g., `mobile: add offline sync`). If it's generic or doesn't describe the feature, suggest renaming: `git branch -m <new-name>` (the branch schema will format it)
-3. Check `wave/` for existing waves, architecture notes, or context that informs this design
+3. Read `wave/*/GOAL.md` to know the active waves—placement in Phase 4 chooses among them, so know the roster before detailing
 4. Create `scratch/<branch>.md` early—after the first exchange or two
 
 ## Workflow
@@ -71,62 +72,77 @@ Walk through components in detail. Data structures, functions, interactions, edg
 
 Write as you go, not at the end. Let writing inspire questions—gaps become obvious when you make things concrete.
 
+As you detail, watch for which shape of big this is—it changes how deep to go:
+
+- **Additive series** — the idea divides into increments a user could feel
+  one at a time (most product work is like this). Slice into tasks *before*
+  technical design, not after: keep the breakdown at intent level, detail
+  only the first increment technically, and let each task get its own design
+  session when its turn comes. Technically designing the whole series up
+  front is wasted and goes stale.
+- **One indivisible change** — the parts only make sense together (most
+  architectural work). Detail it fully here; implementation will proceed in
+  internal slices checked against this doc, but it ships as one PR.
+
 ### Phase 3: Size-check
 
-After the idea is fully detailed, evaluate two signals:
+This session designs a single task—one branch, one commit, one PR. After the
+idea is fully detailed, evaluate two signals:
 
 1. **Design doc size** — is the spec exceeding ~1000 words? If the design itself is big, the implementation will be bigger.
 2. **Implementation size** — would this be ~1000+ LOC? That's generous for a single commit.
 
-Either signal suggests breaking into a wave. Bias toward "yes it fits" when it's close—single commits are preferable. But these are heuristics, not rules. The user can override.
+Either signal means the idea is bigger than this task, not that it needs a
+new home. What happens next depends on which shape it is (Phase 2):
 
-### Phase 4: Fork
+- An **additive series** goes back to the plan: the increments become tasks
+  under the same wave, and only the first gets designed here. If you already
+  technically designed increments beyond the first, that detail was
+  premature—compress it to intent in the task notes.
+- **One indivisible change** stays one task and overrides the signals
+  deliberately: note in the doc that implementation proceeds in slices
+  against this design and ships whole. Don't manufacture shippable fragments
+  from an architectural change—no unused setups or v2s landing early.
 
-Present the size assessment to the human reviewer and ask explicitly:
-**implement or wave?** When a parent reviewer is assigned, make that decision
-from the evidence and record why.
+Bias toward "yes it fits" when it's close—single commits are preferable.
+These are heuristics, not rules. The user can override.
 
-- "This looks like it fits in one commit—ready to implement?" or
-- "This is bigger than one commit—want me to break it into a wave?"
+Don't create a wave from a design session. Waves are durable operating
+contexts and the repo's roster already exists; almost every idea—however
+large—lands inside one of them. If an idea genuinely reads like a new durable
+context rather than work under an existing wave, note that in the design doc
+and raise it with the user; standing up a wave is its own exercise.
 
-This is the natural session exit point. The user's answer determines what to run next.
+### Phase 4: Place
 
-**If implement:**
+Decide where this task lives and what slice ships now.
 
-1. Tighten the scratch doc into the standard design spec (see "Design doc sections" below)
-2. Run `git add scratch/ && git commit -m "design: <branch>"`
-3. End session and tell the user to run `lf implement`
+1. **Choose the wave.** Match the idea against each wave's Objective and
+   Bounds in `wave/*/GOAL.md`. Say which wave and why in one sentence—if the
+   sentence is strained, you're probably forcing the wrong wave. With a human
+   reviewer, confirm: "This reads as <wave> work—agreed?" A parent reviewer
+   decides from the evidence and records why.
+2. **Choose the project.** Read the wave's projects (`lf pm show --wave
+   <name>`) and pick the bet this task advances. If no project fits, flag it
+   to the reviewer rather than inventing one—a task that fits no bet is a
+   signal worth surfacing.
+3. **Scope the slice.** Tighten the scratch doc into the standard design spec
+   (see "Design doc sections" below) covering only what ships in this commit.
+4. **File the remainder.** Anything detailed but not shipping now becomes
+   tasks: `lf pm task create --project <project> --title "…" --notes "…"`, one
+   per independently shippable piece. Tasks live in Linear, not on disk—don't
+   leave a roadmap section in the design doc. If the remainder is most of the
+   design—the session produced a plan, not a task—commit the doc as-is and
+   hand off to `lf launch-plan` instead of filing here.
+5. Run `git add scratch/ && git commit -m "design: <branch>"`.
+6. End session and tell the user to run `lf implement`.
 
-**If wave:**
-
-1. Choose a wave name and create `wave/<name>/`.
-2. Write `wave/<name>/GOAL.md` — the wave's identity and anchor:
-   - frontmatter: machine config only (`crons` and, once connected,
-     `pm.linear_initiative`)
-   - body (the loop prompt): Objective, Measures, Cron if any, and Process. Put
-     routing judgment in Process, not frontmatter.
-   - **No roadmap table, no status indicators, no item lists** — tasks live in
-     Linear.
-3. Write `wave/<name>/MEMORY.md` — seed it with the load-bearing context from the
-   Detail phase (key decisions, constraints, what's known). Short is fine.
-4. Connect Linear with `lf pm init --wave <name>`. It links or creates the
-   Initiative and writes `linear_initiative` into `GOAL.md`.
-5. Create each measured bet with `lf pm project create`. A project is either a
-   completable behavioral improvement or a standing quality frontier. Each
-   belongs to this wave, has no child projects, and carries a definition plus
-   proof-shaped KRs in Linear Project content.
-6. Seed tasks in Linear:
-   - File the opening items with
-     `lf pm task create --project <project> --title "…" --notes "…"` — the urgent
-     and next-step work, one task each. Tasks start in Linear, not on disk.
-7. The first item you expect to build now becomes the design doc for this branch
-   (`scratch/<branch>.md`).
-8. Run `git add scratch/ wave/ && git commit -m "design: <branch>"`.
-9. End session and tell the user what to run next:
-   - `lf implement` (for the immediate item)
-   - `lf ship`
-
-Once breaking things up, be aggressive about commit boundaries—each task should be independently shippable.
+**If the repo has no waves yet** (`wave/` is empty or missing): skip placement
+and just commit the task design—don't bootstrap a wave roster mid-design.
+When the repo is ready to grow one, product / infrastructure / science / ops
+is a loose template, not a target roster: stand waves up one at a time as
+real work accumulates, and name each for what this company actually does—an
+authentic fit beats filling in the template.
 
 ## What makes a good design doc
 
@@ -158,6 +174,7 @@ in the doc instead of inventing a demo.
 When the idea fits in one commit (~1000 words max):
 
 - **What to build** — One sentence. What exists after this that doesn't exist now.
+- **Placement** — One line: the wave and project this task advances (from Phase 4).
 - **The demo** — What the developer runs and what they see when this ships. One or two sentences, concrete enough to perform.
 - **Data structures** — Core types, sketched in code.
 - **Key functions** — Signatures with one-line intent.

@@ -12,12 +12,12 @@ use support::{register_task, RegisteredTask};
 
 #[derive(Debug, PartialEq, Eq)]
 struct LifecycleConfig {
-    kickoff_flow: String,
-    kickoff_policy: InteractionPolicy,
-    iterate_flow: String,
-    iterate_policy: InteractionPolicy,
-    gate_flow: String,
-    gate_policy: InteractionPolicy,
+    first_flow: String,
+    first_policy: InteractionPolicy,
+    loop_flow: String,
+    loop_policy: InteractionPolicy,
+    finally_flow: String,
+    finally_policy: InteractionPolicy,
 }
 
 fn lifecycle_config(task: &RegisteredTask) -> LifecycleConfig {
@@ -27,12 +27,12 @@ fn lifecycle_config(task: &RegisteredTask) -> LifecycleConfig {
         .expect("read Task")
         .expect("Task");
     LifecycleConfig {
-        kickoff_flow: session.lifecycle.kickoff.flow,
-        kickoff_policy: session.lifecycle.kickoff.interaction_policy,
-        iterate_flow: session.lifecycle.iterate.flow,
-        iterate_policy: session.lifecycle.iterate.interaction_policy,
-        gate_flow: session.lifecycle.gate.flow,
-        gate_policy: session.lifecycle.gate.interaction_policy,
+        first_flow: session.lifecycle.first.flow,
+        first_policy: session.lifecycle.first.interaction_policy,
+        loop_flow: session.lifecycle.loop_.flow,
+        loop_policy: session.lifecycle.loop_.interaction_policy,
+        finally_flow: session.lifecycle.finally.flow,
+        finally_policy: session.lifecycle.finally.interaction_policy,
     }
 }
 
@@ -103,7 +103,7 @@ fn seed_current_user_feedback(task: &RegisteredTask) {
                 FlowPosition {
                     work,
                     epoch_id: boundary.basis.epoch_id,
-                    flow: task.session.lifecycle.kickoff.flow.clone(),
+                    flow: task.session.lifecycle.first.flow.clone(),
                     step: "review-design".to_string(),
                     step_index: 0,
                     iteration: 0,
@@ -136,9 +136,9 @@ fn task_run_headless_existing_task_persists_all_policies() {
     );
 
     let persisted = lifecycle_config(&task);
-    assert_eq!(persisted.kickoff_policy, InteractionPolicy::Defer);
-    assert_eq!(persisted.iterate_policy, InteractionPolicy::Defer);
-    assert_eq!(persisted.gate_policy, InteractionPolicy::Defer);
+    assert_eq!(persisted.first_policy, InteractionPolicy::Defer);
+    assert_eq!(persisted.loop_policy, InteractionPolicy::Defer);
+    assert_eq!(persisted.finally_policy, InteractionPolicy::Defer);
 }
 
 #[test]

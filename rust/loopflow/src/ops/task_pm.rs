@@ -141,6 +141,7 @@ pub fn create_and_load_task(
     wave: &str,
     project: &str,
     title: &str,
+    report: &str,
     marker: &str,
 ) -> OpsResult<ResolvedTask> {
     let result = crate::ops::pm::pm_create_task_idempotent(
@@ -148,6 +149,7 @@ pub fn create_and_load_task(
         wave,
         project,
         title,
+        report,
         marker,
         &crate::ops::NullProgress,
     )?;

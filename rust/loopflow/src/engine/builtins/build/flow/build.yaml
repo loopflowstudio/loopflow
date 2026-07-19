@@ -5,16 +5,5 @@
 - implement
 - compress
 - lint
-- xor:
-    paths:
-      demo:
-        steps:
-          - name: demo
-            feedback: true
-        description: "Observable change — walk through the experience"
-      code-review:
-        steps:
-          - name: code-review
-            feedback: true
-        description: "Internal change — walk through the code"
+- review-slice
 - gate

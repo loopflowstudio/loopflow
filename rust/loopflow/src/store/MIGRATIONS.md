@@ -26,18 +26,18 @@ migrations. `lf release run` invokes the canonicalizer with `--release-cut` insi
 release worktree, **after the version bump and before the commit**, so the generated
 files are part of the release PR and run under real Rust CI before the queue merges
 and tags. It freezes the draft set, rejects missing or cyclic dependencies (and two
-drafts sharing a readable name in one cut), topologically orders it (edges first,
-ties broken by name — never merge time, PR number, or wall clock), and assigns the
-next contiguous ordinals in the namespace of the version being cut (a patch continues
-the current `<major>.<minor>`; a minor bump starts a fresh sequence at ordinal 1). It
-plans the whole tail in memory, then installs it atomically — writing
-`<major>.<minor>.<ordinal>_<name>.sql`, appending the `Migration` entry, and deleting
-the draft — and on any failure restores the tree byte-for-byte. Same drafts and
-version always produce the same ids and diff, so an aborted release regenerates
-identically. The manual script is a `--check` preview only; creating canonical files
-requires `--release-cut`. Rust CI uses the separate `--materialize-for-tests`
-authority in its disposable checkout. The release run is the authority that
-publishes.
+drafts sharing a readable name in one cut), and topologically orders it (edges
+first, ties broken by name — never merge time, PR number, or wall clock). It then
+concatenates the ordered bodies into the release's one
+`<major>.<minor>.<patch>.001_release.sql` batch. `-- draft: <name>` markers retain
+the authoring identities for dependencies and incident review. The cut appends one
+`Migration` entry and deletes all consumed drafts atomically; on any failure it
+restores the tree byte-for-byte. The same drafts and version always produce the
+same id and diff, so an aborted release regenerates identically. A second batch for
+the same package version is rejected. The manual script is a `--check` preview
+only; creating canonical files requires `--release-cut`. Rust CI uses the separate
+`--materialize-for-tests` authority in its disposable checkout. The release run is
+the authority that publishes.
 
 Only the merged release commit is canonical migration authority. Between releases,
 ordinary merges add drafts, so main's canonical set does not move and a branch
@@ -74,8 +74,9 @@ the last release tag and fails the build if one moved.
 - The directory and the `MIGRATIONS` registry name the same migrations, with the
   same ids and names. A file nobody registered never runs; a registry entry whose
   id, name, and file disagree is a lie about what a database applied.
-- The registry is in id order. No id is namespaced ahead of the package version,
-  and no new canonical migration is introduced behind the active package namespace.
+- The registry is in id order. New canonical ids match the full package version,
+  use ordinal `001`, and name the single batch `release`. Known historical
+  three-part ids remain valid; no new one can be introduced.
 - Every canonical migration already on `origin/main` has the same ordinal, name, and
   bytes.
 - Nothing that shipped in the last release tag has changed.
@@ -90,26 +91,26 @@ before anything is cut. Same script, both paths.
 
 ## Identity
 
-```
-0.10.001_initial.sql
- │  │  │   └── name — part of the identity, so a rename is a break
- │  │  └────── ordinal, three digits, restarting in each namespace
- └──┴───────── namespace: package major.minor when authored
+```text
+0.12.2.001_release.sql
+ │  │ │  │   └── canonical batch name
+ │  │ │  └────── ordinal; one batch means every release uses 001
+ └──┴─┴───────── package major.minor.patch that published the batch
 ```
 
-- Patch releases append into the current namespace; after a minor bump,
-  subsequent migrations start a new one.
-  `0.11.001` and `0.12.001` are distinct migrations.
-- Order is the numeric tuple `(major, minor, ordinal)`, never a string sort —
-  `0.9.001` precedes `0.10.001`, which lexical order would invert.
+- Historical `0.10.001_initial.sql` / `0.11.037_*.sql` ids remain immutable
+  three-part ids. New canonical migrations always use the four-part format.
+- Order is numeric: `(major, minor, patch, ordinal)`, with legacy ids before
+  release-scoped ids in the same major/minor line. A binary skipped from `1.1.0`
+  to `1.2.0` applies every missing patch and minor batch in that order.
 - The file stem *is* the `schema_migrations.version` string. `MigrationId` in
   `migrations.rs` is the only thing that formats or parses it.
 - The ledger records the SQL checksum, parent-history fingerprint, build
   provenance, source checkout and revision, and package version. Old canonical
   rows receive checksums when the provenance migration first runs; their writer
   is intentionally left unknown rather than attributed to the upgrading build.
-- The active namespace comes from the workspace `Cargo.toml` version, so a
-  migration authored ahead of the version is a release error, not a choice.
+- The active namespace is the full workspace `Cargo.toml` version, so a batch
+  authored for an earlier or later package release is an error, not a choice.
 
 ## What a database can be told
 

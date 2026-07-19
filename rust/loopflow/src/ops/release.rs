@@ -1781,11 +1781,10 @@ mod tests {
     /// call site makes the drafts never freeze and the asserts below fail. A
     /// direct helper call cannot catch that regression.
     ///
-    /// The bare temp worktree has no manifests (so the version bump is a no-op)
-    /// and no repo/wave/store context (so the release-notes stage fails fast,
-    /// with no network). Canonicalization runs before that stage, so the tree is
-    /// already frozen by the time `prepare_release_in_worktree` returns its
-    /// (expected) error — which we ignore and assert on the tree instead.
+    /// The bare temp worktree has no manifests (so the version bump is a no-op).
+    /// A deliberate release-note archive collision then stops the workflow before
+    /// it launches an agent. Canonicalization runs first, so the tree is already
+    /// frozen by the time `prepare_release_in_worktree` returns that expected error.
     #[test]
     fn the_release_run_canonicalizes_drafts_into_the_committed_tree() {
         let script =
@@ -1811,7 +1810,7 @@ mod tests {
             &registry_rs,
             "const MIGRATIONS: &[Migration] = &[\n    Migration {\n        \
              id: MigrationId {\n            major: 0,\n            minor: 11,\n            \
-             ordinal: 1,\n        },\n        name: \"initial\",\n        \
+             patch: None,\n            ordinal: 1,\n        },\n        name: \"initial\",\n        \
              sql: include_str!(\"migrations/0.11.001_initial.sql\"),\n    },\n];\n",
         )
         .unwrap();
@@ -1822,9 +1821,15 @@ mod tests {
              ALTER TABLE waves ADD COLUMN colour TEXT;\n",
         )
         .unwrap();
+        let unreleased = root.join("release/unreleased");
+        let release_archive = root.join("release/v0.11.4");
+        fs::create_dir_all(&unreleased).unwrap();
+        fs::create_dir_all(&release_archive).unwrap();
+        fs::write(unreleased.join("collision.md"), "unreleased\n").unwrap();
+        fs::write(release_archive.join("collision.md"), "archived\n").unwrap();
 
         // A target with no manifests: the version bump is a no-op, canonicalize
-        // runs, then the notes stage fails fast in this contextless worktree.
+        // runs, then the deliberate archive collision stops the notes stage.
         let target = ReleaseTarget {
             name: "default".to_string(),
             area: Vec::new(),
@@ -1832,7 +1837,7 @@ mod tests {
             manifests: Vec::new(),
             workflow: None,
         };
-        let _ = prepare_release_in_worktree(
+        let result = prepare_release_in_worktree(
             root,
             "0.11.4",
             "v0.11.3",
@@ -1840,19 +1845,21 @@ mod tests {
             &target,
             &crate::ops::progress::NullProgress,
         );
+        assert!(
+            result.is_err(),
+            "release-note collision should stop release"
+        );
 
         // The draft is now a canonical, registered migration.
-        let canonical = migrations.join("0.11.002_add_wave_colour.sql");
+        let canonical = migrations.join("0.11.4.001_release.sql");
         assert!(canonical.is_file(), "canonical migration not written");
         assert_eq!(
             fs::read_to_string(&canonical).unwrap(),
-            "ALTER TABLE waves ADD COLUMN colour TEXT;\n"
+            "-- draft: add_wave_colour\nALTER TABLE waves ADD COLUMN colour TEXT;\n"
         );
         let registry = fs::read_to_string(&registry_rs).unwrap();
-        assert!(
-            registry.contains("name: \"add_wave_colour\""),
-            "not registered"
-        );
+        assert!(registry.contains("patch: Some(4)"), "patch not registered");
+        assert!(registry.contains("name: \"release\""), "not registered");
         // The draft is consumed.
         let remaining: Vec<_> = fs::read_dir(&drafts)
             .unwrap()

@@ -1,4 +1,4 @@
-"""The release cut: drafts become a canonical, ordered, ordinal-assigned tail."""
+"""The release cut: drafts become one ordered, release-scoped batch."""
 
 import subprocess
 import sys
@@ -17,6 +17,7 @@ REGISTRY = """const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 1,
         },
         name: "initial",
@@ -94,24 +95,24 @@ def test_empty_draft_set_is_a_noop(repo: Path) -> None:
     assert (repo / MIGRATIONS_RS).read_text() == before
 
 
-def test_two_independent_drafts_get_a_contiguous_tail_ordered_by_name(repo: Path) -> None:
+def test_two_independent_drafts_become_one_release_batch_ordered_by_name(repo: Path) -> None:
     draft(repo, "add_wave_colour")
     draft(repo, "add_task_priority")
 
     result = run(repo, "0.11.30")
 
     assert result.returncode == 0, result.stderr
-    # Contiguous after the last released ordinal (001), ordered by name.
     assert canonical_files(repo) == [
         "0.11.001_initial.sql",
-        "0.11.002_add_task_priority.sql",
-        "0.11.003_add_wave_colour.sql",
+        "0.11.30.001_release.sql",
     ]
     # Drafts are consumed, leaving none behind.
     assert list((repo / DRAFTS).glob("*.sql")) == []
     registry = (repo / MIGRATIONS_RS).read_text()
-    assert 'name: "add_task_priority"' in registry
-    assert 'name: "add_wave_colour"' in registry
+    assert "patch: Some(30)" in registry
+    assert 'name: "release"' in registry
+    batch = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_text()
+    assert batch.index("-- draft: add_task_priority") < batch.index("-- draft: add_wave_colour")
     assert registry.rstrip().endswith("];")
 
 
@@ -125,9 +126,10 @@ def test_a_dependency_orders_before_its_dependent_against_name_order(repo: Path)
     assert result.returncode == 0, result.stderr
     assert canonical_files(repo) == [
         "0.11.001_initial.sql",
-        "0.11.002_z_setup.sql",
-        "0.11.003_a_backfill.sql",
+        "0.11.30.001_release.sql",
     ]
+    batch = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_text()
+    assert batch.index("-- draft: z_setup") < batch.index("-- draft: a_backfill")
 
 
 def test_the_canonical_file_carries_the_body_without_the_header(repo: Path) -> None:
@@ -135,18 +137,18 @@ def test_the_canonical_file_carries_the_body_without_the_header(repo: Path) -> N
 
     run(repo, "0.11.30")
 
-    written = (repo / MIGRATIONS / "0.11.002_add_wave_colour.sql").read_text()
-    assert written == "ALTER TABLE waves ADD COLUMN colour TEXT;\n"
+    written = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_text()
+    assert written == ("-- draft: add_wave_colour\nALTER TABLE waves ADD COLUMN colour TEXT;\n")
     assert "-- name:" not in written
 
 
-def test_a_minor_bump_starts_a_fresh_ordinal_sequence(repo: Path) -> None:
+def test_a_minor_release_uses_its_full_package_version(repo: Path) -> None:
     draft(repo, "add_wave_colour")
 
     result = run(repo, "0.12.0")
 
     assert result.returncode == 0, result.stderr
-    assert (repo / MIGRATIONS / "0.12.001_add_wave_colour.sql").exists()
+    assert (repo / MIGRATIONS / "0.12.0.001_release.sql").exists()
 
 
 def test_a_cycle_fails_before_writing_anything(repo: Path) -> None:
@@ -170,7 +172,7 @@ def test_check_mode_writes_nothing(repo: Path) -> None:
     result = run(repo, "0.11.30", "--check")
 
     assert result.returncode == 0, result.stderr
-    assert "0.11.002_add_wave_colour" in result.stdout
+    assert "0.11.30.001_release" in result.stdout
     assert (repo / MIGRATIONS_RS).read_text() == before
     assert draft_names(repo) == {"add_wave_colour"}
 
@@ -199,7 +201,7 @@ def test_test_materialization_has_explicit_disposable_authority(repo: Path) -> N
     result = run(repo, "0.12.0", "--materialize-for-tests")
 
     assert result.returncode == 0, result.stderr
-    assert (repo / MIGRATIONS / "0.12.001_add_wave_colour.sql").exists()
+    assert (repo / MIGRATIONS / "0.12.0.001_release.sql").exists()
 
 
 def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:
@@ -223,13 +225,25 @@ def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:
     assert (first / MIGRATIONS_RS).read_text() == (second / MIGRATIONS_RS).read_text()
 
 
+def test_a_release_cannot_publish_a_second_batch(repo: Path) -> None:
+    draft(repo, "add_wave_colour")
+    assert run(repo, "0.11.30").returncode == 0
+    draft(repo, "add_task_priority")
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 1
+    assert "already has canonical migration" in result.stderr
+    assert draft_names(repo) == {"add_task_priority"}
+
+
 def test_an_abandoned_release_leaves_drafts_regenerable(repo: Path) -> None:
     draft(repo, "add_wave_colour")
     # A failed release never merged its ids; --check proves the plan without
     # publishing, and a later real run regenerates the same id.
-    assert "0.11.002_add_wave_colour" in run(repo, "0.11.30", "--check").stdout
+    assert "0.11.30.001_release" in run(repo, "0.11.30", "--check").stdout
     run(repo, "0.11.30")
-    assert (repo / MIGRATIONS / "0.11.002_add_wave_colour.sql").exists()
+    assert (repo / MIGRATIONS / "0.11.30.001_release.sql").exists()
 
 
 def test_a_dependency_on_a_released_migration_canonicalizes_after_it(repo: Path) -> None:
@@ -240,7 +254,18 @@ def test_a_dependency_on_a_released_migration_canonicalizes_after_it(repo: Path)
     result = run(repo, "0.11.30")
 
     assert result.returncode == 0, result.stderr
-    assert (repo / MIGRATIONS / "0.11.002_add_wave_colour.sql").exists()
+    assert (repo / MIGRATIONS / "0.11.30.001_release.sql").exists()
+
+
+def test_a_dependency_can_name_a_draft_from_an_earlier_release_batch(repo: Path) -> None:
+    draft(repo, "add_wave_colour")
+    assert run(repo, "0.11.30").returncode == 0
+    draft(repo, "backfill_colour", depends_on="add_wave_colour")
+
+    result = run(repo, "0.11.31")
+
+    assert result.returncode == 0, result.stderr
+    assert (repo / MIGRATIONS / "0.11.31.001_release.sql").exists()
 
 
 def test_a_dependency_on_an_unknown_name_fails(repo: Path) -> None:
@@ -252,6 +277,16 @@ def test_a_dependency_on_an_unknown_name_fails(repo: Path) -> None:
     assert result.returncode == 1
     assert "neither a draft" in result.stderr
     assert (repo / MIGRATIONS_RS).read_text() == before
+    assert draft_names(repo) == {"add_wave_colour"}
+
+
+def test_a_draft_cannot_forge_release_provenance(repo: Path) -> None:
+    draft(repo, "add_wave_colour", body="-- draft: invented\nSELECT 1;\n")
+
+    result = run(repo, "0.11.30")
+
+    assert result.returncode == 1
+    assert "reserved `-- draft:`" in result.stderr
     assert draft_names(repo) == {"add_wave_colour"}
 
 

@@ -14,16 +14,17 @@ use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
 
-/// A migration's release-scoped identity: `{major}.{minor}.{ordinal:03}`.
+/// A migration's identity: legacy `{major}.{minor}.{ordinal:03}` or release-scoped
+/// `{major}.{minor}.{patch}.{ordinal:03}`.
 ///
-/// The namespace is the package major.minor when the migration is authored;
-/// patch releases append into the same namespace. Ordering is the numeric tuple,
-/// never a string sort — `0.9.001` precedes `0.10.001`, which lexical order
-/// would invert.
+/// New migrations carry the full package version of their release cut. Historical
+/// three-part ids remain immutable and sort before release-scoped ids in the same
+/// major/minor line. Ordering is numeric, never a string sort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MigrationId {
     pub major: u32,
     pub minor: u32,
+    pub patch: Option<u32>,
     pub ordinal: u32,
 }
 
@@ -33,23 +34,39 @@ impl MigrationId {
     /// ledger row from the pre-namespace era is told apart from a future release.
     fn parse_version(version: &str) -> Option<Self> {
         let (id, _name) = version.split_once('_')?;
-        let mut parts = id.split('.');
-        let mut number = || parts.next()?.parse().ok();
-        let (major, minor, ordinal) = (number()?, number()?, number()?);
-        if parts.next().is_some() {
-            return None;
+        let numbers = id
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<Vec<u32>, _>>()
+            .ok()?;
+        match numbers.as_slice() {
+            [major, minor, ordinal] => Some(MigrationId {
+                major: *major,
+                minor: *minor,
+                patch: None,
+                ordinal: *ordinal,
+            }),
+            [major, minor, patch, ordinal] => Some(MigrationId {
+                major: *major,
+                minor: *minor,
+                patch: Some(*patch),
+                ordinal: *ordinal,
+            }),
+            _ => None,
         }
-        Some(MigrationId {
-            major,
-            minor,
-            ordinal,
-        })
     }
 }
 
 impl fmt::Display for MigrationId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{:03}", self.major, self.minor, self.ordinal)
+        match self.patch {
+            Some(patch) => write!(
+                f,
+                "{}.{}.{}.{:03}",
+                self.major, self.minor, patch, self.ordinal
+            ),
+            None => write!(f, "{}.{}.{:03}", self.major, self.minor, self.ordinal),
+        }
     }
 }
 
@@ -69,14 +86,14 @@ impl Migration {
     }
 }
 
-/// Every migration, in id order. A new one is appended here and to the
-/// directory; `scripts/new_migration.py` picks the next free ordinal in the
-/// active namespace.
+/// Every canonical migration, in id order. Release cuts append one generated
+/// batch after topologically ordering the ordinal-free drafts.
 const MIGRATIONS: &[Migration] = &[
     Migration {
         id: MigrationId {
             major: 0,
             minor: 10,
+            patch: None,
             ordinal: 1,
         },
         name: "initial",
@@ -86,6 +103,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 10,
+            patch: None,
             ordinal: 2,
         },
         name: "session_execution_context",
@@ -95,6 +113,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 1,
         },
         name: "task_prs",
@@ -104,6 +123,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 2,
         },
         name: "project_session_successors",
@@ -113,6 +133,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 3,
         },
         name: "child_body_lease",
@@ -122,6 +143,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 4,
         },
         name: "task_pr_ci_state",
@@ -131,6 +153,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 5,
         },
         name: "provider_accounts",
@@ -140,6 +163,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 6,
         },
         name: "context_launch_work",
@@ -149,6 +173,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 7,
         },
         name: "task_pr_parent",
@@ -158,6 +183,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 8,
         },
         name: "interactive_handoffs",
@@ -167,6 +193,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 9,
         },
         name: "context_pressure",
@@ -176,6 +203,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 10,
         },
         name: "context_input_normalization",
@@ -185,6 +213,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 11,
         },
         name: "profiles",
@@ -194,6 +223,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 12,
         },
         name: "provider_account_lifecycle",
@@ -203,6 +233,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 13,
         },
         name: "task_review_state",
@@ -212,6 +243,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 14,
         },
         name: "task_lifecycle",
@@ -221,6 +253,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 15,
         },
         name: "interaction_reviews",
@@ -230,6 +263,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 16,
         },
         name: "task_linear_observations",
@@ -239,6 +273,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 17,
         },
         name: "migration_provenance",
@@ -248,6 +283,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 18,
         },
         name: "session_body_provenance",
@@ -257,6 +293,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 19,
         },
         name: "task_pr_github_observation",
@@ -266,6 +303,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 20,
         },
         name: "task_pr_linear_linkage",
@@ -275,6 +313,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 21,
         },
         name: "provider_deliveries",
@@ -284,6 +323,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 22,
         },
         name: "task_session_successors",
@@ -293,6 +333,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 23,
         },
         name: "capture_pruned_state",
@@ -302,6 +343,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 24,
         },
         name: "ci_incidents",
@@ -311,6 +353,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 25,
         },
         name: "usage_deltas",
@@ -320,6 +363,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 26,
         },
         name: "lineage_boundary",
@@ -329,6 +373,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 27,
         },
         name: "accounts_first",
@@ -338,6 +383,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 29,
         },
         name: "ci_incident_repaired_head",
@@ -347,6 +393,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 30,
         },
         name: "one_spend_grain",
@@ -356,6 +403,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 31,
         },
         name: "durable_input_spine",
@@ -365,6 +413,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 32,
         },
         name: "run_launch_attention",
@@ -374,6 +423,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 33,
         },
         name: "launch_attention_only",
@@ -383,6 +433,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 34,
         },
         name: "typed_ci_runs",
@@ -392,6 +443,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 35,
         },
         name: "drop_child_commands",
@@ -401,6 +453,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 36,
         },
         name: "delete_sessions",
@@ -410,6 +463,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 37,
         },
         name: "capture_terminal_states",
@@ -426,6 +480,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 8,
         },
         name: "context_pressure",
@@ -435,6 +490,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 9,
         },
         name: "context_input_normalization",
@@ -444,6 +500,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 10,
         },
         name: "profiles",
@@ -453,6 +510,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 11,
         },
         name: "provider_account_lifecycle",
@@ -476,20 +534,21 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 const RECREATE_MESSAGE: &str =
     "incompatible Loopflow database; delete loopflow.db and rerun the command";
 
-/// The major.minor a migration authored today belongs to, from the single version
+/// The package version a migration release cut belongs to, from the single
 /// source of truth (the workspace `Cargo.toml`, via Cargo).
 ///
 /// # Panics
 ///
 /// Panics if the package version is not `major.minor.patch`, which Cargo rejects
 /// long before this runs.
-pub fn active_namespace() -> (u32, u32) {
+pub fn active_namespace() -> (u32, u32, u32) {
     let version = env!("CARGO_PKG_VERSION");
     let mut parts = version.split('.');
     let major = parts.next().and_then(|part| part.parse().ok());
     let minor = parts.next().and_then(|part| part.parse().ok());
-    match (major, minor) {
-        (Some(major), Some(minor)) => (major, minor),
+    let patch = parts.next().and_then(|part| part.parse().ok());
+    match (major, minor, patch, parts.next()) {
+        (Some(major), Some(minor), Some(patch), None) => (major, minor, patch),
         _ => panic!("package version {version} is not major.minor.patch"),
     }
 }
@@ -1458,12 +1517,20 @@ mod tests {
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
 
+    fn _reopen_repair_is_canonical() -> bool {
+        let marker = format!("-- draft: {REOPEN_REPAIR_NAME}");
+        MIGRATIONS
+            .iter()
+            .any(|migration| migration.sql.lines().any(|line| line == marker.as_str()))
+    }
+
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
     const SECOND_IN_SAME_MINOR: Migration = Migration {
         id: MigrationId {
             major: 0,
             minor: 10,
+            patch: None,
             ordinal: 2,
         },
         name: "add_note",
@@ -1473,6 +1540,7 @@ mod tests {
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 1,
         },
         name: "add_colour",
@@ -1504,12 +1572,6 @@ mod tests {
     }
 
     fn _reopen_repair_sql() -> String {
-        if let Some(migration) = MIGRATIONS
-            .iter()
-            .find(|migration| migration.name == REOPEN_REPAIR_NAME)
-        {
-            return migration.sql.to_string();
-        }
         let drafts =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
         let prefix = format!("{REOPEN_REPAIR_NAME}__");
@@ -1617,8 +1679,13 @@ mod tests {
 
         let active = active_namespace();
         for migration in MIGRATIONS {
+            let namespace = (
+                migration.id.major,
+                migration.id.minor,
+                migration.id.patch.unwrap_or(0),
+            );
             assert!(
-                (migration.id.major, migration.id.minor) <= active,
+                namespace <= active,
                 "{} is namespaced ahead of the package version",
                 migration.version()
             );
@@ -2688,14 +2755,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        if !MIGRATIONS
-            .iter()
-            .any(|migration| migration.name == REOPEN_REPAIR_NAME)
-        {
+        if !_reopen_repair_is_canonical() {
             assert!(stale.contains("reopen_task"));
+            conn.execute_batch(&_reopen_repair_sql()).unwrap();
         }
-
-        conn.execute_batch(&_reopen_repair_sql()).unwrap();
         validate_foreign_keys(&conn).unwrap();
         validate_persisted_json(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
@@ -3126,25 +3189,89 @@ mod tests {
         let id = |major, minor, ordinal| MigrationId {
             major,
             minor,
+            patch: None,
             ordinal,
         };
         assert!(id(0, 9, 1) < id(0, 10, 1));
         assert!(id(0, 10, 2) < id(0, 11, 1));
         assert_eq!(id(0, 10, 1).to_string(), "0.10.001");
+
+        let release = MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(2),
+            ordinal: 1,
+        };
+        assert!(id(0, 12, 37) < release);
+        assert_eq!(release.to_string(), "0.12.2.001");
     }
 
     #[test]
-    fn only_release_scoped_versions_parse() {
+    fn a_skipped_patch_is_part_of_the_pending_release_suffix() {
+        let releases = [
+            Migration {
+                id: MigrationId {
+                    major: 1,
+                    minor: 1,
+                    patch: Some(0),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql: "SELECT 1;",
+            },
+            Migration {
+                id: MigrationId {
+                    major: 1,
+                    minor: 1,
+                    patch: Some(1),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql: "SELECT 2;",
+            },
+            Migration {
+                id: MigrationId {
+                    major: 1,
+                    minor: 2,
+                    patch: Some(0),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql: "SELECT 3;",
+            },
+        ];
+        let applied = [releases[0].version()];
+
+        let pending = pending_migrations(&applied, &releases).unwrap();
+
+        assert_eq!(
+            pending.iter().map(Migration::version).collect::<Vec<_>>(),
+            ["1.1.1.001_release", "1.2.0.001_release"]
+        );
+    }
+
+    #[test]
+    fn legacy_and_release_scoped_versions_parse() {
         assert_eq!(
             MigrationId::parse_version("0.10.001_initial"),
             Some(MigrationId {
                 major: 0,
                 minor: 10,
+                patch: None,
                 ordinal: 1,
             })
         );
         assert_eq!(MigrationId::parse_version("001_initial"), None);
-        assert_eq!(MigrationId::parse_version("0.10.1.2_initial"), None);
+        assert_eq!(
+            MigrationId::parse_version("0.12.2.001_release"),
+            Some(MigrationId {
+                major: 0,
+                minor: 12,
+                patch: Some(2),
+                ordinal: 1,
+            })
+        );
+        assert_eq!(MigrationId::parse_version("0.10.1.2.3_initial"), None);
         assert_eq!(MigrationId::parse_version("0.10.001"), None);
     }
 }

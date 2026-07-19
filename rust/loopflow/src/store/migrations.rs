@@ -469,6 +469,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "capture_terminal_states",
         sql: include_str!("migrations/0.11.037_capture_terminal_states.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(2),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.2.001_release.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

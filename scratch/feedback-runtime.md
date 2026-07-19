@@ -24,32 +24,33 @@ and:
 
 ## Current implementation slice
 
-### Slice 2: durable questions
+### Slice 3: Project answer lane
 
-Implement the exchange and its provider-independent shell surface in this pass:
+Implement the primary Task-to-Project servicing path in this pass:
 
-- persist one Ask exchange under the current Turn with a derived User or
-  immediate-parent route and first-answer-wins semantics;
-- add `lf ask`, `lf ask wait`, `lf work asks`, and `lf work answer`;
-- make the blocking command wake its routed parent after commit and preserve the
-  exchange across shell or Run loss;
-- mirror each committed Ask and Answer to the asking Work's Linear surface as
-  an idempotent comment without putting Linear on the blocking response path;
-- derive User and child attention by querying answerable exchanges;
-- delete Feedback, Continue, reviewer flags, attention columns, and their
-  special runner servicing paths rather than adapting them to Ask;
-- expose Ask and Answer in trace and current DTO surfaces without legacy fields
-  or compatibility reads.
+- reconcile the oldest answerable Task Ask beside the Project core turn;
+- launch one fresh answer AgentInvocation with the exact Ask, Project/Wave
+  context, Task evidence, and prior exchanges from that Task Epoch;
+- withhold the Project Run lease from the answer agent and commit its final text
+  as Answer from the supervising runner;
+- keep core playhead state, provider conversation, and Turn settlement isolated
+  from the answer attempt;
+- wake a stopped Project directly into Ask servicing and retain an answer-only
+  Run supervisor while owned Tasks remain live;
+- drain the durable Linear comment outbox from the resident supervisor so
+  `lf work answer` and the child response path never await Linear;
+- cap repeated answer failures from durable attempt evidence and surface the
+  pending Ask without a token-burning retry loop.
 
-Do not implement Project or Wave answer agents, concurrent runner lanes, or the
-interactive Demo handback in this slice. A parent or User may answer through the
-explicit CLI; automated servicing belongs to Slice 3.
+Do not implement the Wave answer lane or interactive Demo handback in this
+slice. They reuse this result in Slice 4.
 
-Use one defining proof: a live child Turn blocks in `lf ask`, an authorized
-parent answers the exact exchange, the command prints that Answer, and the same
-Turn remains current. The proof must also show that an unrelated or stale Run
-cannot answer. Defer broad Rust, Swift, clippy, and migration suites to the final
-gate.
+Use one defining proof: while a Project core Turn remains active, a Task blocks
+in `lf ask`; a detached answer invocation receives no Run lease, commits the
+Answer, and the same Task Turn resumes without interrupting or advancing the
+Project core Turn. The proof also shows a Linear failure does not delay the
+Answer and is retried by the resident supervisor. Defer broad suites and clippy
+to the final gate.
 
 ## Execution model
 

@@ -558,6 +558,15 @@ const MIGRATIONS: &[Migration] = &[
         name: "durable_asks",
         sql: include_str!("migrations/0.12.3.007_durable_asks.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            ordinal: 7,
+        },
+        name: "ask_linear_comment_outbox",
+        sql: include_str!("migrations/0.12.007_ask_linear_comment_outbox.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before

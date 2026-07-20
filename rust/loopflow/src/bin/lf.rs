@@ -1543,8 +1543,8 @@ mod tests {
         let tables = arg_tables();
         for command in [
             ":", "desktop", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task",
-            "project", "flow", "skill", "chat", "memory", "usage", "top", "ls", "status", "runs",
-            "trace", "help",
+            "project", "flow", "skill", "chat", "usage", "top", "ls", "status", "runs", "trace",
+            "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }
@@ -2005,17 +2005,6 @@ mod tests {
         assert_eq!(
             reorder_args(args),
             vec!["lf", "wt", "rm", "--force", "old-tree"]
-        );
-    }
-
-    #[test]
-    fn reorder_args_keeps_memory_targeting_on_show() {
-        let args: Vec<String> = ["lf", "memory", "show", "--wave", "systems"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            reorder_args(args),
-            vec!["lf", "memory", "show", "--wave", "systems"]
         );
     }
 

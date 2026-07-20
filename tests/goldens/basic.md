@@ -139,7 +139,7 @@ borrow the origin's short-lived credential lease.
 ## Speak
 
 Answer a human message in your turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and explicit Feedback points.
+through typed Work observations and targeted Ask/Answer exchanges.
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it

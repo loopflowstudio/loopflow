@@ -259,6 +259,30 @@ fn release_check_uses_direct_commits_as_release_truth() {
 }
 
 #[test]
+fn release_check_reconciles_version_tags_to_origin() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    git(&repo, &["push", "origin", "v0.9.0"]);
+    let stale_sha = git_output(&repo, &["rev-parse", "v0.9.0"]);
+
+    fs::write(repo.path().join("repair.txt"), "remote release truth\n").unwrap();
+    git(&repo, &["add", "repair.txt"]);
+    git(&repo, &["commit", "-m", "Repair release tag"]);
+    let remote_sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["push", "origin", "HEAD:refs/heads/tag-repair"]);
+    git_output_bare(
+        &repo,
+        &["update-ref", "refs/tags/v0.9.0", &remote_sha, &stale_sha],
+    );
+    let changes = release_check(repo.path(), None).expect("check should reconcile tags");
+
+    assert!(changes.commits.is_empty());
+    assert_eq!(git_output(&repo, &["rev-parse", "v0.9.0"]), remote_sha);
+}
+
+#[test]
 fn release_check_reads_evidence_without_running_repository_hooks() {
     let gh_script = write_gh_script("[]");
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);

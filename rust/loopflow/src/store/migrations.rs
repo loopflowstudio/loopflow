@@ -1878,6 +1878,39 @@ mod tests {
         &MIGRATIONS[..index]
     }
 
+    fn draft_location(name: &str) -> (usize, &'static str, usize) {
+        let marker = format!("-- draft: {name}");
+        MIGRATIONS
+            .iter()
+            .enumerate()
+            .find_map(|(index, migration)| {
+                migration
+                    .sql
+                    .find(&marker)
+                    .map(|offset| (index, migration.sql, offset))
+            })
+            .unwrap_or_else(|| panic!("draft {name} is materialized in a release migration"))
+    }
+
+    fn apply_before_draft(conn: &rusqlite::Connection, name: &str) {
+        let (migration_index, sql, draft_offset) = draft_location(name);
+        apply_set(conn, &MIGRATIONS[..migration_index]).unwrap();
+        conn.execute_batch(&sql[..draft_offset]).unwrap();
+    }
+
+    fn apply_draft(conn: &rusqlite::Connection, name: &str) {
+        let (_, sql, draft_offset) = draft_location(name);
+        let body_start = sql[draft_offset..]
+            .find('\n')
+            .map(|offset| draft_offset + offset + 1)
+            .unwrap_or(sql.len());
+        let body_end = sql[body_start..]
+            .find("\n-- draft: ")
+            .map(|offset| body_start + offset)
+            .unwrap_or(sql.len());
+        conn.execute_batch(&sql[body_start..body_end]).unwrap();
+    }
+
     #[test]
     fn validation_only_open_does_not_apply_an_unpublished_tail() {
         let conn = open();
@@ -3032,11 +3065,7 @@ mod tests {
     #[test]
     fn after_merge_review_rows_become_continue_task() {
         let conn = open();
-        let migration_index = MIGRATIONS
-            .iter()
-            .position(|migration| migration.name == "after_merge_continue_task")
-            .expect("after-merge migration is registered");
-        apply_set(&conn, &MIGRATIONS[..migration_index]).unwrap();
+        apply_before_draft(&conn, "after_merge_continue_task");
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         conn.execute(
             "INSERT INTO task_prs (
@@ -3053,11 +3082,7 @@ mod tests {
         )
         .unwrap();
 
-        let explicit_index = MIGRATIONS
-            .iter()
-            .position(|migration| migration.name == "explicit_pr_merge_requests")
-            .expect("explicit merge request migration is registered");
-        apply_set(&conn, &MIGRATIONS[..explicit_index]).unwrap();
+        apply_draft(&conn, "after_merge_continue_task");
 
         let disposition: String = conn
             .query_row(
@@ -3078,11 +3103,7 @@ mod tests {
     #[test]
     fn historical_publications_gain_no_implicit_merge_request() {
         let conn = open();
-        let migration_index = MIGRATIONS
-            .iter()
-            .position(|migration| migration.name == "explicit_pr_merge_requests")
-            .expect("explicit merge request migration is registered");
-        apply_set(&conn, &MIGRATIONS[..migration_index]).unwrap();
+        apply_before_draft(&conn, "explicit_pr_merge_requests");
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         conn.execute(
             "INSERT INTO task_prs (
@@ -3099,7 +3120,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_set(&conn, MIGRATIONS).unwrap();
+        apply_draft(&conn, "explicit_pr_merge_requests");
 
         let merge: (Option<String>, Option<i64>, Option<String>) = conn
             .query_row(
@@ -3618,7 +3639,7 @@ mod tests {
     #[test]
     fn task_feedback_reviewers_rename_columns_and_map_authority() {
         let conn = open();
-        apply_set(&conn, prefix_before("task_feedback_reviewers")).unwrap();
+        apply_before_draft(&conn, "task_feedback_reviewers");
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('wave_test', 'test', '/repo', 100);
@@ -3636,11 +3657,7 @@ mod tests {
         )
         .unwrap();
 
-        let reviewer_index = MIGRATIONS
-            .iter()
-            .position(|migration| migration.name == "task_feedback_reviewers")
-            .unwrap();
-        apply_set(&conn, &MIGRATIONS[..=reviewer_index]).unwrap();
+        apply_draft(&conn, "task_feedback_reviewers");
 
         let task_columns = columns(&conn, "tasks");
         assert!(task_columns.contains(&"iterate_reviewer".to_string()));
@@ -3733,7 +3750,7 @@ mod tests {
     #[test]
     fn wave_promotion_occurrence_does_not_backfill_existing_ancestry() {
         let conn = open();
-        apply_set(&conn, prefix_before("wave_promotion_occurrence")).unwrap();
+        apply_before_draft(&conn, "wave_promotion_occurrence");
         conn.execute_batch(
             "INSERT INTO waves (id, name, repo, created_at)
                  VALUES ('wave_parent', 'parent', '/repo', 100);
@@ -3742,7 +3759,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        apply_draft(&conn, "wave_promotion_occurrence");
 
         assert!(columns(&conn, "waves").contains(&"promoted_at".to_string()));
         let promoted_at: Option<i64> = conn

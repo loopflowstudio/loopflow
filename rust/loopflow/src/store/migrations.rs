@@ -2198,7 +2198,7 @@ mod tests {
             .query_row(
                 "SELECT product_run_id, home_id, containment_kind, containment_id,
                         resume_token
-                 FROM agent_invocations WHERE id = 'legacy-trace'",
+                 FROM agent_launches WHERE id = 'legacy-trace'",
                 [],
                 |row| {
                     Ok((
@@ -2214,7 +2214,7 @@ mod tests {
         assert_eq!(legacy_trace, (None, None, None, None, None));
         assert_eq!(
             conn.query_row(
-                "SELECT resume_token FROM agent_invocations WHERE id = 'control-shaped'",
+                "SELECT resume_token FROM agent_launches WHERE id = 'control-shaped'",
                 [],
                 |row| row.get::<_, String>(0),
             )

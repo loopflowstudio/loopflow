@@ -914,7 +914,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
-                control: None,
+                supervision: None,
             },
         )
         .unwrap();
@@ -1121,9 +1121,7 @@ mod tests {
             check.detail
         );
 
-        store
-            .lose_invocation_capture(&invocation_id, 500)
-            .unwrap();
+        store.lose_invocation_capture(&invocation_id, 500).unwrap();
         let invocation = store
             .agent_invocations_since(0)
             .unwrap()

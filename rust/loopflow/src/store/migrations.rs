@@ -503,20 +503,11 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 12,
-            ordinal: 1,
-        },
-        name: "drop_agent_bus",
-        sql: include_str!("migrations/0.12.001_drop_agent_bus.sql"),
-    },
-    Migration {
-        id: MigrationId {
-            major: 0,
-            minor: 12,
             patch: Some(3),
             ordinal: 3,
         },
-        name: "task_feedback_reviewers",
-        sql: include_str!("migrations/0.12.3.003_task_feedback_reviewers.sql"),
+        name: "drop_agent_bus",
+        sql: include_str!("migrations/0.12.3.003_drop_agent_bus.sql"),
     },
     Migration {
         id: MigrationId {
@@ -525,8 +516,8 @@ const MIGRATIONS: &[Migration] = &[
             patch: Some(3),
             ordinal: 4,
         },
-        name: "wave_promotion_occurrence",
-        sql: include_str!("migrations/0.12.3.004_wave_promotion_occurrence.sql"),
+        name: "task_feedback_reviewers",
+        sql: include_str!("migrations/0.12.3.004_task_feedback_reviewers.sql"),
     },
     Migration {
         id: MigrationId {
@@ -535,8 +526,8 @@ const MIGRATIONS: &[Migration] = &[
             patch: Some(3),
             ordinal: 5,
         },
-        name: "explicit_pr_merge_requests",
-        sql: include_str!("migrations/0.12.3.005_explicit_pr_merge_requests.sql"),
+        name: "wave_promotion_occurrence",
+        sql: include_str!("migrations/0.12.3.005_wave_promotion_occurrence.sql"),
     },
     Migration {
         id: MigrationId {
@@ -545,8 +536,8 @@ const MIGRATIONS: &[Migration] = &[
             patch: Some(3),
             ordinal: 6,
         },
-        name: "run_owns_execution",
-        sql: include_str!("migrations/0.12.3.006_run_owns_execution.sql"),
+        name: "explicit_pr_merge_requests",
+        sql: include_str!("migrations/0.12.3.006_explicit_pr_merge_requests.sql"),
     },
     Migration {
         id: MigrationId {
@@ -555,17 +546,28 @@ const MIGRATIONS: &[Migration] = &[
             patch: Some(3),
             ordinal: 7,
         },
-        name: "durable_asks",
-        sql: include_str!("migrations/0.12.3.007_durable_asks.sql"),
+        name: "run_owns_execution",
+        sql: include_str!("migrations/0.12.3.007_run_owns_execution.sql"),
     },
     Migration {
         id: MigrationId {
             major: 0,
             minor: 12,
-            ordinal: 7,
+            patch: Some(3),
+            ordinal: 8,
+        },
+        name: "durable_asks",
+        sql: include_str!("migrations/0.12.3.008_durable_asks.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 9,
         },
         name: "ask_linear_comment_outbox",
-        sql: include_str!("migrations/0.12.007_ask_linear_comment_outbox.sql"),
+        sql: include_str!("migrations/0.12.3.009_ask_linear_comment_outbox.sql"),
     },
 ];
 
@@ -3092,7 +3094,7 @@ mod tests {
         assert_eq!(tasks.len(), 6);
         let reopen = tasks
             .iter()
-            .find(|task| task.launch.issue.identifier == "INF-REOPEN")
+            .find(|task| task.plan.identifier == "INF-REOPEN")
             .unwrap();
         assert!(matches!(
             reopen.pm_writeback,
@@ -3104,6 +3106,8 @@ mod tests {
             .collect::<Vec<_>>();
         decisions.sort_unstable();
         assert_eq!(decisions, vec![false, false, false, false, false, true]);
+    }
+
     #[test]
     fn after_merge_review_rows_become_continue_task() {
         let conn = open();

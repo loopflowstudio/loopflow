@@ -3697,16 +3697,13 @@ fn propose_task_done(task: &mut Task, summary: String) -> OpsResult<()> {
     };
     match task.lifecycle_phase {
         crate::task::TaskLifecyclePhase::First => {
-            task
-                .enter_loop()
+            task.enter_loop()
                 .map_err(|error| task_error(error.to_string()))?;
-            task
-                .enter_finally(proposal)
+            task.enter_finally(proposal)
                 .map_err(|error| task_error(error.to_string()))?;
         }
         crate::task::TaskLifecyclePhase::Loop => {
-            task
-                .enter_finally(proposal)
+            task.enter_finally(proposal)
                 .map_err(|error| task_error(error.to_string()))?;
         }
         crate::task::TaskLifecyclePhase::Finally => {
@@ -4753,8 +4750,8 @@ mod tests {
             ..TaskFlowOverrides::default()
         };
 
-        let plan = resolve_task_lifecycle(repo.path(), &project, &overrides)
-            .expect("resolve lifecycle");
+        let plan =
+            resolve_task_lifecycle(repo.path(), &project, &overrides).expect("resolve lifecycle");
 
         assert_eq!(plan.first.flow, "incident");
         assert_eq!(plan.loop_.flow, "slice");
@@ -4777,9 +4774,8 @@ mod tests {
             finally: Some("unsafe-finally".to_string()),
         };
 
-        let error =
-            resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default())
-                .expect_err("reject unsafe finally flow");
+        let error = resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default())
+            .expect_err("reject unsafe finally flow");
 
         assert!(error
             .to_string()
@@ -4799,6 +4795,7 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Task INF-123 already pins loop flow \"slice\""));
+    }
 
     #[test]
     fn pr_mutation_lock_refuses_a_concurrent_writer() {

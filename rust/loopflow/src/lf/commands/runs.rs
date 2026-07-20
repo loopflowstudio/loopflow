@@ -200,13 +200,18 @@ pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
 
     let now = chrono::Utc::now().timestamp();
-    let plan = plan_reconcile(&invocations, &events, now, all, &|path| {
-        match crate::trace::resolve_artifact(path) {
-            Ok(path) if path.is_file() => ArtifactState::Present,
-            Ok(_) => ArtifactState::Missing,
-            Err(_) => ArtifactState::Unsafe,
-        }
-    });
+    let plan =
+        plan_reconcile(
+            &invocations,
+            &events,
+            now,
+            all,
+            &|path| match crate::trace::resolve_artifact(path) {
+                Ok(path) if path.is_file() => ArtifactState::Present,
+                Ok(_) => ArtifactState::Missing,
+                Err(_) => ArtifactState::Unsafe,
+            },
+        );
     let orphans = plan_orphans(&invocations, now, all)?;
 
     if apply {
@@ -1628,7 +1633,7 @@ mod tests {
 
     #[test]
     fn an_aged_intact_partial_with_a_reason_is_acknowledged_lost() {
-        let mut partial = launch(
+        let mut partial = invocation(
             "disk-full",
             "partial",
             NOW - 200 * HOUR,
@@ -1647,9 +1652,9 @@ mod tests {
 
     #[test]
     fn a_fresh_or_unexplained_partial_stays_partial_and_red() {
-        let mut fresh = launch("fresh", "partial", NOW - 2 * HOUR, Some(NOW - HOUR));
+        let mut fresh = invocation("fresh", "partial", NOW - 2 * HOUR, Some(NOW - HOUR));
         fresh.incomplete_reason = Some("ENOSPC while syncing conversation".to_string());
-        let unexplained = launch(
+        let unexplained = invocation(
             "unexplained",
             "partial",
             NOW - 200 * HOUR,

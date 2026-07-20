@@ -115,6 +115,7 @@ fn emit_build_provenance(manifest_dir: &Path) {
             "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
         );
     }
+    let pending_migration_drafts = pending_migration_drafts(manifest_dir);
     let source_revision = git_root
         .and_then(|root| {
             Command::new("git")
@@ -163,6 +164,10 @@ fn emit_build_provenance(manifest_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_BUILD_PROVENANCE={provenance}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
     println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
+    println!(
+        "cargo:rustc-env=LOOPFLOW_PENDING_MIGRATION_DRAFTS={}",
+        pending_migration_drafts.join(",")
+    );
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
@@ -191,6 +196,44 @@ fn emit_build_provenance(manifest_dir: &Path) {
             }
         }
     }
+}
+
+fn pending_migration_drafts(manifest_dir: &Path) -> Vec<String> {
+    let drafts_dir = manifest_dir.join("src/store/migrations/drafts");
+    println!("cargo:rerun-if-changed={}", drafts_dir.display());
+    let entries = match fs::read_dir(&drafts_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => panic!(
+            "read migration drafts from {}: {error}",
+            drafts_dir.display()
+        ),
+    };
+    let mut drafts = entries
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "read migration draft entry from {}: {error}",
+                        drafts_dir.display()
+                    )
+                })
+                .path()
+        })
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .map(|path| {
+            println!("cargo:rerun-if-changed={}", path.display());
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("unreadable_draft");
+            stem.rsplit_once("__")
+                .map_or(stem, |(name, _)| name)
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    drafts.sort();
+    drafts
 }
 
 fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {

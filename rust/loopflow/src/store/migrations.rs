@@ -3751,6 +3751,93 @@ mod tests {
     }
 
     #[test]
+    fn repair_durable_input_timestamp_units_preserves_rows_and_seconds() {
+        const LEGACY_NANOS: i64 = 1_784_521_517_123_456_789;
+        const EXPECTED_SECONDS: i64 = 1_784_521_517;
+        const EARLIEST_VALID_SECOND: i64 = -377_705_116_800;
+        const LATEST_VALID_SECOND: i64 = 253_402_300_799;
+
+        assert!(time::OffsetDateTime::from_unix_timestamp(EARLIEST_VALID_SECOND).is_ok());
+        assert!(time::OffsetDateTime::from_unix_timestamp(EARLIEST_VALID_SECOND - 1).is_err());
+        assert!(time::OffsetDateTime::from_unix_timestamp(LATEST_VALID_SECOND).is_ok());
+        assert!(time::OffsetDateTime::from_unix_timestamp(LATEST_VALID_SECOND + 1).is_err());
+
+        let conn = open();
+        apply_before_draft(&conn, "repair_durable_input_timestamp_units");
+        conn.execute_batch(&format!(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO epoch_revisions (epoch_id, rev, kind, source_id, created_at)
+             VALUES
+                 ('epoch_legacy', 0, 'steer', 'steer_legacy', {LEGACY_NANOS}),
+                 ('epoch_legacy', 1, 'tool_response', 'response_legacy', {LEGACY_NANOS}),
+                 ('epoch_seconds', 0, 'steer', 'steer_seconds', {EXPECTED_SECONDS}),
+                 ('epoch_seconds', 1, 'tool_response', 'response_seconds', {EXPECTED_SECONDS}),
+                 ('epoch_seconds', 2, 'evidence', 'latest_valid', {LATEST_VALID_SECOND});
+             INSERT INTO steers (
+                 id, epoch_id, rev, author_kind, author_run_id, text, issued_at
+             ) VALUES
+                 ('steer_legacy', 'epoch_legacy', 0, 'user', NULL, 'legacy', {LEGACY_NANOS}),
+                 ('steer_seconds', 'epoch_seconds', 0, 'user', NULL, 'seconds', {EXPECTED_SECONDS});
+             INSERT INTO tool_responses (
+                 id, epoch_id, rev, request_id, choice, responded_at
+             ) VALUES
+                 ('response_legacy', 'epoch_legacy', 1, 'request_legacy', 'legacy', {LEGACY_NANOS}),
+                 ('response_seconds', 'epoch_seconds', 1, 'request_seconds', 'seconds', {EXPECTED_SECONDS});"
+        ))
+        .unwrap();
+
+        apply_draft(&conn, "repair_durable_input_timestamp_units");
+
+        let timestamp = |table: &str, column: &str, id_column: &str, id: &str| -> i64 {
+            conn.query_row(
+                &format!("SELECT {column} FROM {table} WHERE {id_column}=?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            timestamp("epoch_revisions", "created_at", "source_id", "steer_legacy"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("steers", "issued_at", "id", "steer_legacy"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("tool_responses", "responded_at", "id", "response_legacy"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("epoch_revisions", "created_at", "source_id", "latest_valid"),
+            LATEST_VALID_SECOND,
+            "an already valid second at the OffsetDateTime boundary is untouched"
+        );
+        assert_eq!(
+            timestamp("steers", "issued_at", "id", "steer_seconds"),
+            EXPECTED_SECONDS
+        );
+        assert_eq!(
+            timestamp("tool_responses", "responded_at", "id", "response_seconds"),
+            EXPECTED_SECONDS
+        );
+        for (table, expected) in [
+            ("epoch_revisions", 5_i64),
+            ("steers", 2_i64),
+            ("tool_responses", 2_i64),
+        ] {
+            assert_eq!(
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+                expected,
+                "the repair must preserve every {table} row"
+            );
+        }
+    }
+
+    #[test]
     fn wave_promotion_occurrence_does_not_backfill_existing_ancestry() {
         let conn = open();
         apply_before_draft(&conn, "wave_promotion_occurrence");

@@ -13,7 +13,7 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
 
 public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
     public let issueIdentifier: String
-    public let sessionId: String
+    public let taskId: String
     public let baseCommit: String
     public let headCommit: String
     public let files: [TaskChangedFile]
@@ -21,7 +21,7 @@ public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case files
         case issueIdentifier = "issue_identifier"
-        case sessionId = "session_id"
+        case taskId = "task_id"
         case baseCommit = "base_commit"
         case headCommit = "head_commit"
     }
@@ -29,7 +29,7 @@ public struct TaskChangesSnapshot: Decodable, Sendable, Hashable {
 
 public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
     public let issueIdentifier: String
-    public let sessionId: String
+    public let taskId: String
     public let path: String?
     public let patch: String
     public let binary: Bool
@@ -38,13 +38,13 @@ public struct TaskDiffSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case path, patch, binary, truncated
         case issueIdentifier = "issue_identifier"
-        case sessionId = "session_id"
+        case taskId = "task_id"
     }
 }
 
 public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     public let issueIdentifier: String
-    public let sessionId: String
+    public let taskId: String
     public let path: String
     public let content: String?
     public let binary: Bool
@@ -54,7 +54,7 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case path, content, binary, truncated
         case issueIdentifier = "issue_identifier"
-        case sessionId = "session_id"
+        case taskId = "task_id"
         case sizeBytes = "size_bytes"
     }
 }

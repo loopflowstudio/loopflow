@@ -5,7 +5,7 @@ import SwiftUI
 
 struct TaskTerminal: Identifiable, Hashable {
     let id: String
-    let taskSessionId: String
+    let taskId: String
     let issueIdentifier: String
     let worktree: String
     let title: String
@@ -19,25 +19,25 @@ final class TaskTerminalStore: ObservableObject {
     @Published private var tabsByTask: [String: [TaskTerminal]] = [:]
     @Published private var selectedTabByTask: [String: String] = [:]
 
-    func tabs(for taskSessionId: String) -> [TaskTerminal] {
-        tabsByTask[taskSessionId] ?? []
+    func tabs(for taskId: String) -> [TaskTerminal] {
+        tabsByTask[taskId] ?? []
     }
 
-    func selectedTab(for taskSessionId: String) -> TaskTerminal? {
-        let tabs = tabs(for: taskSessionId)
-        guard let selected = selectedTabByTask[taskSessionId] else { return tabs.first }
+    func selectedTab(for taskId: String) -> TaskTerminal? {
+        let tabs = tabs(for: taskId)
+        guard let selected = selectedTabByTask[taskId] else { return tabs.first }
         return tabs.first { $0.id == selected } ?? tabs.first
     }
 
     @discardableResult
     func addTerminal(
-        taskSessionId: String,
+        taskId: String,
         issueIdentifier: String,
         worktree: String
     ) async throws -> TaskTerminal {
-        let number = tabs(for: taskSessionId).count + 1
+        let number = tabs(for: taskId).count + 1
         let token = UUID().uuidString.lowercased().prefix(8)
-        let taskToken = taskSessionId
+        let taskToken = taskId
             .lowercased()
             .filter { $0.isLetter || $0.isNumber || $0 == "-" }
             .prefix(18)
@@ -45,35 +45,34 @@ final class TaskTerminalStore: ObservableObject {
         try await TmuxSession(sessionName: tmuxName, worktreePath: worktree).ensureBaseSession()
         let tab = TaskTerminal(
             id: "terminal-\(UUID().uuidString.lowercased())",
-            taskSessionId: taskSessionId,
+            taskId: taskId,
             issueIdentifier: issueIdentifier,
             worktree: worktree,
             title: "Shell \(number)",
             tmuxName: tmuxName
         )
-        tabsByTask[taskSessionId, default: []].append(tab)
-        selectedTabByTask[taskSessionId] = tab.id
+        tabsByTask[taskId, default: []].append(tab)
+        selectedTabByTask[taskId] = tab.id
         return tab
     }
 
-    func select(_ tab: TaskTerminal, taskSessionId: String) {
-        guard tabs(for: taskSessionId).contains(tab) else { return }
-        selectedTabByTask[taskSessionId] = tab.id
+    func select(_ tab: TaskTerminal, taskId: String) {
+        guard tabs(for: taskId).contains(tab) else { return }
+        selectedTabByTask[taskId] = tab.id
     }
 
-    func close(_ tab: TaskTerminal, taskSessionId: String) {
+    func close(_ tab: TaskTerminal, taskId: String) {
         GhosttyManager.shared.destroySession(tab.id)
         TmuxSessionRegistry.shared.killSession(named: tab.tmuxName)
-        tabsByTask[taskSessionId]?.removeAll { $0.id == tab.id }
-        if selectedTabByTask[taskSessionId] == tab.id {
-            selectedTabByTask[taskSessionId] = tabs(for: taskSessionId).last?.id
+        tabsByTask[taskId]?.removeAll { $0.id == tab.id }
+        if selectedTabByTask[taskId] == tab.id {
+            selectedTabByTask[taskId] = tabs(for: taskId).last?.id
         }
     }
 }
 
 enum TaskWorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case changes = "Changes"
-    case feedback = "Feedback"
     case terminal = "Terminal"
 
     var id: String { rawValue }
@@ -103,8 +102,6 @@ struct TaskWorkspaceView: View {
     @State private var file: TaskFileSnapshot?
     @State private var error: String?
     @State private var loading = false
-    @State private var feedbackCommand: [String]?
-    @State private var feedbackError: String?
 
     init(
         task: TaskPlanningSnapshot,
@@ -137,11 +134,9 @@ struct TaskWorkspaceView: View {
                 switch section {
                 case .changes:
                     changesView
-                case .feedback:
-                    feedbackView
                 case .terminal:
                     TaskTerminalWorkspaceView(
-                        taskSessionId: runtime.workId,
+                        taskId: runtime.workId,
                         issueIdentifier: task.identifier,
                         worktree: workspace.worktree,
                         store: terminalStore
@@ -158,7 +153,6 @@ struct TaskWorkspaceView: View {
         .frame(minWidth: 820, minHeight: 560)
         .background(palette.background)
         .task(id: runtime?.workId) { await loadChanges() }
-        .task(id: "feedback:\(runtime?.workId ?? "none")") { await prepareFeedback() }
         .task(id: previewIdentity) { await loadPreview() }
     }
 
@@ -236,38 +230,6 @@ struct TaskWorkspaceView: View {
             }
             .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    @ViewBuilder
-    private var feedbackView: some View {
-        if !canFeedback {
-            ContentUnavailableView(
-                "No Feedback needs you",
-                systemImage: "checkmark.circle",
-                description: Text("This Task is not waiting for User attention.")
-            )
-        } else if let feedbackCommand, let workspace, let runtime {
-            GhosttyTerminalView(
-                workingDirectory: workspace.worktree,
-                argv: feedbackCommand,
-                sessionId: "task-feedback-\(runtime.workId)"
-            )
-            .id(runtime.workId)
-            .background(LoopflowPalette.dark.background)
-        } else if let feedbackError {
-            ContentUnavailableView(
-                "Feedback unavailable",
-                systemImage: "exclamationmark.triangle",
-                description: Text(feedbackError)
-            )
-        } else {
-            ProgressView("Preparing Feedback…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private var canFeedback: Bool {
-        attention.level == .blue
     }
 
     private func changedFileRow(_ changedFile: TaskChangedFile) -> some View {
@@ -380,28 +342,6 @@ struct TaskWorkspaceView: View {
         }
     }
 
-    @MainActor
-    private func prepareFeedback() async {
-        guard canFeedback else {
-            feedbackCommand = nil
-            feedbackError = nil
-            return
-        }
-        let repoPath = repoPath
-        let taskId = task.id
-        do {
-            feedbackCommand = try await Task.detached(priority: .userInitiated) {
-                try LocalWaveAgentLauncher.resolvedTaskFeedbackCommand(
-                    repoPath: repoPath,
-                    taskId: taskId
-                )
-            }.value
-            feedbackError = nil
-        } catch {
-            feedbackError = error.localizedDescription
-        }
-    }
-
     private func openWarp() {
         guard let workspace else { return }
         var components = URLComponents()
@@ -417,7 +357,7 @@ struct TaskWorkspaceView: View {
 }
 
 private struct TaskTerminalWorkspaceView: View {
-    let taskSessionId: String
+    let taskId: String
     let issueIdentifier: String
     let worktree: String
     @ObservedObject var store: TaskTerminalStore
@@ -426,8 +366,8 @@ private struct TaskTerminalWorkspaceView: View {
     @State private var error: String?
     @State private var preparing = false
 
-    private var tabs: [TaskTerminal] { store.tabs(for: taskSessionId) }
-    private var selected: TaskTerminal? { store.selectedTab(for: taskSessionId) }
+    private var tabs: [TaskTerminal] { store.tabs(for: taskId) }
+    private var selected: TaskTerminal? { store.selectedTab(for: taskId) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -436,11 +376,11 @@ private struct TaskTerminalWorkspaceView: View {
                     HStack(spacing: Spacing.xs) {
                         ForEach(tabs) { tab in
                             HStack(spacing: Spacing.xxs) {
-                                Button(tab.title) { store.select(tab, taskSessionId: taskSessionId) }
+                                Button(tab.title) { store.select(tab, taskId: taskId) }
                                     .buttonStyle(.borderless)
                                     .font(Typography.caption(10))
                                 Button {
-                                    store.close(tab, taskSessionId: taskSessionId)
+                                    store.close(tab, taskId: taskId)
                                 } label: {
                                     Image(systemName: "xmark")
                                         .font(Typography.caption(8))
@@ -483,7 +423,7 @@ private struct TaskTerminalWorkspaceView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: taskSessionId) {
+        .task(id: taskId) {
             guard tabs.isEmpty else { return }
             await addTerminal()
         }
@@ -495,7 +435,7 @@ private struct TaskTerminalWorkspaceView: View {
         defer { preparing = false }
         do {
             _ = try await store.addTerminal(
-                taskSessionId: taskSessionId,
+                taskId: taskId,
                 issueIdentifier: issueIdentifier,
                 worktree: worktree
             )

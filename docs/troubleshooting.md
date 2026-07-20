@@ -17,7 +17,7 @@ lf home probe <wave>       # reachable? stopped? running? — with the next acti
 lf start <wave>            # idempotently start the Wave on its placed Home
 ```
 
-## Task Session stops advancing
+## Task Work stops advancing
 
 **Symptom:** A Task remains waiting, blocked, failed, or submitted without an
 obvious next action.
@@ -26,23 +26,22 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf queue
-lf work feedback task task_...
+lf work asks
 ```
 
-`feedback` opens the recorded provider session. Send durable direction without
-opening it via Steer, continue past the boundary, or resume a stopped process
-through the same Task Work:
+Answer an exact pending question, send unsolicited durable direction through
+Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf task steer INF-123 "address the latest review"
+lf work answer ask_... "address the failing check first"
+lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123
 lf task resume INF-123 --model codex --reason "Claude quota exhausted"
 ```
 
 Plain `resume` continues the same provider transcript. `--model` keeps the Task
-Work, Steers, worktree, and active PR, but gives the next Launch to the selected
+Work, Steers, worktree, and active PR, but gives the next Invocation to the selected
 agent. It refuses while another executor is still writing; interrupt that
 boundary first. A Steer is durable before live delivery is attempted. Provider
 acceptance is not incorporation; the Basis of a later successful boundary is.
@@ -81,9 +80,13 @@ List all worktrees, then clean up stale entries:
 
 ```bash
 lf wt list
-lf wt prune --dry-run    # show what would be removed
-lf wt prune              # force-remove unprotected worktrees and their branches
+lf wt prune --dry-run    # show clean terminal or week-stale worktrees
+lf wt prune              # remove those worktrees and their branches
 ```
+
+Prune always preserves uncommitted files. Without terminal evidence, an open PR
+or branch activity in the last seven days also prevents cleanup. Use
+`lf wt remove NAME --force` only when intentionally discarding a worktree.
 
 Feature-worktree integration fetches and pins `origin/<default>` without
 moving the default-branch checkout:
@@ -97,7 +100,7 @@ checkout has not moved.
 
 ## Project or Task is waiting
 
-**Symptom:** Loopflow shows a Project or Task Session in `waiting`.
+**Symptom:** Loopflow shows a Project or Task Work in `waiting`.
 
 Waiting is deliberate: no provider process is running while a child or external
 system must change the answer. Inspect the Wave's work map and the child's
@@ -109,10 +112,11 @@ lf project status <project-id> --json
 lf task status INF-123 --json
 ```
 
-Typical owners are a pending decision, an active child Task, PR review, CI, or
-merge. Steer, decide, or resume the named Project or Task. A relevant child
-observation wakes its Project Session automatically; there is no runtime knob
-or PR-limit counter to clear.
+Typical owners are an unanswered Ask, an active child Task, CI, or an
+explicitly requested merge. Steer, decide, or resume the named Project or Task.
+Task lifecycle observations wake Project Work when their typed route allows it.
+`lf ask` wakes a stopped parent before waiting. There is no PR-limit counter to
+clear.
 
 ## Context too large
 

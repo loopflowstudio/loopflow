@@ -1,17 +1,17 @@
 import Foundation
 
-/// The Active Sessions census: a machine-wide reading of every live body —
+/// A machine-wide census of every live body —
 /// Wave, Project Work, Task Work, direct execution, and interactive
-/// launch — grouped by Wave. It is a **pure projection** over three
-/// already-merged contracts (`lf roadmap`, `lf runs`, `lf launch list`),
+/// invocation — grouped by Wave. It is a **pure projection** over three
+/// already-merged contracts (`lf roadmap`, `lf runs`, `lf invocation list`),
 /// indexed by the ids each contract declares. It performs no filesystem
 /// inference and reconstructs no parentage; it reads the parent each row states.
 ///
 /// The rules that live here, and nowhere in the view:
 /// - **View-only by default.** Ordinary bodies expose no controls. Only an
-///   active interactive launch exposes `.open`, which re-attaches the exact
-///   durable Session through `lf launch attach`.
-/// - **Blue propagation.** A launch waiting on the user tints its Task, its
+///   active interactive invocation carries a `invocationId`, which re-attaches the exact
+///   Invocation through `lf invocation attach`.
+/// - **Blue propagation.** A invocation waiting on the user tints its Task, its
 ///   Project, and its Wave blue even while their bodies are alive.
 /// - **Honest evidence.** Missing, stale, unreachable, stopped, and unavailable
 ///   stay distinguishable from a healthy empty state; a broken source never
@@ -23,7 +23,7 @@ public enum AttentionTint: String, Sendable, Hashable {
 
 /// Why a row reads the way it does. Ordered by severity when several could
 /// apply; a reading is never silently upgraded to `observed`.
-public enum SessionEvidence: String, Sendable, Hashable {
+public enum ActivityEvidence: String, Sendable, Hashable {
     case observed
     case stale
     case stopped
@@ -32,22 +32,18 @@ public enum SessionEvidence: String, Sendable, Hashable {
     case unavailable
 }
 
-public enum SessionAction: String, Sendable, Hashable {
-    case open
-}
-
-public enum ActiveSessionKind: String, Sendable, Hashable {
+public enum WorkActivityKind: String, Sendable, Hashable {
     case project
     case task
     case directExecution
-    case launch
+    case invocation
 }
 
 /// One body in the census. Fields the contract does not carry are `nil`, never
 /// invented — `model` and `step` are frequently absent and stay absent.
-public struct ActiveSessionRow: Sendable, Hashable, Identifiable {
+public struct WorkActivity: Sendable, Hashable, Identifiable {
     public let id: String
-    public let kind: ActiveSessionKind
+    public let kind: WorkActivityKind
     public let title: String
     public let subtitle: String?
     /// The row this one hangs under (a project/task row id), or `nil` at the top
@@ -62,12 +58,11 @@ public struct ActiveSessionRow: Sendable, Hashable, Identifiable {
     public let reason: String?
     public let nextOwner: WorkNextMoveOwner?
     public let tint: AttentionTint
-    public let evidence: SessionEvidence
-    public let actions: [SessionAction]
-    /// Set only when a Launch exposes a User-openable attach route.
-    public let launchId: String?
+    public let evidence: ActivityEvidence
+    /// Set only when a Invocation exposes a User-openable attach route.
+    public let invocationId: String?
 
-    public var isOpenable: Bool { actions.contains(.open) }
+    public var isOpenable: Bool { invocationId != nil }
 
     /// One spoken line: kind and identity, lens, ownership, reason, freshness,
     /// and the one available action. VoiceOver reads this instead of the visual
@@ -85,10 +80,10 @@ public struct ActiveSessionRow: Sendable, Hashable, Identifiable {
 
     private var kindNoun: String {
         switch kind {
-        case .project: "Project session"
-        case .task: "Task session"
+        case .project: "Project Work"
+        case .task: "Task Work"
         case .directExecution: "Direct execution"
-        case .launch: "Interactive launch"
+        case .invocation: "Interactive invocation"
         }
     }
 
@@ -110,19 +105,19 @@ public struct ActiveSessionRow: Sendable, Hashable, Identifiable {
 /// Every live body under one Wave. `evidence`/`unavailableReason` describe the
 /// Wave's roadmap reading: `unavailable` (the source failed) and `missing` (we
 /// looked and found nothing live) are different facts and render differently.
-public struct ActiveSessionWaveGroup: Sendable, Hashable, Identifiable {
+public struct WaveActivity: Sendable, Hashable, Identifiable {
     public let id: String
     public let waveName: String
     public let home: String
     public let remote: Bool
     public let tint: AttentionTint
-    public let evidence: SessionEvidence
+    public let evidence: ActivityEvidence
     public let unavailableReason: String?
-    public let rows: [ActiveSessionRow]
+    public let rows: [WorkActivity]
 }
 
-public struct ActiveSessionsCensus: Sendable, Hashable {
-    public let groups: [ActiveSessionWaveGroup]
+public struct WorkCensus: Sendable, Hashable {
+    public let groups: [WaveActivity]
 
     /// A row is present in at least one group.
     public var isEmpty: Bool { groups.allSatisfy { $0.rows.isEmpty } }
@@ -130,22 +125,22 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
     public init(
         roadmap: RoadmapSnapshot,
         runs: [SkillRunEntry],
-        launches: [LaunchSurfaceRecord],
+        invocations: [InvocationSurfaceRecord],
         staleThresholdSecs: Int = 300
     ) {
         // Index the two side contracts by the identity each already carries:
-        // launches by their declared wave id, runs by their wave name. Only
+        // invocations by their declared wave id, runs by their wave name. Only
         // active bodies enter the census.
-        var launchesByWave: [String: [LaunchSurfaceRecord]] = [:]
-        for launch in launches where launch.status.isActive {
-            launchesByWave[launch.waveId, default: []].append(launch)
+        var invocationsByWave: [String: [InvocationSurfaceRecord]] = [:]
+        for invocation in invocations where invocation.status.isActive {
+            invocationsByWave[invocation.waveId, default: []].append(invocation)
         }
         var runsByWave: [String: [SkillRunEntry]] = [:]
         for run in runs where run.ended == nil {
             runsByWave[run.wave ?? "", default: []].append(run)
         }
 
-        var groups: [ActiveSessionWaveGroup] = []
+        var groups: [WaveActivity] = []
         var seenWaveIds: Set<String> = []
         var seenWaveNames: Set<String> = []
 
@@ -153,34 +148,34 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             let wave = waveRoadmap.wave
             seenWaveIds.insert(wave.id)
             seenWaveNames.insert(wave.name)
-            let waveLaunches = launchesByWave[wave.id] ?? []
+            let waveInvocations = invocationsByWave[wave.id] ?? []
             let waveRuns = runsByWave[wave.name] ?? []
             groups.append(
                 Self.buildGroup(
                     wave: wave,
                     projects: waveRoadmap.projects,
                     runs: waveRuns,
-                    launches: waveLaunches,
+                    invocations: waveInvocations,
                     staleThresholdSecs: staleThresholdSecs
                 )
             )
         }
 
-        // Nothing gets dropped: launches and runs whose Wave is absent from the
+        // Nothing gets dropped: invocations and runs whose Wave is absent from the
         // roadmap still surface, under an explicit unattributed group.
-        var orphanLaunches: [LaunchSurfaceRecord] = []
-        for (waveId, list) in launchesByWave where !seenWaveIds.contains(waveId) {
-            orphanLaunches.append(contentsOf: list)
+        var orphanInvocations: [InvocationSurfaceRecord] = []
+        for (waveId, list) in invocationsByWave where !seenWaveIds.contains(waveId) {
+            orphanInvocations.append(contentsOf: list)
         }
         var orphanRuns: [SkillRunEntry] = []
         for (name, list) in runsByWave where !seenWaveNames.contains(name) {
             orphanRuns.append(contentsOf: list)
         }
-        if !orphanLaunches.isEmpty || !orphanRuns.isEmpty {
+        if !orphanInvocations.isEmpty || !orphanRuns.isEmpty {
             var rows = orphanRuns.map { Self.directExecutionRow($0) }
             rows.append(
-                contentsOf: orphanLaunches.map {
-                    Self.launchRow($0, parentRowId: nil, staleThresholdSecs: staleThresholdSecs)
+                contentsOf: orphanInvocations.map {
+                    Self.invocationRow($0, parentRowId: nil, staleThresholdSecs: staleThresholdSecs)
                 }
             )
             let tint: AttentionTint = if rows.contains(where: { $0.tint == .red }) {
@@ -191,7 +186,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                 .neutral
             }
             groups.append(
-                ActiveSessionWaveGroup(
+                WaveActivity(
                     id: "unattributed",
                     waveName: "Unattributed",
                     home: "",
@@ -213,22 +208,14 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         wave: WaveSnapshot,
         projects: WorkEvidence<RoadmapProject>,
         runs: [SkillRunEntry],
-        launches: [LaunchSurfaceRecord],
+        invocations: [InvocationSurfaceRecord],
         staleThresholdSecs: Int
-    ) -> ActiveSessionWaveGroup {
+    ) -> WaveActivity {
         let remoteUnreachable = isRemote(wave.home) && !wave.live
-        // Only User-routed attention paints the external attention queue blue.
-        // Parent-routed Feedback remains on the parent's control lane.
-        let userLaunches = launches.filter {
-            $0.attention?.kind == "user" && $0.attentionAt != nil
-        }
-        let blockingParentIds = Set(userLaunches.map(\.parentId))
-        let waveLevelAttention = userLaunches.contains { $0.parentKind == "wave" }
-
-        var rows: [ActiveSessionRow] = []
+        var rows: [WorkActivity] = []
         var anyRed = false
-        var anyBlue = waveLevelAttention
-        var handledLaunchIds: Set<String> = []
+        var anyBlue = false
+        var handledInvocationIds: Set<String> = []
 
         if case let .available(projectItems, _) = projects {
             for project in projectItems {
@@ -237,21 +224,19 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                 else { continue }
                 let projectRowId = runtime.workId
                 var projectRed = false
-                var projectBlue = blockingParentIds.contains(runtime.workId)
-                var childRows: [ActiveSessionRow] = []
+                var projectBlue = false
+                var childRows: [WorkActivity] = []
 
                 for task in project.tasks {
                     guard let taskRuntime = task.runtime,
                         !isTerminal(taskRuntime.status)
                     else { continue }
                     let taskRowId = taskRuntime.workId
-                    let blockingLaunch = blockingParentIds.contains(taskRuntime.workId)
-                    var tint = tint(for: task.attention.level)
-                    if blockingLaunch && tint != .red { tint = .blue }
+                    let tint = tint(for: task.attention.level)
                     if tint == .red { projectRed = true }
                     if tint == .blue { projectBlue = true }
                     childRows.append(
-                        ActiveSessionRow(
+                        WorkActivity(
                             id: taskRowId,
                             kind: .task,
                             title: task.task.identifier,
@@ -272,19 +257,18 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                                 remoteUnreachable: remoteUnreachable,
                                 staleThresholdSecs: staleThresholdSecs
                             ),
-                            actions: [],
-                            launchId: nil
+                            invocationId: nil
                         )
                     )
-                    for launch in launches where launch.parentId == taskRuntime.workId {
+                    for invocation in invocations where invocation.parentId == taskRuntime.workId {
                         childRows.append(
-                            launchRow(
-                                launch,
+                            invocationRow(
+                                invocation,
                                 parentRowId: taskRowId,
                                 staleThresholdSecs: staleThresholdSecs
                             )
                         )
-                        handledLaunchIds.insert(launch.sessionId)
+                        handledInvocationIds.insert(invocation.invocationId)
                     }
                 }
 
@@ -294,7 +278,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                     projectRed
                     ? .red : (projectBlue ? .blue : (runtime.processAlive ? .green : .black))
                 rows.append(
-                    ActiveSessionRow(
+                    WorkActivity(
                         id: projectRowId,
                         kind: .project,
                         title: project.project.name,
@@ -313,20 +297,19 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
                             runtime,
                             remoteUnreachable: remoteUnreachable
                         ),
-                        actions: [],
-                        launchId: nil
+                        invocationId: nil
                     )
                 )
                 rows.append(contentsOf: childRows)
-                for launch in launches where launch.parentId == runtime.workId {
+                for invocation in invocations where invocation.parentId == runtime.workId {
                     rows.append(
-                        launchRow(
-                            launch,
+                        invocationRow(
+                            invocation,
                             parentRowId: projectRowId,
                             staleThresholdSecs: staleThresholdSecs
                         )
                     )
-                    handledLaunchIds.insert(launch.sessionId)
+                    handledInvocationIds.insert(invocation.invocationId)
                 }
             }
         }
@@ -334,10 +317,10 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         for run in runs {
             rows.append(directExecutionRow(run))
         }
-        // Wave-level and orphaned launches (parent not found in this roadmap).
-        for launch in launches where !handledLaunchIds.contains(launch.sessionId) {
-            let row = launchRow(
-                launch,
+        // Wave-level and orphaned invocations (parent not found in this roadmap).
+        for invocation in invocations where !handledInvocationIds.contains(invocation.invocationId) {
+            let row = invocationRow(
+                invocation,
                 parentRowId: nil,
                 staleThresholdSecs: staleThresholdSecs
             )
@@ -346,7 +329,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             rows.append(row)
         }
 
-        let evidence: SessionEvidence
+        let evidence: ActivityEvidence
         let unavailableReason: String?
         switch projects {
         case .unavailable(let reason):
@@ -368,7 +351,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             tint = .neutral
         }
 
-        return ActiveSessionWaveGroup(
+        return WaveActivity(
             id: wave.id,
             waveName: wave.name,
             home: wave.home.route,
@@ -382,38 +365,34 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
 
     // MARK: - Row builders
 
-    private static func launchRow(
-        _ launch: LaunchSurfaceRecord,
+    private static func invocationRow(
+        _ invocation: InvocationSurfaceRecord,
         parentRowId: String?,
         staleThresholdSecs: Int
-    ) -> ActiveSessionRow {
-        let userAttention = launch.attention?.kind == "user" && launch.attentionAt != nil
-        // The Feedback presentation opens by Work and Launch, so an empty argv no longer
-        // makes a User-routed Feedback unopenable.
-        let openable = userAttention
-        return ActiveSessionRow(
-            id: "launch:\(launch.sessionId)",
-            kind: .launch,
-            title: launch.reason,
-            subtitle: "\(launch.parentKind) launch · \(launch.provider)",
+    ) -> WorkActivity {
+        let openable = !invocation.argv.isEmpty
+        return WorkActivity(
+            id: "invocation:\(invocation.invocationId)",
+            kind: .invocation,
+            title: invocation.reason,
+            subtitle: "\(invocation.parentKind) invocation · \(invocation.provider)",
             parentRowId: parentRowId,
-            provider: launch.provider,
+            provider: invocation.provider,
             model: nil,
-            home: launch.home,
+            home: invocation.home,
             worktree: nil,
             step: nil,
-            ageSecs: launch.ageSecs,
-            reason: launch.reason,
-            nextOwner: userAttention ? .user : nil,
-            tint: userAttention ? .blue : .green,
-            evidence: isStale(launch.ageSecs, staleThresholdSecs) ? .stale : .observed,
-            actions: openable ? [.open] : [],
-            launchId: openable ? launch.id : nil
+            ageSecs: invocation.ageSecs,
+            reason: invocation.reason,
+            nextOwner: nil,
+            tint: .green,
+            evidence: isStale(invocation.ageSecs, staleThresholdSecs) ? .stale : .observed,
+            invocationId: openable ? invocation.id : nil
         )
     }
 
-    private static func directExecutionRow(_ run: SkillRunEntry) -> ActiveSessionRow {
-        ActiveSessionRow(
+    private static func directExecutionRow(_ run: SkillRunEntry) -> WorkActivity {
+        WorkActivity(
             id: "run:\(run.execId)",
             kind: .directExecution,
             title: run.flow ?? run.skill,
@@ -429,8 +408,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
             nextOwner: nil,
             tint: .green,
             evidence: .observed,
-            actions: [],
-            launchId: nil
+            invocationId: nil
         )
     }
 
@@ -451,7 +429,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
         runtime: TaskRuntimeSnapshot,
         remoteUnreachable: Bool,
         staleThresholdSecs: Int
-    ) -> SessionEvidence {
+    ) -> ActivityEvidence {
         if task.attention.process.state == .unavailable { return .unavailable }
         if !runtime.processAlive { return .stopped }
         if remoteUnreachable { return .unreachable }
@@ -462,7 +440,7 @@ public struct ActiveSessionsCensus: Sendable, Hashable {
     private static func projectEvidence(
         _ runtime: ProjectRuntimeSnapshot,
         remoteUnreachable: Bool
-    ) -> SessionEvidence {
+    ) -> ActivityEvidence {
         if !runtime.processAlive { return .stopped }
         if remoteUnreachable { return .unreachable }
         return .observed

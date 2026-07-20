@@ -47,7 +47,7 @@ struct ReferenceTextViewTests {
 
     @Test("A message with no references is entirely plain")
     func noReferencesEntirelyPlain() {
-        let text = "Project Session is healthy and current"
+        let text = "Project Work is healthy and current"
         let attributed = build(text)
         var sawLink = false
         attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, _, _ in

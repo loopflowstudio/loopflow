@@ -777,11 +777,11 @@ fn wave_memory_is_loaded_separately_from_wave_docs() {
 }
 
 // =============================================================================
-// Ambient wave context
+// Work prompt Wave context
 // =============================================================================
 
-#[test]
-fn run_in_wave_context_assembles_chat_and_memory_sections() {
+fn assert_work_prompt_omits_unselected_wave_turn(skill: &str) {
+    use loopflow::chat::types::{ConversationItem, Lifecycle};
     use loopflow::wave::journal::{journal_path, EventKind, Journal, MessageId, MessageOp};
 
     let temp = TempDir::new().unwrap();
@@ -790,36 +790,68 @@ fn run_in_wave_context_assembles_chat_and_memory_sections() {
     fs::create_dir_all(repo.join("wave/goals")).unwrap();
     fs::write(
         repo.join("wave/goals/MEMORY.md"),
-        "- workers report via lf radio pub",
+        "- child progress arrives as typed Work observations",
     )
     .unwrap();
+    write_skill(repo, skill, "Advance only the selected Work.");
     make_commit(repo, "initial");
 
-    // The wave's journal, as its server would have written it.
+    let user_text = format!("unrelated Wave question before {skill}");
+    let assistant_text = format!("unrelated Wave answer before {skill}");
     let (mut journal, _) = Journal::open(&journal_path(repo, "goals")).unwrap();
-    journal.append(|seq| EventKind::UserMessage {
-        id: MessageId(format!("msg-{seq}")),
+    journal.append(|_| EventKind::UserMessage {
+        id: MessageId("msg-1".to_string()),
         op: MessageOp::Message,
-        text: "how goes the build?".to_string(),
-        from: None,
+        text: user_text.clone(),
+    });
+    journal.append(|_| EventKind::TurnStarted {
+        turn_id: "turn-2".to_string(),
+        answers: vec![MessageId("msg-1".to_string())],
+        body: None,
+    });
+    journal.append(|_| EventKind::TurnItem {
+        turn_id: "turn-2".to_string(),
+        item: ConversationItem::Message {
+            id: "message-1".to_string(),
+            text: assistant_text.clone(),
+            phase: None,
+        },
+    });
+    journal.append(|_| EventKind::TurnFinished {
+        turn_id: "turn-2".to_string(),
+        status: Lifecycle::Completed,
+        usage: loopflow::wave::journal::Usage::empty(),
+        termination_reason: None,
     });
 
     let components = gather_context(&GatherContextOpts {
         repo_root: repo.to_path_buf(),
+        skill: Some(skill.to_string()),
         wave: Some("goals".to_string()),
         ..Default::default()
     })
     .unwrap();
 
     let prompt = render_prompt(components);
-    assert!(prompt.contains("<lf:wave-chat-recent>"));
-    assert!(prompt.contains("user: how goes the build?"));
+    assert!(prompt.contains(&format!("<lf:skill:{skill}>")));
+    assert!(!prompt.contains(&user_text));
+    assert!(!prompt.contains(&assistant_text));
     assert!(prompt.contains("<lf:wave-memory>"));
-    assert!(prompt.contains("workers report via lf radio pub"));
+    assert!(prompt.contains("child progress arrives as typed Work observations"));
 }
 
 #[test]
-fn run_outside_any_wave_assembles_neither_section() {
+fn project_prompt_omits_unselected_wave_turn_but_keeps_memory() {
+    assert_work_prompt_omits_unselected_wave_turn("project_pursue");
+}
+
+#[test]
+fn task_prompt_omits_unselected_wave_turn_but_keeps_memory() {
+    assert_work_prompt_omits_unselected_wave_turn("task_pursue");
+}
+
+#[test]
+fn run_outside_any_wave_assembles_no_memory_section() {
     let temp = TempDir::new().unwrap();
     let repo = temp.path();
     init_repo(repo);
@@ -834,7 +866,6 @@ fn run_outside_any_wave_assembles_neither_section() {
     .unwrap();
 
     let prompt = render_prompt(components);
-    assert!(!prompt.contains("<lf:wave-chat-recent>"));
     assert!(!prompt.contains("<lf:wave-memory>"));
 }
 

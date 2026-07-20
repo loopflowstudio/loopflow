@@ -2,7 +2,7 @@
   "id": "task-ts_22222222222222222222222222222222-14",
   "subject": "task",
   "subject_id": "INF-123",
-  "session_id": "ts_22222222222222222222222222222222",
+  "work_id": "ts_22222222222222222222222222222222",
   "kind": "pr_opened",
   "title": "Opened PR #1073",
   "summary": "https://github.com/loopflow/loopflow/pull/1073"

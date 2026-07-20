@@ -47,7 +47,7 @@ pub struct ChildControlActivity {
     pub id: String,
     pub subject: ChildActivitySubject,
     pub subject_id: String,
-    pub session_id: String,
+    pub work_id: String,
     pub kind: ChildActivityKind,
     pub title: String,
     pub summary: String,
@@ -60,7 +60,7 @@ impl ChildControlActivity {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Task,
             subject_id: observation.issue_identifier.clone(),
-            session_id: observation.task_id.to_string(),
+            work_id: observation.task_id.to_string(),
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
@@ -73,7 +73,7 @@ impl ChildControlActivity {
             id: observation.inbox_id(),
             subject: ChildActivitySubject::Project,
             subject_id: observation.project.clone(),
-            session_id: observation.project_id.to_string(),
+            work_id: observation.project_id.to_string(),
             kind: fields.kind,
             title: fields.title,
             summary: fields.summary,
@@ -98,10 +98,6 @@ pub struct ChatTurn {
     pub items: Vec<ConversationItem>,
     /// RFC 3339 timestamp of when the turn opened.
     pub created_at: String,
-    /// Speaker label for attributed emissions (`lf radio pub` — worker reports,
-    /// child-wave escalations). Absent for the loop's own turns and plain
-    /// user turns.
-    pub from: Option<String>,
     /// Body that produced an assistant span. Required on the wire and
     /// explicitly null for human/attributed turns.
     pub body: Option<BodyProvenance>,
@@ -131,7 +127,7 @@ pub struct TurnDelta {
 pub enum ChatTurnError {
     #[error("child activity entries cannot also carry prose, items, or a provider body")]
     MixedActivity,
-    #[error("child activity entries must be completed attributed user-side entries")]
+    #[error("child activity entries must be completed user-side entries")]
     InvalidActivityEnvelope,
     #[error("human turns must be completed and cannot carry provider items or a body")]
     InvalidHumanTurn,
@@ -147,18 +143,12 @@ impl ChatTurn {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at: now_rfc3339(),
-            from: None,
             body: None,
             activity: None,
         }
     }
 
-    pub fn child_activity(
-        id: String,
-        created_at: String,
-        from: String,
-        activity: ChildControlActivity,
-    ) -> Self {
+    pub fn child_activity(id: String, created_at: String, activity: ChildControlActivity) -> Self {
         Self {
             id,
             role: ChatRole::User,
@@ -166,7 +156,6 @@ impl ChatTurn {
             status: Lifecycle::Completed,
             items: Vec::new(),
             created_at,
-            from: Some(from),
             body: None,
             activity: Some(activity),
         }
@@ -177,10 +166,7 @@ impl ChatTurn {
             if !self.text.is_empty() || !self.items.is_empty() || self.body.is_some() {
                 return Err(ChatTurnError::MixedActivity);
             }
-            if self.role != ChatRole::User
-                || self.status != Lifecycle::Completed
-                || self.from.is_none()
-            {
+            if self.role != ChatRole::User || self.status != Lifecycle::Completed {
                 return Err(ChatTurnError::InvalidActivityEnvelope);
             }
         } else if self.role == ChatRole::User
@@ -255,7 +241,6 @@ impl<'de> Deserialize<'de> for ChatTurn {
             status: Lifecycle,
             items: Vec<ConversationItem>,
             created_at: String,
-            from: Option<String>,
             body: Option<BodyProvenance>,
             activity: Option<ChildControlActivity>,
         }
@@ -268,7 +253,6 @@ impl<'de> Deserialize<'de> for ChatTurn {
             status: wire.status,
             items: wire.items,
             created_at: wire.created_at,
-            from: wire.from,
             body: wire.body,
             activity: wire.activity,
         };
@@ -373,29 +357,12 @@ mod tests {
     }
 
     #[test]
-    fn attributed_turn_round_trips_and_absent_from_decodes_none() {
-        let mut turn = ChatTurn::user("turn-1".into(), "worker report".into());
-        turn.from = Some("worker".to_string());
-        let value = serde_json::to_value(&turn).expect("serialize");
-        assert_eq!(value["from"], "worker");
-        let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
-        assert_eq!(decoded.from.as_deref(), Some("worker"));
-
-        // Absent `from` is None — no default masking on the wire.
-        let mut value =
-            serde_json::to_value(ChatTurn::user("turn-2".into(), "hi".into())).expect("serialize");
-        value.as_object_mut().expect("object").remove("from");
-        let decoded: ChatTurn = serde_json::from_value(value).expect("deserialize");
-        assert_eq!(decoded.from, None);
-    }
-
-    #[test]
     fn child_activity_envelope_rejects_mixed_conversation_content() {
         let activity = ChildControlActivity {
             id: "task-ts_example-1".to_string(),
             subject: ChildActivitySubject::Task,
             subject_id: "INF-123".to_string(),
-            session_id: "ts_example".to_string(),
+            work_id: "ts_example".to_string(),
             kind: ChildActivityKind::StateChanged,
             title: "Task started".to_string(),
             summary: String::new(),
@@ -403,7 +370,6 @@ mod tests {
         let turn = ChatTurn::child_activity(
             "turn-activity".to_string(),
             "2026-07-13T20:00:00Z".to_string(),
-            "Task INF-123".to_string(),
             activity,
         );
         let mut value = serde_json::to_value(turn).expect("serialize activity turn");

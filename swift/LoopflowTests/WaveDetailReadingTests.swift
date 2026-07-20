@@ -70,7 +70,7 @@ struct WaveDetailReadingTests {
         // (INF-123) outranks the black one (INF-124): red > green > unknown > black.
         let projectLens = WaveLens.forProject(runtime: project.runtime, tasks: project.tasks)
         #expect(projectLens.color == .red)
-        #expect(projectLens.reason == "waiting for review")
+        #expect(projectLens.reason == "merge pull request head 333333333333 on GitHub")
 
         // Task rows: the shared attention level and reason, verbatim — Swift
         // never reconstructs the level from status or process flags.

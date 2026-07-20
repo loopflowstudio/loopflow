@@ -183,9 +183,6 @@ pub struct PromptComponents {
     pub summaries: Vec<Document>,
     pub wave_memory: Option<Document>,
     pub wave: Option<String>,
-    /// Ambient wave context: compact rendering of the wave's recent thread.
-    /// `None` when no wave resolves or the wave has no conversation yet.
-    pub wave_chat: Option<String>,
     /// Include loopflow operating guidance.
     pub operate: bool,
     /// User message (positional args after skill/flow name)
@@ -451,34 +448,23 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         "read clipboard"
     );
 
-    // Ambient wave context: every run born inside a wave inherits recent chat
-    // and memory. Explicit --wave wins; otherwise managed env names the channel.
-    // Both resolve through the channel's family head — a hand lives INSIDE its
-    // wave's mind. Work-line channels are ephemeral bus topics with no thread
-    // and no MEMORY.md of their own; a hand's reports land in the wave's
-    // journal, so reading the wave is reading everything it has said. No wave
-    // (or no wave state) → both stay empty and the prompt gains nothing.
-    let ambient_start = Instant::now();
-    let ambient_channel = opts
+    // Wave memory follows durable ownership. Explicit --wave wins; otherwise
+    // LF_WAVE_ID resolves the Wave. Conversation is never included by recency.
+    let memory_start = Instant::now();
+    let ambient_wave = opts
         .wave
         .clone()
-        .or_else(crate::engine::wave_context::resolve_ambient_channel_name);
-    let ambient_wave = ambient_channel
-        .as_deref()
-        .map(|channel| crate::wave::channel::family_head(channel).to_string());
-    let wave_chat = ambient_wave
-        .as_deref()
-        .and_then(|wave| crate::engine::wave_context::gather_wave_chat(repo_root, wave));
+        .or_else(crate::engine::wave_context::resolve_ambient_wave_name);
     if wave_memory.is_none() {
         if let Some(wave) = ambient_wave.as_deref() {
             wave_memory = gather_wave_memory_doc(repo_root, Some(wave))?;
         }
     }
     debug!(
-        elapsed_ms = ambient_start.elapsed().as_millis(),
-        channel = ambient_channel.as_deref(),
-        has_chat = wave_chat.is_some(),
-        "gathered ambient wave context"
+        elapsed_ms = memory_start.elapsed().as_millis(),
+        wave = ambient_wave.as_deref(),
+        has_memory = wave_memory.is_some(),
+        "gathered wave memory"
     );
 
     debug!(elapsed_ms = start.elapsed().as_millis(), "gathered context");
@@ -494,7 +480,6 @@ pub fn gather_context(opts: &GatherContextOpts) -> Result<GatheredContext, CoreE
         summaries,
         wave_memory,
         wave: opts.wave.clone(),
-        wave_chat,
         operate: opts.operate,
         message: opts.message.clone(),
         message_context: None,
@@ -1564,41 +1549,27 @@ pub fn loopflow_section() -> String {
     )
 }
 
-/// The two ambient wave sections — `<lf:wave-memory>` and
-/// `<lf:wave-chat-recent>` — the context every run born inside a wave
-/// inherits, whatever the launch surface (assembled prompts and vendor-skill
-/// seeds alike). Emitted ONLY when non-empty: no wave, no headers, no tokens.
+/// The Wave memory section inherited by every run born inside a Wave, whatever
+/// the launch surface (assembled prompts and vendor-skill seeds alike). Emitted
+/// only when non-empty: no memory, no header, no tokens.
 ///
 /// Memory goes through the one injector
 /// ([`crate::engine::flow::wave_memory_section`], shared with the wave
 /// agent's `render_goal`) and is skipped when the task message already
 /// carries the tag — a wave-agent seed embeds its own memory, and injecting
 /// it twice would double the context.
-pub fn format_wave_context_sections(components: &PromptComponents) -> Vec<String> {
-    let mut parts = Vec::new();
-
+pub fn format_wave_memory_section(components: &PromptComponents) -> Option<String> {
     let message_carries_memory = components
         .message
         .as_deref()
         .is_some_and(|message| message.contains("<lf:wave-memory>"));
-    if !message_carries_memory {
-        if let Some(section) = components
-            .wave_memory
-            .as_ref()
-            .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
-        {
-            parts.push(section);
-        }
+    if message_carries_memory {
+        return None;
     }
-
-    if let Some(ref chat) = components.wave_chat {
-        parts.push(format!(
-            "The wave's recent conversation — the thread this run is part of.\n\n\
-             <lf:wave-chat-recent>\n{chat}\n</lf:wave-chat-recent>"
-        ));
-    }
-
-    parts
+    components
+        .wave_memory
+        .as_ref()
+        .and_then(|doc| crate::engine::flow::wave_memory_section(&doc.content))
 }
 
 /// Render user-content reference sections (docs, diffs, wave context).
@@ -1630,8 +1601,8 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
              - design rationale → scratch/ or wave plan\n\
              - session-specific notes → nowhere (let them die)\n\n\
              How to update:\n\
-             - Through the server: `lf memory add \"<fact>\"` for one entry, `lf memory update`\n\
-             (stdin) to rewrite — never edit the file directly.\n\
+             - Edit the file through the ordinary repository workflow; no live Wave is required.\n\
+             - `update-wave` owns deliberate end-of-work curation.\n\
              - Correct or remove entries that are wrong or stale.\n\
              - Use absolute dates, not \"today\" or \"recently\".\n\
              - When a section grows large, promote stable entries to wave docs or explicit docs and trim.\n\
@@ -1640,10 +1611,11 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
         ));
     }
 
-    // Ambient wave context: the wave's memory and recent conversation flow
-    // into every run born inside the wave. Both sections cost zero tokens
-    // when absent.
-    parts.extend(format_wave_context_sections(components));
+    // Durable Wave memory flows into every run born inside the Wave and costs
+    // zero tokens when absent. Conversation requires explicit selection.
+    if let Some(memory) = format_wave_memory_section(components) {
+        parts.push(memory);
+    }
 
     let scratch_docs: Vec<Document> = components
         .docs
@@ -2101,7 +2073,7 @@ mod tests {
         assert!(prompt.contains("all relevant recorded evidence"));
         assert!(prompt.contains("Treat unexpected tool, test, or user output as a"));
         assert!(prompt.contains("lf pr land"));
-        assert!(prompt.contains("lf memory add"));
+        assert!(prompt.contains("edit\n`wave/<name>/MEMORY.md`"));
         assert!(!prompt.contains("## Prompt layers"));
         assert!(!prompt.contains("## Search portfolios"));
         assert!(!prompt.contains("lf pm show"));
@@ -2156,14 +2128,13 @@ mod tests {
     }
 
     #[test]
-    fn ambient_wave_sections_render_without_an_explicit_wave() {
+    fn wave_memory_renders_without_an_explicit_wave_block() {
         let components = PromptComponents {
             wave_memory: Some(Document {
                 path: "wave/goals/MEMORY.md".to_string(),
                 content: "- land real product code".to_string(),
                 source: DocumentSource::WaveMemory,
             }),
-            wave_chat: Some("user: status?\nwave: two PRs open".to_string()),
             ..Default::default()
         };
 
@@ -2173,16 +2144,12 @@ mod tests {
             "no wave block ambiently"
         );
         assert!(prompt.contains("<lf:wave-memory>\n- land real product code\n</lf:wave-memory>"));
-        assert!(prompt.contains(
-            "<lf:wave-chat-recent>\nuser: status?\nwave: two PRs open\n</lf:wave-chat-recent>"
-        ));
     }
 
     #[test]
     fn no_wave_context_renders_no_wave_sections() {
         let prompt = render_full_prompt(PromptComponents::default());
         assert!(!prompt.contains("<lf:wave-memory>"));
-        assert!(!prompt.contains("<lf:wave-chat-recent>"));
         assert!(!prompt.contains("<lf:wave"));
     }
 
@@ -2378,7 +2345,6 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -2401,7 +2367,6 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -2501,7 +2466,6 @@ mod tests {
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -3094,7 +3058,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3130,7 +3093,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3175,7 +3137,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3214,7 +3175,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -3235,7 +3195,6 @@ directions:
                 directions: vec![],
                 action_style: None,
                 interactive: None,
-                feedback: false,
             }),
             ..Default::default()
         };
@@ -3366,8 +3325,8 @@ directions:
 
     #[test]
     fn gather_documents_cross_repo_docs_include_target_docs_only() {
-        let session_repo = init_repo();
-        write_file(session_repo.path(), "CLAUDE.md", "session claude");
+        let source_repo = init_repo();
+        write_file(source_repo.path(), "CLAUDE.md", "source claude");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
@@ -3381,17 +3340,17 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: source_repo.path().to_path_buf(),
             docs: vec!["widgets:src".to_string()],
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session scratch/root docs do not auto-load root markdown.
+        // Source-repo scratch/root docs do not auto-load root markdown.
         assert!(docs
             .iter()
-            .all(|d| d.path != "CLAUDE.md" && d.content != "session claude"));
+            .all(|d| d.path != "CLAUDE.md" && d.content != "source claude"));
 
         // Related repo root docs are not loaded for a directory docs target.
         assert!(!docs
@@ -3406,8 +3365,8 @@ directions:
 
     #[test]
     fn gather_documents_related_repo_docs_not_loaded_without_explicit_target() {
-        let session_repo = init_repo();
-        write_file(session_repo.path(), "CLAUDE.md", "session claude");
+        let source_repo = init_repo();
+        write_file(source_repo.path(), "CLAUDE.md", "source claude");
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "related claude").unwrap();
@@ -3418,16 +3377,16 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: source_repo.path().to_path_buf(),
             related_repos: vec![related],
             ..Default::default()
         };
         let docs = gather_documents(&spec).unwrap();
 
-        // Session root docs are not ambient.
+        // Source-repo root docs are not ambient.
         assert!(!docs
             .iter()
-            .any(|d| d.path == "CLAUDE.md" && d.content == "session claude"));
+            .any(|d| d.path == "CLAUDE.md" && d.content == "source claude"));
 
         // Related repo docs are not loaded without an explicit docs target for that repo.
         assert!(!docs.iter().any(|d| d.path.contains("[acme/widgets]")));
@@ -3475,7 +3434,7 @@ directions:
 
     #[test]
     fn gather_documents_cross_repo_docs() {
-        let session_repo = init_repo();
+        let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
@@ -3488,7 +3447,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: repo.path().to_path_buf(),
             docs: vec!["studio:swift".to_string()],
             related_repos: vec![related],
             ..Default::default()
@@ -3505,7 +3464,7 @@ directions:
 
     #[test]
     fn gather_documents_bare_repo_name_loads_whole_repo() {
-        let session_repo = init_repo();
+        let repo = init_repo();
 
         let related_repo = tempfile::tempdir().expect("related tempdir");
         std::fs::write(related_repo.path().join("CLAUDE.md"), "studio claude").unwrap();
@@ -3517,7 +3476,7 @@ directions:
         };
 
         let spec = GatherSpec {
-            repo_root: session_repo.path().to_path_buf(),
+            repo_root: repo.path().to_path_buf(),
             docs: vec!["studio:".to_string()],
             related_repos: vec![related],
             ..Default::default()

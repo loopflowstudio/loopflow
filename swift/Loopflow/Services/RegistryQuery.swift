@@ -138,16 +138,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([SkillRunEntry].self, from: stdout)
     }
 
-    /// Every active normalized Launch across the machine.
-    public func activeLaunches() async throws -> [LaunchSurfaceRecord] {
-        let stdout = try await run(["launch", "list", "--active", "--json"], nil)
-        return try Self.decode([LaunchSurfaceRecord].self, from: stdout)
+    /// Every active normalized Invocation across the machine.
+    public func activeInvocations() async throws -> [InvocationSurfaceRecord] {
+        let stdout = try await run(["invocation", "list", "--active", "--json"], nil)
+        return try Self.decode([InvocationSurfaceRecord].self, from: stdout)
     }
 
-    /// Read the generic attach descriptor without changing Launch liveness.
-    public func attachLaunch(launchId: String) async throws -> LaunchSurfaceRecord {
-        let stdout = try await run(["launch", "attach", launchId, "--json"], nil)
-        return try Self.decode(LaunchSurfaceRecord.self, from: stdout)
+    /// Read the generic attach descriptor without changing Invocation liveness.
+    public func attachInvocation(invocationId: String) async throws -> InvocationSurfaceRecord {
+        let stdout = try await run(["invocation", "attach", invocationId, "--json"], nil)
+        return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
     }
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
@@ -208,7 +208,7 @@ public struct RegistryQuery: Sendable {
     /// One atomic Context Lab population. Rust owns every trace join, token
     /// attribution, revision identity, and representative choice; the app sends
     /// only the filter query and renders the returned snapshot.
-    public func contextLab(_ query: SessionSetQuery) async throws -> ContextLabSnapshot {
+    public func contextLab(_ query: InvocationSetQuery) async throws -> ContextLabSnapshot {
         var args = [
             "context", "--json",
             "--started-after", String(query.startedAfter),
@@ -237,7 +237,7 @@ public struct RegistryQuery: Sendable {
     public func traceContent(_ address: TraceAddress) async throws -> TraceContentSnapshot {
         let stdout = try await run([
             "trace", address.runId, "--json", "--content",
-            "--launch", address.launchId, "--turn", address.turnId,
+            "--invocation", address.invocationId, "--turn", address.turnId,
         ], nil)
         return try Self.decode(TraceContentSnapshot.self, from: stdout)
     }
@@ -505,7 +505,7 @@ public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
     public var id: String { turnId }
 
     public let turnId: String
-    public let launchId: String
+    public let invocationId: String
     public let traceId: String
     public let execId: String
     public let repo: String
@@ -533,7 +533,7 @@ public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case repo, wave, flow, skill, provider, model, at
         case turnId = "turn_id"
-        case launchId = "launch_id"
+        case invocationId = "invocation_id"
         case traceId = "trace_id"
         case execId = "exec_id"
         case inputTokens = "input_tokens"

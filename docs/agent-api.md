@@ -24,14 +24,14 @@ An external harness opened by a person is a Loopflow **User**, the same caller
 kind as the Mac app. It may inspect status and use `lf chat` when the person
 asks it to converse with or steer a Wave.
 
-A Wave, Project, or Task agent launched by Loopflow is an internal participant.
-It receives `LOOPFLOW.md`, reports through `lf radio`, and never impersonates
-the User in chat.
+A Loopflow-launched Wave, Project, or Task agent is an internal participant.
+It receives `LOOPFLOW.md`; typed Work observations and Ask/Answer carry
+coordination across the parent relationship.
 
 A Wave directing a task is the internal case:
 
 ```bash
-lf task run INF-123                                  # start a durable Task Session
+lf task run INF-123                                  # start a durable Task Work
 lf task steer INF-123 "take the smaller approach"    # redirect its active turn
 lf task status INF-123 --json                        # inspect durable state
 lf task wait INF-123 --until terminal                # block until it settles
@@ -53,8 +53,8 @@ lf task run INF-123                          # run an existing Linear issue
 lf task start <project-id> "add passkeys"    # create the issue, then run it
 pbpaste | lf task start <project-id>         # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123       # dependent work before the parent PR merges
-lf task run INF-125 --headless               # no interactive surface
-lf project run <project-id>                  # start the supervising Project Session
+lf task run INF-125 --reviewer parent        # Project reviews every checkpoint
+lf project run <project-id>                  # start the supervising Project Work
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -85,7 +85,8 @@ same stable Work control surface:
 ```bash
 lf work status task task_... --json
 lf work steer task task_... "show the failing fixture" --json
-lf work continue task task_...                      # continue past current Feedback
+lf work asks project proj_... --json                  # pending child questions
+lf work answer ask_... "use the smaller change"    # answer one exact Ask
 ```
 
 A Steer receipt reports immutable delivery attempts, not incorporation. A
@@ -100,39 +101,11 @@ worktree.
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.
 
-## Internal agents: the radio
+## Memory
 
-Loopflow-launched agents talk to each other on the bus; chat belongs to the
-User surface.
-
-```bash
-lf radio pub --channel goals.build "parser lands green; starting docs"
-lf radio sub goals --json          # NDJSON stream of a channel family
-```
-
-Publish is an INSERT into the shared local store — no broker, no server in the
-path, so it works even with zero loopflow processes running. A listening Wave
-folds messages from its channel family into its journal with attribution.
-Outside any wave, a publish prints a drop note and exits 0, so the verb is safe
-in every prompt. Never guess a channel: publish only where the prompt or skill
-names one.
-
-An external harness acting for the person may use `lf chat`; a
-Loopflow-launched worker never posts there.
-
-## Remember, with receipts
-
-```bash
-lf memory add "workers report via stream" --receipt chat_turn:turn-3
-lf receipt show chat_turn:turn-3 --json
-lf receipt show pr:acme/app#42 --json
-```
-
-`lf memory add` records a durable wave learning bound to evidence. A receipt
-token (`kind:reference` — `chat_turn:`, `run:`, `pr:`, …) resolves to the
-canonical local record, so a claim in memory can always be drilled to what
-actually happened. `wave/<name>/MEMORY.md` is server-owned; agents write
-through the API, never the file.
+`wave/<name>/MEMORY.md` is the Wave's durable memory. Read or edit it through
+the ordinary repository workflow; the file is truth, running Wave or not, and
+there is no separate CLI or server surface for it.
 
 ## Ship
 
@@ -179,8 +152,8 @@ Every launched agent gets `LOOPFLOW.md` — the operating contract — in contex
 - Route git, worktrees, and PRs through `lf`; never raw `git worktree`.
 - Execute here first; delegation must make the problem smaller.
 - Checkpoint and proceed: don't ask permission for reversible work.
-- Answer humans in turn text; report proactively on the radio only when a
-  channel is established.
+- Answer humans in turn text; use typed Work observations and explicit
+  Ask/Answer exchanges for parent/child coordination.
 - Write repo-specific learnings into `.lf/` and commit them with the work.
 
 Source: `rust/loopflow/src/engine/builtins/LOOPFLOW.md`.

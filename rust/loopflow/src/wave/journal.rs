@@ -3,12 +3,11 @@
 //! One JSONL file per served wave at
 //! `.lf/journal/waves/<name>/journal.jsonl` under the origin repo (already
 //! covered by the repo's `.lf/journal/` gitignore entry — the log is
-//! per-machine, never committed). Work-line channels are ephemeral bus topics
-//! and never own journals. Every projection is a fold over the wave's log:
+//! per-machine, never committed). Every projection is a fold over the Wave log:
 //! the thread is the conversation events, the loop state is the last
-//! `LoopState` event, and the message queue is `UserMessage`s not yet named in
-//! any `TurnStarted.answers` or `TurnSteered.answers`. The journal is truth;
-//! SSE is liveness.
+//! `LoopState` event, and the input queue is human messages and typed
+//! observations not yet named in any `TurnStarted.answers` or
+//! `TurnSteered.answers`. The journal is truth; SSE is liveness.
 //!
 //! These events are internal persistence, NOT wire DTOs — there is no
 //! Swift/Python mirror obligation. The no-defaults discipline still applies:
@@ -17,12 +16,9 @@
 //! migrated.
 //!
 //! `RunObserved`/`RunCompleted` remain readable for journals written before
-//! Project and Tasks replaced generic workers. New child lifecycle
-//! facts arrive as typed Project and Task observations. `MemoryUpdated` and
-//! `MemoryAdded` are produced by the server's memory routes (`lf memory
-//! update`/`add` — the server holds MEMORY.md's pen). `ServerStarted` is
-//! appended once per boot, after replay — restarts are forensically visible
-//! in the record.
+//! Project and Tasks replaced generic workers. New child lifecycle facts arrive
+//! as typed Project and Task observations. `ServerStarted` is appended once per
+//! boot, after replay — restarts are forensically visible in the record.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -35,16 +31,16 @@ use time::OffsetDateTime;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
-use crate::receipt::Receipt;
 use crate::task::TaskObservation;
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
+use crate::wave::PromotionWake;
 
 /// Current journal format version, stamped on every line.
 const FORMAT_VERSION: u32 = 1;
 
-/// Identifies one user message within a wave (`"msg-<seq>"`, from the seq of
-/// its `UserMessage` event).
+/// Identifies one pending Wave input: `"msg-<seq>"` for human messages and a
+/// deterministic typed id for observations and promotion wakes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct MessageId(pub String);
@@ -70,11 +66,6 @@ pub enum MessageOp {
     Steer,
     /// Cancel the current turn; non-empty text becomes the next turn.
     Interrupt,
-    /// An attributed emission (`lf radio pub`): a worker report, child-wave
-    /// escalation, or CLI FYI. Lands in the thread as an attributed statement
-    /// AND queues for the loop exactly like `Message` — same consumption
-    /// machinery, `TurnStarted.answers` can name it.
-    Say,
 }
 
 /// Token usage accrued over one turn. Providers report different subsets, so
@@ -117,15 +108,12 @@ impl WorkerOutcome {
     }
 }
 
-/// A journaled user message that has not yet been consumed by a turn.
+/// One journaled prompt input that has not yet been consumed by a turn.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
-    /// The byline a `Say` emission arrived under ("worker", "wave goals",
-    /// "bus"); `None` for the unattributed human thread.
-    pub from: Option<String>,
 }
 
 /// One journal row.
@@ -159,17 +147,10 @@ pub enum EventKind {
         id: MessageId,
         op: MessageOp,
         text: String,
-        /// The byline of a `Say` emission; `None` for plain user messages.
-        /// It rides the existing `UserMessage` row (an emission is a user
-        /// message with a byline), so the queue fold — `UserMessage`s not
-        /// named in any `answers` — stays untouched: no new event kind, no
-        /// second inbox to desync.
-        from: Option<String>,
     },
     TurnStarted {
         turn_id: String,
-        /// Consumption marker: the queued user messages this turn's prompt
-        /// consumed. Queue = `UserMessage`s not named in any `answers`.
+        /// Consumption marker: the queued inputs this turn's prompt consumed.
         answers: Vec<MessageId>,
         /// Exact body attempt producing this assistant span. Instantaneous
         /// injected turns carry `None`.
@@ -236,33 +217,9 @@ pub enum EventKind {
     ProjectObserved {
         observation: ProjectObservation,
     },
-    // -- legacy channels --
-    /// A work-line channel opened under this wave. No current code produces
-    /// this event; retaining the variant lets existing journals replay.
-    ChannelOpened {
-        /// The child channel's name — exactly the worktree basename minus
-        /// the repo prefix (`goals.148e0e02`).
-        name: String,
-        run_id: String,
-    },
-    // -- memory --
-    /// A compiled memory checkpoint was written to `MEMORY.md`. Clears the
-    /// replayable add delta because the checkpoint is now the seed.
-    MemoryUpdated {
-        summary: String,
-    },
-    /// A fact published to the stream (`lf memory add`). Accumulates into the
-    /// replayable delta until the next `MemoryUpdated`.
-    MemoryAdded {
-        fact: String,
-        /// Evidence receipts binding the fact to the raw records that justify
-        /// it. `#[serde(default)]` is deliberate replayed-log evolution: a
-        /// `MemoryAdded` row written before receipts existed lacks the field,
-        /// and `read_events` stops the whole fold on the first parse error — so
-        /// an absent list must decode as empty, not truncate the journal. The
-        /// `Receipt` type itself stays default-free as a wire DTO.
-        #[serde(default)]
-        receipts: Vec<Receipt>,
+    PromotionObserved {
+        parent_wave_id: crate::id::WaveId,
+        parent: String,
     },
     // -- server lifecycle --
     /// One boot of the wave server, appended after replay. Folds ignore it;
@@ -440,20 +397,13 @@ impl Narrator {
     /// console.
     fn render(&mut self, kind: &EventKind) -> Narration {
         match kind {
-            EventKind::UserMessage { id, op, text, from } => {
+            EventKind::UserMessage { id, op, text } => {
                 let op_tag = match op {
-                    MessageOp::Message | MessageOp::Say => "",
+                    MessageOp::Message => "",
                     MessageOp::Steer => "(steer) ",
                     MessageOp::Interrupt => "(interrupt) ",
                 };
-                let byline = from
-                    .as_ref()
-                    .map(|from| format!("[{from}] "))
-                    .unwrap_or_default();
-                info(format!(
-                    "chat ← {op_tag}{byline}\"{}\" ({id})",
-                    ellipsize(text, 60)
-                ))
+                info(format!("chat ← {op_tag}\"{}\" ({id})", ellipsize(text, 60)))
             }
             EventKind::TurnStarted {
                 turn_id, answers, ..
@@ -581,15 +531,13 @@ impl Narrator {
                 observation.event_id,
                 ellipsize(&observation.prompt(), 70)
             )),
-            EventKind::ChannelOpened { name, run_id } => {
-                info(format!("channel {name} opened · run {}", short_id(run_id)))
-            }
-            EventKind::MemoryUpdated { summary } => {
-                info(format!("memory curated: {}", ellipsize(summary, 70)))
-            }
-            EventKind::MemoryAdded { fact, .. } => {
-                info(format!("memory added: {}", ellipsize(fact, 70)))
-            }
+            EventKind::PromotionObserved {
+                parent_wave_id,
+                parent,
+            } => info(format!(
+                "observed promotion from Wave {} · {}",
+                parent, parent_wave_id
+            )),
             EventKind::ServerStarted { pid, endpoint } => {
                 info(format!("server started · pid {pid} · {endpoint}"))
             }
@@ -908,67 +856,27 @@ pub struct ThreadFold {
     /// Last durable playhead snapshot, absent before the first resident or
     /// enqueue initializes the default wave flow.
     pub playhead: Option<Playhead>,
-    /// User messages not named by any `TurnStarted.answers` or
-    /// `TurnSteered.answers` (minus what `MessagesRequeued` restored); this
-    /// seeds the scheduler queue on restart.
+    /// Human messages and typed inputs not named by any `answers` event (minus
+    /// what `MessagesRequeued` restored); this seeds the scheduler queue on
+    /// restart.
     pub pending_messages: Vec<PendingMessage>,
-    /// Every journaled user message by id — `MessagesRequeued` restores
-    /// pending entries from it (an id alone can't rebuild the text/op/from).
+    /// Every journaled input by id — `MessagesRequeued` restores pending
+    /// entries from it.
     pub messages: HashMap<MessageId, PendingMessage>,
     /// Typed Task observations indexed by their synthetic consumption id.
     pub tasks: HashMap<MessageId, TaskObservation>,
     /// Typed Project observations indexed by their synthetic consumption id.
     pub projects: HashMap<MessageId, ProjectObservation>,
+    /// Promotion wakes indexed by their deterministic occurrence id.
+    pub(crate) promotions: HashMap<MessageId, PromotionWake>,
     /// Message ids claimed (`answers`) by turns still open at the end of the
     /// log — the crash tail's consumption. The boot janitor requeues these
     /// when it finalizes the crashed turns as `Failed`.
     pub open_claims: Vec<MessageId>,
-    /// Memory facts added this server life — the replayable stream a fresh
-    /// subscriber gets before going live. Rebuilt from the journal on restart.
-    pub memory_adds: Vec<String>,
-}
-
-/// One curated memory fact with its evidence receipts. Wire type for
-/// `lf memory log --json`: both fields required, no serde defaults.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MemoryFact {
-    pub fact: String,
-    pub receipts: Vec<Receipt>,
-}
-
-/// The curated facts (with receipts) live in the current replayable delta —
-/// every `MemoryAdded` since the last `MemoryUpdated` checkpoint, oldest first.
-/// This is the receipt-bearing view behind `lf memory log --json`; the plain
-/// `memory_adds` fold above drops receipts because the live stream never needed
-/// them.
-pub fn memory_facts(events: &[Event]) -> Vec<MemoryFact> {
-    let mut facts = Vec::new();
-    for event in events {
-        match &event.kind {
-            EventKind::MemoryAdded { fact, receipts } => facts.push(MemoryFact {
-                fact: fact.clone(),
-                receipts: receipts.clone(),
-            }),
-            EventKind::MemoryUpdated { .. } => facts.clear(),
-            _ => {}
-        }
-    }
-    facts
-}
-
-/// Materialize a historical `ChannelOpened` event during journal replay.
-fn legacy_channel_opened_turn(event: &Event, name: &str) -> ChatTurn {
-    let mut turn = ChatTurn::user(
-        format!("turn-{}", event.seq),
-        format!("work line {name} opened"),
-    );
-    turn.created_at = event.at_rfc3339();
-    turn.from = Some("worker".to_string());
-    turn
 }
 
 /// The thread-visible turn a `RunCompleted` observation materializes: the
-/// worker's ending as a bylined statement, never queued for the loop (only
+/// worker's ending as a typed observation, never queued for the loop (only
 /// `UserMessage` rows feed the pending queue). Covers the died-silently case
 /// — a worker that never reported still ends visibly, failure summary on the
 /// wire. Shared by the fold and the live append so replay and the live
@@ -985,7 +893,6 @@ pub fn run_completed_turn(
     }
     let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text);
     turn.created_at = event.at_rfc3339();
-    turn.from = Some("observer".to_string());
     turn
 }
 
@@ -1030,24 +937,22 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
+    let mut promotions: HashMap<MessageId, PromotionWake> = HashMap::new();
     let mut consumed_messages: HashSet<MessageId> = HashSet::new();
     // Claims (`answers`) per still-open turn — the crash tail's consumption,
     // exported so the boot janitor can requeue it.
     let mut claims_by_open_turn: HashMap<String, Vec<MessageId>> = HashMap::new();
-    let mut memory_adds: Vec<String> = Vec::new();
 
     for event in events {
         match &event.kind {
-            EventKind::UserMessage { id, op, text, from } => {
+            EventKind::UserMessage { id, op, text } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
-                turn.from = from.clone();
                 turns.push(turn);
                 let message = PendingMessage {
                     id: id.clone(),
                     op: *op,
                     text: text.clone(),
-                    from: from.clone(),
                 };
                 if !consumed_messages.contains(id) {
                     pending_messages.push(message.clone());
@@ -1059,7 +964,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let turn = ChatTurn::child_activity(
                     format!("turn-{}", event.seq),
                     event.at_rfc3339(),
-                    "task".to_string(),
                     crate::chat::turns::ChildControlActivity::from_task(observation),
                 );
                 turns.push(turn);
@@ -1074,7 +978,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let turn = ChatTurn::child_activity(
                     format!("turn-{}", event.seq),
                     event.at_rfc3339(),
-                    "project".to_string(),
                     crate::chat::turns::ChildControlActivity::from_project(observation),
                 );
                 turns.push(turn);
@@ -1082,6 +985,21 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     pending_messages.push(message.clone());
                 }
                 projects.insert(message.id.clone(), observation.clone());
+                messages.insert(message.id.clone(), message);
+            }
+            EventKind::PromotionObserved {
+                parent_wave_id,
+                parent,
+            } => {
+                let wake = PromotionWake {
+                    parent_wave_id: parent_wave_id.clone(),
+                    parent: parent.clone(),
+                };
+                let message = promotion_wake_message(&wake);
+                if !consumed_messages.contains(&message.id) {
+                    pending_messages.push(message.clone());
+                }
+                promotions.insert(message.id.clone(), wake);
                 messages.insert(message.id.clone(), message);
             }
             EventKind::TurnStarted {
@@ -1098,7 +1016,6 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     status: Lifecycle::Running,
                     items: Vec::new(),
                     created_at: event.at_rfc3339(),
-                    from: None,
                     body: body.as_deref().cloned(),
                     activity: None,
                 });
@@ -1171,21 +1088,12 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::MessagesRequeued { ids } => {
                 restore_pending(&mut pending_messages, &messages, ids);
             }
-            EventKind::ChannelOpened { name, .. } => {
-                turns.push(legacy_channel_opened_turn(event, name));
-            }
             EventKind::RunCompleted {
                 run_id,
                 outcome,
                 summary,
             } => {
                 turns.push(run_completed_turn(event, run_id, *outcome, summary));
-            }
-            EventKind::MemoryAdded { fact, .. } => {
-                memory_adds.push(fact.clone());
-            }
-            EventKind::MemoryUpdated { .. } => {
-                memory_adds.clear();
             }
             EventKind::RunObserved { .. } | EventKind::ServerStarted { .. } => {}
         }
@@ -1207,8 +1115,8 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         messages,
         tasks,
         projects,
+        promotions,
         open_claims,
-        memory_adds,
     }
 }
 
@@ -1217,7 +1125,6 @@ pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
-        from: Some("task".to_string()),
     }
 }
 
@@ -1226,7 +1133,14 @@ pub fn project_observation_message(observation: &ProjectObservation) -> PendingM
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
-        from: Some("project".to_string()),
+    }
+}
+
+pub(crate) fn promotion_wake_message(wake: &PromotionWake) -> PendingMessage {
+    PendingMessage {
+        id: MessageId(wake.inbox_id()),
+        op: MessageOp::Message,
+        text: wake.prompt(),
     }
 }
 
@@ -1247,90 +1161,6 @@ fn mark_consumed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipt::EvidenceKind;
-
-    #[test]
-    fn memory_fact_fixture_round_trips_every_evidence_kind() {
-        let fixture = include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/dto/receipt.json"
-        ));
-        let fact: MemoryFact = serde_json::from_str(fixture).expect("decode receipt fixture");
-        let kinds: Vec<EvidenceKind> = fact.receipts.iter().map(|r| r.kind).collect();
-        assert_eq!(
-            kinds,
-            vec![
-                EvidenceKind::ChatTurn,
-                EvidenceKind::WorkerReport,
-                EvidenceKind::Trace,
-                EvidenceKind::Pm,
-                EvidenceKind::Pr,
-            ],
-        );
-        // A PR reference keeps its `@sha` and its wave differs from the others —
-        // the cross-wave case doctor detects downstream.
-        let pr = fact.receipts.last().expect("pr receipt");
-        assert_eq!(pr.reference, "loopflow/loopflow#912@abc1234");
-        assert_eq!(pr.wave, "auditability");
-
-        let reencoded = serde_json::to_string(&fact).expect("serialize");
-        let decoded: MemoryFact = serde_json::from_str(&reencoded).expect("re-decode");
-        assert_eq!(fact, decoded);
-    }
-
-    #[test]
-    fn memory_facts_keep_receipts_and_reset_at_each_checkpoint() {
-        let events = vec![
-            Event {
-                v: FORMAT_VERSION,
-                seq: 1,
-                at: OffsetDateTime::UNIX_EPOCH,
-                kind: EventKind::MemoryAdded {
-                    fact: "pre-checkpoint fact".into(),
-                    receipts: vec![Receipt::new(EvidenceKind::ChatTurn, "turn-1", "ship")],
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 2,
-                at: OffsetDateTime::UNIX_EPOCH,
-                kind: EventKind::MemoryUpdated {
-                    summary: "compiled".into(),
-                },
-            },
-            Event {
-                v: FORMAT_VERSION,
-                seq: 3,
-                at: OffsetDateTime::UNIX_EPOCH,
-                kind: EventKind::MemoryAdded {
-                    fact: "post-checkpoint fact".into(),
-                    receipts: vec![Receipt::new(EvidenceKind::Pr, "o/r#5", "ship")],
-                },
-            },
-        ];
-        let facts = memory_facts(&events);
-        assert_eq!(facts.len(), 1, "the checkpoint cleared the earlier delta");
-        assert_eq!(facts[0].fact, "post-checkpoint fact");
-        assert_eq!(
-            facts[0].receipts,
-            vec![Receipt::new(EvidenceKind::Pr, "o/r#5", "ship")]
-        );
-    }
-
-    /// A `MemoryAdded` row written before receipts existed decodes with an empty
-    /// list, so `read_events` never truncates an old journal at the first fact.
-    #[test]
-    fn legacy_memory_added_without_receipts_decodes_empty() {
-        let line = r#"{"v":1,"seq":4,"at":"2026-07-04T00:00:00Z","kind":{"type":"memory_added","fact":"legacy fact"}}"#;
-        let event: Event = serde_json::from_str(line).expect("decode legacy MemoryAdded");
-        match event.kind {
-            EventKind::MemoryAdded { fact, receipts } => {
-                assert_eq!(fact, "legacy fact");
-                assert!(receipts.is_empty());
-            }
-            other => panic!("expected MemoryAdded, got {other:?}"),
-        }
-    }
 
     fn open_tmp() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1343,7 +1173,6 @@ mod tests {
             id: MessageId(format!("msg-{seq}")),
             op: MessageOp::Message,
             text: text.to_string(),
-            from: None,
         }
     }
 
@@ -1432,7 +1261,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,
-            "{\"v\":2,\"seq\":1,\"at\":\"2026-07-04T00:00:00Z\",\"kind\":{\"type\":\"memory_added\",\"fact\":\"x\"}}\n",
+            "{\"v\":2,\"seq\":1,\"at\":\"2026-07-04T00:00:00Z\",\"kind\":{\"type\":\"server_started\",\"pid\":1,\"endpoint\":\"127.0.0.1:1\"}}\n",
         )
         .unwrap();
         assert!(Journal::open(&path).is_err());
@@ -1442,12 +1271,6 @@ mod tests {
     fn event_round_trips_every_kind() {
         let kinds = vec![
             user_message(1, "hi"),
-            EventKind::UserMessage {
-                id: MessageId("msg-9".into()),
-                op: MessageOp::Say,
-                text: "worker report: PR landed".into(),
-                from: Some("worker".into()),
-            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![MessageId("msg-1".into())],
@@ -1496,17 +1319,6 @@ mod tests {
             },
             EventKind::TaskObserved {
                 observation: task_observation(),
-            },
-            EventKind::ChannelOpened {
-                name: "ship.148e0e02".into(),
-                run_id: "run-1".into(),
-            },
-            EventKind::MemoryUpdated {
-                summary: "learned the fold".into(),
-            },
-            EventKind::MemoryAdded {
-                fact: "learned a fact".into(),
-                receipts: Vec::new(),
             },
             EventKind::ServerStarted {
                 pid: 4242,
@@ -1634,10 +1446,6 @@ mod tests {
             EventKind::TaskObserved {
                 observation: task_observation(),
             },
-            EventKind::ChannelOpened {
-                name: "ship.148e0e02".into(),
-                run_id: "run-1".into(),
-            },
             EventKind::ServerStarted {
                 pid: 4242,
                 endpoint: "127.0.0.1:50123".into(),
@@ -1692,9 +1500,9 @@ mod tests {
     }
 
     /// A fixed event sequence renders the console a human would want to read:
-    /// chat with bylines and ops, turn open/close with items and usage, the
-    /// prose gist once at INFO with the rest at DEBUG, legacy worker observations,
-    /// memory curation.
+    /// human chat with explicit ops, turn open/close with items and usage, the
+    /// prose gist once at INFO with the rest at DEBUG, and legacy worker
+    /// observations.
     #[test]
     fn narration_demo_reads_like_a_console() {
         let mut narrator = Narrator::default();
@@ -1712,7 +1520,6 @@ mod tests {
             id: MessageId("msg-1".into()),
             op: MessageOp::Message,
             text: "how is the reactive server refactor going?".into(),
-            from: None,
         });
         assert_eq!(n.level, NarrationLevel::Info);
         assert_eq!(
@@ -1721,21 +1528,9 @@ mod tests {
         );
 
         let n = render(EventKind::UserMessage {
-            id: MessageId("msg-2".into()),
-            op: MessageOp::Say,
-            text: "run-42 landed: PR #12 merged, one clippy fix on the side".into(),
-            from: Some("worker".into()),
-        });
-        assert_eq!(
-            n.line,
-            "chat ← [worker] \"run-42 landed: PR #12 merged, one clippy fix on the side\" (msg-2)"
-        );
-
-        let n = render(EventKind::UserMessage {
             id: MessageId("msg-3".into()),
             op: MessageOp::Steer,
             text: "focus on the journal tests first".into(),
-            from: None,
         });
         assert_eq!(
             n.line,
@@ -1849,57 +1644,11 @@ mod tests {
             "observed run run-8c1d completed · narration tap landed, suite green"
         );
 
-        let n = render(EventKind::MemoryAdded {
-            fact: "workers report through the memory stream".into(),
-            receipts: Vec::new(),
-        });
-        assert_eq!(
-            n.line,
-            "memory added: workers report through the memory stream"
-        );
-
-        let n = render(EventKind::MemoryUpdated {
-            summary: "journal is the console's source of truth".into(),
-        });
-        assert_eq!(
-            n.line,
-            "memory curated: journal is the console's source of truth"
-        );
-
         let n = render(EventKind::ServerStarted {
             pid: 4242,
             endpoint: "127.0.0.1:50123".into(),
         });
         assert_eq!(n.line, "server started · pid 4242 · 127.0.0.1:50123");
-
-        let n = render(EventKind::ChannelOpened {
-            name: "ship.148e0e02".into(),
-            run_id: "run-8c1d2e3f4a".into(),
-        });
-        assert_eq!(n.line, "channel ship.148e0e02 opened · run run-8c1d");
-    }
-
-    /// Historical `ChannelOpened` rows still fold into a thread-visible turn.
-    #[test]
-    fn fold_materializes_legacy_channel_opened_as_a_worker_turn() {
-        let events = vec![Event {
-            v: FORMAT_VERSION,
-            seq: 1,
-            at: OffsetDateTime::now_utc(),
-            kind: EventKind::ChannelOpened {
-                name: "ship.148e0e02".into(),
-                run_id: "run-7".into(),
-            },
-        }];
-        let fold = fold_thread(&events);
-        assert_eq!(fold.turns.len(), 1);
-        assert_eq!(fold.turns[0].text, "work line ship.148e0e02 opened");
-        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
-        assert_eq!(fold.turns[0].id, "turn-1");
-        assert!(
-            fold.pending_messages.is_empty(),
-            "a channel opening never queues for the loop"
-        );
     }
 
     /// Long text is flattened and cut; a fresh turn resets the prose gist.
@@ -1911,7 +1660,6 @@ mod tests {
             id: MessageId("msg-1".into()),
             op: MessageOp::Message,
             text: long.clone(),
-            from: None,
         });
         assert_eq!(n.line, format!("chat ← \"{}…\" (msg-1)", "x".repeat(60)));
 
@@ -2007,49 +1755,6 @@ mod tests {
                 turn_id: turn_id.clone()
             }
         );
-    }
-
-    /// A `Say` emission is a user message with a byline: the fold puts its
-    /// attribution on the wire turn and queues it as consumable input, and a
-    /// `TurnStarted.answers` naming it consumes it like any other message.
-    #[test]
-    fn fold_treats_say_as_attributed_consumable_input() {
-        let say = |seq: u64| EventKind::UserMessage {
-            id: MessageId(format!("msg-{seq}")),
-            op: MessageOp::Say,
-            text: "landed the parser PR".to_string(),
-            from: Some("worker".into()),
-        };
-        let events = vec![Event {
-            v: FORMAT_VERSION,
-            seq: 1,
-            at: OffsetDateTime::now_utc(),
-            kind: say(1),
-        }];
-        let fold = fold_thread(&events);
-        assert_eq!(fold.turns.len(), 1);
-        assert_eq!(fold.turns[0].role, ChatRole::User);
-        assert_eq!(fold.turns[0].from.as_deref(), Some("worker"));
-        assert_eq!(fold.pending_messages.len(), 1, "say queues for the loop");
-        assert_eq!(fold.pending_messages[0].op, MessageOp::Say);
-        assert_eq!(fold.pending_messages[0].from.as_deref(), Some("worker"));
-
-        // Consumption: a turn answering it drains the queue.
-        let consumed = vec![
-            events[0].clone(),
-            Event {
-                v: FORMAT_VERSION,
-                seq: 2,
-                at: OffsetDateTime::now_utc(),
-                kind: EventKind::TurnStarted {
-                    turn_id: "turn-2".into(),
-                    answers: vec![MessageId("msg-1".into())],
-                    body: None,
-                },
-            },
-        ];
-        let fold = fold_thread(&consumed);
-        assert!(fold.pending_messages.is_empty(), "answered say is consumed");
     }
 
     #[test]

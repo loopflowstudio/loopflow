@@ -602,14 +602,14 @@ fn parse_duration(value: &str) -> anyhow::Result<std::time::Duration> {
 fn format_child_body(
     agent: &str,
     provider: &str,
-    launch: Option<&loopflow::durable::Launch>,
+    invocation: Option<&loopflow::durable::AgentInvocation>,
 ) -> String {
-    launch.map_or_else(
+    invocation.map_or_else(
         || format!("none; next agent {agent}, provider {provider}"),
-        |launch| {
+        |invocation| {
             format!(
-                "launch {}; agent {agent}; provider {}; {:?}",
-                launch.id, launch.route.provider, launch.state
+                "invocation {}; agent {agent}; provider {}",
+                invocation.id, invocation.route.provider
             )
         },
     )
@@ -617,7 +617,7 @@ fn format_child_body(
 
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
-/// the session's `PM writeback` line sits directly above. Silence means linked.
+/// the Task's `PM writeback` line sits directly above. Silence means linked.
 fn format_task_pr_line(pr: &loopflow::task::TaskPr) -> String {
     let provider = pr
         .github()
@@ -644,12 +644,12 @@ fn format_task_pr_line(pr: &loopflow::task::TaskPr) -> String {
     )
 }
 
-fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
-    let snapshot = loopflow::ops::task::task_snapshot(session)?;
+fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
+    let snapshot = loopflow::ops::task::task_snapshot(task)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let pm_writeback = match &session.pm_writeback {
+        let pm_writeback = match &task.pm_writeback {
             loopflow::task::PmWritebackState::Current => "current".to_string(),
             loopflow::task::PmWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
@@ -661,25 +661,24 @@ fn print_task(session: &loopflow::task::Task, json: bool) -> anyhow::Result<()> 
             .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
             .map(|pr| pr.branch.as_str())
             .unwrap_or("none");
-        let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
+        let body = format_child_body(&task.agent, &task.provider, snapshot.invocation.as_ref());
         println!(
-            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} ({}, iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
-            session.launch.issue.identifier,
+            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            task.plan.identifier,
             work_status_label(&snapshot.status),
-            session.id,
-            session.lifecycle_phase.as_str(),
-            session.lifecycle_cycle(),
-            session.phase_plan().flow,
-            session.phase_plan().interaction_policy.as_str(),
-            session.phase_iteration + 1,
-            session.phase_cursor + 1,
+            task.id,
+            task.lifecycle_phase.as_str(),
+            task.lifecycle_cycle(),
+            task.phase_plan().flow,
+            task.phase_iteration + 1,
+            task.phase_cursor + 1,
             body,
-            session.worktree.display(),
+            task.worktree.display(),
             branch,
             pm_writeback,
             work_status_label(&snapshot.status),
         );
-        println!("  project: {}", session.project_id);
+        println!("  project: {}", task.project_id);
         for pr in &snapshot.prs {
             println!("{}", format_task_pr_line(pr));
         }
@@ -750,19 +749,23 @@ fn print_task_control(
     Ok(())
 }
 
-fn print_project(session: &loopflow::project::Project, json: bool) -> anyhow::Result<()> {
-    let snapshot = loopflow::ops::project::project_snapshot(session)?;
+fn print_project(project: &loopflow::project::Project, json: bool) -> anyhow::Result<()> {
+    let snapshot = loopflow::ops::project::project_snapshot(project)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let body = format_child_body(&session.agent, &session.provider, snapshot.launch.as_ref());
+        let body = format_child_body(
+            &project.agent,
+            &project.provider,
+            snapshot.invocation.as_ref(),
+        );
         println!(
-            "{}  {}\n  session: {}\n  body: {}\n  iteration: {}\n  reason: {}",
-            session.launch.project.slug,
+            "{}  {}\n  project: {}\n  body: {}\n  iteration: {}\n  reason: {}",
+            project.plan.slug,
             work_status_label(&snapshot.status),
-            session.id,
+            project.id,
             body,
-            session.iteration,
+            project.iteration,
             work_status_label(&snapshot.status),
         );
     }
@@ -793,8 +796,8 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             directive,
             json,
         } => {
-            let session = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
-            print_project(&session, *json)
+            let project = loopflow::ops::project::project_run(repo, project_id, directive.clone())?;
+            print_project(&project, *json)
         }
         ProjectCommand::Start {
             title,
@@ -802,17 +805,17 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
             directive,
             json,
         } => {
-            let session = loopflow::ops::project::project_start(
+            let project = loopflow::ops::project::project_start(
                 repo,
                 title,
                 wave.as_deref(),
                 directive.clone(),
             )?;
-            print_project(&session, *json)
+            print_project(&project, *json)
         }
         ProjectCommand::Status { project_id, json } => {
-            let session = loopflow::ops::project::project_status(project_id)?;
-            print_project(&session, *json)
+            let project = loopflow::ops::project::project_status(project_id)?;
+            print_project(&project, *json)
         }
         ProjectCommand::Steer {
             project_id,
@@ -838,8 +841,8 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
                 loopflow::ops::project::ProjectWaitUntil::Terminal
             };
             let timeout = timeout.as_deref().map(parse_duration).transpose()?;
-            let session = loopflow::ops::project::project_wait(project_id, until, timeout)?;
-            print_project(&session, *json)
+            let project = loopflow::ops::project::project_wait(project_id, until, timeout)?;
+            print_project(&project, *json)
         }
         ProjectCommand::Resume {
             project_id,
@@ -878,10 +881,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             finally,
             stack_on,
             directive,
-            headless,
             json,
         } => {
-            let session = loopflow::ops::task::task_run(
+            let task = loopflow::ops::task::task_run(
                 repo,
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
@@ -893,10 +895,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
-                    headless: *headless,
                 },
             )?;
-            print_task(&session, *json)
+            print_task(&task, *json)
         }
         TaskCommand::Start {
             project_id,
@@ -907,10 +908,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             finally,
             stack_on,
             directive,
-            headless,
             json,
         } => {
-            let session = loopflow::ops::task::task_start(
+            let task = loopflow::ops::task::task_start(
                 repo,
                 project_id,
                 title.clone(),
@@ -924,14 +924,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
-                    headless: *headless,
                 },
             )?;
-            print_task(&session, *json)
+            print_task(&task, *json)
         }
         TaskCommand::Status { issue, json } => {
-            let session = loopflow::ops::task::task_status(issue)?;
-            print_task(&session, *json)
+            let task = loopflow::ops::task::task_status(issue)?;
+            print_task(&task, *json)
         }
         TaskCommand::Changes { issue, json } => {
             let snapshot = loopflow::ops::task::task_changes(issue)?;
@@ -990,8 +989,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             summary,
             json,
         } => {
-            let session = loopflow::ops::task::task_complete(issue, summary.clone())?;
-            print_task(&session, *json)
+            let task = loopflow::ops::task::task_complete(issue, summary.clone())?;
+            print_task(&task, *json)
         }
         TaskCommand::Steer {
             issue,
@@ -1017,8 +1016,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 loopflow::ops::task::TaskWaitUntil::Terminal
             };
             let timeout = timeout.as_deref().map(parse_duration).transpose()?;
-            let session = loopflow::ops::task::task_wait(issue, until, timeout)?;
-            print_task(&session, *json)
+            let task = loopflow::ops::task::task_wait(issue, until, timeout)?;
+            print_task(&task, *json)
         }
         TaskCommand::Resume {
             issue,
@@ -1034,8 +1033,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             reason,
             json,
         } => {
-            let session = loopflow::ops::task::task_recover(issue, reason.clone())?;
-            print_task(&session, *json)
+            let task = loopflow::ops::task::task_recover(issue, reason.clone())?;
+            print_task(&task, *json)
         }
         TaskCommand::Abandon {
             issue,
@@ -1099,18 +1098,11 @@ fn main() -> anyhow::Result<()> {
         cli.wave = Some(wave.name().to_string());
     }
     // One resolved wave identity drives prompt context, registry attribution,
-    // journaling, and every child process. An explicit wave is also the
-    // default bus channel for this invocation.
+    // journaling, and every child process.
     let _explicit_wave_env = explicit_wave.as_ref().map(|wave| {
         EnvGuard::set(
             loopflow::engine::wave_context::WAVE_ID_ENV,
             wave.id().to_string(),
-        )
-    });
-    let _explicit_channel_env = explicit_wave.as_ref().map(|wave| {
-        EnvGuard::set(
-            loopflow::engine::wave_context::CHANNEL_ENV,
-            wave.name().to_string(),
         )
     });
     // `--account`/`--only-account` are resolved once at the outer invocation.
@@ -1198,6 +1190,7 @@ fn main() -> anyhow::Result<()> {
                 })
             }
             Some(Commands::Desktop) => loopflow::lf::commands::desktop::run(),
+            Some(Commands::Ask { args }) => loopflow::lf::commands::ask::run(args),
             Some(Commands::Pr { cmd }) => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
             }),
@@ -1296,9 +1289,9 @@ fn main() -> anyhow::Result<()> {
                     "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
                 );
                 run_target("project-promote", Some(&message), &cli, &args)?;
-                let session = loopflow::ops::project::complete_promotion(repo, &parent, slug)
+                let residency = loopflow::ops::project::complete_promotion(repo, &parent, slug)
                     .map_err(anyhow::Error::from)?;
-                println!("promoted {slug} from {parent}; residency: {session}");
+                println!("promoted {slug} from {parent}; residency: {residency}");
                 Ok(())
             }),
             Some(Commands::Project { cmd }) => {
@@ -1307,28 +1300,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Task { cmd }) => {
                 in_repo_runtime(&args, |repo| run_task_command(repo, cmd))
             }
-            Some(Commands::Launch { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::launch::run(cmd))
+            Some(Commands::Invocation { cmd }) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::invocation::run(cmd))
             }
             Some(Commands::Work { cmd }) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
             }
-            Some(Commands::Queue { json }) => {
-                loopflow::lf::commands::work::run_queue(*json)
-            }
-            Some(Commands::FeedbackExitGuard {
-                kind,
-                id,
-                launch_id,
-                epoch_id,
-                revision,
-            }) => loopflow::lf::commands::work::run_exit_guard(
-                kind,
-                id,
-                launch_id,
-                epoch_id,
-                *revision,
-            ),
             Some(Commands::WorkRunner { kind, work_id }) => {
                 let work = match kind.as_str() {
                     "project" => loopflow::durable::WorkRef::Project(work_id.parse()?),
@@ -1427,7 +1404,7 @@ fn main() -> anyhow::Result<()> {
                 content,
                 events,
                 jsonl,
-                launch,
+                invocation,
                 turn,
             }) => loopflow::lf::commands::runs::trace(
                 exec_id,
@@ -1435,7 +1412,7 @@ fn main() -> anyhow::Result<()> {
                 *content,
                 *events,
                 *jsonl,
-                launch.as_deref(),
+                invocation.as_deref(),
                 turn.as_deref(),
             ),
             Some(Commands::Chat {
@@ -1449,35 +1426,10 @@ fn main() -> anyhow::Result<()> {
             }) => loopflow::lf::commands::chat::run(
                 text, *follow, *steer, *history, *json, *limit, target,
             ),
-            Some(Commands::Radio { command }) => match command {
-                loopflow::lf::RadioCommand::Pub {
-                    text,
-                    channel,
-                    parent,
-                    from,
-                } => loopflow::lf::commands::radio::run_pub(
-                    text,
-                    channel.as_deref(),
-                    *parent,
-                    from.as_deref(),
-                ),
-                loopflow::lf::RadioCommand::Sub { channel, json } => {
-                    loopflow::lf::commands::sub::run(channel.as_deref(), *json)
-                }
-            },
             Some(Commands::Install { .. }) => {
                 unreachable!("install dispatches before home routing")
             }
-            Some(Commands::RetiredSub { .. }) => unreachable!("retired sub cannot parse"),
             Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
-            Some(Commands::Memory { cmd, target }) => {
-                loopflow::lf::commands::memory::run(cmd.as_ref(), target)
-            }
-            Some(Commands::Receipt { cmd }) => match cmd {
-                loopflow::lf::ReceiptCommand::Show { token, wave, json } => {
-                    loopflow::lf::commands::receipt::run(token, wave.as_deref(), *json)
-                }
-            },
             Some(Commands::Ssh {
                 target,
                 repo,
@@ -1529,7 +1481,7 @@ mod tests {
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
-    use loopflow::task::{AfterMerge, GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
+    use loopflow::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
     fn published_pr() -> TaskPr {
         let now = time::OffsetDateTime::now_utc();
@@ -1543,13 +1495,12 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::Review,
-                next_slug: None,
                 github: Some(GithubPr {
                     number: 931,
                     url: "https://github.com/loopflowstudio/loopflow/pull/931".to_string(),
                     head_sha: None,
                 }),
+                merge: None,
             }),
             merge_commit: None,
             abandoned_at: None,
@@ -1592,8 +1543,8 @@ mod tests {
         let tables = arg_tables();
         for command in [
             ":", "desktop", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task",
-            "project", "flow", "skill", "chat", "memory", "usage", "top", "ls", "status", "runs",
-            "trace", "help",
+            "project", "flow", "skill", "chat", "usage", "top", "ls", "status", "runs", "trace",
+            "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }
@@ -2057,35 +2008,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reorder_args_keeps_valid_parent_flags_on_the_parent() {
-        let args: Vec<String> = ["lf", "memory", "--wave", "systems", "add", "fact"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            reorder_args(args),
-            vec!["lf", "memory", "--wave", "systems", "add", "fact"]
-        );
-    }
-
     /// `lf chat --wave X text` must reach the chat subcommand untouched —
     /// hoisting `--wave` to the top level silently retargets the publish.
     #[test]
-    fn reorder_args_leaves_chat_and_memory_targeting_alone() {
+    fn reorder_args_leaves_explicit_targeting_alone() {
         let args: Vec<String> = ["lf", "chat", "--wave", "systems", "shipped it"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             reorder_args(args),
             vec!["lf", "chat", "--wave", "systems", "shipped it"]
-        );
-
-        let args: Vec<String> = ["lf", "memory", "add", "fact", "--wave", "systems"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(
-            reorder_args(args),
-            vec!["lf", "memory", "add", "fact", "--wave", "systems"]
         );
 
         let args: Vec<String> = ["lf", "pm", "show", "--wave", "systems"]

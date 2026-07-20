@@ -24,7 +24,7 @@ const FRESH_SECS: i64 = 15 * 60;
 /// window observations have gone stale are polled live first.
 ///
 /// `--json` emits one row per *Turn* instead: what the provider measured for
-/// one exchange, attributed by the launch that ran it. That is the grain the
+/// one exchange, attributed by the invocation that ran it. That is the grain the
 /// dashboard groups by — skill, `provider:model`, repo — and consumers sum,
 /// never diff.
 pub fn run(json: bool, days: u32, refresh: bool, cached: bool) -> Result<()> {
@@ -303,7 +303,7 @@ fn format_share(total: u64, grand_total: u64) -> String {
 /// per-Turn rows emitted by `--json`: terminal-only SQL cannot assign a flow
 /// that uses Claude for one skill and Codex for another.
 ///
-/// Every Turn is reached through the launch that ran it, and a launch always
+/// Every Turn is reached through the invocation that ran it, and a invocation always
 /// names its repo and provider — so spend here is never unattributed.
 #[derive(Debug, PartialEq)]
 struct UsageRow {
@@ -441,7 +441,7 @@ mod tests {
         sqlite::SqliteStore, AccountLimitWindow, CredentialState, ProviderAccount,
         ProviderAccountId, RoutingState, TurnSpendRow,
     };
-    use crate::trace::{AgentLaunchRow, AgentTurnRow};
+    use crate::trace::{AgentInvocationRow, AgentTurnRow};
 
     const TURN_SPEND_FIXTURE: &str =
         include_str!("../../../../../tests/fixtures/dto/turn_spend.json");
@@ -475,7 +475,7 @@ mod tests {
 
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].turn_id, "turn-1");
-        assert_eq!(turns[0].launch_id, "launch-1");
+        assert_eq!(turns[0].invocation_id, "invocation-1");
         assert_eq!(turns[1].input_tokens, None);
         assert_eq!(turns[1].output_tokens, Some(0));
         assert_eq!(turns[1].cache_read_tokens, Some(150));
@@ -487,10 +487,11 @@ mod tests {
         );
     }
 
-    fn launch(id: &str) -> AgentLaunchRow {
-        AgentLaunchRow {
-            id: format!("launch-{id}"),
+    fn invocation(id: &str) -> AgentInvocationRow {
+        AgentInvocationRow {
+            id: format!("invocation-{id}"),
             run_id: format!("trace-{id}"),
+            answer_ask_id: None,
             process_id: format!("exec-{id}"),
             started_at: 100,
             ended_at: Some(110),
@@ -507,25 +508,25 @@ mod tests {
             capture_status: "complete".to_string(),
             incomplete_reason: None,
             outcome: "completed".to_string(),
-            artifact_dir: "traces/launch".to_string(),
-            conversation_path: "traces/launch/conversation.jsonl".to_string(),
+            artifact_dir: "traces/invocation".to_string(),
+            conversation_path: "traces/invocation/conversation.jsonl".to_string(),
             provider_events_path: None,
             provider_session_id: None,
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 1,
-            control: None,
+            supervision: None,
         }
     }
 
     fn measured_turn(
-        launch: &AgentLaunchRow,
+        invocation: &AgentInvocationRow,
         output: Option<i64>,
         cache_read: Option<i64>,
     ) -> AgentTurnRow {
         AgentTurnRow {
-            id: launch.id.replacen("launch", "turn", 1),
-            launch_id: launch.id.clone(),
+            id: invocation.id.replacen("invocation", "turn", 1),
+            invocation_id: invocation.id.clone(),
             ordinal: 1,
             provider_turn_id: None,
             started_at: 100,
@@ -567,10 +568,10 @@ mod tests {
             ("zero", Some(0), None),
             ("cache", None, Some(150)),
         ] {
-            let launch = launch(id);
-            let turn = measured_turn(&launch, output, cache_read);
+            let invocation = invocation(id);
+            let turn = measured_turn(&invocation, output, cache_read);
             store
-                .insert_trace_capture(&launch, &turn, &[], &[])
+                .insert_trace_capture(&invocation, &turn, &[], &[])
                 .expect("insert capture");
         }
 
@@ -691,7 +692,7 @@ mod tests {
     fn turn(process: &str, at: i64, provider: &str, input: i64) -> TurnSpendRow {
         TurnSpendRow {
             turn_id: format!("turn-{process}-{at}"),
-            launch_id: format!("launch-{process}"),
+            invocation_id: format!("invocation-{process}"),
             trace_id: "trace".to_string(),
             exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),

@@ -268,13 +268,13 @@
       "work_id": "ts_commits",
       "project_id": "ps_1",
       "status": "ready",
-      "reason": "PR open for review",
+      "reason": "User merge requested",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
       "process_alive": false,
       "observation": {
         "category": "needs_input",
-        "reason": "PR open for review",
+        "reason": "User merge requested",
         "owner": "user",
         "controls": [
           "decide",
@@ -287,18 +287,18 @@
       }
     },
     "next_move": {
-      "owner": "review",
-      "reason": "checks passed; awaiting review"
+      "owner": "user",
+      "reason": "merge pull request head head-commits on GitHub"
     },
     "attention": {
       "level": "red",
-      "reason": "checks passed; awaiting review",
+      "reason": "merge pull request head head-commits on GitHub",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
-      "next_owner": "review",
+      "next_owner": "user",
       "actions": {
-        "recommended": "review",
-        "reason": "checks passed; awaiting review"
+        "recommended": "open_pr",
+        "reason": "merge head head-commits on GitHub"
       },
       "pm_completed": false,
       "work_status": "ready",
@@ -327,11 +327,16 @@
       "empty": null,
       "publication": {
         "requested_at": "2026-07-14T22:00:00Z",
-        "after_merge": "review",
-        "next_slug": null,
         "github": {
           "number": 123,
           "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits",
+          "after_merge": "continue_task",
+          "next_slug": null
         }
       },
       "merge_commit": null,

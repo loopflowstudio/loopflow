@@ -4,6 +4,7 @@
 #if os(macOS)
 import Foundation
 import Testing
+@testable import Loopflow
 @testable import LoopflowMac
 
 @Suite("Local wave launcher")
@@ -89,9 +90,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
-        #expect(LocalWaveAgentLauncher.taskFeedbackCommand(lfPath: lf, taskId: "task_131") == [
-            lf, "work", "feedback", "task", "task_131", "--continue-on-exit",
-        ])
     }
 
     @Test("PR review delegates to lf pr open rather than opening a URL itself")
@@ -104,6 +102,17 @@ struct LocalWaveAgentLauncherTests {
         #expect(command == [lf, "pr", "open"])
         #expect(!command.contains { $0.contains("github.com") })
         #expect(!command.contains { $0.hasPrefix("http") })
+    }
+
+    private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {
+        let testFile = URL(fileURLWithPath: sourceFile)
+        let fixtures = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto")
+            .appendingPathComponent(name)
+        return try Data(contentsOf: fixtures)
     }
 
     @Test("Task start uses the exact CLI receipt as workspace identity")

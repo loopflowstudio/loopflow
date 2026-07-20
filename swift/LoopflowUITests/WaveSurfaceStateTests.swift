@@ -38,7 +38,7 @@ final class WaveSurfaceStateTests: XCTestCase {
     }
 
     @MainActor
-    func testControlIsSecondaryAndOpensToActiveSessions() {
+    func testControlIsSecondaryAndOpensToWorkCensus() {
         forEachWidth { app in
             XCTAssertTrue(waitFor(app, id: "wave-chat-transcript"),
                           "Chat must be the selected Wave's default surface")
@@ -52,8 +52,8 @@ final class WaveSurfaceStateTests: XCTestCase {
 
             XCTAssertTrue(waitFor(app, id: "control-surface"),
                           "Control must open from the Wave header")
-            XCTAssertTrue(waitFor(app, id: "control-active-sessions"),
-                          "Control must open to Active Sessions")
+            XCTAssertTrue(waitFor(app, id: "control-work-census"),
+                          "Control must open to the Work Census")
             XCTAssertTrue(exists(app, id: "control-run-history-tab"),
                           "Run History remains visible as later disclosure")
         }

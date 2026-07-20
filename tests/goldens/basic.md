@@ -138,15 +138,15 @@ borrow the origin's short-lived credential lease.
 
 ## Speak
 
-Answer a human message in your turn text. Use `lf radio pub` for proactive progress,
-completion, or failure reports only when the prompt establishes an exact wave or
-channel, or when the active skill requires it. Never guess a channel.
+Answer a human message in your turn text. Tasks, Projects, and Waves communicate
+through typed Work observations and targeted Ask/Answer exchanges.
 
-`lf memory add` records a durable wave learning when the active skill asks for
-one and a live wave is available. A stopped server must not block the assigned
-work. `wave/<name>/MEMORY.md` is server-owned; never edit it directly.
+When the active skill calls for a durable Wave learning, edit
+`wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it
+curated rather than appending a transcript. `update-wave` owns deliberate
+end-of-work memory curation; no live Wave is required.
 
-`lf chat` is the User surface. Loopflow-launched agents use `lf radio pub`.
+`lf chat` is the User surface. Work Steer is the live correction path.
 
 ## Where To Write
 

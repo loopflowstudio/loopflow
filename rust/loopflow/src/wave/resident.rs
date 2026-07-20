@@ -207,14 +207,20 @@ pub async fn follow_inbox(endpoint: String, inbox_tx: mpsc::UnboundedSender<Inbo
 
 fn inbox_item(frame: InboxFrame) -> InboxItem {
     match frame {
-        InboxFrame::Message { id, op, text, from } => InboxItem::Message(PendingMessage {
+        InboxFrame::Message { id, op, text } => InboxItem::Message(PendingMessage {
             id: MessageId(id),
             op,
             text,
-            from,
         }),
         InboxFrame::Task { observation } => InboxItem::Task(observation),
         InboxFrame::Project { observation } => InboxItem::Project(observation),
+        InboxFrame::Promotion {
+            parent_wave_id,
+            parent,
+        } => InboxItem::Promotion {
+            parent_wave_id,
+            parent,
+        },
         InboxFrame::Interrupt => InboxItem::Interrupt,
         InboxFrame::Skip => InboxItem::Skip,
     }
@@ -462,10 +468,14 @@ mod tests {
             WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open runtime");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = server::router(
+        let observer = std::sync::Arc::new(crate::wave::registry::ObserverSlot::new(
+            runtime.clone(),
+            None,
+        ));
+        let app = server::router_with_observer(
             runtime,
             server::ResidentDoor::new("right-token"),
-            None,
+            observer,
             None,
             server::ShutdownDoor::new(),
         );
@@ -492,7 +502,6 @@ mod tests {
             id: "msg-3".into(),
             op: crate::wave::journal::MessageOp::Steer,
             text: "focus".into(),
-            from: None,
         });
         let InboxItem::Message(message) = message else {
             panic!("expected message");

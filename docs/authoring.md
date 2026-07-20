@@ -56,17 +56,9 @@ flow — with commits between them:
 - gate
 ```
 
-Declare conversation on the flow step that owns it:
-
-```yaml
-- kickoff
-- step:
-    name: review-design
-    feedback: true
-- implement
-```
-
-The skill itself does not make every flow that references it wait for Feedback.
+Skills that need judgment run `lf ask "<question>"`. The command records the
+exchange under the current Turn, waits for its routed Answer, then returns that
+Answer to the same skill process. Flow YAML needs no interaction flag.
 
 Mechanical git/PR operations ride along as `op:` steps:
 
@@ -218,8 +210,9 @@ hand.
 lf design: plan infrastructure hardening for the runtime
 ```
 
-Don't author `MEMORY.md` beyond a seed: it is server-owned, written by the
-wave as it works. Curate it through `lf memory add --receipt`, not the file.
+Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
+agents edit the same reviewed file through the ordinary repository workflow;
+`update-wave` owns deliberate end-of-work curation.
 
 ## Adaptation
 

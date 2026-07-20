@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::journal::open_ledger;
-use crate::trace::{AgentLaunchRow, AgentTurnRow, ContextAssetKind, ContextAssetRow};
+use crate::trace::{AgentInvocationRow, AgentTurnRow, ContextAssetKind, ContextAssetRow};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionSetQuery {
+pub struct InvocationSetQuery {
     pub repo_paths: Vec<String>,
     pub started_after: i64,
     pub started_before: i64,
@@ -32,59 +32,59 @@ pub struct SessionSetQuery {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextLabSnapshot {
-    pub query: SessionSetQuery,
+    pub query: InvocationSetQuery,
     pub coverage: ContextCoverageDto,
-    pub totals: SessionSetTotals,
+    pub totals: InvocationSetTotals,
     pub aggregate_root: ContextFlameNode,
-    pub sessions: Vec<SessionLane>,
+    pub invocations: Vec<InvocationLane>,
     pub sources: Vec<InstructionSourceSummary>,
     pub evidence: Vec<SourceEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextCoverageDto {
-    pub complete_launches: u64,
-    pub partial_launches: u64,
-    pub prompt_only_launches: u64,
-    pub capturing_launches: u64,
+    pub complete_invocations: u64,
+    pub partial_invocations: u64,
+    pub prompt_only_invocations: u64,
+    pub capturing_invocations: u64,
     pub attributed_turns: u64,
     pub provider_total_only_turns: u64,
     pub unknown_turns: u64,
     pub prompt_artifacts_available: u64,
     pub conversations_available: u64,
-    pub source_observable_agent_sessions: u64,
+    pub source_observable_invocations: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionSetTotals {
+pub struct InvocationSetTotals {
     pub runs: u64,
-    pub agent_sessions: u64,
+    pub invocations: u64,
     pub turns: u64,
     pub initial_prompt_tokens: Option<u64>,
-    pub initial_prompt_agent_sessions: u64,
+    pub initial_prompt_invocations: u64,
     pub median_initial_prompt_tokens: Option<u64>,
     pub p95_initial_prompt_tokens: Option<u64>,
     pub instruction_tokens: Option<u64>,
     pub lifetime_input_tokens: Option<u64>,
-    pub lifetime_input_agent_sessions: u64,
+    pub lifetime_input_invocations: u64,
     pub median_lifetime_input_tokens: Option<u64>,
     pub p95_lifetime_input_tokens: Option<u64>,
     pub median_peak_context_percent: Option<f64>,
     pub p95_peak_context_percent: Option<f64>,
-    pub peak_context_agent_sessions: u64,
-    pub completed_launches: u64,
-    pub failed_launches: u64,
-    pub interrupted_launches: u64,
-    pub running_launches: u64,
+    pub peak_context_invocations: u64,
+    pub completed_invocations: u64,
+    pub failed_invocations: u64,
+    pub interrupted_invocations: u64,
+    pub running_invocations: u64,
     pub steering_turns: u64,
-    pub steered_launches: u64,
+    pub steered_invocations: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum ContextFlameLevel {
-    SessionSet,
+    InvocationSet,
     Kind,
     Source,
     Revision,
@@ -100,13 +100,13 @@ pub struct ContextFlameNode {
     pub content_sha256: Option<String>,
     pub attributed_tokens: u64,
     pub run_count: u64,
-    pub agent_session_count: u64,
+    pub invocation_count: u64,
     pub turn_count: u64,
     pub children: Vec<ContextFlameNode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionLane {
+pub struct InvocationLane {
     pub id: String,
     pub run_id: String,
     pub started_at: i64,
@@ -156,7 +156,7 @@ pub struct InstructionSourceSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct TraceAddress {
     pub run_id: String,
-    pub launch_id: String,
+    pub invocation_id: String,
     pub turn_id: String,
 }
 
@@ -183,18 +183,18 @@ pub struct RepresentativeTrace {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceMeasurements {
-    pub exposed_sessions: u64,
-    pub exposed_launches: u64,
+    pub exposed_runs: u64,
+    pub exposed_invocations: u64,
     pub exposed_turns: u64,
     pub attributed_tokens: u64,
     pub median_tokens_per_exposed_turn: Option<u64>,
     pub p95_tokens_per_exposed_turn: Option<u64>,
     pub first_seen: Option<i64>,
     pub last_seen: Option<i64>,
-    pub completed_launches: u64,
-    pub failed_launches: u64,
+    pub completed_invocations: u64,
+    pub failed_invocations: u64,
     pub steering_turns: Option<u64>,
-    pub complete_capture_launches: u64,
+    pub complete_capture_invocations: u64,
     pub provider_models: Vec<ProviderModelExposure>,
 }
 
@@ -202,7 +202,7 @@ pub struct SourceMeasurements {
 pub struct ProviderModelExposure {
     pub provider: String,
     pub model: Option<String>,
-    pub exposed_launches: u64,
+    pub exposed_invocations: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -249,7 +249,7 @@ pub fn run(options: ContextQueryOptions) -> Result<()> {
     if started_after >= started_before {
         return Err(anyhow!("context window must start before it ends"));
     }
-    let query = SessionSetQuery {
+    let query = InvocationSetQuery {
         repo_paths: options.repo_paths,
         started_after,
         started_before,
@@ -269,21 +269,21 @@ pub fn run(options: ContextQueryOptions) -> Result<()> {
     validate_query(&query)?;
 
     let store = open_ledger().map_err(|error| anyhow!("run ledger unavailable: {error}"))?;
-    let launches = store
-        .agent_launches_since(query.started_after)
-        .map_err(|error| anyhow!("failed to read context launches: {error}"))?
+    let invocations = store
+        .agent_invocations_since(query.started_after)
+        .map_err(|error| anyhow!("failed to read context invocations: {error}"))?
         .into_iter()
-        .filter(|launch| launch.started_at < query.started_before)
-        .filter(|launch| launch_matches(launch, &query))
+        .filter(|invocation| invocation.started_at < query.started_before)
+        .filter(|invocation| invocation_matches(invocation, &query))
         .collect::<Vec<_>>();
-    let launch_ids = launches
+    let invocation_ids = invocations
         .iter()
-        .map(|launch| launch.id.clone())
+        .map(|invocation| invocation.id.clone())
         .collect::<Vec<_>>();
-    let turns = store.agent_turns_for_launches(&launch_ids)?;
+    let turns = store.agent_turns_for_invocations(&invocation_ids)?;
     let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
     let assets = store.context_assets_for_turns(&turn_ids)?;
-    let snapshot = aggregate(query, launches, turns, assets);
+    let snapshot = aggregate(query, invocations, turns, assets);
 
     if options.json {
         println!("{}", serde_json::to_string(&snapshot)?);
@@ -293,7 +293,7 @@ pub fn run(options: ContextQueryOptions) -> Result<()> {
     Ok(())
 }
 
-fn validate_query(query: &SessionSetQuery) -> Result<()> {
+fn validate_query(query: &InvocationSetQuery) -> Result<()> {
     validate_values(
         "outcome",
         &query.outcomes,
@@ -324,18 +324,18 @@ fn validate_values(label: &str, values: &[String], allowed: &[&str]) -> Result<(
     Ok(())
 }
 
-fn launch_matches(launch: &AgentLaunchRow, query: &SessionSetQuery) -> bool {
-    matches_filter(&query.repo_paths, Some(&launch.repo))
-        && matches_filter(&query.waves, launch.wave.as_ref())
-        && matches_filter(&query.projects, launch.project.as_ref())
-        && matches_filter(&query.tasks, launch.task.as_ref())
-        && matches_filter(&query.flows, launch.flow.as_ref())
-        && matches_filter(&query.skills, launch.skill.as_ref())
-        && matches_filter(&query.providers, Some(&launch.provider))
-        && matches_filter(&query.models, launch.model.as_ref())
-        && matches_filter(&query.surfaces, Some(&launch.surface))
-        && matches_filter(&query.outcomes, Some(&launch.outcome))
-        && matches_filter(&query.capture_states, Some(&launch.capture_status))
+fn invocation_matches(invocation: &AgentInvocationRow, query: &InvocationSetQuery) -> bool {
+    matches_filter(&query.repo_paths, Some(&invocation.repo))
+        && matches_filter(&query.waves, invocation.wave.as_ref())
+        && matches_filter(&query.projects, invocation.project.as_ref())
+        && matches_filter(&query.tasks, invocation.task.as_ref())
+        && matches_filter(&query.flows, invocation.flow.as_ref())
+        && matches_filter(&query.skills, invocation.skill.as_ref())
+        && matches_filter(&query.providers, Some(&invocation.provider))
+        && matches_filter(&query.models, invocation.model.as_ref())
+        && matches_filter(&query.surfaces, Some(&invocation.surface))
+        && matches_filter(&query.outcomes, Some(&invocation.outcome))
+        && matches_filter(&query.capture_states, Some(&invocation.capture_status))
 }
 
 fn matches_filter(values: &[String], candidate: Option<&String>) -> bool {
@@ -343,13 +343,14 @@ fn matches_filter(values: &[String], candidate: Option<&String>) -> bool {
 }
 
 pub fn aggregate(
-    query: SessionSetQuery,
-    launches: Vec<AgentLaunchRow>,
+    query: InvocationSetQuery,
+    invocations: Vec<AgentInvocationRow>,
     turns: Vec<AgentTurnRow>,
     assets: Vec<ContextAssetRow>,
 ) -> ContextLabSnapshot {
-    let (mut launches, turns, assets) = filter_research_state(&query, launches, turns, assets);
-    launches.sort_by_key(|launch| (launch.started_at, launch.id.clone()));
+    let (mut invocations, turns, assets) =
+        filter_research_state(&query, invocations, turns, assets);
+    invocations.sort_by_key(|invocation| (invocation.started_at, invocation.id.clone()));
     let initial_prompt_turns = turns
         .iter()
         .filter(|turn| turn.input_op == "initial" && turn.context_coverage == "assembled")
@@ -361,27 +362,28 @@ pub fn aggregate(
         .collect::<Vec<_>>();
     let catalog_sources = discover_instruction_sources(&query);
     attach_catalog_source_paths(&mut assets, &catalog_sources);
-    let launch_by_id = launches
+    let invocation_by_id = invocations
         .iter()
-        .map(|launch| (launch.id.as_str(), launch))
+        .map(|invocation| (invocation.id.as_str(), invocation))
         .collect::<HashMap<_, _>>();
     let turn_by_id = turns
         .iter()
         .map(|turn| (turn.id.as_str(), turn))
         .collect::<HashMap<_, _>>();
     let assets_by_turn = group_assets(&assets);
-    let revisions = build_revisions(&assets, &launch_by_id, &turn_by_id, &turns);
-    let usage_by_launch = build_agent_session_usage(&launches, &turns);
+    let revisions = build_revisions(&assets, &invocation_by_id, &turn_by_id, &turns);
+    let usage_by_invocation = build_invocation_usage(&invocations, &turns);
     let initial_turns = turns
         .iter()
         .filter(|turn| initial_prompt_turns.contains(turn.id.as_str()))
         .cloned()
         .collect::<Vec<_>>();
 
-    let sessions = build_session_lanes(&launches, &turns, &assets_by_turn, &usage_by_launch);
-    let coverage = build_coverage(&launches, &turns, &assets);
-    let totals = build_totals(&launches, &turns, &assets, &usage_by_launch);
-    let aggregate_root = build_flame(&launches, &initial_turns, &revisions);
+    let invocation_lanes =
+        build_invocation_lanes(&invocations, &turns, &assets_by_turn, &usage_by_invocation);
+    let coverage = build_coverage(&invocations, &turns, &assets);
+    let totals = build_totals(&invocations, &turns, &assets, &usage_by_invocation);
+    let aggregate_root = build_flame(&invocations, &initial_turns, &revisions);
     let mut evidence = build_evidence(revisions);
     let sources = build_instruction_sources(&catalog_sources, &aggregate_root, &mut evidence);
     ContextLabSnapshot {
@@ -389,75 +391,80 @@ pub fn aggregate(
         coverage,
         totals,
         aggregate_root,
-        sessions,
+        invocations: invocation_lanes,
         sources,
         evidence,
     }
 }
 
 fn filter_research_state(
-    query: &SessionSetQuery,
-    mut launches: Vec<AgentLaunchRow>,
+    query: &InvocationSetQuery,
+    mut invocations: Vec<AgentInvocationRow>,
     mut turns: Vec<AgentTurnRow>,
     mut assets: Vec<ContextAssetRow>,
-) -> (Vec<AgentLaunchRow>, Vec<AgentTurnRow>, Vec<ContextAssetRow>) {
+) -> (
+    Vec<AgentInvocationRow>,
+    Vec<AgentTurnRow>,
+    Vec<ContextAssetRow>,
+) {
     if !query.steered_only && !query.current_revision_only {
-        return (launches, turns, assets);
+        return (invocations, turns, assets);
     }
 
-    let mut included_launches = launches
+    let mut included_invocations = invocations
         .iter()
-        .map(|launch| launch.id.clone())
+        .map(|invocation| invocation.id.clone())
         .collect::<HashSet<_>>();
     if query.steered_only {
-        let steered_launches = turns
+        let steered_invocations = turns
             .iter()
             .filter(|turn| turn.input_op == "steer")
-            .map(|turn| turn.launch_id.clone())
+            .map(|turn| turn.invocation_id.clone())
             .collect::<HashSet<_>>();
-        included_launches.retain(|launch_id| steered_launches.contains(launch_id));
+        included_invocations.retain(|invocation_id| steered_invocations.contains(invocation_id));
     }
     if query.current_revision_only {
-        let current_launches = launches_with_current_file_revision(&launches, &turns, &assets);
-        included_launches.retain(|launch_id| current_launches.contains(launch_id));
+        let current_invocations =
+            invocations_with_current_file_revision(&invocations, &turns, &assets);
+        included_invocations.retain(|invocation_id| current_invocations.contains(invocation_id));
     }
 
-    launches.retain(|launch| included_launches.contains(&launch.id));
-    turns.retain(|turn| included_launches.contains(&turn.launch_id));
+    invocations.retain(|invocation| included_invocations.contains(&invocation.id));
+    turns.retain(|turn| included_invocations.contains(&turn.invocation_id));
     let included_turns = turns
         .iter()
         .map(|turn| turn.id.as_str())
         .collect::<HashSet<_>>();
     assets.retain(|asset| included_turns.contains(asset.turn_id.as_str()));
-    (launches, turns, assets)
+    (invocations, turns, assets)
 }
 
-fn launches_with_current_file_revision(
-    launches: &[AgentLaunchRow],
+fn invocations_with_current_file_revision(
+    invocations: &[AgentInvocationRow],
     turns: &[AgentTurnRow],
     assets: &[ContextAssetRow],
 ) -> HashSet<String> {
-    let launch_by_id = launches
+    let invocation_by_id = invocations
         .iter()
-        .map(|launch| (launch.id.as_str(), launch))
+        .map(|invocation| (invocation.id.as_str(), invocation))
         .collect::<HashMap<_, _>>();
-    let launch_id_by_turn = turns
+    let invocation_id_by_turn = turns
         .iter()
-        .map(|turn| (turn.id.as_str(), turn.launch_id.as_str()))
+        .map(|turn| (turn.id.as_str(), turn.invocation_id.as_str()))
         .collect::<HashMap<_, _>>();
     let mut current_hashes: BTreeMap<(ContextAssetKind, String), Option<String>> = BTreeMap::new();
-    let mut current_launches = HashSet::new();
+    let mut current_invocations = HashSet::new();
 
     for row in assets.iter().filter(|row| {
         is_current_file_revision_kind(row.asset.kind) && row.asset.source_path.is_some()
     }) {
-        let Some(launch_id) = launch_id_by_turn.get(row.turn_id.as_str()) else {
+        let Some(invocation_id) = invocation_id_by_turn.get(row.turn_id.as_str()) else {
             continue;
         };
-        let Some(launch) = launch_by_id.get(launch_id) else {
+        let Some(invocation) = invocation_by_id.get(invocation_id) else {
             continue;
         };
-        let canonical = canonical_identity(launch, row);
+        let canonical = canonical_identity(invocation, row);
         let Some(path) = canonical.path else {
             continue;
         };
@@ -467,10 +474,10 @@ fn launches_with_current_file_revision(
                 hash_current_source(row.asset.kind, &path).map(|hashes| hashes.effective)
             });
         if current_hash.as_deref() == Some(row.asset.content_sha256.as_str()) {
-            current_launches.insert((*launch_id).to_string());
+            current_invocations.insert((*invocation_id).to_string());
         }
     }
-    current_launches
+    current_invocations
 }
 
 fn is_current_file_revision_kind(kind: ContextAssetKind) -> bool {
@@ -492,15 +499,15 @@ fn group_assets(assets: &[ContextAssetRow]) -> HashMap<&str, Vec<&ContextAssetRo
 }
 
 fn build_coverage(
-    launches: &[AgentLaunchRow],
+    invocations: &[AgentInvocationRow],
     turns: &[AgentTurnRow],
     assets: &[ContextAssetRow],
 ) -> ContextCoverageDto {
-    let launch_by_turn = turns
+    let invocation_by_turn = turns
         .iter()
-        .map(|turn| (turn.id.as_str(), turn.launch_id.as_str()))
+        .map(|turn| (turn.id.as_str(), turn.invocation_id.as_str()))
         .collect::<HashMap<_, _>>();
-    let source_observable_agent_sessions = assets
+    let source_observable_invocations = assets
         .iter()
         .filter(|row| {
             is_catalog_instruction_kind(row.asset.kind)
@@ -510,14 +517,14 @@ fn build_coverage(
                         ContextAssetKind::SkillInstructions | ContextAssetKind::SurfaceInstructions
                     ))
         })
-        .filter_map(|row| launch_by_turn.get(row.turn_id.as_str()).copied())
+        .filter_map(|row| invocation_by_turn.get(row.turn_id.as_str()).copied())
         .collect::<HashSet<_>>()
         .len() as u64;
     ContextCoverageDto {
-        complete_launches: count_launches(launches, "complete"),
-        partial_launches: count_launches(launches, "partial"),
-        prompt_only_launches: count_launches(launches, "prompt_only"),
-        capturing_launches: count_launches(launches, "capturing"),
+        complete_invocations: count_invocations(invocations, "complete"),
+        partial_invocations: count_invocations(invocations, "partial"),
+        prompt_only_invocations: count_invocations(invocations, "prompt_only"),
+        capturing_invocations: count_invocations(invocations, "capturing"),
         attributed_turns: count_turn_coverage(turns, "assembled"),
         provider_total_only_turns: count_turn_coverage(turns, "provider_total_only"),
         unknown_turns: count_turn_coverage(turns, "unknown"),
@@ -525,49 +532,49 @@ fn build_coverage(
             .iter()
             .filter(|turn| artifact_available(&turn.task_prompt_path))
             .count() as u64,
-        conversations_available: launches
+        conversations_available: invocations
             .iter()
-            .filter(|launch| artifact_available(&launch.conversation_path))
+            .filter(|invocation| artifact_available(&invocation.conversation_path))
             .count() as u64,
-        source_observable_agent_sessions,
+        source_observable_invocations,
     }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct AgentSessionUsage {
+struct InvocationUsage {
     lifetime_input_tokens: Option<u64>,
     peak_context_percent: Option<f64>,
 }
 
-fn build_agent_session_usage(
-    launches: &[AgentLaunchRow],
+fn build_invocation_usage(
+    invocations: &[AgentInvocationRow],
     turns: &[AgentTurnRow],
-) -> HashMap<String, AgentSessionUsage> {
-    let mut turns_by_launch: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
+) -> HashMap<String, InvocationUsage> {
+    let mut turns_by_invocation: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
     for turn in turns {
-        turns_by_launch
-            .entry(turn.launch_id.as_str())
+        turns_by_invocation
+            .entry(turn.invocation_id.as_str())
             .or_default()
             .push(turn);
     }
-    launches
+    invocations
         .iter()
-        .map(|launch| {
-            let launch_turns = turns_by_launch
-                .remove(launch.id.as_str())
+        .map(|invocation| {
+            let invocation_turns = turns_by_invocation
+                .remove(invocation.id.as_str())
                 .unwrap_or_default();
-            let input_values = launch_turns
+            let input_values = invocation_turns
                 .iter()
-                .filter_map(|turn| normalized_total_input(launch, turn))
+                .filter_map(|turn| normalized_total_input(invocation, turn))
                 .collect::<Vec<_>>();
             let lifetime_input_tokens = if input_values.is_empty() {
                 None
-            } else if launch.provider == "codex" {
+            } else if invocation.provider == "codex" {
                 input_values.into_iter().max()
             } else {
                 Some(input_values.into_iter().sum())
             };
-            let peak_context_percent = launch_turns
+            let peak_context_percent = invocation_turns
                 .iter()
                 .filter_map(|turn| {
                     let input = turn.peak_input_tokens.filter(|value| *value >= 0)? as f64;
@@ -576,8 +583,8 @@ fn build_agent_session_usage(
                 })
                 .max_by(f64::total_cmp);
             (
-                launch.id.clone(),
-                AgentSessionUsage {
+                invocation.id.clone(),
+                InvocationUsage {
                     lifetime_input_tokens,
                     peak_context_percent,
                 },
@@ -586,12 +593,12 @@ fn build_agent_session_usage(
         .collect()
 }
 
-fn normalized_total_input(launch: &AgentLaunchRow, turn: &AgentTurnRow) -> Option<u64> {
+fn normalized_total_input(invocation: &AgentInvocationRow, turn: &AgentTurnRow) -> Option<u64> {
     if let Some(value) = turn.provider_total_input_tokens {
         return Some(nonnegative(value));
     }
     let input = nonnegative(turn.provider_input_tokens?);
-    if launch.provider == "codex" {
+    if invocation.provider == "codex" {
         Some(input)
     } else {
         Some(
@@ -603,37 +610,37 @@ fn normalized_total_input(launch: &AgentLaunchRow, turn: &AgentTurnRow) -> Optio
 }
 
 fn build_totals(
-    launches: &[AgentLaunchRow],
+    invocations: &[AgentInvocationRow],
     turns: &[AgentTurnRow],
     assets: &[ContextAssetRow],
-    usage_by_launch: &HashMap<String, AgentSessionUsage>,
-) -> SessionSetTotals {
+    usage_by_invocation: &HashMap<String, InvocationUsage>,
+) -> InvocationSetTotals {
     let mut initial_prompt_values = turns
         .iter()
         .filter(|turn| turn.input_op == "initial" && turn.context_coverage == "assembled")
         .map(|turn| nonnegative(turn.supplied_context_tokens))
         .collect::<Vec<_>>();
     initial_prompt_values.sort_unstable();
-    let initial_prompt_agent_sessions = turns
+    let initial_prompt_invocations = turns
         .iter()
         .filter(|turn| turn.input_op == "initial" && turn.context_coverage == "assembled")
-        .map(|turn| turn.launch_id.as_str())
+        .map(|turn| turn.invocation_id.as_str())
         .collect::<HashSet<_>>()
         .len() as u64;
-    let mut lifetime_input_values = usage_by_launch
+    let mut lifetime_input_values = usage_by_invocation
         .values()
         .filter_map(|usage| usage.lifetime_input_tokens)
         .collect::<Vec<_>>();
     lifetime_input_values.sort_unstable();
-    let mut peak_context_values = usage_by_launch
+    let mut peak_context_values = usage_by_invocation
         .values()
         .filter_map(|usage| usage.peak_context_percent)
         .collect::<Vec<_>>();
     peak_context_values.sort_by(f64::total_cmp);
-    let steered_launches = turns
+    let steered_invocations = turns
         .iter()
         .filter(|turn| turn.input_op == "steer")
-        .map(|turn| turn.launch_id.as_str())
+        .map(|turn| turn.invocation_id.as_str())
         .collect::<HashSet<_>>()
         .len() as u64;
     let instruction_tokens = assets
@@ -650,78 +657,81 @@ fn build_totals(
     let instruction_tokens = initial_prompt_tokens.and_then(|initial_prompt_tokens| {
         (attributed_tokens > 0 || initial_prompt_tokens == 0).then_some(instruction_tokens)
     });
-    SessionSetTotals {
-        runs: launches
+    InvocationSetTotals {
+        runs: invocations
             .iter()
-            .map(|launch| launch.run_id.as_str())
+            .map(|invocation| invocation.run_id.as_str())
             .collect::<HashSet<_>>()
             .len() as u64,
-        agent_sessions: launches.len() as u64,
+        invocations: invocations.len() as u64,
         turns: turns.len() as u64,
         initial_prompt_tokens,
-        initial_prompt_agent_sessions,
+        initial_prompt_invocations,
         median_initial_prompt_tokens: percentile(&initial_prompt_values, 50),
         p95_initial_prompt_tokens: percentile(&initial_prompt_values, 95),
         instruction_tokens,
         lifetime_input_tokens: (!lifetime_input_values.is_empty())
             .then(|| lifetime_input_values.iter().sum()),
-        lifetime_input_agent_sessions: lifetime_input_values.len() as u64,
+        lifetime_input_invocations: lifetime_input_values.len() as u64,
         median_lifetime_input_tokens: percentile(&lifetime_input_values, 50),
         p95_lifetime_input_tokens: percentile(&lifetime_input_values, 95),
         median_peak_context_percent: percentile_f64(&peak_context_values, 50),
         p95_peak_context_percent: percentile_f64(&peak_context_values, 95),
-        peak_context_agent_sessions: peak_context_values.len() as u64,
-        completed_launches: count_outcomes(launches, "completed"),
-        failed_launches: count_outcomes(launches, "failed"),
-        interrupted_launches: count_outcomes(launches, "interrupted"),
-        running_launches: count_outcomes(launches, "running"),
+        peak_context_invocations: peak_context_values.len() as u64,
+        completed_invocations: count_outcomes(invocations, "completed"),
+        failed_invocations: count_outcomes(invocations, "failed"),
+        interrupted_invocations: count_outcomes(invocations, "interrupted"),
+        running_invocations: count_outcomes(invocations, "running"),
         steering_turns: turns.iter().filter(|turn| turn.input_op == "steer").count() as u64,
-        steered_launches,
+        steered_invocations,
     }
 }
 
-fn build_session_lanes(
-    launches: &[AgentLaunchRow],
+fn build_invocation_lanes(
+    invocations: &[AgentInvocationRow],
     turns: &[AgentTurnRow],
     assets_by_turn: &HashMap<&str, Vec<&ContextAssetRow>>,
-    usage_by_launch: &HashMap<String, AgentSessionUsage>,
-) -> Vec<SessionLane> {
-    let mut turns_by_launch: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
+    usage_by_invocation: &HashMap<String, InvocationUsage>,
+) -> Vec<InvocationLane> {
+    let mut turns_by_invocation: HashMap<&str, Vec<&AgentTurnRow>> = HashMap::new();
     for turn in turns {
-        turns_by_launch
-            .entry(turn.launch_id.as_str())
+        turns_by_invocation
+            .entry(turn.invocation_id.as_str())
             .or_default()
             .push(turn);
     }
-    launches
+    invocations
         .iter()
-        .map(|launch| {
-            let mut launch_turns = turns_by_launch
-                .remove(launch.id.as_str())
+        .map(|invocation| {
+            let mut invocation_turns = turns_by_invocation
+                .remove(invocation.id.as_str())
                 .unwrap_or_default();
-            launch_turns.sort_by_key(|turn| turn.ordinal);
-            let steering_turns = launch_turns
+            invocation_turns.sort_by_key(|turn| turn.ordinal);
+            let steering_turns = invocation_turns
                 .iter()
                 .filter(|turn| turn.input_op == "steer")
                 .count() as u64;
-            let usage = usage_by_launch.get(&launch.id).copied().unwrap_or_default();
-            SessionLane {
-                id: launch.id.clone(),
-                run_id: launch.run_id.clone(),
-                started_at: launch.started_at,
-                outcome: launch.outcome.clone(),
+            let usage = usage_by_invocation
+                .get(&invocation.id)
+                .copied()
+                .unwrap_or_default();
+            InvocationLane {
+                id: invocation.id.clone(),
+                run_id: invocation.run_id.clone(),
+                started_at: invocation.started_at,
+                outcome: invocation.outcome.clone(),
                 steering_turns: Some(steering_turns),
                 lifetime_input_tokens: usage.lifetime_input_tokens,
                 peak_context_percent: usage.peak_context_percent,
-                provider: launch.provider.clone(),
-                model: launch.model.clone(),
-                surface: launch.surface.clone(),
-                wave: launch.wave.clone(),
-                project: launch.project.clone(),
-                task: launch.task.clone(),
-                flow: launch.flow.clone(),
-                skill: launch.skill.clone(),
-                turns: launch_turns
+                provider: invocation.provider.clone(),
+                model: invocation.model.clone(),
+                surface: invocation.surface.clone(),
+                wave: invocation.wave.clone(),
+                project: invocation.project.clone(),
+                task: invocation.task.clone(),
+                flow: invocation.flow.clone(),
+                skill: invocation.skill.clone(),
+                turns: invocation_turns
                     .into_iter()
                     .map(|turn| TurnLane {
                         id: turn.id.clone(),
@@ -733,7 +743,7 @@ fn build_session_lanes(
                             .get(turn.id.as_str())
                             .into_iter()
                             .flatten()
-                            .map(|row| lane_asset(launch, row))
+                            .map(|row| lane_asset(invocation, row))
                             .collect(),
                     })
                     .collect(),
@@ -742,8 +752,8 @@ fn build_session_lanes(
         .collect()
 }
 
-fn lane_asset(launch: &AgentLaunchRow, row: &ContextAssetRow) -> ContextLaneAsset {
-    let canonical = canonical_identity(launch, row);
+fn lane_asset(invocation: &AgentInvocationRow, row: &ContextAssetRow) -> ContextLaneAsset {
+    let canonical = canonical_identity(invocation, row);
     ContextLaneAsset {
         node_id: revision_node_id(row.asset.kind, &canonical.key, &row.asset.content_sha256),
         kind: row.asset.kind,
@@ -756,15 +766,15 @@ fn lane_asset(launch: &AgentLaunchRow, row: &ContextAssetRow) -> ContextLaneAsse
 struct FlameAccumulator {
     attributed_tokens: u64,
     runs: BTreeSet<String>,
-    agent_sessions: BTreeSet<String>,
+    invocations: BTreeSet<String>,
     turns: BTreeSet<String>,
 }
 
 impl FlameAccumulator {
-    fn add(&mut self, run_id: &str, launch_id: &str, turn_id: &str, attributed_tokens: u64) {
+    fn add(&mut self, run_id: &str, invocation_id: &str, turn_id: &str, attributed_tokens: u64) {
         self.attributed_tokens += attributed_tokens;
         self.runs.insert(run_id.to_string());
-        self.agent_sessions.insert(launch_id.to_string());
+        self.invocations.insert(invocation_id.to_string());
         self.turns.insert(turn_id.to_string());
     }
 }
@@ -814,14 +824,14 @@ struct EvidenceCandidate {
 
 fn build_revisions(
     assets: &[ContextAssetRow],
-    launch_by_id: &HashMap<&str, &AgentLaunchRow>,
+    invocation_by_id: &HashMap<&str, &AgentInvocationRow>,
     turn_by_id: &HashMap<&str, &AgentTurnRow>,
     turns: &[AgentTurnRow],
 ) -> BTreeMap<RevisionKey, RevisionAccumulator> {
-    let mut steering_by_launch: HashMap<&str, u64> = HashMap::new();
+    let mut steering_by_invocation: HashMap<&str, u64> = HashMap::new();
     for turn in turns.iter().filter(|turn| turn.input_op == "steer") {
-        *steering_by_launch
-            .entry(turn.launch_id.as_str())
+        *steering_by_invocation
+            .entry(turn.invocation_id.as_str())
             .or_default() += 1;
     }
 
@@ -830,10 +840,10 @@ fn build_revisions(
         let Some(turn) = turn_by_id.get(row.turn_id.as_str()) else {
             continue;
         };
-        let Some(launch) = launch_by_id.get(turn.launch_id.as_str()) else {
+        let Some(invocation) = invocation_by_id.get(turn.invocation_id.as_str()) else {
             continue;
         };
-        let canonical = canonical_identity(launch, row);
+        let canonical = canonical_identity(invocation, row);
         let revision = revisions
             .entry(RevisionKey {
                 kind: row.asset.kind,
@@ -844,8 +854,8 @@ fn build_revisions(
             })
             .or_insert_with(RevisionAccumulator::default);
         revision.flame.add(
-            &launch.run_id,
-            &launch.id,
+            &invocation.run_id,
+            &invocation.id,
             &turn.id,
             row.asset.attributed_tokens,
         );
@@ -857,26 +867,26 @@ fn build_revisions(
             .entry(turn.id.clone())
             .or_insert_with(|| EvidenceCandidate {
                 address: TraceAddress {
-                    run_id: launch.run_id.clone(),
-                    launch_id: launch.id.clone(),
+                    run_id: invocation.run_id.clone(),
+                    invocation_id: invocation.id.clone(),
                     turn_id: turn.id.clone(),
                 },
                 started_at: turn.started_at,
-                outcome: launch.outcome.clone(),
-                capture: launch.capture_status.clone(),
-                provider: launch.provider.clone(),
-                model: launch.model.clone(),
+                outcome: invocation.outcome.clone(),
+                capture: invocation.capture_status.clone(),
+                provider: invocation.provider.clone(),
+                model: invocation.model.clone(),
                 supplied_context_tokens: (turn.context_coverage == "assembled")
                     .then(|| nonnegative(turn.supplied_context_tokens)),
                 selected_source_tokens: 0,
                 steering_turns: Some(
-                    steering_by_launch
-                        .get(launch.id.as_str())
+                    steering_by_invocation
+                        .get(invocation.id.as_str())
                         .copied()
                         .unwrap_or(0),
                 ),
                 prompt_artifact_available: artifact_available(&turn.task_prompt_path),
-                conversation_available: artifact_available(&launch.conversation_path),
+                conversation_available: artifact_available(&invocation.conversation_path),
             });
         candidate.selected_source_tokens += row.asset.attributed_tokens;
     }
@@ -884,7 +894,7 @@ fn build_revisions(
 }
 
 fn build_flame(
-    launches: &[AgentLaunchRow],
+    invocations: &[AgentInvocationRow],
     turns: &[AgentTurnRow],
     revisions: &BTreeMap<RevisionKey, RevisionAccumulator>,
 ) -> ContextFlameNode {
@@ -960,17 +970,20 @@ fn build_flame(
         attributed_tokens: kind_nodes.iter().map(|node| node.attributed_tokens).sum(),
         ..FlameAccumulator::default()
     };
-    root_accumulator.agent_sessions = turns.iter().map(|turn| turn.launch_id.clone()).collect();
-    root_accumulator.runs = launches
+    root_accumulator.invocations = turns
         .iter()
-        .filter(|launch| root_accumulator.agent_sessions.contains(&launch.id))
-        .map(|launch| launch.run_id.clone())
+        .map(|turn| turn.invocation_id.clone())
+        .collect();
+    root_accumulator.runs = invocations
+        .iter()
+        .filter(|invocation| root_accumulator.invocations.contains(&invocation.id))
+        .map(|invocation| invocation.run_id.clone())
         .collect();
     root_accumulator.turns = turns.iter().map(|turn| turn.id.clone()).collect();
     node_from_accumulator(
         FlameNodeDescriptor {
-            id: "session-set".to_string(),
-            level: ContextFlameLevel::SessionSet,
+            id: "invocation-set".to_string(),
+            level: ContextFlameLevel::InvocationSet,
             kind: None,
             label: "Initial prompts".to_string(),
             source_path: None,
@@ -995,7 +1008,7 @@ fn node_from_accumulator(
         content_sha256: descriptor.content_sha256,
         attributed_tokens: accumulator.attributed_tokens,
         run_count: accumulator.runs.len() as u64,
-        agent_session_count: accumulator.agent_sessions.len() as u64,
+        invocation_count: accumulator.invocations.len() as u64,
         turn_count: accumulator.turns.len() as u64,
         children,
     }
@@ -1009,8 +1022,8 @@ fn merge_accumulators<'a>(
         accumulator.attributed_tokens += child.attributed_tokens;
         accumulator.runs.extend(child.runs.iter().cloned());
         accumulator
-            .agent_sessions
-            .extend(child.agent_sessions.iter().cloned());
+            .invocations
+            .extend(child.invocations.iter().cloned());
         accumulator.turns.extend(child.turns.iter().cloned());
     }
     accumulator
@@ -1037,17 +1050,17 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                 .map(|candidate| candidate.selected_source_tokens)
                 .collect::<Vec<_>>();
             per_turn.sort_unstable();
-            let launch_candidates = candidates
+            let invocation_candidates = candidates
                 .iter()
-                .map(|candidate| (candidate.address.launch_id.as_str(), candidate))
+                .map(|candidate| (candidate.address.invocation_id.as_str(), candidate))
                 .collect::<BTreeMap<_, _>>();
-            let steering_turns = launch_candidates
+            let steering_turns = invocation_candidates
                 .values()
                 .map(|candidate| candidate.steering_turns)
                 .collect::<Option<Vec<_>>>()
                 .map(|values| values.into_iter().sum());
             let mut provider_models = BTreeMap::new();
-            for candidate in launch_candidates.values() {
+            for candidate in invocation_candidates.values() {
                 *provider_models
                     .entry((candidate.provider.clone(), candidate.model.clone()))
                     .or_insert(0) += 1;
@@ -1068,8 +1081,8 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                 current_source_sha256: current_source_hashes.map(|hashes| hashes.source),
                 precedence_layers: revision.precedence_layers.into_iter().collect(),
                 measurements: SourceMeasurements {
-                    exposed_sessions: revision.flame.runs.len() as u64,
-                    exposed_launches: launch_candidates.len() as u64,
+                    exposed_runs: revision.flame.runs.len() as u64,
+                    exposed_invocations: invocation_candidates.len() as u64,
                     exposed_turns: candidates.len() as u64,
                     attributed_tokens: revision.flame.attributed_tokens,
                     median_tokens_per_exposed_turn: percentile(&per_turn, 50),
@@ -1082,26 +1095,26 @@ fn build_evidence(revisions: BTreeMap<RevisionKey, RevisionAccumulator>) -> Vec<
                         .iter()
                         .map(|candidate| candidate.started_at)
                         .max(),
-                    completed_launches: launch_candidates
+                    completed_invocations: invocation_candidates
                         .values()
                         .filter(|candidate| candidate.outcome == "completed")
                         .count() as u64,
-                    failed_launches: launch_candidates
+                    failed_invocations: invocation_candidates
                         .values()
                         .filter(|candidate| candidate.outcome == "failed")
                         .count() as u64,
                     steering_turns,
-                    complete_capture_launches: launch_candidates
+                    complete_capture_invocations: invocation_candidates
                         .values()
                         .filter(|candidate| candidate.capture == "complete")
                         .count() as u64,
                     provider_models: provider_models
                         .into_iter()
                         .map(
-                            |((provider, model), exposed_launches)| ProviderModelExposure {
+                            |((provider, model), exposed_invocations)| ProviderModelExposure {
                                 provider,
                                 model,
-                                exposed_launches,
+                                exposed_invocations,
                             },
                         )
                         .collect(),
@@ -1173,7 +1186,7 @@ fn build_instruction_sources(
                 label: node.label.clone(),
                 kind,
                 source_path,
-                impressions: Some(node.agent_session_count),
+                impressions: Some(node.invocation_count),
                 observed_revision_hashes,
                 last_seen: last_seen_for_revisions(&observed_revision_node_ids, evidence),
                 current_revision_node_id: None,
@@ -1238,7 +1251,9 @@ fn build_instruction_sources(
             content_sha256: hashes.effective.clone(),
             current_content_sha256: Some(hashes.effective),
             current_source_sha256: Some(hashes.source),
-            precedence_layers: vec!["current file (not observed in this session set)".to_string()],
+            precedence_layers: vec![
+                "current file (not observed in this invocation set)".to_string()
+            ],
             measurements: empty_source_measurements(),
             representatives: Vec::new(),
         });
@@ -1269,18 +1284,18 @@ fn build_instruction_sources(
 
 fn empty_source_measurements() -> SourceMeasurements {
     SourceMeasurements {
-        exposed_sessions: 0,
-        exposed_launches: 0,
+        exposed_runs: 0,
+        exposed_invocations: 0,
         exposed_turns: 0,
         attributed_tokens: 0,
         median_tokens_per_exposed_turn: None,
         p95_tokens_per_exposed_turn: None,
         first_seen: None,
         last_seen: None,
-        completed_launches: 0,
-        failed_launches: 0,
+        completed_invocations: 0,
+        failed_invocations: 0,
         steering_turns: Some(0),
-        complete_capture_launches: 0,
+        complete_capture_invocations: 0,
         provider_models: Vec::new(),
     }
 }
@@ -1343,7 +1358,7 @@ fn attach_catalog_source_paths(
     }
 }
 
-fn discover_instruction_sources(query: &SessionSetQuery) -> Vec<CatalogInstructionSource> {
+fn discover_instruction_sources(query: &InvocationSetQuery) -> Vec<CatalogInstructionSource> {
     let mut sources = BTreeMap::new();
     for repo_path in &query.repo_paths {
         let repo =
@@ -1514,12 +1529,12 @@ fn add_catalog_source(
 }
 
 fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<RepresentativeTrace> {
-    // Roles are surfaced in priority order and each is a distinct session. When
+    // Roles are surfaced in priority order and each is a distinct invocation. When
     // the best candidate for a later role already represents an earlier role,
-    // take the next-best session rather than repeating one or dropping a
+    // take the next-best invocation rather than repeating one or dropping a
     // role that the population can still fill.
     let mut selected = Vec::new();
-    let mut claimed_sessions = HashSet::new();
+    let mut claimed_runs = HashSet::new();
     if let Some(candidate) = candidates
         .iter()
         .filter(|candidate| {
@@ -1529,21 +1544,21 @@ fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<Representativ
         })
         .min_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(u64::MAX))
     {
-        claimed_sessions.insert(candidate.address.run_id.clone());
+        claimed_runs.insert(candidate.address.run_id.clone());
         selected.push(representative(EvidenceRole::SmoothComplete, candidate));
     }
     if let Some(candidate) = candidates
         .iter()
-        .filter(|candidate| !claimed_sessions.contains(&candidate.address.run_id))
+        .filter(|candidate| !claimed_runs.contains(&candidate.address.run_id))
         .filter(|candidate| candidate.outcome == "completed")
         .max_by_key(|candidate| candidate.supplied_context_tokens.unwrap_or(0))
     {
-        claimed_sessions.insert(candidate.address.run_id.clone());
+        claimed_runs.insert(candidate.address.run_id.clone());
         selected.push(representative(EvidenceRole::HighContextComplete, candidate));
     }
     if let Some(candidate) = candidates
         .iter()
-        .filter(|candidate| !claimed_sessions.contains(&candidate.address.run_id))
+        .filter(|candidate| !claimed_runs.contains(&candidate.address.run_id))
         .filter(|candidate| {
             candidate.outcome == "failed"
                 || candidate.outcome == "interrupted"
@@ -1551,12 +1566,12 @@ fn select_representatives(candidates: &[EvidenceCandidate]) -> Vec<Representativ
         })
         .max_by_key(|candidate| candidate.selected_source_tokens)
     {
-        claimed_sessions.insert(candidate.address.run_id.clone());
+        claimed_runs.insert(candidate.address.run_id.clone());
         selected.push(representative(EvidenceRole::FailedOrSteered, candidate));
     }
     if let Some(candidate) = candidates
         .iter()
-        .filter(|candidate| !claimed_sessions.contains(&candidate.address.run_id))
+        .filter(|candidate| !claimed_runs.contains(&candidate.address.run_id))
         .max_by_key(|candidate| candidate.started_at)
     {
         selected.push(representative(EvidenceRole::Recent, candidate));
@@ -1583,9 +1598,9 @@ struct CanonicalIdentity {
     path: Option<String>,
 }
 
-fn canonical_identity(launch: &AgentLaunchRow, row: &ContextAssetRow) -> CanonicalIdentity {
+fn canonical_identity(invocation: &AgentInvocationRow, row: &ContextAssetRow) -> CanonicalIdentity {
     if let Some(source_path) = &row.asset.source_path {
-        let path = canonical_source_path(launch, source_path);
+        let path = canonical_source_path(invocation, source_path);
         let label = Path::new(&path)
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -1616,15 +1631,15 @@ fn context_source_label(kind: ContextAssetKind, label: &str) -> String {
     }
 }
 
-fn canonical_source_path(launch: &AgentLaunchRow, source_path: &str) -> String {
+fn canonical_source_path(invocation: &AgentInvocationRow, source_path: &str) -> String {
     let source = Path::new(source_path);
     let joined = if source.is_absolute() {
         source
-            .strip_prefix(&launch.worktree)
-            .map(|relative| Path::new(&launch.repo).join(relative))
+            .strip_prefix(&invocation.worktree)
+            .map(|relative| Path::new(&invocation.repo).join(relative))
             .unwrap_or_else(|_| source.to_path_buf())
     } else {
-        Path::new(&launch.repo).join(source)
+        Path::new(&invocation.repo).join(source)
     };
     fs::canonicalize(&joined)
         .unwrap_or_else(|_| normalize_path(&joined))
@@ -1702,17 +1717,17 @@ fn nonnegative(value: i64) -> u64 {
     u64::try_from(value).unwrap_or(0)
 }
 
-fn count_launches(launches: &[AgentLaunchRow], capture: &str) -> u64 {
-    launches
+fn count_invocations(invocations: &[AgentInvocationRow], capture: &str) -> u64 {
+    invocations
         .iter()
-        .filter(|launch| launch.capture_status == capture)
+        .filter(|invocation| invocation.capture_status == capture)
         .count() as u64
 }
 
-fn count_outcomes(launches: &[AgentLaunchRow], outcome: &str) -> u64 {
-    launches
+fn count_outcomes(invocations: &[AgentInvocationRow], outcome: &str) -> u64 {
+    invocations
         .iter()
-        .filter(|launch| launch.outcome == outcome)
+        .filter(|invocation| invocation.outcome == outcome)
         .count() as u64
 }
 
@@ -1781,44 +1796,44 @@ fn percentile_f64(sorted: &[f64], percent: usize) -> Option<f64> {
 }
 
 fn print_human(snapshot: &ContextLabSnapshot) {
-    if snapshot.totals.agent_sessions == 0 {
+    if snapshot.totals.invocations == 0 {
         println!("No captured agent context in the selected population.");
         return;
     }
     let totals = &snapshot.totals;
     println!(
-        "POPULATION   {} runs  {} agent sessions  {} turns",
-        totals.runs, totals.agent_sessions, totals.turns
+        "POPULATION   {} runs  {} invocations  {} turns",
+        totals.runs, totals.invocations, totals.turns
     );
     println!(
-        "INITIAL      {} tokens / {} agent sessions  median {}  p95 {}",
+        "INITIAL      {} tokens / {} invocations  median {}  p95 {}",
         display_optional(totals.initial_prompt_tokens),
-        totals.initial_prompt_agent_sessions,
+        totals.initial_prompt_invocations,
         display_optional(totals.median_initial_prompt_tokens),
         display_optional(totals.p95_initial_prompt_tokens),
     );
     println!(
-        "LIFETIME     {} input tokens / {} agent sessions  peak window median {}  p95 {}",
+        "LIFETIME     {} input tokens / {} invocations  peak window median {}  p95 {}",
         display_optional(totals.lifetime_input_tokens),
-        totals.lifetime_input_agent_sessions,
+        totals.lifetime_input_invocations,
         display_percent(totals.median_peak_context_percent),
         display_percent(totals.p95_peak_context_percent),
     );
     println!(
         "CAPTURE      {} complete  {} partial  {} prompt-only  prompts {}/{}  conversations {}/{}",
-        snapshot.coverage.complete_launches,
-        snapshot.coverage.partial_launches,
-        snapshot.coverage.prompt_only_launches,
+        snapshot.coverage.complete_invocations,
+        snapshot.coverage.partial_invocations,
+        snapshot.coverage.prompt_only_invocations,
         snapshot.coverage.prompt_artifacts_available,
         totals.turns,
         snapshot.coverage.conversations_available,
-        totals.agent_sessions,
+        totals.invocations,
     );
     println!("\nCONTEXT FLAME");
     for node in &snapshot.aggregate_root.children {
         println!(
             "  {:<24} {:>10} tokens  {:>5} impressions  {:>5} turns",
-            node.label, node.attributed_tokens, node.agent_session_count, node.turn_count
+            node.label, node.attributed_tokens, node.invocation_count, node.turn_count
         );
     }
 }
@@ -1839,10 +1854,16 @@ mod tests {
     #[test]
     fn aggregate_preserves_missing_values_and_flame_widths() {
         let query = query();
-        let launches = vec![launch("launch-a", "run-a", "completed", "complete", 100)];
+        let invocations = vec![invocation(
+            "invocation-a",
+            "run-a",
+            "completed",
+            "complete",
+            100,
+        )];
         let turns = vec![
-            turn("turn-a", "launch-a", 1, "assembled", 100, Some(0.25)),
-            turn("turn-b", "launch-a", 2, "unknown", 0, None),
+            turn("turn-a", "invocation-a", 1, "assembled", 100, Some(0.25)),
+            turn("turn-b", "invocation-a", 2, "unknown", 0, None),
         ];
         let assets = vec![
             asset(
@@ -1874,7 +1895,7 @@ mod tests {
             ),
         ];
 
-        let snapshot = aggregate(query, launches, turns, assets);
+        let snapshot = aggregate(query, invocations, turns, assets);
 
         assert_eq!(snapshot.totals.initial_prompt_tokens, Some(100));
         assert_eq!(snapshot.coverage.attributed_turns, 1);
@@ -1890,23 +1911,32 @@ mod tests {
             snapshot.aggregate_root.attributed_tokens
         );
         assert_eq!(
-            snapshot.sessions[0].turns[0]
+            snapshot.invocations[0].turns[0]
                 .assets
                 .iter()
                 .map(|asset| asset.label.as_str())
                 .collect::<Vec<_>>(),
             ["AGENTS.md", "implement"]
         );
-        assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
-        assert!(snapshot.sessions[0].turns[1].assets.is_empty());
+        assert_eq!(
+            snapshot.invocations[0].turns[1].supplied_context_tokens,
+            None
+        );
+        assert!(snapshot.invocations[0].turns[1].assets.is_empty());
     }
 
     #[test]
     fn assembly_capture_is_presented_as_unattributed() {
         let snapshot = aggregate(
             query(),
-            vec![launch("launch-a", "run-a", "completed", "complete", 10)],
-            vec![turn("turn-a", "launch-a", 1, "assembled", 10, None)],
+            vec![invocation(
+                "invocation-a",
+                "run-a",
+                "completed",
+                "complete",
+                10,
+            )],
+            vec![turn("turn-a", "invocation-a", 1, "assembled", 10, None)],
             vec![asset(
                 "turn-a",
                 0,
@@ -1922,7 +1952,7 @@ mod tests {
         assert_eq!(kind.label, "Unattributed");
         assert_eq!(kind.children[0].label, "unattributed prompt remainder");
         assert_eq!(
-            snapshot.sessions[0].turns[0].assets[0].label,
+            snapshot.invocations[0].turns[0].assets[0].label,
             "unattributed prompt remainder"
         );
     }
@@ -1930,13 +1960,13 @@ mod tests {
     #[test]
     fn revisions_stay_separate_under_one_canonical_source() {
         let query = query();
-        let launches = vec![
-            launch("launch-a", "run-a", "completed", "complete", 100),
-            launch("launch-b", "run-b", "failed", "partial", 200),
+        let invocations = vec![
+            invocation("invocation-a", "run-a", "completed", "complete", 100),
+            invocation("invocation-b", "run-b", "failed", "partial", 200),
         ];
         let turns = vec![
-            turn("turn-a", "launch-a", 1, "assembled", 60, Some(0.1)),
-            turn("turn-b", "launch-b", 1, "assembled", 90, Some(0.2)),
+            turn("turn-a", "invocation-a", 1, "assembled", 60, Some(0.1)),
+            turn("turn-b", "invocation-b", 1, "assembled", 90, Some(0.2)),
         ];
         let assets = vec![
             asset(
@@ -1959,13 +1989,13 @@ mod tests {
             ),
         ];
 
-        let snapshot = aggregate(query, launches, turns, assets);
+        let snapshot = aggregate(query, invocations, turns, assets);
         let kind = &snapshot.aggregate_root.children[0];
         assert_eq!(kind.children.len(), 1);
         assert_eq!(kind.children[0].children.len(), 2);
         assert_eq!(kind.children[0].attributed_tokens, 150);
         assert_eq!(kind.children[0].run_count, 2);
-        assert_eq!(kind.children[0].agent_session_count, 2);
+        assert_eq!(kind.children[0].invocation_count, 2);
         assert_eq!(kind.children[0].turn_count, 2);
         assert_ne!(
             kind.children[0].children[0].id,
@@ -1982,22 +2012,29 @@ mod tests {
             .find(|item| item.content_sha256 == "new-hash")
             .expect("new revision evidence");
         assert_eq!(failed.measurements.first_seen, Some(101));
-        assert_eq!(failed.measurements.failed_launches, 1);
-        assert_eq!(failed.measurements.complete_capture_launches, 0);
+        assert_eq!(failed.measurements.failed_invocations, 1);
+        assert_eq!(failed.measurements.complete_capture_invocations, 0);
     }
 
     #[test]
-    fn smooth_representative_excludes_steered_launches() {
-        let launches = vec![
-            launch("launch-steered", "run-a", "completed", "complete", 100),
-            launch("launch-smooth", "run-b", "completed", "complete", 200),
+    fn smooth_representative_excludes_steered_invocations() {
+        let invocations = vec![
+            invocation("invocation-steered", "run-a", "completed", "complete", 100),
+            invocation("invocation-smooth", "run-b", "completed", "complete", 200),
         ];
-        let mut steered_turn = turn("turn-steer", "launch-steered", 2, "assembled", 20, None);
+        let mut steered_turn = turn("turn-steer", "invocation-steered", 2, "assembled", 20, None);
         steered_turn.input_op = "steer".to_string();
         let turns = vec![
-            turn("turn-initial", "launch-steered", 1, "assembled", 10, None),
+            turn(
+                "turn-initial",
+                "invocation-steered",
+                1,
+                "assembled",
+                10,
+                None,
+            ),
             steered_turn,
-            turn("turn-smooth", "launch-smooth", 1, "assembled", 30, None),
+            turn("turn-smooth", "invocation-smooth", 1, "assembled", 30, None),
         ];
         let assets = vec![
             asset(
@@ -2029,63 +2066,95 @@ mod tests {
             ),
         ];
 
-        let snapshot = aggregate(query(), launches, turns, assets);
+        let snapshot = aggregate(query(), invocations, turns, assets);
         let smooth = snapshot.evidence[0]
             .representatives
             .iter()
             .find(|representative| representative.role == EvidenceRole::SmoothComplete)
             .expect("smooth complete representative");
 
-        assert_eq!(smooth.address.launch_id, "launch-smooth");
+        assert_eq!(smooth.address.invocation_id, "invocation-smooth");
     }
 
     #[test]
     fn steered_only_filters_the_whole_atomic_population() {
-        let launches = vec![
-            launch("launch-smooth", "run-a", "completed", "complete", 100),
-            launch("launch-steered", "run-b", "completed", "complete", 200),
+        let invocations = vec![
+            invocation("invocation-smooth", "run-a", "completed", "complete", 100),
+            invocation("invocation-steered", "run-b", "completed", "complete", 200),
         ];
-        let mut steered = turn("turn-steered", "launch-steered", 1, "assembled", 20, None);
+        let mut steered = turn(
+            "turn-steered",
+            "invocation-steered",
+            1,
+            "assembled",
+            20,
+            None,
+        );
         steered.input_op = "steer".to_string();
         let turns = vec![
-            turn("turn-smooth", "launch-smooth", 1, "assembled", 10, None),
+            turn("turn-smooth", "invocation-smooth", 1, "assembled", 10, None),
             steered,
         ];
         let mut selection = query();
         selection.steered_only = true;
 
-        let snapshot = aggregate(selection, launches, turns, Vec::new());
+        let snapshot = aggregate(selection, invocations, turns, Vec::new());
 
         assert_eq!(snapshot.totals.runs, 1);
-        assert_eq!(snapshot.totals.agent_sessions, 1);
+        assert_eq!(snapshot.totals.invocations, 1);
         assert_eq!(snapshot.totals.turns, 1);
-        assert_eq!(snapshot.totals.steered_launches, 1);
-        assert_eq!(snapshot.sessions[0].id, "launch-steered");
+        assert_eq!(snapshot.totals.steered_invocations, 1);
+        assert_eq!(snapshot.invocations[0].id, "invocation-steered");
     }
 
     #[test]
-    fn current_revision_only_keeps_launches_with_a_current_file_instruction() {
+    fn current_revision_only_keeps_invocations_with_a_current_file_instruction() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("AGENTS.md");
         fs::write(&path, "Current instructions\n").unwrap();
         let current_hash = hex::encode(Sha256::digest(b"Current instructions\n"));
-        let mut current_launch = launch("launch-current", "run-a", "completed", "complete", 100);
-        current_launch.repo = directory.path().to_string_lossy().to_string();
-        current_launch.worktree = current_launch.repo.clone();
-        let mut historical_launch =
-            launch("launch-historical", "run-b", "completed", "complete", 200);
-        historical_launch.repo = current_launch.repo.clone();
-        historical_launch.worktree = current_launch.worktree.clone();
-        let mut unresolved_launch =
-            launch("launch-unresolved", "run-c", "completed", "complete", 300);
-        unresolved_launch.repo = current_launch.repo.clone();
-        unresolved_launch.worktree = current_launch.worktree.clone();
+        let mut current_invocation =
+            invocation("invocation-current", "run-a", "completed", "complete", 100);
+        current_invocation.repo = directory.path().to_string_lossy().to_string();
+        current_invocation.worktree = current_invocation.repo.clone();
+        let mut historical_invocation = invocation(
+            "invocation-historical",
+            "run-b",
+            "completed",
+            "complete",
+            200,
+        );
+        historical_invocation.repo = current_invocation.repo.clone();
+        historical_invocation.worktree = current_invocation.worktree.clone();
+        let mut unresolved_invocation = invocation(
+            "invocation-unresolved",
+            "run-c",
+            "completed",
+            "complete",
+            300,
+        );
+        unresolved_invocation.repo = current_invocation.repo.clone();
+        unresolved_invocation.worktree = current_invocation.worktree.clone();
         let turns = vec![
-            turn("turn-current", "launch-current", 1, "assembled", 20, None),
-            turn("turn-earlier", "launch-current", 2, "assembled", 5, None),
+            turn(
+                "turn-current",
+                "invocation-current",
+                1,
+                "assembled",
+                20,
+                None,
+            ),
+            turn(
+                "turn-earlier",
+                "invocation-current",
+                2,
+                "assembled",
+                5,
+                None,
+            ),
             turn(
                 "turn-historical",
-                "launch-historical",
+                "invocation-historical",
                 1,
                 "assembled",
                 30,
@@ -2093,7 +2162,7 @@ mod tests {
             ),
             turn(
                 "turn-unresolved",
-                "launch-unresolved",
+                "invocation-unresolved",
                 1,
                 "assembled",
                 10,
@@ -2143,14 +2212,18 @@ mod tests {
 
         let snapshot = aggregate(
             selection,
-            vec![current_launch, historical_launch, unresolved_launch],
+            vec![
+                current_invocation,
+                historical_invocation,
+                unresolved_invocation,
+            ],
             turns,
             assets,
         );
 
-        assert_eq!(snapshot.totals.agent_sessions, 1);
+        assert_eq!(snapshot.totals.invocations, 1);
         assert_eq!(snapshot.totals.turns, 2);
-        assert_eq!(snapshot.sessions[0].id, "launch-current");
+        assert_eq!(snapshot.invocations[0].id, "invocation-current");
         assert_eq!(snapshot.aggregate_root.attributed_tokens, 20);
         assert!(snapshot
             .evidence
@@ -2164,15 +2237,15 @@ mod tests {
 
     #[test]
     fn revision_measurements_include_provider_model_mix_and_observation_window() {
-        let mut codex = launch("launch-codex", "run-a", "completed", "complete", 100);
+        let mut codex = invocation("invocation-codex", "run-a", "completed", "complete", 100);
         codex.model = Some("gpt-5".to_string());
-        let mut claude = launch("launch-claude", "run-b", "completed", "complete", 300);
+        let mut claude = invocation("invocation-claude", "run-b", "completed", "complete", 300);
         claude.provider = "claude".to_string();
         claude.model = None;
-        let mut claude_turn = turn("turn-claude", "launch-claude", 1, "assembled", 20, None);
+        let mut claude_turn = turn("turn-claude", "invocation-claude", 1, "assembled", 20, None);
         claude_turn.started_at = 301;
         let turns = vec![
-            turn("turn-codex", "launch-codex", 1, "assembled", 10, None),
+            turn("turn-codex", "invocation-codex", 1, "assembled", 10, None),
             claude_turn,
         ];
         let assets = vec![
@@ -2207,21 +2280,34 @@ mod tests {
                 ProviderModelExposure {
                     provider: "claude".to_string(),
                     model: None,
-                    exposed_launches: 1,
+                    exposed_invocations: 1,
                 },
                 ProviderModelExposure {
                     provider: "codex".to_string(),
                     model: Some("gpt-5".to_string()),
-                    exposed_launches: 1,
+                    exposed_invocations: 1,
                 },
             ]
         );
     }
 
     #[test]
-    fn representatives_never_repeat_one_session_across_roles() {
-        let launches = vec![launch("launch-solo", "run-a", "completed", "complete", 100)];
-        let turns = vec![turn("turn-solo", "launch-solo", 1, "assembled", 30, None)];
+    fn representatives_never_repeat_one_run_across_roles() {
+        let invocations = vec![invocation(
+            "invocation-solo",
+            "run-a",
+            "completed",
+            "complete",
+            100,
+        )];
+        let turns = vec![turn(
+            "turn-solo",
+            "invocation-solo",
+            1,
+            "assembled",
+            30,
+            None,
+        )];
         let assets = vec![asset(
             "turn-solo",
             0,
@@ -2232,36 +2318,42 @@ mod tests {
             30,
         )];
 
-        let snapshot = aggregate(query(), launches, turns, assets);
+        let snapshot = aggregate(query(), invocations, turns, assets);
         let representatives = &snapshot.evidence[0].representatives;
 
         // The lone completed, complete-capture, zero-steer run is simultaneously
         // the smooth, high-context, and recent candidate. It must surface once.
         assert_eq!(representatives.len(), 1);
         assert_eq!(representatives[0].role, EvidenceRole::SmoothComplete);
-        assert_eq!(representatives[0].address.launch_id, "launch-solo");
+        assert_eq!(representatives[0].address.invocation_id, "invocation-solo");
     }
 
     #[test]
-    fn representatives_fill_roles_from_distinct_sessions_when_possible() {
-        let launches = vec![
-            launch("launch-low", "run-a", "completed", "complete", 100),
-            launch("launch-same-session", "run-a", "completed", "complete", 150),
-            launch("launch-high", "run-b", "completed", "complete", 200),
-            launch("launch-recent", "run-c", "completed", "partial", 300),
+    fn representatives_fill_roles_from_distinct_runs_when_possible() {
+        let invocations = vec![
+            invocation("invocation-low", "run-a", "completed", "complete", 100),
+            invocation(
+                "invocation-same-invocation",
+                "run-a",
+                "completed",
+                "complete",
+                150,
+            ),
+            invocation("invocation-high", "run-b", "completed", "complete", 200),
+            invocation("invocation-recent", "run-c", "completed", "partial", 300),
         ];
         let turns = vec![
-            turn("turn-low", "launch-low", 1, "assembled", 10, None),
+            turn("turn-low", "invocation-low", 1, "assembled", 10, None),
             turn(
-                "turn-same-session",
-                "launch-same-session",
+                "turn-same-invocation",
+                "invocation-same-invocation",
                 1,
                 "assembled",
                 100,
                 None,
             ),
-            turn("turn-high", "launch-high", 1, "assembled", 80, None),
-            turn("turn-recent", "launch-recent", 1, "assembled", 40, None),
+            turn("turn-high", "invocation-high", 1, "assembled", 80, None),
+            turn("turn-recent", "invocation-recent", 1, "assembled", 40, None),
         ];
         let assets = turns
             .iter()
@@ -2278,7 +2370,7 @@ mod tests {
             })
             .collect();
 
-        let snapshot = aggregate(query(), launches, turns, assets);
+        let snapshot = aggregate(query(), invocations, turns, assets);
         let representatives = &snapshot.evidence[0].representatives;
 
         assert_eq!(
@@ -2286,13 +2378,13 @@ mod tests {
                 .iter()
                 .map(|representative| (
                     representative.role,
-                    representative.address.launch_id.as_str(),
+                    representative.address.invocation_id.as_str(),
                 ))
                 .collect::<Vec<_>>(),
             [
-                (EvidenceRole::SmoothComplete, "launch-low"),
-                (EvidenceRole::HighContextComplete, "launch-high"),
-                (EvidenceRole::Recent, "launch-recent"),
+                (EvidenceRole::SmoothComplete, "invocation-low"),
+                (EvidenceRole::HighContextComplete, "invocation-high"),
+                (EvidenceRole::Recent, "invocation-recent"),
             ]
         );
     }
@@ -2305,23 +2397,30 @@ mod tests {
     }
 
     #[test]
-    fn lifetime_input_and_peak_pressure_are_agent_session_metrics() {
-        let mut codex_initial = turn("codex-1", "launch-codex", 1, "assembled", 10, None);
+    fn lifetime_input_and_peak_pressure_are_invocation_metrics() {
+        let mut codex_initial = turn("codex-1", "invocation-codex", 1, "assembled", 10, None);
         codex_initial.provider_total_input_tokens = Some(100);
         codex_initial.peak_input_tokens = Some(50);
         codex_initial.context_window_tokens = Some(100);
-        let mut codex_steer = turn("codex-2", "launch-codex", 2, "provider_total_only", 1, None);
+        let mut codex_steer = turn(
+            "codex-2",
+            "invocation-codex",
+            2,
+            "provider_total_only",
+            1,
+            None,
+        );
         codex_steer.provider_total_input_tokens = Some(300);
         codex_steer.peak_input_tokens = Some(80);
         codex_steer.context_window_tokens = Some(100);
 
-        let mut claude_initial = turn("claude-1", "launch-claude", 1, "assembled", 20, None);
+        let mut claude_initial = turn("claude-1", "invocation-claude", 1, "assembled", 20, None);
         claude_initial.provider_total_input_tokens = Some(100);
         claude_initial.peak_input_tokens = Some(50);
         claude_initial.context_window_tokens = Some(200);
         let mut claude_steer = turn(
             "claude-2",
-            "launch-claude",
+            "invocation-claude",
             2,
             "provider_total_only",
             1,
@@ -2331,12 +2430,12 @@ mod tests {
         claude_steer.peak_input_tokens = Some(90);
         claude_steer.context_window_tokens = Some(200);
 
-        let mut claude = launch("launch-claude", "run-b", "completed", "complete", 200);
+        let mut claude = invocation("invocation-claude", "run-b", "completed", "complete", 200);
         claude.provider = "claude".to_string();
         let snapshot = aggregate(
             query(),
             vec![
-                launch("launch-codex", "run-a", "completed", "complete", 100),
+                invocation("invocation-codex", "run-a", "completed", "complete", 100),
                 claude,
             ],
             vec![codex_initial, codex_steer, claude_initial, claude_steer],
@@ -2344,19 +2443,19 @@ mod tests {
         );
 
         assert_eq!(snapshot.totals.initial_prompt_tokens, Some(30));
-        assert_eq!(snapshot.totals.initial_prompt_agent_sessions, 2);
+        assert_eq!(snapshot.totals.initial_prompt_invocations, 2);
         assert_eq!(snapshot.totals.lifetime_input_tokens, Some(600));
         assert_eq!(snapshot.totals.median_lifetime_input_tokens, Some(300));
         assert_eq!(snapshot.totals.p95_lifetime_input_tokens, Some(300));
         assert_eq!(snapshot.totals.median_peak_context_percent, Some(45.0));
         assert_eq!(snapshot.totals.p95_peak_context_percent, Some(80.0));
-        assert_eq!(snapshot.totals.peak_context_agent_sessions, 2);
+        assert_eq!(snapshot.totals.peak_context_invocations, 2);
     }
 
     #[test]
-    fn source_impressions_count_each_agent_session_once() {
-        let launch = launch("launch-a", "run-a", "completed", "complete", 100);
-        let turn = turn("turn-a", "launch-a", 1, "assembled", 20, None);
+    fn source_impressions_count_each_invocation_once() {
+        let invocation = invocation("invocation-a", "run-a", "completed", "complete", 100);
+        let turn = turn("turn-a", "invocation-a", 1, "assembled", 20, None);
         let assets = vec![
             asset(
                 "turn-a",
@@ -2378,13 +2477,13 @@ mod tests {
             ),
         ];
 
-        let snapshot = aggregate(query(), vec![launch], vec![turn], assets);
+        let snapshot = aggregate(query(), vec![invocation], vec![turn], assets);
         let source = &snapshot.aggregate_root.children[0].children[0];
 
         assert_eq!(source.attributed_tokens, 20);
-        assert_eq!(source.agent_session_count, 1);
+        assert_eq!(source.invocation_count, 1);
         assert_eq!(source.run_count, 1);
-        assert_eq!(snapshot.coverage.source_observable_agent_sessions, 1);
+        assert_eq!(snapshot.coverage.source_observable_invocations, 1);
     }
 
     #[test]
@@ -2400,9 +2499,9 @@ mod tests {
         let repo = directory.path().canonicalize().unwrap();
         let mut selection = query();
         selection.repo_paths = vec![repo.to_string_lossy().to_string()];
-        let mut agent_session = launch("launch-a", "run-a", "completed", "complete", 100);
-        agent_session.repo = repo.to_string_lossy().to_string();
-        agent_session.worktree = agent_session.repo.clone();
+        let mut invocation = invocation("invocation-a", "run-a", "completed", "complete", 100);
+        invocation.repo = repo.to_string_lossy().to_string();
+        invocation.worktree = invocation.repo.clone();
         let seen_hash = hash_current_source(
             ContextAssetKind::SkillInstructions,
             seen_path.to_str().unwrap(),
@@ -2412,8 +2511,8 @@ mod tests {
 
         let snapshot = aggregate(
             selection,
-            vec![agent_session],
-            vec![turn("turn-a", "launch-a", 1, "assembled", 20, None)],
+            vec![invocation],
+            vec![turn("turn-a", "invocation-a", 1, "assembled", 20, None)],
             vec![asset(
                 "turn-a",
                 0,
@@ -2450,7 +2549,7 @@ mod tests {
             current.current_content_sha256.as_deref(),
             Some(current.content_sha256.as_str())
         );
-        assert_eq!(current.measurements.exposed_launches, 0);
+        assert_eq!(current.measurements.exposed_invocations, 0);
         assert!(current.representatives.is_empty());
     }
 
@@ -2511,18 +2610,20 @@ mod tests {
         let repo = directory.path().canonicalize().unwrap();
         let mut selection = query();
         selection.repo_paths = vec![repo.to_string_lossy().to_string()];
-        let mut first_agent_session = launch("launch-a", "run-a", "completed", "complete", 100);
-        first_agent_session.repo = repo.to_string_lossy().to_string();
-        first_agent_session.worktree = first_agent_session.repo.clone();
-        let mut second_agent_session = launch("launch-b", "run-b", "completed", "complete", 101);
-        second_agent_session.repo = repo.to_string_lossy().to_string();
-        second_agent_session.worktree = second_agent_session.repo.clone();
+        let mut first_invocation =
+            invocation("invocation-a", "run-a", "completed", "complete", 100);
+        first_invocation.repo = repo.to_string_lossy().to_string();
+        first_invocation.worktree = first_invocation.repo.clone();
+        let mut second_invocation =
+            invocation("invocation-b", "run-b", "completed", "complete", 101);
+        second_invocation.repo = repo.to_string_lossy().to_string();
+        second_invocation.worktree = second_invocation.repo.clone();
         let snapshot = aggregate(
             selection,
-            vec![first_agent_session, second_agent_session],
+            vec![first_invocation, second_invocation],
             vec![
-                turn("turn-a", "launch-a", 1, "assembled", 20, None),
-                turn("turn-b", "launch-b", 1, "assembled", 20, None),
+                turn("turn-a", "invocation-a", 1, "assembled", 20, None),
+                turn("turn-b", "invocation-b", 1, "assembled", 20, None),
             ],
             vec![
                 asset(
@@ -2551,7 +2652,7 @@ mod tests {
         assert_eq!(source.label, "assess");
         assert_eq!(source.impressions, Some(2));
         assert_eq!(source.observed_revisions, 1);
-        assert_eq!(snapshot.coverage.source_observable_agent_sessions, 2);
+        assert_eq!(snapshot.coverage.source_observable_invocations, 2);
         let current = snapshot
             .evidence
             .iter()
@@ -2561,7 +2662,7 @@ mod tests {
             current.source_path.as_deref(),
             builtin.canonicalize().unwrap().to_str()
         );
-        assert_eq!(current.measurements.exposed_launches, 2);
+        assert_eq!(current.measurements.exposed_invocations, 2);
         assert_eq!(
             current.current_content_sha256.as_deref(),
             Some(current.content_sha256.as_str())
@@ -2570,9 +2671,9 @@ mod tests {
 
     #[test]
     fn canonical_sources_collapse_task_worktrees_into_the_main_repo() {
-        let mut launch = launch("launch-a", "run-a", "completed", "complete", 100);
-        launch.repo = "/src/loopflow".to_string();
-        launch.worktree = "/src/loopflow.intelligence.context".to_string();
+        let mut invocation = invocation("invocation-a", "run-a", "completed", "complete", 100);
+        invocation.repo = "/src/loopflow".to_string();
+        invocation.worktree = "/src/loopflow.intelligence.context".to_string();
         let row = asset(
             "turn-a",
             0,
@@ -2585,7 +2686,7 @@ mod tests {
             20,
         );
 
-        let identity = canonical_identity(&launch, &row);
+        let identity = canonical_identity(&invocation, &row);
 
         assert_eq!(
             identity.path.as_deref(),
@@ -2626,7 +2727,10 @@ mod tests {
         assert_eq!(snapshot.totals.runs, 1);
         assert!(snapshot.query.steered_only);
         assert!(snapshot.query.current_revision_only);
-        assert_eq!(snapshot.sessions[0].turns[1].supplied_context_tokens, None);
+        assert_eq!(
+            snapshot.invocations[0].turns[1].supplied_context_tokens,
+            None
+        );
         assert_eq!(snapshot.sources[0].impressions, Some(1));
         assert_eq!(snapshot.sources[1].impressions, None);
         assert_eq!(
@@ -2647,8 +2751,8 @@ mod tests {
         );
     }
 
-    fn query() -> SessionSetQuery {
-        SessionSetQuery {
+    fn query() -> InvocationSetQuery {
+        InvocationSetQuery {
             repo_paths: Vec::new(),
             started_after: 0,
             started_before: 1_000,
@@ -2668,28 +2772,29 @@ mod tests {
     }
 
     #[test]
-    fn project_and_task_filters_require_durable_launch_attribution() {
-        let attributed = launch("launch-1", "run-1", "completed", "complete", 100);
+    fn project_and_task_filters_require_durable_invocation_attribution() {
+        let attributed = invocation("invocation-1", "run-1", "completed", "complete", 100);
         let mut selection = query();
         selection.projects = vec!["context".to_string()];
         selection.tasks = vec!["W2-71".to_string()];
-        assert!(launch_matches(&attributed, &selection));
+        assert!(invocation_matches(&attributed, &selection));
 
         let mut unattributed = attributed;
         unattributed.task = None;
-        assert!(!launch_matches(&unattributed, &selection));
+        assert!(!invocation_matches(&unattributed, &selection));
     }
 
-    fn launch(
+    fn invocation(
         id: &str,
         run_id: &str,
         outcome: &str,
         capture_status: &str,
         started_at: i64,
-    ) -> AgentLaunchRow {
-        AgentLaunchRow {
+    ) -> AgentInvocationRow {
+        AgentInvocationRow {
             id: id.to_string(),
             run_id: run_id.to_string(),
+            answer_ask_id: None,
             process_id: format!("process-{id}"),
             started_at,
             ended_at: Some(started_at + 10),
@@ -2713,13 +2818,13 @@ mod tests {
             provider_session_path: None,
             conversation_event_count: 0,
             conversation_bytes: 0,
-            control: None,
+            supervision: None,
         }
     }
 
     fn turn(
         id: &str,
-        launch_id: &str,
+        invocation_id: &str,
         ordinal: i64,
         coverage: &str,
         tokens: i64,
@@ -2727,7 +2832,7 @@ mod tests {
     ) -> AgentTurnRow {
         AgentTurnRow {
             id: id.to_string(),
-            launch_id: launch_id.to_string(),
+            invocation_id: invocation_id.to_string(),
             ordinal,
             provider_turn_id: None,
             started_at: 100 + ordinal,

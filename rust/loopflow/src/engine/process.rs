@@ -70,11 +70,11 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
         .map(PathBuf::from)
 }
 
-/// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
+/// Resolve the `lf` a Work launch will use: an absolute path that exists.
 ///
 /// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
 /// against the *login* shell's PATH inside tmux — a third binary, chosen by
-/// neither the Session nor its launcher. A Session that cannot name its own
+/// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     let candidate = resolve_lf_binary();
@@ -83,14 +83,14 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
             Ok(candidate)
         } else {
             Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the lf this Session should run",
+                "lf binary {} does not exist; set LF_BIN to the lf this Work should run",
                 candidate.display()
             ))
         };
     }
     which_on_path(&candidate).ok_or_else(|| {
         anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Session should run",
+            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Work should run",
             candidate.display()
         )
     })
@@ -108,11 +108,11 @@ pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
 
 /// Capture the current process's control context — this process's `lf`, store,
 /// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
-/// build this honors `LF_CONTROL_*`, so a running body hands its own session's
-/// context (not the machine's Home) to the provider CLI it spawns.
+/// build this honors `LF_CONTROL_*`, so a running body hands its own Run context
+/// (not the machine's Home) to the provider CLI it spawns.
 ///
 /// This is NOT the launch resolver. Use [`current_home_execution_context`] to
-/// launch or relaunch a Session: launching through the control context would
+/// launch or relaunch Work: launching through the control context would
 /// perpetuate the historical binary a legacy body was created with.
 pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
@@ -184,10 +184,10 @@ fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
     })
 }
 
-/// Resolve the current Home execution context for launching a Session: the
+/// Resolve the current Home execution context for launching Work: the
 /// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
 ///
-/// This is the launch/relaunch boundary resolver. A Session created under one
+/// This is the launch/relaunch boundary resolver. Work created under one
 /// binary and resumed under another launches through the current Home — its
 /// worktree, provider history, and directives are unaffected by which binary
 /// first created it.
@@ -216,8 +216,8 @@ pub(crate) fn shell_escape(value: &str) -> String {
 /// Whether this machine can look for tmux sessions at all.
 ///
 /// Ask PATH, not the binary. A generic `--version` probe reports tmux as absent
-/// on every machine — tmux only accepts `-V` — which silently downgrades Session
-/// liveness to "unknowable" and hides processes that are actually gone.
+/// on every machine — tmux only accepts `-V` — which silently downgrades Work
+/// process liveness to "unknowable" and hides processes that are actually gone.
 pub(crate) fn tmux_installed() -> bool {
     which_on_path(Path::new("tmux")).is_some()
 }
@@ -294,6 +294,39 @@ pub(crate) async fn start_lf_session_with_env(
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
+pub(crate) async fn start_tmux_window_with_env(
+    session: &str,
+    window: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let context = pinned_execution_context()?;
+    let mut child_env = env
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect::<Vec<_>>();
+    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell_command = lf_session_shell_command(argv, &environment);
+    let status = tokio::process::Command::new("tmux")
+        .args(["new-window", "-d", "-t", session, "-n", window, "-c"])
+        .arg(cwd)
+        .args(["/bin/zsh", "-lc", &shell_command])
+        .status()
+        .await
+        .map_err(|error| anyhow!("tmux failed to spawn window: {error}"))?;
+    if !status.success() {
+        return Err(anyhow!(
+            "tmux failed to launch window '{window}' in session '{session}'"
+        ));
+    }
+    Ok(())
+}
+
 fn reject_detached_forwarded_account(forwarded: bool) -> Result<()> {
     if forwarded {
         return Err(anyhow!(
@@ -358,7 +391,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
+    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -465,7 +498,7 @@ mod tests {
 
     /// The launch boundary must resolve the current Home lf (B), never the
     /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
-    /// legacy Sessions. Contrast the two selectors under release provenance:
+    /// legacy Work bodies. Contrast the two selectors under release provenance:
     /// the old override picks the control pin A, the current-Home selector
     /// picks B and has no way to reach A at all.
     #[test]
@@ -515,7 +548,7 @@ mod tests {
 
     /// The probe must agree with whether tmux can actually be run. The previous
     /// `--version` probe disagreed on every machine that has tmux, which pinned
-    /// Session liveness to "unknowable" and let gone processes read as running.
+    /// Work-process liveness to "unknowable" and let gone processes read as running.
     #[test]
     fn tmux_probe_agrees_with_running_tmux() {
         // Both sides of this comparison resolve through `PATH`.
@@ -545,7 +578,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
         );
     }
 
@@ -557,7 +590,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
         );
     }
 
@@ -581,7 +614,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
+            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
         );
     }
 

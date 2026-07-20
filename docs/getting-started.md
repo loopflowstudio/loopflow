@@ -147,6 +147,7 @@ contracts, evidence loops, Wave goals, and directions.
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
+lf pr submit    # prepare the exact head; you click merge
 lf pr land      # arm auto-merge; GitHub merges after required checks pass
 ```
 
@@ -158,7 +159,7 @@ Ready to automate? Waves remain available continuously and run a complete flow
 when chat, child observations, crons, or a heartbeat wake them.
 
 `lf` skills are manual building blocks. A Wave is a named agent that reads its
-Linear Projects and tasks, starts durable Task Sessions, and supervises their
+Linear Projects and tasks, starts durable Tasks, and supervises their
 results.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
@@ -169,8 +170,8 @@ Project → Task work map; the app starts the Wave's resident process when
 needed. From the CLI, `lf start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
-<issue-id>`, and stays steerable while the Task Session works in its immutable
-worktree. CI failures and review feedback return to the same session; linked
+<issue-id>`, and stays steerable while the Task runs in its immutable
+worktree. CI failures and review feedback return to the same Task; linked
 events land in the Wave thread.
 
 Detached processes use named tmux sessions for process lifetime and read-only
@@ -181,8 +182,8 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf queue`, then `lf work feedback <kind> <id>`, for work that
-needs you. Stop a running Wave with `lf stop <name>`.
+Use `lf work asks`, then `lf work answer <ask-id> <text>`, for questions that
+need you. Stop a running Wave with `lf stop <name>`.
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.

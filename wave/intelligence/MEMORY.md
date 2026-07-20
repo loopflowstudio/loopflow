@@ -147,37 +147,23 @@ context, its launch situation, execution, and outcome.
   Evidence has one home and `lf trace <run-id>` explains either arm. No results
   server, ever.
 
-## Decisions (memory model)
+## Wave memory
 
-- **The fold lives in the mind, not in code.** Agents subscribe to the memory
-  stream and consolidate into their own opaque working memory. There is no
-  external consolidator process — the unit of work is a mind, and the mind holds
-  the memory.
-- **`MEMORY.md` is a checkpoint of a mind's compiled state; the stream is the
-  delta since.** A new agent = load `MEMORY.md` + subscribe to the stream (or
-  replay it) → re-fold in its own context.
-- **`add` publishes a full fact to a replayable stream** (shipped, slice 1):
-  journals `MemoryAdded { fact }`, pushes to a replay buffer, broadcasts the
-  full fact on its own channel. `add` does not write `MEMORY.md`; the file stays
-  compiled instead of becoming an accreting pile of raw bullets.
-- **The replay buffer is adds-since-last-externalization, not adds-since-boot.**
-  Load-bearing: it makes a fresh subscriber's seed exactly `MEMORY.md` (compiled
-  checkpoint) + the stream (uncompiled delta), no overlap, no double-count.
-  `append_memory` pushes; `update_memory` clears. The journal fold applies the
-  same accumulate-on-`MemoryAdded` / clear-on-`MemoryUpdated` logic, so a server
-  restart rebuilds the buffer deterministically from disk.
-- **memory-add earns its own broadcast and SSE event name.** `memory-add`
-  (full facts, replay-then-live) sits beside `memory` (curation summaries,
-  live-only). The `memory` frame stays byte-stable — additive, not a wire break.
-- **Only the wave's mind externalizes `MEMORY.md`.** Workers only `add`. Work
-  lines have no memory, so there's no last-writer-wins clobber.
-- **Externalization is forced at context-compaction and at land** — the two
-  moments an in-head fold would otherwise be lost.
-- **Letta: learn-from only.** Reimplement blocks + fold. No backend, no server
-  dependency, no vector store. Letta's "sleep-time agent" is, in loopflow terms,
-  a dispatched TUI session running the fold.
-- **Bounded, not unbounded.** Memory is context-sized; `MEMORY.md` is the whole
-  compiled form. No archive, no retrieval.
+- **`wave/<name>/MEMORY.md` is the whole durable memory.** There is no journal
+  delta, replay buffer, runtime copy, broadcast, HTTP write route, SSE frame, or
+  second checkpoint to reconcile with it.
+- **Memory is Wave-owned, not process-owned.** A running listener or provider
+  does not hold a more authoritative version. Reviewed repository edits curate
+  the file, and reading it is an ordinary file read that works with every
+  server stopped — there is no CLI surface for memory.
+- **Inheritance is explicit and file-based.** Prompt assembly reads applicable
+  ancestor Wave memories oldest-first. Project and Task Work do not own memory,
+  and unrelated recent Wave chat is never ambient prompt context.
+- **Keep the file cold-reader sized.** Fold durable decisions, constraints, and
+  evidence-backed learnings into it; do not turn it into a session log or raw
+  fact archive. Git carries its history.
+- **No memory backend.** Loopflow has no vector store, remote memory service,
+  live compactor, export protocol, or vendor-memory dependency.
 
 ## Decisions (usage evidence)
 
@@ -226,16 +212,11 @@ context, its launch situation, execution, and outcome.
   from it joins that trace as a child span. That is the design. It also means a
   demo run from such a shell will not mint a fresh trace: prefix
   `env -u LF_RUN_ID` when you want a root.
-- **Only `MEMORY.md` crosses the branch boundary.** The journal (and the
-  `MemoryAdded` replay buffer it rebuilds) is per-machine and gitignored, so the
-  stream replays only *within a server's life*.
-- **The server holds the pen.** Only the live wave server writes `MEMORY.md`,
-  under a lock, journaled + broadcast. Offline waves edit the file directly.
-- **We cannot read a running agent's internal memory representation.** The only
-  way to get "whole compiled memory" out is a mind externalizing via `update`.
-- **Compaction is owned by the vendor CLI.** Externalize-at-compaction assumes
-  loopflow can act *before* Claude Code compacts. Unproven — the least-certain
-  mechanism in the design. Fallback: land-externalization + periodic updates.
+- **Only committed `MEMORY.md` crosses a branch or machine boundary.** Per-run
+  journals remain execution evidence, not an uncompiled memory tail.
+- **Provider context is not Wave memory.** Loopflow cannot and need not extract
+  a provider's opaque working state; the next Work Run starts from durable
+  authored context.
 
 ## Running the Mac dashboard
 
@@ -255,43 +236,11 @@ launches it. Three ways this has actually gone wrong:
 
 Stale-binary check: `strings "$D/Loopflow" | grep -c "Tokens by skill"`.
 
-## Open work (not yet in Linear — the token is expired)
-
-`lf pm show --wave intelligence` fails with *"Stored linear token has expired.
-Run `lf auth linear` again."* This pass could not read or file tasks, so the
-wave's next loop must run `lf auth linear` and file these before anything else:
-
-- **A PR delivery record** (run/wave → PR number → merge event). Blocks every PR
-  metric: landed PRs by wave, cost per landed PR, lead time. Not telemetry work.
-- **An `escalated` event that fires.** `LfEventType::Escalated` is defined and
-  emitted zero times, so human-intervention counts and first-pass completion have
-  no source. Needs an event, not a query.
-- **Steering verbs for `lf wavechat`.** `/status` is the only non-speech verb, so
-  a bad run can be watched and talked to but not stopped. The wave-chat KR
-  promises interruption: add `/pause`, `/resume`, `/interrupt` against the wave's
-  doors. Keep the rule — a slash command is a steering verb, everything else is
-  speech.
-- **Is hootro meant to be driven through loopflow, or left as the control arm?**
-  It is genuinely dormant (no `.lf/journal`, nothing since 2026-06-19). Both
-  answers are defensible.
-
 ## Someday (explicitly not now — Jack: "maybe someday")
 
 - **The controlled eval harvester** (cadenza first). The design above remains
   parked until Trace has delivery, intervention, complete context, and transcript
   evidence and the wave deliberately reopens Evals as a project.
-
-- **Memory export is a reader-optimized summary, not context compaction.** Claude's
-  context compaction is writer-optimized (preserve working state so the *same*
-  mind continues). Memory export is the opposite: the producer already knows
-  everything, so the artifact is for a *cold reader* (next session, parent reading
-  a child's MEMORY.md, fresh worker). Quality bar: "can someone with none of my
-  context act correctly from this?" — not "can I resume?" Drop the narrative,
-  keep the durable conclusion. An export that reads like a session log is a bad
-  export.
-- **A compaction *tool* (not `lf memory update`).** Given the current MEMORY.md +
-  the add-delta, *suggest* a compacted MEMORY.md the mind reviews and applies.
-  Route → fold-per-block → assemble. NOT being built now.
 
 ## Glossary
 
@@ -299,20 +248,15 @@ wave's next loop must run `lf auth linear` and file these before anything else:
 - **span** — a `process_id`. One process, minted once, never inherited.
 - **boundary** — one usage-bearing row inside a span (a skill frame, or the
   terminal run row). Readings are cumulative; `own_spend` diffs them.
-- **add** — publish an immutable fact to the append stream. `lf memory add`.
-- **stream** — the ordered, broadcast log of adds. Subscribed via `lf sub`.
-- **fold** — a mind consolidating incoming facts into its working memory.
-- **externalize** — a mind writing its compiled state to `MEMORY.md` via
-  `lf memory update`. The only checkpoint operation.
-- **block** — a typed, budgeted region of the compiled `MEMORY.md`.
-- **checkpoint** — a committed `MEMORY.md`; the seed the next agent inherits.
+- **Wave memory** — the committed `MEMORY.md` files selected for a Run's
+  authored context; no live delta exists beside them.
 
 ## Code map (current state)
 
-Memory is Rust-only under `rust/loopflow/src/`. `Memory { path }`
-(`wave/memory.rs`); routes (`server.rs` `/memory`, `/events`); CLI
-(`lf/commands/memory.rs`); injection via `wave_memory_section` →
-`<lf:wave-memory>` (`engine/flow.rs`).
+Wave-memory resolution lives in `wave/memory.rs`; the read-only CLI is
+`lf/commands/memory.rs`; prompt injection uses `wave_memory_section` →
+`<lf:wave-memory>` in `engine/flow.rs`. None of these paths requires a Wave
+server.
 
 Telemetry: writer in `journal/mod.rs` (`RunContext`, `ledger_insert`,
 `LF_PROCESS_ID_ENV`); storage in `lfdb/` (migrations 055–058); readers in
@@ -320,6 +264,5 @@ Telemetry: writer in `journal/mod.rs` (`RunContext`, `ledger_insert`,
 Swift consumer in `swift/Loopflow/Services/RegistryQuery.swift` and
 `swift/LoopflowMac/Views/TelemetryDashboardView.swift`.
 
-Still greenfield: typed memory blocks (slice 3); forced externalization at
-land/compaction (slice 4). No cross-machine/branch replay — that boundary is
-`MEMORY.md`'s; the journal is per-machine and gitignored.
+The boundary is the committed file: there is no cross-machine replay protocol
+and no journal-to-memory fold.

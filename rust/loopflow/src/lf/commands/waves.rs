@@ -21,14 +21,16 @@ use crate::child::{
     body_progress_age, observe, BodyEvidence, BodyIntent, BodyObservation, ChildRef,
     ObservationRecipient, DEFAULT_STALL_AFTER,
 };
-use crate::durable::{AttentionRoute, Containment, Home, WorkRef, WorkStatus};
+use crate::durable::{Containment, Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
 use crate::pm::{PmItem, PmKr, PmProject, ProjectFlowPlan};
 use crate::project::Project;
 use crate::store::{open_existing_store, SharedStore};
-use crate::task::{AfterMerge, CiObservation, CiState, PrPhase, Task, TaskPr};
+use crate::task::{
+    AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
+};
 use crate::wave::server::live_endpoint;
 use crate::wave::Wave;
 
@@ -174,7 +176,6 @@ pub enum NextMoveOwner {
     Wave,
     Project,
     Task,
-    Review,
     Ci,
     External,
 }
@@ -226,7 +227,7 @@ pub struct TaskRuntimeSnapshot {
 
 /// The compact Task attention signal shared by terminal and app surfaces. The
 /// names are deliberately the product's visual vocabulary: consumers do not
-/// reinterpret Session/process combinations into their own colors.
+/// reinterpret Work/process combinations into their own colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskAttentionLevel {
@@ -238,8 +239,7 @@ pub enum TaskAttentionLevel {
 }
 
 pub use crate::task::actions::{
-    ci_failure_reason, derive_task_actions, ReviewGateState, TaskAction, TaskActionEvidence,
-    TaskActionModel,
+    ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -284,7 +284,7 @@ pub struct LocalProgressEvidence {
 struct TaskAttentionEvidence {
     process: TaskProcessEvidence,
     local_progress: LocalProgressEvidence,
-    user_feedback: bool,
+    user_ask: bool,
 }
 
 /// A Task's shared attention projection and the evidence that proves it.
@@ -318,7 +318,7 @@ pub struct TaskReferenceSnapshot {
 pub struct TaskWorkspaceSnapshot {
     pub slug: String,
     /// Full branch name from the active PR, or the last recorded PR after the
-    /// Task settles. `None` is explicit for legacy Sessions with no PR record.
+    /// Task settles. `None` is explicit for legacy Tasks with no PR record.
     pub branch: Option<String>,
     pub worktree: String,
 }
@@ -352,9 +352,17 @@ pub struct PrSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrPublicationSnapshot {
     pub requested_at: String,
+    pub github: Option<GithubPrSnapshot>,
+    pub merge: Option<PrMergeRequestSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrMergeRequestSnapshot {
+    pub mode: PrMergeMode,
+    pub requested_at: String,
+    pub head_sha: String,
     pub after_merge: AfterMerge,
     pub next_slug: Option<String>,
-    pub github: Option<GithubPrSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -379,12 +387,21 @@ impl PrSnapshot {
                 .map(|publication| PrPublicationSnapshot {
                     requested_at: format_time(publication.requested_at)
                         .expect("PR publication timestamp formats as RFC 3339"),
-                    after_merge: publication.after_merge,
-                    next_slug: publication.next_slug.clone(),
                     github: publication.github.as_ref().map(|github| GithubPrSnapshot {
                         number: github.number,
                         url: github.url.clone(),
                     }),
+                    merge: publication
+                        .merge
+                        .as_ref()
+                        .map(|request| PrMergeRequestSnapshot {
+                            mode: request.mode,
+                            requested_at: format_time(request.requested_at)
+                                .expect("PR merge request timestamp formats as RFC 3339"),
+                            head_sha: request.head_sha.clone(),
+                            after_merge: request.after_merge,
+                            next_slug: request.next_slug.clone(),
+                        }),
                 }),
             merge_commit: pr.merge_commit.clone(),
             abandoned_at: pr.abandoned_at.and_then(format_time),
@@ -440,7 +457,7 @@ pub struct WaveRoadmap {
     pub projects: Evidence<RoadmapProject>,
 }
 
-/// One Project in the roadmap: its plan, live Project-Session evidence when a
+/// One Project in the roadmap: its plan, live Project Work evidence when a
 /// loop exists, its section, and its Tasks. Reuses the same leaf snapshots
 /// `lf status` emits; adds the derived `section`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -452,7 +469,7 @@ pub struct RoadmapProject {
     pub tasks: Vec<RoadmapTask>,
 }
 
-/// One Task in the roadmap: plan row, live Task-Session evidence when a Session
+/// One Task in the roadmap: plan row, live Task Work evidence when a Task
 /// exists, its section, and its active PR. `runtime: None` is a Task nobody has
 /// started — never confused with a dead process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -549,7 +566,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
 /// `lf roadmap [wave]` — the machine-wide intent plane. Every Wave (or one, when
 /// scoped) with its plan joined to live evidence and each row bucketed into a
 /// section. Deterministic and local: one `tmux list-sessions` for the whole
-/// read, bounded Git probes for Tasks with Sessions, and no network. `lf status`
+/// read, bounded Git probes for Task Work, and no network. `lf status`
 /// answers "is it healthy"; this answers "what is being worked on and what
 /// could be".
 pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
@@ -590,7 +607,7 @@ pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
                 .map_err(|err| anyhow!("failed to read wave registry: {err}"))?,
             Err(other) => return Err(anyhow!(other)),
         };
-        // One tmux reading for every Session on the machine, taken once.
+        // One tmux reading for every Work process on the machine, taken once.
         let liveness = TmuxLiveness::snapshot().await;
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
@@ -640,7 +657,7 @@ async fn wave_roadmap_projects(
         }
     };
     let projects = match store.list_projects(Some(wave.id())).await {
-        Ok(sessions) => sessions,
+        Ok(projects) => projects,
         Err(err) => {
             return Evidence::Unavailable {
                 reason: format!("failed to read Projects: {err}"),
@@ -648,7 +665,7 @@ async fn wave_roadmap_projects(
         }
     };
     let tasks = match store.list_tasks(Some(wave.id())).await {
-        Ok(sessions) => sessions,
+        Ok(tasks) => tasks,
         Err(err) => {
             return Evidence::Unavailable {
                 reason: format!("failed to read Tasks: {err}"),
@@ -707,7 +724,7 @@ fn roadmap_task(detail: TaskDetailSnapshot, liveness: Liveness) -> RoadmapTask {
 
 /// A Task's section, from the same primitives the row already carries. Order is
 /// load-bearing: a dead process outranks a terminal record (an audit finding),
-/// and a terminal Session is `Later` before its owner is consulted.
+/// and terminal Work is `Later` before its owner is consulted.
 fn task_section(task: &TaskDetailSnapshot, liveness: Liveness) -> RoadmapSection {
     let Some(runtime) = &task.runtime else {
         return if task.task.completed {
@@ -779,10 +796,10 @@ async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Re
         .ok_or_else(|| anyhow!("wave '{name}' is not in this machine's registry"))
 }
 
-/// One tmux reading for the whole command. `lf status` checks a handful of
-/// Sessions and `lf roadmap` checks every Session on the machine; both take a
-/// single `tmux list-sessions` snapshot here and look each name up in the set,
-/// never a `has-session` fork per Session. `installed` is kept distinct from an
+/// One tmux reading for the whole command. `lf status` checks a handful of tmux
+/// sessions and `lf roadmap` checks every tmux session on the machine; both take
+/// a single `tmux list-sessions` snapshot here and look each name up in the set,
+/// never a `has-session` fork per name. `installed` is kept distinct from an
 /// empty `live` set: no tmux means liveness is *unknowable*, not *nothing alive*.
 #[derive(Debug, Clone)]
 struct TmuxLiveness {
@@ -812,7 +829,7 @@ impl TmuxLiveness {
     }
 }
 
-/// Whether this machine can tell a live Session process from a dead one. Without
+/// Whether this machine can tell a live Work process from a dead one. Without
 /// tmux there is no way to look, and `process_alive: false` means "unknown", not
 /// "gone" — a surface that reports the difference as a finding is inventing one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -830,7 +847,7 @@ impl Liveness {
         }
     }
 
-    /// A Session that records a live process the machine looked for and did not
+    /// Work that records a live process the machine looked for and did not
     /// find.
     fn is_gone(self, claims_process: bool, process_alive: bool) -> bool {
         self == Self::Observable && claims_process && !process_alive
@@ -913,7 +930,7 @@ fn attention(
 
 fn attention_reason(dead: bool, status: &str, recorded: &str) -> String {
     if dead {
-        format!("process is gone but the Session still records '{status}'")
+        format!("process is gone but the Work still records '{status}'")
     } else {
         recorded.to_string()
     }
@@ -994,7 +1011,7 @@ async fn snapshot_task_runtime(
     now: time::OffsetDateTime,
 ) -> Result<TaskRuntimeSnapshot> {
     let process_alive = work_status_is_running(&status)
-        && child_launch_alive(store, &ChildRef::Task(task.id.clone()), liveness).await?;
+        && child_run_alive(store, &ChildRef::Task(task.id.clone()), liveness).await?;
     let latest_event_at = store
         .latest_task_event_at(&task.id)
         .await
@@ -1029,7 +1046,7 @@ async fn snapshot_project_runtime(
     now: time::OffsetDateTime,
 ) -> Result<ProjectRuntimeSnapshot> {
     let process_alive = work_status_is_running(&status)
-        && child_launch_alive(store, &ChildRef::Project(project.id.clone()), liveness).await?;
+        && child_run_alive(store, &ChildRef::Project(project.id.clone()), liveness).await?;
     let pending_observations = if work_status_is_terminal(&status) {
         store
             .pending_observations(&ObservationRecipient::Project {
@@ -1070,7 +1087,7 @@ async fn snapshot_project_runtime(
     })
 }
 
-async fn child_launch_alive(
+async fn child_run_alive(
     store: &SharedStore,
     child: &ChildRef,
     liveness: &TmuxLiveness,
@@ -1086,16 +1103,10 @@ async fn child_launch_alive(
     else {
         return Ok(false);
     };
-    let Some(launch) = store
-        .current_launch_for_run(&run.id)
-        .await
-        .map_err(|error| anyhow!("failed to read child Launch: {error}"))?
-    else {
-        return Ok(false);
-    };
-    Ok(match launch.containment {
-        Containment::Tmux { name } => liveness.is_alive(&name),
-        Containment::ProcessGroup { .. } => true,
+    Ok(match run.containment {
+        None => false,
+        Some(Containment::Tmux { name }) => liveness.is_alive(&name),
+        Some(Containment::ProcessGroup { .. }) => true,
     })
 }
 
@@ -1152,16 +1163,16 @@ async fn snapshot_projects(
 
     for project in &projects {
         let status = child_work_status(store, &ChildRef::Project(project.id.clone())).await?;
-        let Some(index) = session_project_index(
+        let Some(index) = work_project_index(
             &details,
-            project.launch.project.id.as_str(),
-            &project.launch.project.slug,
+            project.plan.id.as_str(),
+            &project.plan.slug,
             work_status_is_terminal(&status),
             wave.name(),
             &format!("Project {}", project.id),
             &format!(
                 "lf project abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                project.launch.project.slug
+                project.plan.slug
             ),
         )?
         else {
@@ -1186,47 +1197,56 @@ async fn snapshot_projects(
             )
         })?;
         let index = project_index(&details, project_slug, project_slug)?;
-        let runtime_session = tasks.iter().find(|session| {
-            session.launch.issue.id.as_str() == item.id
-                || session.launch.issue.identifier == item.identifier
+        let runtime_task = tasks.iter().find(|task| {
+            task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
-        details[index].tasks.push(
-            snapshot_task_detail(store, item, runtime_session, liveness, probe_pr_empty).await?,
-        );
+        details[index]
+            .tasks
+            .push(snapshot_task_detail(store, item, runtime_task, liveness, probe_pr_empty).await?);
     }
 
     for runtime_task in &tasks {
         let status = child_work_status(store, &ChildRef::Task(runtime_task.id.clone())).await?;
-        let Some(project_index) = session_project_index(
+        let parent = projects
+            .iter()
+            .find(|project| project.id == runtime_task.project_id)
+            .ok_or_else(|| {
+                anyhow!(
+                    "Task {} requires owning Project {}",
+                    runtime_task.id,
+                    runtime_task.project_id
+                )
+            })?;
+        let Some(project_index) = work_project_index(
             &details,
-            runtime_task.launch.project.id.as_str(),
-            &runtime_task.launch.project.slug,
+            parent.plan.id.as_str(),
+            &parent.plan.slug,
             work_status_is_terminal(&status),
             wave.name(),
             &format!("Task {}", runtime_task.id),
             &format!(
                 "lf task abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                runtime_task.launch.issue.identifier
+                runtime_task.plan.identifier
             ),
         )?
         else {
             continue;
         };
         if details[project_index].tasks.iter().any(|detail| {
-            detail.task.id == runtime_task.launch.issue.id.as_str()
-                || detail.task.identifier == runtime_task.launch.issue.identifier
+            detail.task.id == runtime_task.plan.id.as_str()
+                || detail.task.identifier == runtime_task.plan.identifier
         }) {
             continue;
         }
         let item = PmItem {
-            id: runtime_task.launch.issue.id.as_str().to_string(),
-            identifier: runtime_task.launch.issue.identifier.clone(),
+            id: runtime_task.plan.id.as_str().to_string(),
+            identifier: runtime_task.plan.identifier.clone(),
             url: None,
-            name: runtime_task.launch.issue.title.clone(),
-            description: runtime_task.launch.issue.description.clone(),
+            name: runtime_task.plan.title.clone(),
+            description: runtime_task.plan.description.clone(),
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
-            project: Some(runtime_task.launch.project.slug.clone()),
+            project: Some(parent.plan.slug.clone()),
             assignee: None,
         };
         details[project_index].tasks.push(
@@ -1246,13 +1266,13 @@ async fn snapshot_projects(
     Ok(details)
 }
 
-fn session_project_index(
+fn work_project_index(
     projects: &[ProjectDetailSnapshot],
     id: &str,
     slug: &str,
     terminal: bool,
     wave: &str,
-    session: &str,
+    work: &str,
     recovery: &str,
 ) -> Result<Option<usize>> {
     if let Some(index) = find_project_index(projects, id, slug) {
@@ -1262,7 +1282,7 @@ fn session_project_index(
         return Ok(None);
     }
     Err(anyhow!(
-        "{session} references Project {slug} ({id}), which is absent from the current PM snapshot; run `lf pm sync --wave {wave}`. If the Project remains absent, settle the stale Session with `{recovery}`"
+        "{work} references Project {slug} ({id}), which is absent from the current PM snapshot; run `lf pm sync --wave {wave}`. If the Project remains absent, settle the stale Work with `{recovery}`"
     ))
 }
 
@@ -1284,26 +1304,26 @@ fn find_project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) 
 async fn snapshot_task_detail(
     store: &SharedStore,
     item: PmItem,
-    session: Option<&Task>,
+    task: Option<&Task>,
     liveness: &TmuxLiveness,
     probe_pr_empty: bool,
 ) -> Result<TaskDetailSnapshot> {
-    let prs = match session {
-        Some(session) => store.task_prs(&session.id).await?,
+    let prs = match task {
+        Some(task) => store.task_prs(&task.id).await?,
         None => Vec::new(),
     };
     let latest = prs.last();
     let active = prs.iter().find(|pr| pr.is_active());
     let observed_at = now();
-    let runtime = match session {
-        Some(session) => {
-            let status = child_work_status(store, &ChildRef::Task(session.id.clone())).await?;
-            Some(snapshot_task_runtime(store, session, status, liveness, observed_at).await?)
+    let runtime = match task {
+        Some(task) => {
+            let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
+            Some(snapshot_task_runtime(store, task, status, liveness, observed_at).await?)
         }
         None => None,
     };
-    let reference = task_reference(&item, session, active, &prs);
-    let next_move = match session {
+    let reference = task_reference(&item, task, active, &prs);
+    let next_move = match task {
         Some(_) => next_move_for_task(
             &runtime
                 .as_ref()
@@ -1311,6 +1331,7 @@ async fn snapshot_task_detail(
                 .status,
             active.map(TaskPr::phase),
             active.and_then(|pr| pr.fresh_ci()),
+            active.and_then(TaskPr::merge_request),
         ),
         None if item.completed => NextMove {
             owner: NextMoveOwner::Project,
@@ -1322,55 +1343,44 @@ async fn snapshot_task_detail(
         },
     };
     let process = task_process_evidence(runtime.as_ref(), liveness);
-    let local_progress = task_local_progress(session, runtime.as_ref(), active, &process);
-    let completion_refusal = match session {
-        Some(session) => crate::ops::task::task_completion_gate(store, session)
+    let local_progress = task_local_progress(task, runtime.as_ref(), active, &process);
+    let completion_refusal = match task {
+        Some(task) => crate::ops::task::task_completion_gate(store, task)
             .await?
-            .refusal(&session.launch.issue.identifier),
+            .refusal(&task.plan.identifier),
         None => None,
     };
-    let resume_refusal = session.and_then(|session| {
-        crate::ops::task::no_active_pr_resume_refusal(
-            &session.launch.issue.identifier,
-            active,
-            latest,
-        )
+    let resume_refusal = task.and_then(|task| {
+        crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
     });
-    let (action_evidence, user_feedback) = match session {
-        Some(session) => {
+    let (action_evidence, user_ask) = match task {
+        Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
                 None => None,
             };
             let work = store
-                .work_for_child(&ChildRef::Task(session.id.clone()))
+                .work_for_child(&ChildRef::Task(task.id.clone()))
                 .await?;
-            let feedback = store.feedback(&work).await?;
-            let user_feedback = feedback
-                .as_ref()
-                .is_some_and(|feedback| feedback.attention == AttentionRoute::User);
+            let user_ask = store.has_pending_user_ask_for_work(&work).await?;
             let work_status = store.work_status(&work).await?;
             (
                 Some(TaskActionEvidence {
                     status: work_status,
                     latest_pr_phase: latest.map(TaskPr::phase),
                     latest_pr_after_merge: latest
-                        .and_then(|pr| pr.publication.as_ref())
-                        .map(|p| p.after_merge),
-                    latest_pr_next_slug: latest
-                        .and_then(|pr| pr.publication.as_ref())
-                        .and_then(|p| p.next_slug.as_deref()),
+                        .filter(|pr| pr.phase() == PrPhase::Merged)
+                        .map(TaskPr::after_merge),
+                    latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
-                    pending_directive: false,
                     ci: active.and_then(|pr| pr.fresh_ci()),
                     process_alive: process.alive,
                     predecessor_phase,
-                    review_gate: None,
-                    abandon_intent: session.abandon_intent.is_some(),
+                    abandon_intent: task.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
                 }),
-                user_feedback,
+                user_ask,
             )
         }
         None => (None, false),
@@ -1382,13 +1392,13 @@ async fn snapshot_task_detail(
         TaskAttentionEvidence {
             process,
             local_progress,
-            user_feedback,
+            user_ask,
         },
         action_evidence.as_ref(),
         observed_at,
     );
-    let direction = match session {
-        Some(session) => current_direction(store, ChildRef::Task(session.id.clone())).await?,
+    let direction = match task {
+        Some(task) => current_direction(store, ChildRef::Task(task.id.clone())).await?,
         None => None,
     };
     Ok(TaskDetailSnapshot {
@@ -1404,9 +1414,9 @@ async fn snapshot_task_detail(
                 // PR emptiness is an execution-plane fact (`lf status`); it costs
                 // an additional Git comparison, so `lf roadmap` opts out. The
                 // attention fold already carries the progress evidence it needs.
-                let empty = match (session, active) {
-                    (Some(session), Some(active)) if probe_pr_empty && active.id == pr.id => {
-                        task_pr_empty(session, pr)
+                let empty = match (task, active) {
+                    (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
+                        task_pr_empty(task, pr)
                     }
                     _ => None,
                 };
@@ -1450,12 +1460,12 @@ fn task_process_evidence(
 }
 
 fn task_local_progress(
-    session: Option<&Task>,
+    task: Option<&Task>,
     runtime: Option<&TaskRuntimeSnapshot>,
     active_pr: Option<&TaskPr>,
     process: &TaskProcessEvidence,
 ) -> LocalProgressEvidence {
-    let Some(session) = session else {
+    let Some(task) = task else {
         return LocalProgressEvidence {
             state: LocalProgressEvidenceState::NotApplicable,
             unsettled: Some(false),
@@ -1469,7 +1479,7 @@ fn task_local_progress(
         runtime
             .map(|runtime| &runtime.status)
             .expect("Task runtime exists when the durable Task exists"),
-        &session.worktree,
+        &task.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
         process,
     )
@@ -1563,17 +1573,17 @@ fn derive_task_attention(
     let TaskAttentionEvidence {
         process,
         local_progress,
-        user_feedback,
+        user_ask,
     } = evidence;
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
     let live = process.alive == Some(true);
-    let user_attention = matches!(next_move.owner, NextMoveOwner::User | NextMoveOwner::Review);
-    let (level, reason) = if user_feedback {
+    let user_attention = next_move.owner == NextMoveOwner::User;
+    let (level, reason) = if user_ask {
         (
             TaskAttentionLevel::Blue,
-            "Waiting for your feedback".to_string(),
+            "Waiting for your answer".to_string(),
         )
     } else if live && user_attention {
         (TaskAttentionLevel::Red, next_move.reason.clone())
@@ -1638,18 +1648,18 @@ fn derive_task_attention(
 
 fn task_reference(
     item: &PmItem,
-    session: Option<&Task>,
+    task: Option<&Task>,
     active_pr: Option<&TaskPr>,
     prs: &[TaskPr],
 ) -> TaskReferenceSnapshot {
-    let workspace = session.map(|session| {
+    let workspace = task.map(|task| {
         let branch = active_pr
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
         TaskWorkspaceSnapshot {
-            slug: session.workspace_slug.clone(),
+            slug: task.workspace_slug.clone(),
             branch,
-            worktree: session.worktree.display().to_string(),
+            worktree: task.worktree.display().to_string(),
         }
     });
     TaskReferenceSnapshot {
@@ -1658,15 +1668,15 @@ fn task_reference(
     }
 }
 
-fn task_pr_empty(session: &Task, pr: &TaskPr) -> Option<bool> {
-    if !session.worktree.exists() {
+fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
+    if !task.worktree.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(&session.worktree).ok()?;
+    let clean = crate::engine::git::is_clean(&task.worktree).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(&session.worktree, "HEAD").ok()?;
+    let head = crate::engine::git::rev_parse(&task.worktree, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 
@@ -1754,52 +1764,47 @@ fn next_move_for_task(
     status: &WorkStatus,
     pr_phase: Option<PrPhase>,
     ci: Option<&CiObservation>,
+    merge: Option<&PrMergeRequest>,
 ) -> NextMove {
-    // An open PR's next move is CI-derived. Review begins only once a fresh
-    // current-head reading proves required checks passed.
     if pr_phase == Some(PrPhase::Open) {
         if let Some(ci) = ci {
-            // A head red only on land-time preconditions (`scratch-clear`) holds
-            // nothing a body can repair — `lf pr land` greens it. It is
-            // reviewable, not owned by CI, and a live body sitting on it is the
-            // reviewer's turn, not "fixing CI". Every Task PR is red this way
-            // pre-land, so this is the common case, not the exception.
-            if ci.only_land_time_preconditions() {
-                return NextMove {
-                    owner: NextMoveOwner::Review,
-                    reason: "checks passed except scratch-clear; awaiting review".to_string(),
-                };
-            }
-            // A live ci-fix generation (Running/Starting) owns the next move:
-            // the Task is actively repairing a real failing check, not waiting
-            // for an external CI fix. Failing + idle → Ci (the wake will fire);
-            // Passing → Review regardless of process state.
-            let fixing = work_status_is_running(status) && ci.state == CiState::Failing;
+            let repairable_failure =
+                ci.state == CiState::Failing && !ci.only_land_time_preconditions();
+            let fixing = work_status_is_running(status) && repairable_failure;
             if fixing {
                 return NextMove {
                     owner: NextMoveOwner::Task,
                     reason: "fixing CI".to_string(),
                 };
             }
-            return match ci.state {
-                CiState::Pending => NextMove {
-                    owner: NextMoveOwner::Ci,
-                    reason: "required checks are still running".to_string(),
-                },
-                CiState::Failing => NextMove {
+            if repairable_failure {
+                return NextMove {
                     owner: NextMoveOwner::Ci,
                     reason: ci_failure_reason(ci),
+                };
+            }
+        }
+        if let Some(request) = merge {
+            if ci
+                .is_none_or(|ci| ci.state == CiState::Pending && !ci.only_land_time_preconditions())
+            {
+                return NextMove {
+                    owner: NextMoveOwner::Ci,
+                    reason: "required checks have not passed for the requested merge".to_string(),
+                };
+            }
+            let short = request.head_sha.chars().take(12).collect::<String>();
+            return match request.mode {
+                PrMergeMode::User => NextMove {
+                    owner: NextMoveOwner::User,
+                    reason: format!("merge pull request head {short} on GitHub"),
                 },
-                CiState::Passing => NextMove {
-                    owner: NextMoveOwner::Review,
-                    reason: "checks passed; awaiting review".to_string(),
+                PrMergeMode::Auto => NextMove {
+                    owner: NextMoveOwner::External,
+                    reason: format!("GitHub auto-merge is settling head {short}"),
                 },
             };
         }
-        return NextMove {
-            owner: NextMoveOwner::Ci,
-            reason: "required checks have not been observed for the current head".to_string(),
-        };
     }
     let owner = match status {
         WorkStatus::Running { .. } => NextMoveOwner::Task,
@@ -1816,7 +1821,7 @@ fn next_move_for_task(
 
 /// The invoking context's wave id: `LF_WAVE_ID`, else `None` (the caller
 /// errors). Kept minimal — `lf status` with no arg is a convenience, not the
-/// resolution surface `lf chat`/`lf radio sub` own.
+/// resolution surface `lf chat` owns.
 fn ambient_wave() -> Option<String> {
     std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
         .ok()
@@ -2281,7 +2286,6 @@ fn owner_label(owner: &NextMoveOwner) -> &'static str {
         NextMoveOwner::Wave => "wave",
         NextMoveOwner::Project => "project",
         NextMoveOwner::Task => "task",
-        NextMoveOwner::Review => "review",
         NextMoveOwner::Ci => "ci",
         NextMoveOwner::External => "external",
     }
@@ -2306,4 +2310,80 @@ fn truncate(value: &str, width: usize) -> String {
     }
     let head: String = value.chars().take(width.saturating_sub(1)).collect();
     format!("{head}\u{2026}")
+}
+
+#[cfg(test)]
+mod tests {
+    use time::OffsetDateTime;
+
+    use super::{next_move_for_task, NextMoveOwner};
+    use crate::durable::WorkStatus;
+    use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+
+    #[test]
+    fn only_an_explicit_merge_request_owns_a_healthy_open_pr() {
+        let passing = CiObservation {
+            head_sha: "head-1234567890".to_string(),
+            state: CiState::Passing,
+            failing_checks: Vec::new(),
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let published = next_move_for_task(
+            &WorkStatus::Ready,
+            Some(PrPhase::Open),
+            Some(&passing),
+            None,
+        );
+        assert_eq!(published.owner, NextMoveOwner::Project);
+
+        for (mode, owner) in [
+            (PrMergeMode::User, NextMoveOwner::User),
+            (PrMergeMode::Auto, NextMoveOwner::External),
+        ] {
+            let request = PrMergeRequest {
+                mode,
+                requested_at: OffsetDateTime::now_utc(),
+                head_sha: passing.head_sha.clone(),
+                after_merge: crate::task::AfterMerge::ContinueTask,
+                next_slug: None,
+            };
+            let next = next_move_for_task(
+                &WorkStatus::Ready,
+                Some(PrPhase::Open),
+                Some(&passing),
+                Some(&request),
+            );
+            assert_eq!(next.owner, owner);
+            assert!(next.reason.contains("head-1234567"));
+        }
+    }
+
+    #[test]
+    fn land_only_failure_leaves_the_requested_merge_with_its_operator() {
+        let ci = CiObservation {
+            head_sha: "head".to_string(),
+            state: CiState::Failing,
+            failing_checks: vec![crate::task::CiCheck {
+                name: "scratch-clear".to_string(),
+                url: None,
+            }],
+            observed_at: OffsetDateTime::now_utc(),
+        };
+        let request = PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: OffsetDateTime::now_utc(),
+            head_sha: ci.head_sha.clone(),
+            after_merge: crate::task::AfterMerge::ContinueTask,
+            next_slug: None,
+        };
+
+        let next = next_move_for_task(
+            &WorkStatus::Ready,
+            Some(PrPhase::Open),
+            Some(&ci),
+            Some(&request),
+        );
+
+        assert_eq!(next.owner, NextMoveOwner::User);
+    }
 }

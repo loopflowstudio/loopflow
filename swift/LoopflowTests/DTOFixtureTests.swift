@@ -13,7 +13,7 @@ struct DTOFixtureTests {
         let turns = try JSONDecoder().decode([TurnSpend].self, from: data)
 
         #expect(turns.map(\.id) == ["turn-1", "turn-2"])
-        #expect(turns[0].launchId == "launch-1")
+        #expect(turns[0].invocationId == "invocation-1")
         #expect(turns[0].traceId == "trace-1")
         #expect(turns[0].execId == "exec-1")
         #expect(turns[0].totalTokens == 1200)
@@ -34,18 +34,18 @@ struct DTOFixtureTests {
         let snapshot = try JSONDecoder().decode(ContextLabSnapshot.self, from: data)
 
         #expect(snapshot.totals.runs == 1)
-        #expect(snapshot.totals.agentSessions == 1)
+        #expect(snapshot.totals.invocations == 1)
         #expect(snapshot.totals.initialPromptTokens == 1_000)
         #expect(snapshot.totals.lifetimeInputTokens == 2_400)
         #expect(snapshot.totals.medianPeakContextPercent == 45)
         #expect(snapshot.coverage.unknownTurns == 1)
-        #expect(snapshot.coverage.sourceObservableAgentSessions == 1)
+        #expect(snapshot.coverage.sourceObservableInvocations == 1)
         #expect(snapshot.aggregateRoot.children[0].children[0].children.count == 1)
         #expect(snapshot.query.projects == ["context"])
         #expect(snapshot.query.steeredOnly)
         #expect(snapshot.query.currentRevisionOnly)
-        #expect(snapshot.sessions[0].task == "W2-71")
-        #expect(snapshot.sessions[0].turns[1].suppliedContextTokens == nil)
+        #expect(snapshot.invocations[0].task == "W2-71")
+        #expect(snapshot.invocations[0].turns[1].suppliedContextTokens == nil)
         #expect(snapshot.sources[0].impressions == 1)
         #expect(snapshot.sources[0].currentRevisionNodeId == "context-revision")
         #expect(snapshot.sources[1].impressions == nil)
@@ -70,7 +70,7 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].tasks.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.projects[0].tasks[0].prs.compactMap(\.publication?.github?.number) == [912])
         #expect(detail.projects[0].tasks[0].activePr == "pr_33333333333333333333333333333333")
-        #expect(detail.projects[0].tasks[0].prs[0].publication?.afterMerge == .completeTask)
+        #expect(detail.projects[0].tasks[0].prs[0].publication?.merge?.afterMerge == .completeTask)
         #expect(detail.projects[0].directive?.version == 1)
         #expect(detail.projects[0].tasks[0].directive?.version == 2)
         #expect(detail.projects[0].tasks[0].directive?.incorporatedAt != nil)
@@ -90,11 +90,11 @@ struct DTOFixtureTests {
         #expect(detail.runs.items[0].suppliedContextTokens == 3000)
         #expect(detail.runs.items[0].status == "ok")
         #expect(detail.attention.items[0].subject == "INF-123")
-        #expect(detail.attention.items[0].owner == .review)
-        #expect(detail.attention.items[0].reason == "waiting for review")
+        #expect(detail.attention.items[0].owner == .user)
+        #expect(detail.attention.items[0].reason == "merge pull request head 333333333333 on GitHub")
         #expect(detail.attention.items[0].ageSeconds == 7200)
         #expect(detail.projects[0].tasks[0].attention.level == .red)
-        #expect(detail.projects[0].tasks[0].attention.reason == "waiting for review")
+        #expect(detail.projects[0].tasks[0].attention.reason == "merge pull request head 333333333333 on GitHub")
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -116,26 +116,6 @@ struct DTOFixtureTests {
         #expect(roadmap.waves[1].projects.unavailableReason?.contains("lf pm sync") == true)
     }
 
-    @Test("memory fact fixture preserves every evidence-kind receipt")
-    func memoryFactFixturePreservesReceipts() throws {
-        let data = try loadFixtureData("receipt.json")
-        let fact = try JSONDecoder().decode(MemoryFact.self, from: data)
-
-        #expect(fact.fact == "Workers report through the memory stream, not the journal.")
-        #expect(fact.receipts.map(\.kind) == [.chatTurn, .workerReport, .trace, .pm, .pr])
-        // A PR reference keeps its `@sha`; its wave differs from the others (the
-        // cross-wave case doctor detects downstream).
-        let pr = try #require(fact.receipts.last)
-        #expect(pr.reference == "loopflow/loopflow#912@abc1234")
-        #expect(pr.wave == "auditability")
-        #expect(pr.token == "pr:loopflow/loopflow#912@abc1234")
-
-        // Round-trips: re-encode and decode to the same value.
-        let reencoded = try JSONEncoder().encode(fact)
-        let decoded = try JSONDecoder().decode(MemoryFact.self, from: reencoded)
-        #expect(decoded == fact)
-    }
-
     @Test("child activity preserves typed delivery evidence")
     func childActivityPreservesTypedDeliveryEvidence() throws {
         let data = try loadFixtureData("child_control_activity.json")
@@ -143,24 +123,51 @@ struct DTOFixtureTests {
 
         #expect(activity.subject == .task)
         #expect(activity.subjectId == "INF-123")
+        #expect(activity.workId == "ts_22222222222222222222222222222222")
         #expect(activity.kind == .prOpened)
         #expect(activity.title == "Opened PR #1073")
     }
-    @Test("Launch surface fixture preserves attach and attention")
-    func launchSurfaceFixtureRoundTrips() throws {
-        let data = try loadFixtureData("launch_surface.json")
-        let surface = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: data)
+    @Test("Invocation surface fixture preserves Run ownership and attach")
+    func invocationSurfaceFixtureRoundTrips() throws {
+        let data = try loadFixtureData("invocation_surface.json")
+        let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: data)
 
-        #expect(surface.id == "launch_00000000000000000000000000000001")
+        #expect(surface.id == "invocation_00000000000000000000000000000001")
         #expect(surface.work.kind == .task)
-        #expect(surface.status == .live)
-        #expect(surface.attention?.kind == "user")
-        #expect(surface.attentionAt == "2026-07-17T12:01:00Z")
+        #expect(surface.status == .active)
+        #expect(surface.run.containment == .tmux(name: "lf-task"))
+        #expect(surface.run.cwd == "/src/loopflow.task")
         #expect(surface.argv == ["tmux", "attach-session", "-t", "lf-task"])
 
         let encoded = try JSONEncoder().encode(surface)
-        let decoded = try JSONDecoder().decode(LaunchSurfaceRecord.self, from: encoded)
+        let decoded = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: encoded)
         #expect(decoded == surface)
+    }
+
+    @Test("Turn and Ask fixtures preserve the targeted exchange")
+    func askExchangeFixturesRoundTrip() throws {
+        let turn = try JSONDecoder().decode(
+            TurnRecord.self,
+            from: loadFixtureData("turn.json")
+        )
+        #expect(turn.state == .active)
+        #expect(turn.basis.revision == 4)
+
+        let ask = try JSONDecoder().decode(
+            AskExchangeRecord.self,
+            from: loadFixtureData("ask_exchange.json")
+        )
+        #expect(ask.turnId == turn.id)
+        #expect(ask.route == .parent(WorkReference(
+            kind: .project,
+            id: "proj_00000000000000000000000000000001"
+        )))
+        #expect(ask.answer?.author == .run("run_00000000000000000000000000000001"))
+        #expect(ask.answer?.text == "The live blocking exchange.")
+
+        let encoded = try JSONEncoder().encode(ask)
+        let decoded = try JSONDecoder().decode(AskExchangeRecord.self, from: encoded)
+        #expect(decoded == ask)
     }
 
     @Test("Work status fixture preserves every status and wait kind")

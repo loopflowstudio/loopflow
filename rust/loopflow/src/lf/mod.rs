@@ -165,6 +165,12 @@ pub enum Commands {
     },
     /// Open or focus Loopflow.app
     Desktop,
+    /// Ask the current Turn's parent and block until its durable Answer arrives
+    Ask {
+        /// Question text, or `wait [<ask-id>]` to resume an existing exchange
+        #[arg(trailing_var_arg = true, value_name = "QUESTION|wait [ASK_ID]")]
+        args: Vec<String>,
+    },
     /// Authorize global lf promotion against the shared migration frontier
     Install {
         #[command(subcommand)]
@@ -261,7 +267,7 @@ pub enum Commands {
     Wave {
         /// Wave name
         name: String,
-        /// Take over even if another live wave session is registered
+        /// Take over even if another live Wave is registered
         #[arg(long)]
         force: bool,
     },
@@ -307,30 +313,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Inspect, attach, and hand back provider or opaque process Launches
-    Launch {
+    /// Inspect, attach, and hand back provider or opaque AgentInvocations
+    Invocation {
         #[command(subcommand)]
-        cmd: LaunchCommand,
+        cmd: InvocationCommand,
     },
     /// Inspect and control stable Wave, Project, or Task Work
     Work {
         #[command(subcommand)]
         cmd: WorkCommand,
-    },
-    /// List current User-attention Feedback, oldest first
-    Queue {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Internal: continue Feedback if its presentation client exits unexpectedly
-    #[command(name = "__feedback-exit-guard", hide = true)]
-    FeedbackExitGuard {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-        launch_id: String,
-        epoch_id: String,
-        revision: u64,
     },
     /// Internal: run a Project or Task body holding the ambient Run lease
     #[command(name = "__work", hide = true)]
@@ -415,19 +406,19 @@ pub enum Commands {
         /// Filter by model
         #[arg(long)]
         model: Vec<String>,
-        /// Filter by launch surface
+        /// Filter by invocation surface
         #[arg(long)]
         surface: Vec<String>,
-        /// Filter by launch outcome
+        /// Filter by invocation outcome
         #[arg(long)]
         outcome: Vec<String>,
         /// Filter by capture state
         #[arg(long)]
         capture_state: Vec<String>,
-        /// Include only launches with observed steering turns
+        /// Include only invocations with observed steering turns
         #[arg(long)]
         steered_only: bool,
-        /// Include only launches containing a current file instruction revision
+        /// Include only invocations containing a current file instruction revision
         #[arg(long)]
         current_revision_only: bool,
         /// Emit the Context Lab snapshot as JSON
@@ -503,16 +494,15 @@ pub enum Commands {
         /// Stream stored event objects as JSONL
         #[arg(long, requires = "events")]
         jsonl: bool,
-        /// Select one launch by id prefix
+        /// Select one AgentInvocation by id prefix
         #[arg(long)]
-        launch: Option<String>,
+        invocation: Option<String>,
         /// Select one turn by id prefix (with --content)
         #[arg(long, requires = "content")]
         turn: Option<String>,
     },
-    /// Converse with a served mind's thread (humans); --follow replays it and
-    /// --steer reaches the live body. Agents use `lf radio pub` for
-    /// agent-to-agent comms, not this.
+    /// Converse with a served mind's thread; --follow replays it and --steer
+    /// reaches the live body.
     Chat {
         /// Message text (reads stdin when omitted unless --follow or --history)
         #[arg(trailing_var_arg = true)]
@@ -535,25 +525,6 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
-    /// Publish to or subscribe to the ephemeral agent bus.
-    #[command(subcommand_required = true, arg_required_else_help = true)]
-    Radio {
-        #[command(subcommand)]
-        command: RadioCommand,
-    },
-    // Reserve the retired spelling so the external-subcommand fallback cannot
-    // reinterpret the retired top-level spelling as a skill. This variant can
-    // never parse.
-    #[command(
-        name = "sub",
-        hide = true,
-        about = "Removed; use `lf radio sub`",
-        arg_required_else_help = true
-    )]
-    RetiredSub {
-        #[arg(required = true, value_parser = reject_retired_sub)]
-        removed: String,
-    },
     // Same reservation for the retired `lf op` namespace, which held every
     // operation before the runtime collapsed to waves, projects, and tasks.
     // Without it, `lf op land` reports a missing skill named `op` instead of
@@ -569,18 +540,6 @@ pub enum Commands {
         removed: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
-    },
-    /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
-    Memory {
-        #[command(subcommand)]
-        cmd: Option<MemoryCommand>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Resolve one evidence receipt to its canonical local record
-    Receipt {
-        #[command(subcommand)]
-        cmd: ReceiptCommand,
     },
     /// Run a command on a Home or SSH host carrying your local credentials.
     ///
@@ -636,7 +595,7 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum RunsCommand {
     /// Tombstone terminal captures whose conversation artifacts are gone, and
-    /// finalize orphaned `capturing` launches. Dry-run by default; `--apply`
+    /// finalize orphaned `capturing` invocations. Dry-run by default; `--apply`
     /// writes. A red `lf doctor` capture check means un-acknowledged loss —
     /// this is the explicit acknowledgment that turns historical loss green
     /// while leaving fresh loss red.
@@ -655,71 +614,42 @@ pub enum RunsCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RadioCommand {
-    /// Broadcast on the agent bus. Reads stdin when TEXT is omitted.
-    Pub {
-        /// Message text (reads stdin when omitted — heredoc-friendly)
-        #[arg(trailing_var_arg = true)]
-        text: Vec<String>,
-        /// Broadcast on another channel (a hand's `goals.<run>`) instead of
-        /// your own.
-        #[arg(short = 'c', long = "channel", conflicts_with = "parent")]
-        channel: Option<String>,
-        /// Broadcast to the parent wave's channel (escalation up the tree).
-        #[arg(long)]
-        parent: bool,
-        /// Byline for machine speech (e.g. --from ci). Testimony, not proof:
-        /// the row records it beside the channel it arrived on.
-        #[arg(long)]
-        from: Option<String>,
-    },
-    /// Hear broadcasts on a channel and its descendants while listening.
-    Sub {
-        /// Channel prefix (default: the ambient channel — env, else worktree)
-        channel: Option<String>,
-        /// Emit heard frames as NDJSON instead of human lines
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum LaunchCommand {
-    /// List Launches backed by the normalized Run controller
+pub enum InvocationCommand {
+    /// List AgentInvocations supervised by Runs
     List {
-        /// Include only Launches whose containment may still be live
+        /// Include only invocations whose supervising Run may still be live
         #[arg(long)]
         active: bool,
         #[arg(long)]
         json: bool,
     },
-    /// Show one Launch and its generic attach route
+    /// Show one AgentInvocation and its generic attach route
     Status {
-        launch_id: String,
+        invocation_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Return the generic attach descriptor without changing Launch state
+    /// Return the generic attach descriptor without changing Run state
     Attach {
-        launch_id: String,
+        invocation_id: String,
         #[arg(long)]
         json: bool,
     },
-    /// Record explicit terminal evidence for an opaque Launch boundary
+    /// Record explicit terminal evidence for an opaque invocation boundary
     Handback {
-        launch_id: String,
+        invocation_id: String,
         #[arg(long, value_parser = ["succeeded", "failed", "interrupted", "unknown"])]
         outcome: String,
         #[arg(long)]
         json: bool,
     },
-    /// Exec the Launch's generic attach route
-    Present { launch_id: String },
+    /// Exec the AgentInvocation's generic attach route
+    Present { invocation_id: String },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum WorkCommand {
-    /// Show current Epoch, Basis, Run, Wait, and Feedback projection
+    /// Show current Epoch, Basis, Run, and Wait projection
     Status {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -745,35 +675,22 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Present the current User-attention Feedback in its recorded Launch
-    Feedback {
+    /// List pending Asks routed to the User or this parent Work
+    Asks {
         #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
-        /// Continue when the presentation exits successfully
-        #[arg(long, conflicts_with = "continue_on_exit")]
-        continue_on_success: bool,
-        /// Continue whenever the presentation exits, including signals or crashes
-        #[arg(long, conflicts_with = "continue_on_success")]
-        continue_on_exit: bool,
-    },
-    /// Continue past the current Feedback boundary
-    Continue {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
+        kind: Option<String>,
+        id: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Escalate immediate child Feedback from this parent Run to the User
-    Escalate {
-        #[arg(value_parser = ["wave", "project", "task"])]
-        kind: String,
-        id: String,
+    /// Answer one exact Ask; the first authorized Answer wins
+    Answer {
+        ask_id: crate::durable::AskId,
+        text: String,
         #[arg(long)]
         json: bool,
     },
-    /// Interrupt the current Turn or opaque Launch boundary
+    /// Interrupt the current Turn or opaque Invocation boundary
     Interrupt {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: String,
@@ -791,10 +708,6 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-}
-
-fn reject_retired_sub(_: &str) -> Result<String, String> {
-    Err("the top-level subscription command was removed; use `lf radio sub`".to_string())
 }
 
 /// Name the surviving spelling for each retired `lf op` verb. Prompts, `.lf/`
@@ -821,8 +734,8 @@ fn reject_retired_op(sub: &str) -> Result<String, String> {
     Err(format!("`lf op {sub}` was removed; {hint}"))
 }
 
-/// Wave targeting shared by `lf chat` and `lf memory`: default is the
-/// invoking context's wave (`LF_WAVE_ID` env, else the worktree name).
+/// Wave targeting for `lf chat`: default is the invoking context's wave
+/// (`LF_WAVE_ID` env, else the worktree name).
 #[derive(Args, Debug, Clone, Default)]
 pub struct WaveTargetArgs {
     /// Target wave by name
@@ -831,58 +744,6 @@ pub struct WaveTargetArgs {
     /// Target the invoking wave's parent (escalation up the wave tree)
     #[arg(long)]
     pub parent: bool,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum MemoryCommand {
-    /// Print the wave's MEMORY.md
-    Show {
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Print memory facts added since the last update
-    Log {
-        /// Emit facts with their evidence receipts as JSON
-        #[arg(long)]
-        json: bool,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Replace MEMORY.md from stdin (written by the live server, journaled)
-    Update {
-        /// One-line summary journaled with the update (default: first line)
-        #[arg(long)]
-        summary: Option<String>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Publish one fact to the replayable memory stream
-    Add {
-        /// The fact to publish
-        fact: String,
-        /// Evidence receipt binding the fact to its raw record, written as
-        /// `kind:reference` (e.g. `chat_turn:turn-3`, `run:<run_id>`,
-        /// `pr:owner/repo#N`). Repeatable for many-to-one evidence.
-        #[arg(long = "receipt")]
-        receipts: Vec<String>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ReceiptCommand {
-    /// Drill one receipt to its canonical local record
-    Show {
-        /// Receipt token: `kind:reference` (e.g. `chat_turn:turn-3`, `run:run-9`)
-        token: String,
-        /// Wave name (default: the ambient wave)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
-        /// Emit the resolved record as JSON
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -897,7 +758,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Start or resume the current Session for an existing Linear Project
+    /// Start or resume the current Work for an existing Linear Project
     Run {
         /// Linear Project UUID or unique slug
         project_id: String,
@@ -913,7 +774,7 @@ pub enum ProjectCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Redirect Project work now, relaunching the Session when needed
+    /// Redirect Project Work now, relaunching its provider when needed
     Steer {
         project_id: String,
         message: String,
@@ -987,9 +848,6 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Route every interactive lifecycle step to the parent Project
-        #[arg(long)]
-        headless: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1015,9 +873,6 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
-        /// Route every interactive lifecycle step to the parent Project
-        #[arg(long)]
-        headless: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1772,7 +1627,7 @@ pub enum WtCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Remove every worktree not protected by active ownership
+    /// Remove clean terminal or inactive worktrees
     Prune {
         /// Show what would be pruned without removing anything
         #[arg(long)]
@@ -2224,27 +2079,10 @@ mod tests {
     }
 
     #[test]
-    fn task_run_and_start_accept_headless_lifecycle_policy() {
-        for argv in [
-            vec!["lf", "task", "run", "INF-123", "--headless"],
-            vec![
-                "lf",
-                "task",
-                "start",
-                "project-1",
-                "Ship auth",
-                "--headless",
-            ],
-        ] {
-            let cli = Cli::try_parse_from(argv).expect("parse headless Task launch");
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Task {
-                    cmd: TaskCommand::Run { headless: true, .. }
-                        | TaskCommand::Start { headless: true, .. }
-                })
-            ));
-        }
+    fn task_run_rejects_retired_reviewer_flag() {
+        assert!(
+            Cli::try_parse_from(["lf", "task", "run", "INF-123", "--reviewer", "parent"]).is_err()
+        );
     }
 
     #[test]
@@ -2265,7 +2103,16 @@ mod tests {
     }
 
     #[test]
-    fn context_accepts_repeatable_session_set_filters() {
+    fn task_run_rejects_retired_headless_flag() {
+        let error = Cli::try_parse_from(["lf", "task", "run", "INF-123", "--headless"])
+            .expect_err("--headless must not remain as an alias");
+        assert!(error
+            .to_string()
+            .contains("unexpected argument '--headless'"));
+    }
+
+    #[test]
+    fn context_accepts_repeatable_invocation_set_filters() {
         let cli = Cli::try_parse_from([
             "lf",
             "context",
@@ -2327,8 +2174,8 @@ mod tests {
             "run-1",
             "--json",
             "--content",
-            "--launch",
-            "launch-1",
+            "--invocation",
+            "invocation-1",
             "--turn",
             "turn-1",
         ])
@@ -2337,10 +2184,10 @@ mod tests {
             cli.command,
             Some(Commands::Trace {
                 content: true,
-                launch: Some(launch),
+                invocation: Some(invocation),
                 turn: Some(turn),
                 ..
-            }) if launch == "launch-1" && turn == "turn-1"
+            }) if invocation == "invocation-1" && turn == "turn-1"
         ));
         assert!(Cli::try_parse_from(["lf", "trace", "run-1", "--content"]).is_err());
     }
@@ -2621,26 +2468,26 @@ mod tests {
         ));
     }
     #[test]
-    fn cli_parses_generic_launch_contract() {
+    fn cli_parses_generic_invocation_contract() {
         let cli = Cli::try_parse_from([
             "lf",
-            "launch",
+            "invocation",
             "handback",
-            "launch_1",
+            "invocation_1",
             "--outcome",
             "unknown",
             "--json",
         ])
-        .expect("parse Launch handback");
+        .expect("parse Invocation handback");
         assert!(matches!(
             cli.command,
-            Some(Commands::Launch {
-                cmd: LaunchCommand::Handback {
-                    launch_id,
+            Some(Commands::Invocation {
+                cmd: InvocationCommand::Handback {
+                    invocation_id,
                     outcome,
                     json: true,
                 }
-            }) if launch_id == "launch_1" && outcome == "unknown"
+            }) if invocation_id == "invocation_1" && outcome == "unknown"
         ));
     }
 
@@ -2668,45 +2515,31 @@ mod tests {
             }) if kind == "task" && id == "task_1" && message == "inspect the failure"
         ));
 
-        let continue_cli = Cli::try_parse_from(["lf", "work", "continue", "project", "project_1"])
-            .expect("parse Work continue");
+        let asks = Cli::try_parse_from(["lf", "work", "asks", "project", "project_1"])
+            .expect("parse Work asks");
         assert!(matches!(
-            continue_cli.command,
+            asks.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Continue { kind, id, json: false }
+                cmd: WorkCommand::Asks { kind: Some(kind), id: Some(id), json: false }
             }) if kind == "project" && id == "project_1"
         ));
-
-        let feedback = Cli::try_parse_from([
+        let answer = Cli::try_parse_from([
             "lf",
             "work",
-            "feedback",
-            "task",
-            "task_1",
-            "--continue-on-exit",
+            "answer",
+            "ask_00000000000000000000000000000001",
+            "keep the durable exchange",
+            "--json",
         ])
-        .expect("parse Feedback presentation exit policy");
+        .expect("parse Work answer");
         assert!(matches!(
-            feedback.command,
+            answer.command,
             Some(Commands::Work {
-                cmd: WorkCommand::Feedback {
-                    kind,
-                    id,
-                    continue_on_success: false,
-                    continue_on_exit: true,
-                }
-            }) if kind == "task" && id == "task_1"
+                cmd: WorkCommand::Answer { text, json: true, .. }
+            }) if text == "keep the durable exchange"
         ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "work",
-            "feedback",
-            "task",
-            "task_1",
-            "--continue-on-success",
-            "--continue-on-exit",
-        ])
-        .is_err());
+        assert!(Cli::try_parse_from(["lf", "work", "continue", "task", "task_1"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "work", "escalate", "task", "task_1"]).is_err());
 
         let place = Cli::try_parse_from([
             "lf",
@@ -2733,6 +2566,24 @@ mod tests {
             "home_00000000000000000000000000000001",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn cli_parses_ask_and_wait_as_shell_arguments() {
+        let ask =
+            Cli::try_parse_from(["lf", "ask", "Which proof matters?"]).expect("parse Ask question");
+        assert!(matches!(
+            ask.command,
+            Some(Commands::Ask { args }) if args == ["Which proof matters?"]
+        ));
+        let wait =
+            Cli::try_parse_from(["lf", "ask", "wait", "ask_00000000000000000000000000000001"])
+                .expect("parse Ask wait");
+        assert!(matches!(
+            wait.command,
+            Some(Commands::Ask { args })
+                if args == ["wait", "ask_00000000000000000000000000000001"]
+        ));
     }
 
     #[test]
@@ -2948,8 +2799,7 @@ mod tests {
         assert_eq!(text, vec!["hi"]);
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
-        // Machine speech does not ride this verb: bylines belong to the bus
-        // (`lf radio pub --from`), and chat refuses the flag at parse.
+        // Chat messages have no machine-authored byline.
         assert!(Cli::try_parse_from([
             "lf",
             "chat",
@@ -3038,149 +2888,22 @@ mod tests {
     }
 
     #[test]
-    fn radio_pub_parses_channel_parent_and_byline() {
-        // `-c`/`--channel` addresses a hand's channel; text trails.
-        let cli = Cli::try_parse_from(["lf", "radio", "pub", "-c", "goals.148e", "landed PR"])
-            .expect("parse");
-        let Some(Commands::Radio {
-            command:
-                RadioCommand::Pub {
-                    text,
-                    channel,
-                    parent,
-                    from,
-                },
-        }) = cli.command
-        else {
-            panic!("expected radio pub command");
-        };
-        assert_eq!(text, vec!["landed PR"]);
-        assert_eq!(channel.as_deref(), Some("goals.148e"));
-        assert!(!parent);
-        assert_eq!(from, None);
-
-        // Escalation up the tree.
-        let cli = Cli::try_parse_from(["lf", "radio", "pub", "--parent", "blocked"])
-            .expect("parse parent");
-        let Some(Commands::Radio {
-            command: RadioCommand::Pub { parent, .. },
-        }) = cli.command
-        else {
-            panic!("expected radio pub command");
-        };
-        assert!(parent);
-
-        // A channel and the parent are mutually exclusive — a report goes to
-        // one place.
-        assert!(
-            Cli::try_parse_from(["lf", "radio", "pub", "-c", "goals.148e", "--parent", "x"])
-                .is_err()
-        );
+    fn radio_is_not_a_first_class_command() {
+        assert!(Cli::command().find_subcommand("radio").is_none());
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "radio", "pub", "status"])
+                .expect("unknown names remain eligible for skill discovery")
+                .command,
+            Some(Commands::External(parts)) if parts[0] == "radio"
+        ));
     }
 
     #[test]
-    fn radio_sub_parses_channel_and_json() {
-        let cli = Cli::try_parse_from(["lf", "radio", "sub", "goals", "--json"]).expect("parse");
-        let Some(Commands::Radio {
-            command: RadioCommand::Sub { channel, json },
-        }) = cli.command
-        else {
-            panic!("expected radio sub command");
-        };
-        assert_eq!(channel.as_deref(), Some("goals"));
-        assert!(json);
-    }
-
-    #[test]
-    fn radio_requires_an_explicit_operation_and_rejects_old_forms() {
-        let error = Cli::try_parse_from(["lf", "radio"]).expect_err("bare radio shows help");
-        assert_eq!(
-            error.kind(),
-            clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-        );
-        assert!(Cli::try_parse_from(["lf", "radio", "worker done"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "sub"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "sub", "goals"]).is_err());
-    }
-
-    /// Steer is a thread op, and the thread is not the bus. The shared
-    /// dispatch once let `--steer` leak across the verb split; separate
-    /// transports make it unspellable.
-    #[test]
-    fn radio_has_no_steer_flag() {
-        assert!(Cli::try_parse_from(["lf", "radio", "pub", "--steer", "gate it"]).is_err());
-    }
-
-    #[test]
-    fn memory_parses_bare_show_update_and_add() {
-        let cli = Cli::try_parse_from(["lf", "memory", "--wave", "goals"]).expect("parse");
-        let Some(Commands::Memory { cmd, target }) = cli.command else {
-            panic!("expected memory command");
-        };
-        assert!(cmd.is_none(), "bare memory is show");
-        assert_eq!(target.wave.as_deref(), Some("goals"));
-
-        let cli =
-            Cli::try_parse_from(["lf", "memory", "update", "--summary", "learned"]).expect("parse");
-        let Some(Commands::Memory {
-            cmd: Some(MemoryCommand::Update { summary, .. }),
-            ..
-        }) = cli.command
-        else {
-            panic!("expected memory update");
-        };
-        assert_eq!(summary.as_deref(), Some("learned"));
-
-        let cli = Cli::try_parse_from([
-            "lf",
-            "memory",
-            "add",
-            "one fact",
-            "--receipt",
-            "chat_turn:turn-3",
-            "--receipt",
-            "run:run-9",
-            "--parent",
-        ])
-        .expect("parse");
-        let Some(Commands::Memory {
-            cmd:
-                Some(MemoryCommand::Add {
-                    fact,
-                    receipts,
-                    target,
-                }),
-            ..
-        }) = cli.command
-        else {
-            panic!("expected memory add");
-        };
-        assert_eq!(fact, "one fact");
-        assert_eq!(receipts, vec!["chat_turn:turn-3", "run:run-9"]);
-        assert!(target.parent);
-    }
-
-    #[test]
-    fn receipt_show_parses_token_wave_and_json() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "receipt",
-            "show",
-            "chat_turn:turn-3",
-            "--wave",
-            "ship",
-            "--json",
-        ])
-        .expect("parse");
-        let Some(Commands::Receipt {
-            cmd: ReceiptCommand::Show { token, wave, json },
-        }) = cli.command
-        else {
-            panic!("expected receipt show");
-        };
-        assert_eq!(token, "chat_turn:turn-3");
-        assert_eq!(wave.as_deref(), Some("ship"));
-        assert!(json);
+    fn evidence_receipt_command_is_absent() {
+        assert!(Cli::command().find_subcommand("receipt").is_none());
+        let cli = Cli::try_parse_from(["lf", "receipt", "show", "chat_turn:turn-3"])
+            .expect("unknown names remain eligible for skill discovery");
+        assert!(matches!(cli.command, Some(Commands::External(_))));
     }
 
     #[test]

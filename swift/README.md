@@ -34,8 +34,8 @@ Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
 codebase tree, and registry health.
 
 Select a Wave, then open **Context Lab** from its header. Compare that Wave's
-aggregate initial-prompt flame and prompt-ordered agent-session lanes, or rank
-current instruction sources by captured agent-session impressions. Select a skill or
+aggregate initial-prompt flame and prompt-ordered Invocation lanes, or rank
+current instruction sources by captured Invocation impressions. Select a skill or
 `LOOPFLOW.md` to read main's current file beside exact trace evidence. Choose a
 Refinement Project once per multi-Project Wave, then **Refine in task-worker**
 creates a Task and opens its running agent. The Project destination does not
@@ -45,7 +45,7 @@ Selecting a segment never opens prompt bodies;
 **Open trace** is the explicit boundary. Saved views retain only the query and visualization mode.
 The research-state filters can require observed steering or a launch containing
 a current resolvable file-backed instruction revision. Revision comparisons stay unavailable until
-both revisions have enough launches with comparable capture, provider/model mix,
+both revisions have enough invocations with comparable capture, provider/model mix,
 and observation spans.
 
 ## Product ownership
@@ -54,12 +54,12 @@ and observation spans.
   send/steer/interrupt behavior.
 - **Projects and Tasks** appear in the Wave work map. Linear owns their planning
   identity; Loopflow's registry owns their runtime state.
-- **Task Sessions** own implementation worktrees and PR delivery. Every Task
-  reports through its Project Session; the Wave retains root inspection and
+- **Tasks** own implementation worktrees and PR delivery. Every Task
+  reports through its Project Work; the Wave retains root inspection and
   override. Waves and Projects remain control-plane processes in main.
-- **Task workspace presentation** reads `lf task changes/diff/file --json` and
-  opens blue Feedback through `lf work feedback task <id> --continue-on-exit`.
-  Lifecycle mutations remain `lf task run/resume/interrupt`.
+- **Task workspace presentation** reads `lf task changes/diff/file --json`.
+  Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
+  are answered through the explicit `lf work asks/answer` CLI.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
@@ -75,7 +75,8 @@ and observation spans.
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
-- `LoopflowMac/Views/ContextLabView.swift` — session-set filters, flames, lanes, and evidence
+- `LoopflowMac/Views/WorkCensusView.swift` — machine-wide Work and Invocation census
+- `LoopflowMac/Views/ContextLabView.swift` — invocation-set filters, flames, lanes, and evidence
 - `LoopflowMac/Views/ContextLabHandoffView.swift` — explicit trace bodies and Task refinement handoff
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads

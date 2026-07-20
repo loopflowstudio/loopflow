@@ -62,14 +62,16 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf start designer                           # serve it from this Home's one keeper
 lf chat --steer "ship the button audit first"
-lf memory add "buttons: variants unified" --receipt chat_turn:turn-3
 lf stop designer
 ```
+
+Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
+reviewed repository file, not live server state.
 
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task run INF-123                                   # durable Task Session, own worktree
+lf task run INF-123                                   # durable Task Work, own worktree
 lf task steer INF-123 "take the smaller approach"     # redirect the active turn
 lf task status INF-123 --json                         # inspect durable state
 lf pr land -c                                         # merge the PR, complete the Task
@@ -93,7 +95,7 @@ lf usage               # subscription state and spend, per account and repo
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
 | **Wave** | Durable operating context: memory, cadence, chat, project selection | `wave/<name>/` |
 | **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
-| **Task** | Concrete work; its Session owns the only delivery worktree | Linear, via `lf pm` |
+| **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf pm` |
 | **Home** | Stable execution authority; its route may move without changing identity | local SQLite |
 
 | Built-in | What it does |

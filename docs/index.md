@@ -27,7 +27,7 @@ SSH.
 
 A wave is a named agent with a goal. Goal, memory, and crons are authored in
 the repo and reviewed like code. Execution placement lives in the local
-durable store. Projects and Tasks live in Linear. Only a Task Session owns a
+durable store. Projects and Tasks live in Linear. Only Task Work owns a
 worktree; that is where every file change happens.
 
 ## Try it

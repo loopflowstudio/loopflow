@@ -255,6 +255,12 @@ fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
 }
 
 pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
+    // Every ordinary Loopflow branch push shares the Task settlement fence.
+    // After a commit, a changed HEAD clears a head-pinned merge request (and
+    // revokes Auto remotely) before Git can expose the new head. Same-head
+    // publication remains a no-op and preserves the request.
+    let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")

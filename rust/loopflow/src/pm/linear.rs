@@ -292,6 +292,21 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
   }
 }"#;
 
+const ISSUE_COMMENTS_QUERY: &str = r#"query IssueComments($id: String!, $comments: Int!, $after: String) {
+  issue(id: $id) {
+    comments(first: $comments, after: $after, orderBy: createdAt) {
+      nodes {
+        id
+        body
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}"#;
+
 // Reads the owning team of an existing issue so state transitions resolve a
 // workflow state from the issue's team, not the wave-configured team. A Project
 // can span teams (e.g. ENG-* and W2-*), and Linear rejects a state that belongs
@@ -763,7 +778,7 @@ impl LinearClient {
     }
 
     /// Move an issue into another team and return its **new** identifier. The
-    /// issue UUID is preserved (Session/PR/comment ownership survives); only the
+    /// issue UUID is preserved (Task/PR/comment ownership survives); only the
     /// number changes, and Linear assigns it at move time, so we read it back.
     pub async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
         let response: IssueUpdateIdentifierData = self
@@ -859,6 +874,52 @@ impl LinearClient {
             )
             .await?;
         Ok(response.comment_create.comment.id)
+    }
+
+    /// Find a previously-created comment by its stable body marker.
+    ///
+    /// Ask publication records an attempt before calling Linear. If that call
+    /// succeeds but the local process dies before recording the returned id, a
+    /// retry scans the issue's comments and adopts the existing one rather than
+    /// creating a duplicate.
+    pub async fn find_comment_with_marker(
+        &self,
+        issue_id: &str,
+        marker: &str,
+    ) -> PmResult<Option<String>> {
+        let mut after = None;
+        loop {
+            let response: IssueCommentsData = self
+                .graphql(
+                    ISSUE_COMMENTS_QUERY,
+                    json!({
+                        "id": issue_id,
+                        "comments": OBSERVATION_COMMENT_PAGE,
+                        "after": after,
+                    }),
+                )
+                .await?;
+            let issue = response
+                .issue
+                .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
+            if let Some(comment) = issue
+                .comments
+                .nodes
+                .into_iter()
+                .find(|comment| comment.body.contains(marker))
+            {
+                return Ok(Some(comment.id));
+            }
+            if !issue.comments.page_info.has_next_page {
+                return Ok(None);
+            }
+            after = issue.comments.page_info.end_cursor;
+            if after.is_none() {
+                return Err(PmError::Message(format!(
+                    "Linear comments for issue {issue_id} have another page without a cursor"
+                )));
+            }
+        }
     }
 
     pub async fn update_comment(&self, comment_id: &str, body: &str) -> PmResult<()> {
@@ -1130,6 +1191,23 @@ struct IssueObservationNode {
     #[serde(default)]
     description: Option<String>,
     comments: CommentConnection,
+}
+
+#[derive(Deserialize)]
+struct IssueCommentsData {
+    issue: Option<IssueCommentsNode>,
+}
+
+#[derive(Deserialize)]
+struct IssueCommentsNode {
+    comments: PagedCommentConnection,
+}
+
+#[derive(Deserialize)]
+struct PagedCommentConnection {
+    nodes: Vec<CommentNode>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
 }
 
 #[derive(Deserialize)]

@@ -65,11 +65,8 @@ its available status/next owner.
   repository mutation to a Task.
 - Use `lf task steer`, `interrupt`, `wait`, and `resume`. Do not create another
   worktree or session for review feedback or CI repair.
-- Service a pending child Feedback before background KR work. Reply with the
-  exact `lf work steer ...` command embedded in `<lf:child-feedback>`, or use its
-  `lf work continue ...` command when Feedback is finished. When the
-  choice needs Wave judgment, state the exact question in the Project's own
-  interactive step so its parent Feedback can route it.
+- When the choice needs Wave judgment, run `lf ask "<exact question>"` and
+  continue the same Turn after the Answer returns.
 - Never start another Project or Wave from Project pursuit, and never collapse
   the remaining Project into one anonymous task.
 - Discovered debt becomes a task under an existing KR unless it

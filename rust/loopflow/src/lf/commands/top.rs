@@ -313,7 +313,7 @@ mod tests {
     fn spend(recorded_at: i64, output: i64, provider: &str) -> TurnSpendRow {
         TurnSpendRow {
             turn_id: format!("turn-{recorded_at}"),
-            launch_id: "launch".to_string(),
+            invocation_id: "invocation".to_string(),
             trace_id: "trace".to_string(),
             exec_id: "exec".to_string(),
             repo: "/src/loopflow".to_string(),

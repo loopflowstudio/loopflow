@@ -8,7 +8,7 @@ enum RoadmapTaskAction: Equatable {
     case attach
     case resume
     case recover
-    case review
+    case openPr
 
     var label: String {
         switch self {
@@ -16,7 +16,7 @@ enum RoadmapTaskAction: Equatable {
         case .attach: "Attach"
         case .resume: "Resume"
         case .recover: "Recover"
-        case .review: "Review"
+        case .openPr: "Open PR"
         }
     }
 }
@@ -33,9 +33,8 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     switch task.attention.actions.recommended {
     case .recover: return .recover
     case .resume: return .resume
-    case .review:
-        // Review is only actionable here when there is a PR to open.
-        if task.activePr?.publication?.github != nil { return .review }
+    case .openPr:
+        if task.activePr?.publication?.github != nil { return .openPr }
     case .startNextPr, .complete, .noAction, .none:
         break
     }
@@ -137,7 +136,7 @@ struct RoadmapView: View {
                 attention: selection.task.attention,
                 repoPath: selection.wave.repo,
                 terminalStore: terminalStore,
-                initialSection: selection.task.attention.level == .blue ? .feedback : .changes
+                initialSection: .changes
             )
         }
         .confirmationDialog(
@@ -340,7 +339,7 @@ struct RoadmapView: View {
             // Recovering a dead body and resuming a parked step are the same
             // control; the label distinguishes them because the situations do.
             perform(TaskControl.resume, on: selection)
-        case .review:
+        case .openPr:
             if let github = selection.task.activePr?.publication?.github {
                 NSWorkspace.shared.open(github.url)
             }

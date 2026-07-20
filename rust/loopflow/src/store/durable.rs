@@ -1,19 +1,54 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AttentionRoute, Author, Basis, BoundarySeed, ChildFeedback,
-    ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, Feedback, FlowPosition, Home,
-    HomeId, InterruptReceipt, LaunchId, LaunchSurface, Placement, Run, RunAdvance, RunControl,
-    RunLease, RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
-    ToolResponseReceipt, ToolResponseWrite, UserFeedback, WorkRef, WorkStatus,
+    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AnswerAttemptHistory,
+    AnswerContext, AskExchange, AskId, Author, Basis, BoundarySeed, ContainmentObservation,
+    ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt,
+    InvocationSurface, Placement, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId,
+    SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_sqlite, Store, StoreError, StoreResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWriterState {
     pub work: WorkRef,
     pub identifier: String,
     pub run: Option<Run>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AskCommentTransition {
+    Ask,
+    Answer,
+}
+
+impl AskCommentTransition {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Answer => "answer",
+        }
+    }
+
+    pub(crate) fn marker(self, ask_id: &AskId) -> String {
+        format!("<!-- loopflow:{ask_id}:{} -->", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AskCommentWrite {
+    pub ask_id: AskId,
+    pub transition: AskCommentTransition,
+    pub issue_id: String,
+    pub body: String,
+    pub repo: String,
+    pub wave: String,
+    pub attempt_count: u32,
+    pub attempt_started_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub linear_comment_id: Option<String>,
+    pub delivered_at: Option<i64>,
 }
 
 impl Store {
@@ -80,9 +115,32 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn reserve_recovery_run(
+        &self,
+        lease: &RunLease,
+    ) -> StoreResult<(Run, RunLease)> {
+        let _promotion_lock = crate::promotion_lock::acquire_shared()
+            .await
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "acquire shared promotion lock before Recovery Run reservation: {error}"
+                ))
+            })?;
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_recovery_run(&lease)
+        })
+        .await
+    }
+
     pub async fn current_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
         let work = work.clone();
         run_sqlite(&self.sqlite, move |store| store.current_run(&work)).await
+    }
+
+    pub(crate) async fn run_by_id(&self, run_id: &crate::durable::RunId) -> StoreResult<Run> {
+        let run_id = run_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.run_by_id(&run_id)).await
     }
 
     pub(crate) async fn resolve_run_lease(
@@ -95,11 +153,6 @@ impl Store {
     pub(crate) async fn validate_run_lease(&self, lease: &RunLease) -> StoreResult<()> {
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
-    }
-
-    pub(crate) async fn rotate_run_lease(&self, lease: &RunLease) -> StoreResult<RunLease> {
-        let lease = lease.clone();
-        run_sqlite(&self.sqlite, move |store| store.rotate_run_lease(&lease)).await
     }
 
     pub async fn advance_run(
@@ -152,100 +205,244 @@ impl Store {
         .await
     }
 
-    pub async fn route_feedback(
+    pub(crate) async fn open_ask(
         &self,
         lease: &RunLease,
-        launch_id: &LaunchId,
-        attention: AttentionRoute,
-    ) -> StoreResult<Feedback> {
+        invocation_id: &AgentInvocationId,
+        question: &str,
+    ) -> StoreResult<AskExchange> {
         let lease = lease.clone();
-        let launch_id = launch_id.clone();
+        let invocation_id = invocation_id.clone();
+        let question = question.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.route_feedback(&lease, &launch_id, &attention)
+            store.open_ask(&lease, &invocation_id, &question)
         })
         .await
     }
 
-    pub async fn feedback(&self, work: &WorkRef) -> StoreResult<Option<Feedback>> {
-        let work = work.clone();
-        run_sqlite(&self.sqlite, move |store| store.feedback(&work)).await
-    }
-
-    pub async fn launch_surface(&self, launch_id: &LaunchId) -> StoreResult<Option<LaunchSurface>> {
-        let launch_id = launch_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.launch_surface(&launch_id)).await
-    }
-
-    pub(crate) async fn current_launch(
+    pub(crate) async fn current_ask(
         &self,
         lease: &RunLease,
-    ) -> StoreResult<Option<crate::durable::Launch>> {
+        invocation_id: &AgentInvocationId,
+        ask_id: Option<&AskId>,
+    ) -> StoreResult<AskExchange> {
         let lease = lease.clone();
+        let invocation_id = invocation_id.clone();
+        let ask_id = ask_id.cloned();
+        run_sqlite(&self.sqlite, move |store| {
+            store.current_ask(&lease, &invocation_id, ask_id.as_ref())
+        })
+        .await
+    }
+
+    pub async fn answer_ask(
+        &self,
+        context: &ControlCtx<'_>,
+        ask_id: &AskId,
+        text: &str,
+    ) -> StoreResult<Answer> {
+        let lease = match context {
+            ControlCtx::User(_) => None,
+            ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
+        let ask_id = ask_id.clone();
+        let text = text.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.answer_ask(lease.as_ref(), &ask_id, &text)
+        })
+        .await
+    }
+
+    pub(crate) async fn pending_ask_comment_writes(&self) -> StoreResult<Vec<AskCommentWrite>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.pending_ask_comment_writes()
+        })
+        .await
+    }
+
+    pub(crate) async fn claim_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        attempted_at: i64,
+        stale_before: i64,
+    ) -> StoreResult<Option<AskCommentWrite>> {
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.claim_ask_comment_write(&ask_id, transition, attempted_at, stale_before)
+        })
+        .await
+    }
+
+    pub(crate) async fn complete_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        comment_id: &str,
+        delivered_at: i64,
+    ) -> StoreResult<()> {
+        let ask_id = ask_id.clone();
+        let comment_id = comment_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.complete_ask_comment_write(&ask_id, transition, &comment_id, delivered_at)
+        })
+        .await
+    }
+
+    pub(crate) async fn fail_ask_comment_write(
+        &self,
+        ask_id: &AskId,
+        transition: AskCommentTransition,
+        error: &str,
+    ) -> StoreResult<()> {
+        let ask_id = ask_id.clone();
+        let error = error.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.fail_ask_comment_write(&ask_id, transition, &error)
+        })
+        .await
+    }
+
+    pub async fn pending_asks_for_parent(&self, parent: &WorkRef) -> StoreResult<Vec<AskExchange>> {
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.pending_asks_for_parent(&parent)
+        })
+        .await
+    }
+
+    pub(crate) async fn oldest_answer_context(
+        &self,
+        parent: &WorkRef,
+    ) -> StoreResult<Option<AnswerContext>> {
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.oldest_answer_context(&parent)
+        })
+        .await
+    }
+
+    pub(crate) async fn answer_attempt_history(
+        &self,
+        ask_id: &AskId,
+    ) -> StoreResult<AnswerAttemptHistory> {
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.answer_attempt_history(&ask_id)
+        })
+        .await
+    }
+
+    pub async fn pending_user_asks(&self) -> StoreResult<Vec<AskExchange>> {
+        run_sqlite(&self.sqlite, move |store| store.pending_user_asks()).await
+    }
+
+    pub async fn has_pending_user_ask_for_work(&self, work: &WorkRef) -> StoreResult<bool> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.has_pending_user_ask_for_work(&work)
+        })
+        .await
+    }
+
+    pub async fn invocation_surface(
+        &self,
+        invocation_id: &AgentInvocationId,
+    ) -> StoreResult<Option<InvocationSurface>> {
+        let invocation_id = invocation_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.invocation_surface(&invocation_id)
+        })
+        .await
+    }
+
+    pub(crate) async fn open_invocation(
+        &self,
+        lease: &RunLease,
+    ) -> StoreResult<Option<AgentInvocation>> {
+        let lease = lease.clone();
+        let invocation_id = std::env::var_os(crate::durable::AGENT_INVOCATION_ENV)
+            .map(|value| {
+                let value = value.into_string().map_err(|_| {
+                    StoreError::InvalidData("LF_AGENT_INVOCATION_ID is not valid UTF-8".to_string())
+                })?;
+                AgentInvocationId::parse(&value)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            })
+            .transpose()?;
         run_sqlite(&self.sqlite, move |store| {
             store.validate_run_lease(&lease)?;
-            store.control_launch_for_run(&lease.run_id)
+            match invocation_id {
+                Some(invocation_id) => {
+                    store.open_invocation_for_run_by_id(&lease.run_id, &invocation_id)
+                }
+                None => store.open_invocation_for_run(&lease.run_id),
+            }
         })
         .await
     }
 
-    pub(crate) async fn current_launch_for_run(
+    pub(crate) async fn open_invocation_for_run(
         &self,
         run_id: &crate::durable::RunId,
-    ) -> StoreResult<Option<crate::durable::Launch>> {
+    ) -> StoreResult<Option<AgentInvocation>> {
         let run_id = run_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.control_launch_for_run(&run_id)
+            store.open_invocation_for_run(&run_id)
         })
         .await
     }
 
-    pub(crate) async fn launches_for_run(
+    pub(crate) async fn invocations_for_run(
         &self,
         run_id: &crate::durable::RunId,
-    ) -> StoreResult<Vec<crate::durable::Launch>> {
+    ) -> StoreResult<Vec<AgentInvocation>> {
         let run_id = run_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.launches_for_run(&run_id)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.invocations_for_run(&run_id)
+        })
+        .await
     }
 
     /// Reconcile an observed Run after its writer has disappeared.
     ///
-    /// The exact Run and Launch ids fence the observation against a concurrent
-    /// handoff. Only proven absence releases the slot; live or unprovable
+    /// Only proven absence releases the exact Run slot; live or unprovable
     /// containment remains fenced for a later keeper pass.
     pub(crate) async fn recover_run(
         &self,
         run_id: &crate::durable::RunId,
-        launch_id: Option<&LaunchId>,
         containment: ContainmentObservation,
     ) -> StoreResult<StopReceipt> {
         let run_id = run_id.clone();
-        let launch_id = launch_id.cloned();
         run_sqlite(&self.sqlite, move |store| {
-            store.recover_run(&run_id, launch_id.as_ref(), containment)
+            store.recover_run(&run_id, containment)
         })
         .await
     }
 
-    pub async fn launch_surfaces(&self, active_only: bool) -> StoreResult<Vec<LaunchSurface>> {
+    pub async fn invocation_surfaces(
+        &self,
+        active_only: bool,
+    ) -> StoreResult<Vec<InvocationSurface>> {
         run_sqlite(&self.sqlite, move |store| {
-            store.launch_surfaces(active_only)
+            store.invocation_surfaces(active_only)
         })
         .await
     }
 
-    pub async fn observe_launch_provider(
+    pub async fn observe_invocation_provider(
         &self,
         lease: &RunLease,
-        launch_id: &LaunchId,
+        invocation_id: &AgentInvocationId,
         account_id: Option<crate::store::ProviderAccountId>,
         resume_token: Option<String>,
-    ) -> StoreResult<crate::durable::Launch> {
+    ) -> StoreResult<AgentInvocation> {
         let lease = lease.clone();
-        let launch_id = launch_id.clone();
+        let invocation_id = invocation_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.observe_launch_provider(
+            store.observe_invocation_provider(
                 &lease,
-                &launch_id,
+                &invocation_id,
                 account_id.as_ref(),
                 resume_token.as_deref(),
             )
@@ -253,71 +450,14 @@ impl Store {
         .await
     }
 
-    pub async fn handback_launch(
+    pub async fn handback_invocation(
         &self,
-        launch_id: &LaunchId,
+        invocation_id: &AgentInvocationId,
         outcome: crate::durable::BoundaryState,
-    ) -> StoreResult<LaunchSurface> {
-        let launch_id = launch_id.clone();
+    ) -> StoreResult<InvocationSurface> {
+        let invocation_id = invocation_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.handback_launch(&launch_id, outcome)
-        })
-        .await
-    }
-
-    pub async fn child_attention(&self, parent: &WorkRef) -> StoreResult<Vec<ChildFeedback>> {
-        let parent = parent.clone();
-        run_sqlite(&self.sqlite, move |store| store.child_attention(&parent)).await
-    }
-
-    pub async fn user_attention(&self) -> StoreResult<Vec<UserFeedback>> {
-        run_sqlite(&self.sqlite, move |store| store.user_attention()).await
-    }
-
-    pub async fn escalate_feedback(
-        &self,
-        lease: &RunLease,
-        child: &WorkRef,
-        if_basis: &Basis,
-    ) -> StoreResult<Feedback> {
-        let lease = lease.clone();
-        let child = child.clone();
-        let if_basis = if_basis.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.escalate_feedback(&lease, &child, &if_basis)
-        })
-        .await
-    }
-
-    pub(crate) async fn continue_feedback_if_current(
-        &self,
-        work: &WorkRef,
-        launch_id: &LaunchId,
-        if_basis: &Basis,
-    ) -> StoreResult<WorkStatus> {
-        let work = work.clone();
-        let launch_id = launch_id.clone();
-        let if_basis = if_basis.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.continue_feedback_if_current(&work, &launch_id, &if_basis)
-        })
-        .await
-    }
-
-    pub async fn continue_feedback(
-        &self,
-        context: &ControlCtx<'_>,
-        work: &WorkRef,
-        if_basis: &Basis,
-    ) -> StoreResult<WorkStatus> {
-        let context = match context {
-            ControlCtx::User(_) => None,
-            ControlCtx::Run(lease) => Some((*lease).clone()),
-        };
-        let work = work.clone();
-        let if_basis = if_basis.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.continue_feedback(context.as_ref(), &work, &if_basis)
+            store.handback_invocation(&invocation_id, outcome)
         })
         .await
     }
@@ -510,12 +650,11 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::durable::{
-        AttentionRoute, AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation,
-        ControlCtx, FlowPosition, LaunchId, LaunchRoute, RunAdvance, RunState, RunTrigger,
-        StopCause, WorkRef, WorkStatus,
+        AuthenticatedRequest, BoundaryState, Containment, ContainmentObservation, ControlCtx,
+        InvocationRoute, RunAdvance, RunState, RunTrigger, StopCause, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
-    use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
+    use crate::planning::{LinearProjectId, ProjectPlan};
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig, StoreError};
     use crate::wave::Wave;
@@ -535,20 +674,18 @@ mod tests {
         (store, WorkRef::Wave(wave.id().clone()))
     }
 
-    fn project(wave_id: WaveId) -> Project {
+    fn project_for(wave: &Wave) -> Project {
         let now = OffsetDateTime::now_utc();
         Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-feedback").unwrap(),
-                    slug: "feedback-runtime".to_string(),
-                    name: "Feedback Runtime".to_string(),
-                    prompt_context: "Definition".to_string(),
-                },
+            plan: ProjectPlan {
+                id: LinearProjectId::new(format!("linear-{}", wave.id())).unwrap(),
+                slug: "runtime-project".to_string(),
+                name: "Runtime Project".to_string(),
+                prompt_context: "Answer child questions.".to_string(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
-            wave_id,
+            wave_id: wave.id().clone(),
             iteration: 0,
             observation_cursor: 0,
             last_state_fingerprint: None,
@@ -561,48 +698,43 @@ mod tests {
         }
     }
 
-    async fn start_launch(
+    async fn start_invocation(
         store: &super::Store,
         work: &WorkRef,
-        opaque: bool,
-    ) -> (crate::durable::RunLease, crate::durable::Launch) {
+    ) -> (crate::durable::RunLease, crate::durable::AgentInvocation) {
         let (_run, lease) = store.reserve_run(work, RunTrigger::User).await.unwrap();
-        let receipt = store
+        store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchStarting {
-                    route: LaunchRoute {
-                        provider: "codex".to_string(),
-                        model: None,
-                        account_id: None,
-                    },
+                RunAdvance::RunStarting {
                     containment: Containment::Tmux {
                         name: "lf-runtime".to_string(),
                     },
                     cwd: PathBuf::from("/tmp/runtime"),
-                    surface: "tui".to_string(),
-                    opaque,
-                    resume_token: None,
                 },
             )
             .await
             .unwrap();
-        let crate::durable::AdvanceReceipt::Launch(launch) = receipt else {
-            panic!("expected Launch receipt")
-        };
         let receipt = store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchLive {
-                    launch_id: launch.id.clone(),
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "tui".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await
             .unwrap();
-        let crate::durable::AdvanceReceipt::Launch(launch) = receipt else {
-            panic!("expected Launch receipt")
+        let crate::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
+            panic!("expected Invocation receipt")
         };
-        (lease, launch)
+        (lease, invocation)
     }
 
     #[tokio::test]
@@ -617,243 +749,199 @@ mod tests {
             .unwrap();
 
         assert_eq!(receipt.run_id, run.id);
-        assert_eq!(receipt.launch_id, None);
-        assert_eq!(receipt.turn_id, None);
+        assert!(receipt.turn_ids.is_empty());
         assert!(store.current_run(&work).await.unwrap().is_none());
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
     }
 
     #[tokio::test]
-    async fn one_run_can_own_sequential_launches_but_never_overlapping_launches() {
+    async fn one_run_can_supervise_overlapping_invocations_without_changing_containment() {
         let (store, work) = wave_work().await;
-        let (lease, first) = start_launch(&store, &work, false).await;
-        let next = RunAdvance::LaunchStarting {
-            route: LaunchRoute {
+        let (lease, first) = start_invocation(&store, &work).await;
+        let next = RunAdvance::InvocationStarting {
+            route: InvocationRoute {
                 provider: "claude".to_string(),
                 model: None,
                 account_id: None,
             },
-            containment: Containment::Tmux {
-                name: "lf-runtime-2".to_string(),
-            },
-            cwd: PathBuf::from("/tmp/runtime"),
             surface: "headless".to_string(),
-            opaque: false,
             resume_token: None,
+            answer_ask_id: None,
         };
 
-        assert!(store.advance_run(&lease, next.clone()).await.is_err());
+        let crate::durable::AdvanceReceipt::Invocation(second) =
+            store.advance_run(&lease, next).await.unwrap()
+        else {
+            panic!("expected second Invocation")
+        };
+        assert_eq!(first.supervising_run_id, Some(lease.run_id.clone()));
+        assert_eq!(second.supervising_run_id, Some(lease.run_id.clone()));
+        assert_eq!(second.route.provider, "claude");
         store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchEnded {
-                    launch_id: first.id,
-                    outcome: BoundaryState::Failed,
+                RunAdvance::InvocationEnded {
+                    invocation_id: first.id.clone(),
+                    outcome: BoundaryState::Succeeded,
                 },
             )
             .await
             .unwrap();
-        let rotated = store.rotate_run_lease(&lease).await.unwrap();
-        assert!(store.validate_run_lease(&lease).await.is_err());
-        let crate::durable::AdvanceReceipt::Launch(second) =
-            store.advance_run(&rotated, next).await.unwrap()
-        else {
-            panic!("expected second Launch")
-        };
-        assert_eq!(second.run_id, rotated.run_id);
-        assert_eq!(second.route.provider, "claude");
+        let invocations = store.invocations_for_run(&lease.run_id).await.unwrap();
+        assert!(invocations[0].ended_at.is_some());
+        assert!(invocations[1].ended_at.is_none());
+        let run = store.current_run(&work).await.unwrap().unwrap();
+        assert_eq!(run.state, RunState::Active);
+        assert_eq!(
+            run.containment,
+            Some(Containment::Tmux {
+                name: "lf-runtime".into()
+            })
+        );
     }
 
     #[tokio::test]
-    async fn feedback_is_current_flow_launch_and_attention_not_a_stored_decision() {
-        let (store, work) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, false).await;
-        let initial = store.current_epoch(&work).await.unwrap().current_basis;
-        store
-            .set_flow_position(
-                &lease,
-                FlowPosition {
-                    work: work.clone(),
-                    epoch_id: initial.epoch_id.clone(),
-                    flow: "wave-pursue".to_string(),
-                    step: "design".to_string(),
-                    step_index: 2,
-                    iteration: 1,
-                    feedback: true,
-                    updated_at: OffsetDateTime::now_utc(),
+    async fn parent_answer_wins_and_stale_run_cannot_write() {
+        let directory = tempfile::tempdir().unwrap().keep();
+        let store = open_store(&StorageConfig::sqlite(directory.join("registry.db")))
+            .await
+            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "runtime".to_string(),
+            directory.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let parent_work = WorkRef::Wave(wave.id().clone());
+        let (parent_lease, _parent_invocation) = start_invocation(&store, &parent_work).await;
+        let project = project_for(&wave);
+        store.create_project(&project).await.unwrap();
+        let child_work = WorkRef::Project(project.id.clone());
+        let (child_lease, child_invocation) = start_invocation(&store, &child_work).await;
+        let crate::durable::AdvanceReceipt::Turn(turn) = store
+            .advance_run(
+                &child_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: child_invocation.id.clone(),
                 },
             )
-            .await
-            .unwrap();
-        let feedback = store
-            .route_feedback(&lease, &launch.id, AttentionRoute::User)
-            .await
-            .unwrap();
-        assert_eq!(feedback.work, work);
-        assert_eq!(feedback.launch_id, launch.id);
-        assert_eq!(feedback.position.step, "design");
-        let queued = store.user_attention().await.unwrap();
-        assert_eq!(queued.len(), 1);
-        assert_eq!(queued[0].feedback, feedback);
-        assert_eq!(queued[0].surface.launch.id, launch.id);
-
-        let request = AuthenticatedRequest::cli();
-        let steer = store
-            .steer(
-                &ControlCtx::User(&request),
-                &work,
-                "show the failure path",
-                Some(&initial),
-            )
-            .await
-            .unwrap();
-        let parked = store
-            .feedback(&work)
             .await
             .unwrap()
-            .expect("a User response does not close the Feedback");
-        assert!(parked.attention_at.is_none());
+        else {
+            panic!("expected Turn receipt")
+        };
+
+        let ask = store
+            .sqlite
+            .open_ask(&child_lease, &child_invocation.id, "Which proof matters?")
+            .unwrap();
+        assert_eq!(ask.turn_id, turn.id);
+        assert_eq!(
+            ask.route,
+            crate::durable::AnswerRoute::Parent(parent_work.clone())
+        );
+        let recovered = store
+            .sqlite
+            .open_ask(&child_lease, &child_invocation.id, "Which proof matters?")
+            .unwrap();
+        assert_eq!(recovered.id, ask.id);
+        assert_eq!(
+            store.pending_asks_for_parent(&parent_work).await.unwrap(),
+            vec![ask.clone()]
+        );
+
+        store
+            .stop_run(
+                &parent_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
         assert!(matches!(
             store
-                .continue_feedback(&ControlCtx::User(&request), &work, &initial)
+                .answer_ask(
+                    &ControlCtx::Run(&parent_lease),
+                    &ask.id,
+                    "The live blocking exchange."
+                )
                 .await,
-            Err(StoreError::StaleBasis { .. })
+            Err(StoreError::InvalidAuthority(_))
         ));
-        assert!(matches!(
+
+        store
+            .stop_run(
+                &child_lease,
+                StopCause::Recovery,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.pending_asks_for_parent(&parent_work).await.unwrap(),
+            vec![ask.clone()],
+            "runner loss must not erase its unanswered Ask"
+        );
+
+        let (replacement_lease, _replacement_invocation) =
+            start_invocation(&store, &parent_work).await;
+        let answer = store
+            .answer_ask(
+                &ControlCtx::Run(&replacement_lease),
+                &ask.id,
+                "The live blocking exchange.",
+            )
+            .await
+            .unwrap();
+        assert_eq!(answer.ask_id, ask.id);
+        assert_eq!(
             store
-                .continue_feedback_if_current(&work, &launch.id, &initial)
-                .await,
-            Err(StoreError::StaleBasis { .. })
-        ));
-        assert!(matches!(
-            store
-                .continue_feedback(&ControlCtx::User(&request), &work, &steer.steer.basis,)
+                .answer_ask(
+                    &ControlCtx::Run(&replacement_lease),
+                    &ask.id,
+                    "The live blocking exchange.",
+                )
                 .await
                 .unwrap(),
-            WorkStatus::Running { .. }
+            answer
+        );
+        assert!(matches!(
+            store
+                .answer_ask(
+                    &ControlCtx::Run(&replacement_lease),
+                    &ask.id,
+                    "A different answer",
+                )
+                .await,
+            Err(StoreError::InvalidAuthority(_))
         ));
-        assert!(store.feedback(&work).await.unwrap().is_none());
-        assert!(store.user_attention().await.unwrap().is_empty());
-    }
+        assert!(store
+            .pending_asks_for_parent(&parent_work)
+            .await
+            .unwrap()
+            .is_empty());
 
-    #[tokio::test]
-    async fn exit_guard_continues_only_the_exact_user_feedback() {
-        let (store, work) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, false).await;
-        let basis = store.current_epoch(&work).await.unwrap().current_basis;
+        let (recovery_lease, recovery_invocation) = start_invocation(&store, &child_work).await;
         store
-            .set_flow_position(
-                &lease,
-                FlowPosition {
-                    work: work.clone(),
-                    epoch_id: basis.epoch_id.clone(),
-                    flow: "wave-pursue".to_string(),
-                    step: "feedback".to_string(),
-                    step_index: 0,
-                    iteration: 0,
-                    feedback: true,
-                    updated_at: OffsetDateTime::now_utc(),
+            .advance_run(
+                &recovery_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: recovery_invocation.id.clone(),
                 },
             )
             .await
             .unwrap();
-        store
-            .route_feedback(&lease, &launch.id, AttentionRoute::User)
+        let current = store
+            .current_ask(&recovery_lease, &recovery_invocation.id, Some(&ask.id))
             .await
             .unwrap();
-
-        assert!(matches!(
-            store
-                .continue_feedback_if_current(&work, &LaunchId::new(), &basis)
-                .await,
-            Err(StoreError::InvalidAuthority(_))
-        ));
-        let request = AuthenticatedRequest::cli();
-        let steer = store
-            .steer(
-                &ControlCtx::User(&request),
-                &work,
-                "inspect the boundary",
-                Some(&basis),
-            )
-            .await
-            .unwrap();
-        assert!(matches!(
-            store
-                .continue_feedback_if_current(&work, &launch.id, &basis)
-                .await,
-            Err(StoreError::StaleBasis { .. })
-        ));
-        let status = store
-            .continue_feedback_if_current(&work, &launch.id, &steer.steer.basis)
-            .await
-            .unwrap();
-        assert!(matches!(status, WorkStatus::Running { .. }));
-        assert!(store.feedback(&work).await.unwrap().is_none());
-        assert!(matches!(
-            store
-                .continue_feedback_if_current(&work, &launch.id, &steer.steer.basis)
-                .await,
-            Err(StoreError::NotFound)
-        ));
-    }
-
-    #[tokio::test]
-    async fn active_parent_run_can_escalate_only_its_current_child_feedback() {
-        let (store, parent) = wave_work().await;
-        let project = project(match &parent {
-            WorkRef::Wave(id) => id.clone(),
-            _ => unreachable!(),
-        });
-        store.create_project(&project).await.unwrap();
-        let child = store
-            .work_for_child(&crate::child::ChildRef::Project(project.id))
-            .await
-            .unwrap();
-        let (parent_lease, _) = start_launch(&store, &parent, false).await;
-        let (child_lease, child_launch) = start_launch(&store, &child, false).await;
-        let basis = store.current_epoch(&child).await.unwrap().current_basis;
-        store
-            .set_flow_position(
-                &child_lease,
-                FlowPosition {
-                    work: child.clone(),
-                    epoch_id: basis.epoch_id.clone(),
-                    flow: "project".to_string(),
-                    step: "feedback".to_string(),
-                    step_index: 0,
-                    iteration: 0,
-                    feedback: true,
-                    updated_at: OffsetDateTime::now_utc(),
-                },
-            )
-            .await
-            .unwrap();
-        store
-            .route_feedback(
-                &child_lease,
-                &child_launch.id,
-                AttentionRoute::Parent(parent.clone()),
-            )
-            .await
-            .unwrap();
-
-        let escalated = store
-            .escalate_feedback(&parent_lease, &child, &basis)
-            .await
-            .unwrap();
-        assert_eq!(escalated.attention, AttentionRoute::User);
-        assert_eq!(store.user_attention().await.unwrap().len(), 1);
-        assert!(matches!(
-            store.escalate_feedback(&parent_lease, &child, &basis).await,
-            Err(StoreError::InvalidAuthority(_))
-        ));
+        assert_eq!(current.answer, Some(answer));
     }
 
     #[tokio::test]
     async fn unprovable_containment_keeps_the_run_slot_fenced() {
         let (store, work) = wave_work().await;
-        let (lease, _launch) = start_launch(&store, &work, false).await;
+        let (lease, _invocation) = start_invocation(&store, &work).await;
         let stopped = store
             .stop_run(
                 &lease,
@@ -883,16 +971,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn keeper_recovery_releases_only_the_exact_absent_launch() {
+    async fn keeper_recovery_releases_the_exact_absent_run() {
         let (store, work) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, false).await;
+        let (lease, _invocation) = start_invocation(&store, &work).await;
 
         let recovered = store
-            .recover_run(
-                &lease.run_id,
-                Some(&launch.id),
-                ContainmentObservation::Absent,
-            )
+            .recover_run(&lease.run_id, ContainmentObservation::Absent)
             .await
             .unwrap();
         assert_eq!(recovered.run.state, RunState::Ended);
@@ -911,64 +995,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn keeper_recovery_cannot_reap_a_replacement_launch() {
+    async fn invocation_order_does_not_fence_run_recovery() {
         let (store, work) = wave_work().await;
-        let (lease, first) = start_launch(&store, &work, false).await;
+        let (lease, _first) = start_invocation(&store, &work).await;
         store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchEnded {
-                    launch_id: first.id.clone(),
-                    outcome: BoundaryState::Failed,
-                },
-            )
-            .await
-            .unwrap();
-        let lease = store.rotate_run_lease(&lease).await.unwrap();
-        let receipt = store
-            .advance_run(
-                &lease,
-                RunAdvance::LaunchStarting {
-                    route: LaunchRoute {
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
                         provider: "claude".to_string(),
                         model: None,
                         account_id: None,
                     },
-                    containment: Containment::Tmux {
-                        name: "lf-runtime-replacement".to_string(),
-                    },
-                    cwd: PathBuf::from("/tmp/runtime"),
                     surface: "headless".to_string(),
-                    opaque: false,
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await
             .unwrap();
-        let crate::durable::AdvanceReceipt::Launch(second) = receipt else {
-            panic!("expected Launch receipt")
-        };
-
-        assert!(matches!(
-            store
-                .recover_run(
-                    &lease.run_id,
-                    Some(&first.id),
-                    ContainmentObservation::Absent,
-                )
-                .await,
-            Err(StoreError::InvalidData(message)) if message.contains("advanced")
-        ));
-        assert_eq!(
-            store
-                .current_launch_for_run(&lease.run_id)
-                .await
-                .unwrap()
-                .unwrap()
-                .id,
-            second.id
-        );
-        assert!(store.validate_run_lease(&lease).await.is_ok());
+        let recovered = store
+            .recover_run(&lease.run_id, ContainmentObservation::Absent)
+            .await
+            .unwrap();
+        assert_eq!(recovered.run.state, RunState::Ended);
     }
 
     #[tokio::test]
@@ -1018,15 +1068,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opaque_launch_success_is_a_completion_basis() {
+    async fn successful_turn_is_a_completion_basis() {
         let (store, work) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, true).await;
-        let basis = launch.opaque_basis.clone().unwrap();
+        let (lease, invocation) = start_invocation(&store, &work).await;
+        let receipt = store
+            .advance_run(
+                &lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: invocation.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Turn(turn) = receipt else {
+            panic!("expected Turn receipt")
+        };
+        let basis = turn.basis.clone();
         store
             .advance_run(
                 &lease,
-                RunAdvance::LaunchEnded {
-                    launch_id: launch.id,
+                RunAdvance::TurnEnded {
+                    turn_id: turn.id,
+                    outcome: BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id,
                     outcome: BoundaryState::Succeeded,
                 },
             )
@@ -1037,43 +1109,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn launch_surface_reopens_without_owning_liveness_and_handback_clears_attention() {
+    async fn invocation_surface_reopens_without_owning_liveness() {
         let (store, work) = wave_work().await;
-        let (lease, launch) = start_launch(&store, &work, true).await;
-        let basis = launch.opaque_basis.clone().unwrap();
-        store
-            .set_flow_position(
+        let (lease, invocation) = start_invocation(&store, &work).await;
+
+        let first = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let reopened = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first, reopened);
+        assert_eq!(first.attach_argv.as_ref().unwrap()[0], "tmux");
+
+        let ended = store
+            .handback_invocation(&invocation.id, BoundaryState::Unknown)
+            .await
+            .unwrap();
+        assert!(ended.invocation.ended_at.is_some());
+        assert_eq!(ended.handback, Some(BoundaryState::Unknown));
+
+        let receipt = store
+            .advance_run(
                 &lease,
-                FlowPosition {
-                    work: work.clone(),
-                    epoch_id: basis.epoch_id,
-                    flow: "wave-pursue".to_string(),
-                    step: "demo".to_string(),
-                    step_index: 0,
-                    iteration: 0,
-                    feedback: true,
-                    updated_at: OffsetDateTime::now_utc(),
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await
             .unwrap();
-        store
-            .route_feedback(&lease, &launch.id, AttentionRoute::User)
+        let crate::durable::AdvanceReceipt::Invocation(headless) = receipt else {
+            panic!("expected Invocation receipt")
+        };
+        assert!(store
+            .handback_invocation(&headless.id, BoundaryState::Succeeded)
             .await
-            .unwrap();
-
-        let first = store.launch_surface(&launch.id).await.unwrap().unwrap();
-        let reopened = store.launch_surface(&launch.id).await.unwrap().unwrap();
-        assert_eq!(first, reopened);
-        assert_eq!(first.attach_argv.as_ref().unwrap()[0], "tmux");
-        assert!(store.feedback(&work).await.unwrap().is_some());
-
-        let ended = store
-            .handback_launch(&launch.id, BoundaryState::Unknown)
-            .await
-            .unwrap();
-        assert_eq!(ended.launch.state, crate::durable::LaunchState::Ended);
-        assert_eq!(ended.handback, Some(BoundaryState::Unknown));
-        assert!(store.feedback(&work).await.unwrap().is_none());
+            .is_err());
     }
 }

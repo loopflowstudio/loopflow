@@ -10,7 +10,7 @@ enum ContextLabMode: String, Codable, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .aggregate: "Initial prompts"
-        case .lanes: "Agent sessions"
+        case .lanes: "Invocations"
         case .sources: "Sources"
         }
     }
@@ -37,7 +37,7 @@ private enum ContextNodeSort: String, CaseIterable, Identifiable {
 }
 
 private struct ContextLabSavedView: Codable, Hashable {
-    let query: SessionSetQuery
+    let query: InvocationSetQuery
     let mode: ContextLabMode
 
     var name: String {
@@ -56,7 +56,7 @@ struct TaskWorkspaceRoute: Codable, Hashable {
 }
 
 struct ContextLabRoute: Codable, Hashable {
-    let query: SessionSetQuery
+    let query: InvocationSetQuery
     let selectedNodeId: String
     let focusNodeId: String
     let mode: ContextLabMode
@@ -74,7 +74,7 @@ struct ContextLabRoute: Codable, Hashable {
         now: Int64 = Int64(Date().timeIntervalSince1970)
     ) -> Self {
         return Self(
-            query: SessionSetQuery(
+            query: InvocationSetQuery(
                 repoPaths: [WaveOrigin.resolve(repoPath)],
                 startedAfter: now - 30 * 24 * 60 * 60,
                 startedBefore: now,
@@ -91,24 +91,24 @@ struct ContextLabRoute: Codable, Hashable {
                 steeredOnly: false,
                 currentRevisionOnly: false
             ),
-            selectedNodeId: "session-set",
-            focusNodeId: "session-set",
+            selectedNodeId: "invocation-set",
+            focusNodeId: "invocation-set",
             mode: .aggregate
         )
     }
 }
 
 struct ContextLabView: View {
-    private let defaultQuery: SessionSetQuery
+    private let defaultQuery: InvocationSetQuery
     private let savedViewsKey: String
 
     @Environment(\.palette) private var palette
     @Environment(\.openWindow) private var openWindow
 
-    @State private var query: SessionSetQuery
+    @State private var query: InvocationSetQuery
     @State private var snapshot: ContextLabSnapshot?
-    @State private var selectedNodeId = "session-set"
-    @State private var focusNodeId = "session-set"
+    @State private var selectedNodeId = "invocation-set"
+    @State private var focusNodeId = "invocation-set"
     @State private var mode = ContextLabMode.aggregate
     @State private var laneSort = ContextLaneSort.context
     @State private var nodeSort = ContextNodeSort.impressions
@@ -196,7 +196,7 @@ struct ContextLabView: View {
                     Text("Context Lab")
                         .font(Typography.heroTitle(26))
                         .foregroundStyle(palette.text)
-                    Text("\(query.waves[0]) · what text shaped these sessions")
+                    Text("\(query.waves[0]) · what text shaped these invocations")
                         .font(Typography.caption())
                         .foregroundStyle(palette.textSecondary)
                 }
@@ -216,7 +216,7 @@ struct ContextLabView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoading)
-                .help("Refresh the selected session set")
+                .help("Refresh the selected invocation set")
             }
             if let snapshot {
                 stats(snapshot)
@@ -231,7 +231,7 @@ struct ContextLabView: View {
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Spacing.lg) {
                 ContextStat(label: "Runs", value: totals.runs.formatted())
-                ContextStat(label: "Agent sessions", value: totals.agentSessions.formatted())
+                ContextStat(label: "Invocations", value: totals.invocations.formatted())
                 ContextStat(
                     label: "Turns",
                     value: totals.turns.formatted(),
@@ -240,7 +240,7 @@ struct ContextLabView: View {
                 ContextStat(
                     label: "Initial prompts",
                     value: optionalTokens(totals.initialPromptTokens),
-                    denominator: "\(totals.initialPromptAgentSessions) / \(totals.agentSessions) captured"
+                    denominator: "\(totals.initialPromptInvocations) / \(totals.invocations) captured"
                 )
                 ContextStat(
                     label: "Initial p50 / p95",
@@ -254,7 +254,7 @@ struct ContextLabView: View {
                 ContextStat(
                     label: "Lifetime input",
                     value: optionalTokens(totals.lifetimeInputTokens),
-                    denominator: "\(totals.lifetimeInputAgentSessions) / \(totals.agentSessions) measured"
+                    denominator: "\(totals.lifetimeInputInvocations) / \(totals.invocations) measured"
                 )
                 ContextStat(
                     label: "Lifetime p50 / p95",
@@ -263,21 +263,21 @@ struct ContextLabView: View {
                 ContextStat(
                     label: "Peak window p50 / p95",
                     value: "\(optionalPercent(totals.medianPeakContextPercent)) / \(optionalPercent(totals.p95PeakContextPercent))",
-                    denominator: "\(totals.peakContextAgentSessions) / \(totals.agentSessions) measured"
+                    denominator: "\(totals.peakContextInvocations) / \(totals.invocations) measured"
                 )
                 ContextStat(
                     label: "Outcomes",
-                    value: "\(totals.completedLaunches) done · \(totals.failedLaunches) failed",
-                    denominator: "\(totals.runningLaunches) running · \(totals.interruptedLaunches) interrupted"
+                    value: "\(totals.completedInvocations) done · \(totals.failedInvocations) failed",
+                    denominator: "\(totals.runningInvocations) running · \(totals.interruptedInvocations) interrupted"
                 )
                 ContextStat(
                     label: "Steering",
                     value: "\(totals.steeringTurns) turns",
-                    denominator: "across \(totals.steeredLaunches) agent sessions"
+                    denominator: "across \(totals.steeredInvocations) invocations"
                 )
                 ContextStat(
                     label: "Capture",
-                    value: "\(snapshot.coverage.completeLaunches) / \(totals.agentSessions) complete",
+                    value: "\(snapshot.coverage.completeInvocations) / \(totals.invocations) complete",
                     denominator: "prompts \(snapshot.coverage.promptArtifactsAvailable) / \(totals.turns)"
                 )
             }
@@ -296,7 +296,7 @@ struct ContextLabView: View {
                         .font(Typography.code(10))
                         .foregroundStyle(palette.textSecondary)
                 }
-                railTitle("Session set")
+                railTitle("Invocation set")
                 Picker("Window", selection: windowDaysBinding) {
                     Text("7 days").tag(7)
                     Text("30 days").tag(30)
@@ -312,7 +312,7 @@ struct ContextLabView: View {
 
                 Divider()
                 railTitle("Outcome")
-                ForEach(SessionOutcome.allCases, id: \.self) { value in
+                ForEach(InvocationOutcome.allCases, id: \.self) { value in
                     filterToggle(value.rawValue.capitalized, selected: query.outcomes.contains(value)) {
                         toggle(value, in: &query.outcomes)
                         query.outcomes.sort { $0.rawValue < $1.rawValue }
@@ -480,14 +480,14 @@ struct ContextLabView: View {
                         .font(Typography.caption(11))
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
-                    Text("\(maximumTurnTokens(snapshot.sessions).formatted()) tokens")
+                    Text("\(maximumTurnTokens(snapshot.invocations).formatted()) tokens")
                         .font(Typography.code(10))
                         .foregroundStyle(palette.textSecondary)
                 }
-                ForEach(sortedSessions(snapshot.sessions, selectedIds: selectedIds)) { session in
-                    SessionLaneView(
-                        session: session,
-                        maximumTokens: maximumTurnTokens(snapshot.sessions),
+                ForEach(sortedInvocations(snapshot.invocations, selectedIds: selectedIds)) { invocation in
+                    InvocationLaneView(
+                        invocation: invocation,
+                        maximumTokens: maximumTurnTokens(snapshot.invocations),
                         selectedNodeIds: selectedIds,
                         onSelect: { selectedNodeId = $0.nodeId }
                     )
@@ -520,7 +520,7 @@ struct ContextLabView: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("One impression is one agent session whose initial prompt contains the source.")
+                    Text("One impression is one invocation whose initial prompt contains the source.")
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                     TextField("Find a source", text: $sourceSearch)
@@ -557,7 +557,7 @@ struct ContextLabView: View {
                             Text(source.impressions?.formatted() ?? "—")
                                 .frame(width: 72, alignment: .trailing)
                             Text(source.impressions.map {
-                                percent($0, of: snapshot.coverage.sourceObservableAgentSessions)
+                                percent($0, of: snapshot.coverage.sourceObservableInvocations)
                             } ?? "—")
                                 .frame(width: 46, alignment: .trailing)
                         }
@@ -644,8 +644,8 @@ struct ContextLabView: View {
             }
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                evidenceMetric("Runs", "\(evidence.measurements.exposedSessions) / \(snapshot.totals.runs)")
-                evidenceMetric("Impressions", "\(evidence.measurements.exposedLaunches) agent sessions")
+                evidenceMetric("Runs", "\(evidence.measurements.exposedRuns) / \(snapshot.totals.runs)")
+                evidenceMetric("Impressions", "\(evidence.measurements.exposedInvocations) invocations")
                 evidenceMetric("Turns", evidence.measurements.exposedTurns.formatted())
                 evidenceMetric("Attributed", "\(evidence.measurements.attributedTokens.formatted()) tokens")
                 evidenceMetric("Median / p95", "\(optionalTokens(evidence.measurements.medianTokensPerExposedTurn)) / \(optionalTokens(evidence.measurements.p95TokensPerExposedTurn))")
@@ -672,9 +672,9 @@ struct ContextLabView: View {
             refinementProjectDestination
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                railTitle("Representative sessions")
+                railTitle("Representative invocations")
                 if evidence.representatives.isEmpty {
-                    Text("No agent session has observed this revision in the selected population.")
+                    Text("No invocation has observed this revision in the selected population.")
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                 } else {
@@ -745,24 +745,24 @@ struct ContextLabView: View {
                     optionalTokens(later.measurements.medianTokensPerExposedTurn)
                 )
                 comparisonMetric(
-                    "Completed launches",
-                    percent(earlier.measurements.completedLaunches, of: earlier.measurements.exposedLaunches),
-                    percent(later.measurements.completedLaunches, of: later.measurements.exposedLaunches)
+                    "Completed invocations",
+                    percent(earlier.measurements.completedInvocations, of: earlier.measurements.exposedInvocations),
+                    percent(later.measurements.completedInvocations, of: later.measurements.exposedInvocations)
                 )
                 comparisonMetric(
-                    "Failed launches",
-                    percent(earlier.measurements.failedLaunches, of: earlier.measurements.exposedLaunches),
-                    percent(later.measurements.failedLaunches, of: later.measurements.exposedLaunches)
+                    "Failed invocations",
+                    percent(earlier.measurements.failedInvocations, of: earlier.measurements.exposedInvocations),
+                    percent(later.measurements.failedInvocations, of: later.measurements.exposedInvocations)
                 )
                 comparisonMetric(
-                    "Steering / launch",
-                    rate(earlier.measurements.steeringTurns, over: earlier.measurements.exposedLaunches),
-                    rate(later.measurements.steeringTurns, over: later.measurements.exposedLaunches)
+                    "Steering / invocation",
+                    rate(earlier.measurements.steeringTurns, over: earlier.measurements.exposedInvocations),
+                    rate(later.measurements.steeringTurns, over: later.measurements.exposedInvocations)
                 )
                 comparisonMetric(
                     "Complete capture",
-                    percent(earlier.measurements.completeCaptureLaunches, of: earlier.measurements.exposedLaunches),
-                    percent(later.measurements.completeCaptureLaunches, of: later.measurements.exposedLaunches)
+                    percent(earlier.measurements.completeCaptureInvocations, of: earlier.measurements.exposedInvocations),
+                    percent(later.measurements.completeCaptureInvocations, of: later.measurements.exposedInvocations)
                 )
                 comparisonMetric(
                     "Observation span",
@@ -780,10 +780,10 @@ struct ContextLabView: View {
 
     private func comparisonBlocker(_ earlier: SourceEvidence, _ later: SourceEvidence) -> String? {
         contextRevisionComparisonBlocker(
-            earlierLaunches: earlier.measurements.exposedLaunches,
-            earlierCompleteCaptures: earlier.measurements.completeCaptureLaunches,
-            laterLaunches: later.measurements.exposedLaunches,
-            laterCompleteCaptures: later.measurements.completeCaptureLaunches,
+            earlierInvocations: earlier.measurements.exposedInvocations,
+            earlierCompleteCaptures: earlier.measurements.completeCaptureInvocations,
+            laterInvocations: later.measurements.exposedInvocations,
+            laterCompleteCaptures: later.measurements.completeCaptureInvocations,
             earlierProviderModels: earlier.measurements.providerModels,
             laterProviderModels: later.measurements.providerModels,
             earlierFirstSeen: earlier.measurements.firstSeen,
@@ -834,7 +834,7 @@ struct ContextLabView: View {
                     Spacer()
                     evidenceMetric("Tokens", node.attributedTokens.formatted())
                     evidenceMetric("Runs", node.runCount.formatted())
-                    evidenceMetric("Impressions", node.agentSessionCount.formatted())
+                    evidenceMetric("Impressions", node.invocationCount.formatted())
                     evidenceMetric("Turns", node.turnCount.formatted())
                 }
                 .padding(Spacing.md)
@@ -859,9 +859,9 @@ struct ContextLabView: View {
             )
             evidenceMetric(
                 "Source evidence",
-                "\(coverage.sourceObservableAgentSessions) / \(snapshot.totals.agentSessions) agent sessions"
+                "\(coverage.sourceObservableInvocations) / \(snapshot.totals.invocations) invocations"
             )
-            evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(snapshot.totals.agentSessions)")
+            evidenceMetric("Conversations", "\(coverage.conversationsAvailable) / \(snapshot.totals.invocations)")
         }
     }
 
@@ -880,7 +880,7 @@ struct ContextLabView: View {
 
     private func facetPicker(
         _ title: String,
-        query keyPath: WritableKeyPath<SessionSetQuery, [String]>,
+        query keyPath: WritableKeyPath<InvocationSetQuery, [String]>,
         values: [String]
     ) -> some View {
         let selection = Binding(
@@ -895,12 +895,12 @@ struct ContextLabView: View {
         .pickerStyle(.menu)
     }
 
-    private func facets(_ keyPath: KeyPath<SessionLane, String?>) -> [String] {
+    private func facets(_ keyPath: KeyPath<InvocationLane, String?>) -> [String] {
         facets { $0[keyPath: keyPath] }
     }
 
-    private func facets(_ value: (SessionLane) -> String?) -> [String] {
-        Array(Set(snapshot?.sessions.compactMap(value) ?? [])).sorted()
+    private func facets(_ value: (InvocationLane) -> String?) -> [String] {
+        Array(Set(snapshot?.invocations.compactMap(value) ?? [])).sorted()
     }
 
     private func filterToggle(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -944,7 +944,7 @@ struct ContextLabView: View {
             .foregroundStyle(available ? Color.statusSuccess : palette.textSecondary)
     }
 
-    private func canRefine(_ evidence: SourceEvidence, in query: SessionSetQuery) -> Bool {
+    private func canRefine(_ evidence: SourceEvidence, in query: InvocationSetQuery) -> Bool {
         guard evidence.isEditable,
               let sourcePath = evidence.sourcePath,
               query.waves.count == 1,
@@ -955,7 +955,7 @@ struct ContextLabView: View {
         return contextRelativeSourcePath(sourcePath, repoPath: repoPath) != nil
     }
 
-    private func refinementHelp(_ evidence: SourceEvidence, in query: SessionSetQuery) -> String {
+    private func refinementHelp(_ evidence: SourceEvidence, in query: InvocationSetQuery) -> String {
         guard evidence.isEditable, let sourcePath = evidence.sourcePath else {
             return editabilityReason(evidence)
         }
@@ -968,7 +968,7 @@ struct ContextLabView: View {
                 : "Choose the Project that should own refinement Tasks for this Wave."
         }
         guard query.repoPaths.count == 1, let repoPath = query.repoPaths.first else {
-            return "Narrow the session set to one repo before refining this source."
+            return "Narrow the invocation set to one repo before refining this source."
         }
         guard contextRelativeSourcePath(sourcePath, repoPath: repoPath) != nil else {
             return "This source is outside the selected repo and cannot be changed in its Task worktree."
@@ -1083,11 +1083,11 @@ struct ContextLabView: View {
         return snapshot.evidence.filter { ids.contains($0.nodeId) }
     }
 
-    private func sortedSessions(_ sessions: [SessionLane], selectedIds: Set<String>) -> [SessionLane] {
-        sessions.sorted { left, right in
+    private func sortedInvocations(_ invocations: [InvocationLane], selectedIds: Set<String>) -> [InvocationLane] {
+        invocations.sorted { left, right in
             switch laneSort {
             case .context:
-                return sessionTokens(left) > sessionTokens(right)
+                return launchTokens(left) > launchTokens(right)
             case .lifetimeInput:
                 return (left.lifetimeInputTokens ?? 0) > (right.lifetimeInputTokens ?? 0)
             case .windowPressure:
@@ -1097,11 +1097,11 @@ struct ContextLabView: View {
                 let rightSelected = selectedTokens(right, ids: selectedIds)
                 let leftShare = contextSelectedSourceShare(
                     selectedTokens: leftSelected,
-                    contextTokens: sessionTokens(left)
+                    contextTokens: launchTokens(left)
                 )
                 let rightShare = contextSelectedSourceShare(
                     selectedTokens: rightSelected,
-                    contextTokens: sessionTokens(right)
+                    contextTokens: launchTokens(right)
                 )
                 if leftShare != rightShare { return leftShare > rightShare }
                 return leftSelected > rightSelected
@@ -1184,10 +1184,10 @@ struct ContextLabView: View {
             errorMessage = nil
             if findNode(selectedNodeId, in: next.aggregateRoot) == nil
                 && !next.evidence.contains(where: { $0.nodeId == selectedNodeId }) {
-                selectedNodeId = "session-set"
+                selectedNodeId = "invocation-set"
             }
             if findNode(focusNodeId, in: next.aggregateRoot) == nil {
-                focusNodeId = "session-set"
+                focusNodeId = "invocation-set"
             }
         } catch is CancellationError {
             return
@@ -1518,9 +1518,9 @@ private struct ContextIcicle: View {
     }
 }
 
-private struct SessionLaneView: View {
+private struct InvocationLaneView: View {
     @Environment(\.palette) private var palette
-    let session: SessionLane
+    let invocation: InvocationLane
     let maximumTokens: UInt64
     let selectedNodeIds: Set<String>
     let onSelect: (ContextLaneAsset) -> Void
@@ -1528,26 +1528,26 @@ private struct SessionLaneView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack {
-                Text(shortHash(session.runId))
+                Text(shortHash(invocation.runId))
                     .font(Typography.code(10))
-                Text(session.skill ?? session.flow ?? "inline")
+                Text(invocation.skill ?? invocation.flow ?? "inline")
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                 Spacer()
-                Text("\(session.provider)\(session.model.map { ":\($0)" } ?? "")")
+                Text("\(invocation.provider)\(invocation.model.map { ":\($0)" } ?? "")")
                     .font(Typography.code(9))
                     .foregroundStyle(palette.textSecondary)
-                Text("life \(optionalTokens(session.lifetimeInputTokens))")
+                Text("life \(optionalTokens(invocation.lifetimeInputTokens))")
                     .font(Typography.code(9))
                     .foregroundStyle(palette.textSecondary)
-                Text("peak \(optionalPercent(session.peakContextPercent))")
+                Text("peak \(optionalPercent(invocation.peakContextPercent))")
                     .font(Typography.code(9))
                     .foregroundStyle(palette.textSecondary)
-                Text(session.outcome.rawValue)
+                Text(invocation.outcome.rawValue)
                     .font(Typography.caption(9))
-                    .foregroundStyle(outcomeColor(session.outcome))
+                    .foregroundStyle(outcomeColor(invocation.outcome))
             }
-            ForEach(session.turns) { turn in
+            ForEach(invocation.turns) { turn in
                 HStack(spacing: Spacing.sm) {
                     Text("T\(turn.ordinal)")
                         .font(Typography.code(9))
@@ -1620,24 +1620,24 @@ private func revisionIds(for id: String, root: ContextFlameNode) -> Set<String> 
     return Set(descendants(of: node).filter { $0.level == .revision }.map(\.id))
 }
 
-private func maximumTurnTokens(_ sessions: [SessionLane]) -> UInt64 {
-    sessions
+private func maximumTurnTokens(_ invocations: [InvocationLane]) -> UInt64 {
+    invocations
         .flatMap(\.turns)
         .map { $0.suppliedContextTokens ?? $0.assets.reduce(0) { $0 + $1.attributedTokens } }
         .max() ?? 1
 }
 
-private func sessionTokens(_ session: SessionLane) -> UInt64 {
-    session.turns.reduce(0) { $0 + ($1.suppliedContextTokens ?? 0) }
+private func launchTokens(_ invocation: InvocationLane) -> UInt64 {
+    invocation.turns.reduce(0) { $0 + ($1.suppliedContextTokens ?? 0) }
 }
 
-private func selectedTokens(_ session: SessionLane, ids: Set<String>) -> UInt64 {
-    session.turns.flatMap(\.assets)
+private func selectedTokens(_ invocation: InvocationLane, ids: Set<String>) -> UInt64 {
+    invocation.turns.flatMap(\.assets)
         .filter { ids.contains($0.nodeId) }
         .reduce(0) { $0 + $1.attributedTokens }
 }
 
-private func outcomeRank(_ outcome: SessionOutcome) -> Int {
+private func outcomeRank(_ outcome: InvocationOutcome) -> Int {
     switch outcome {
     case .failed: 4
     case .interrupted: 3
@@ -1646,7 +1646,7 @@ private func outcomeRank(_ outcome: SessionOutcome) -> Int {
     }
 }
 
-private func outcomeColor(_ outcome: SessionOutcome) -> Color {
+private func outcomeColor(_ outcome: InvocationOutcome) -> Color {
     switch outcome {
     case .completed: .statusSuccess
     case .failed: .statusError
@@ -1696,9 +1696,9 @@ func contextSelectedSourceShare(selectedTokens: UInt64, contextTokens: UInt64) -
 }
 
 func contextRevisionComparisonBlocker(
-    earlierLaunches: UInt64,
+    earlierInvocations: UInt64,
     earlierCompleteCaptures: UInt64,
-    laterLaunches: UInt64,
+    laterInvocations: UInt64,
     laterCompleteCaptures: UInt64,
     earlierProviderModels: [ProviderModelExposure],
     laterProviderModels: [ProviderModelExposure],
@@ -1707,13 +1707,13 @@ func contextRevisionComparisonBlocker(
     laterFirstSeen: Int64?,
     laterLastSeen: Int64?
 ) -> String? {
-    let minimumLaunches: UInt64 = 3
-    guard earlierLaunches >= minimumLaunches, laterLaunches >= minimumLaunches else {
-        return "Unavailable until each revision has at least \(minimumLaunches) exposed launches "
-            + "(\(earlierLaunches) and \(laterLaunches) captured)."
+    let minimumInvocations: UInt64 = 3
+    guard earlierInvocations >= minimumInvocations, laterInvocations >= minimumInvocations else {
+        return "Unavailable until each revision has at least \(minimumInvocations) exposed invocations "
+            + "(\(earlierInvocations) and \(laterInvocations) captured)."
     }
-    let earlierCoverage = Double(earlierCompleteCaptures) / Double(earlierLaunches)
-    let laterCoverage = Double(laterCompleteCaptures) / Double(laterLaunches)
+    let earlierCoverage = Double(earlierCompleteCaptures) / Double(earlierInvocations)
+    let laterCoverage = Double(laterCompleteCaptures) / Double(laterInvocations)
     guard abs(earlierCoverage - laterCoverage) <= 0.1 + 1e-12 else {
         let earlierPercent = earlierCoverage.formatted(.percent.precision(.fractionLength(0)))
         let laterPercent = laterCoverage.formatted(.percent.precision(.fractionLength(0)))
@@ -1722,10 +1722,10 @@ func contextRevisionComparisonBlocker(
     }
     guard let earlierMix = providerModelDistribution(
         earlierProviderModels,
-        exposedLaunches: earlierLaunches
+        exposedInvocations: earlierInvocations
     ), let laterMix = providerModelDistribution(
         laterProviderModels,
-        exposedLaunches: laterLaunches
+        exposedInvocations: laterInvocations
     ) else {
         return "Unavailable because provider/model exposure is missing for one or both revisions."
     }
@@ -1771,15 +1771,15 @@ private struct ProviderModelKey: Hashable {
 
 private func providerModelDistribution(
     _ exposures: [ProviderModelExposure],
-    exposedLaunches: UInt64
+    exposedInvocations: UInt64
 ) -> [ProviderModelKey: Double]? {
-    guard exposedLaunches > 0 else { return nil }
-    let capturedLaunches = exposures.reduce(UInt64(0)) { $0 + $1.exposedLaunches }
-    guard capturedLaunches == exposedLaunches else { return nil }
+    guard exposedInvocations > 0 else { return nil }
+    let capturedInvocations = exposures.reduce(UInt64(0)) { $0 + $1.exposedInvocations }
+    guard capturedInvocations == exposedInvocations else { return nil }
     var distribution: [ProviderModelKey: Double] = [:]
     for exposure in exposures {
         let key = ProviderModelKey(provider: exposure.provider, model: exposure.model)
-        distribution[key, default: 0] += Double(exposure.exposedLaunches) / Double(exposedLaunches)
+        distribution[key, default: 0] += Double(exposure.exposedInvocations) / Double(exposedInvocations)
     }
     return distribution
 }
@@ -1787,7 +1787,7 @@ private func providerModelDistribution(
 private func providerModelSummary(_ exposures: [ProviderModelExposure]) -> String {
     guard !exposures.isEmpty else { return "Missing" }
     return exposures.map { exposure in
-        "\(exposure.provider)/\(exposure.model ?? "model missing") \(exposure.exposedLaunches)"
+        "\(exposure.provider)/\(exposure.model ?? "model missing") \(exposure.exposedInvocations)"
     }.joined(separator: " · ")
 }
 
@@ -1824,7 +1824,7 @@ private func observationDuration(_ seconds: Int64) -> String {
 
 private func displayKind(_ kind: ContextAssetKind?) -> String {
     if kind == .assembly { return "Unattributed" }
-    return kind?.rawValue.replacingOccurrences(of: "_", with: " ").capitalized ?? "Session set"
+    return kind?.rawValue.replacingOccurrences(of: "_", with: " ").capitalized ?? "Invocation set"
 }
 
 private func displayCapture(_ capture: CaptureState) -> String {
@@ -1839,7 +1839,7 @@ private func shortHash(_ hash: String) -> String {
     String(hash.prefix(10))
 }
 
-private func windowLabel(_ query: SessionSetQuery) -> String {
+private func windowLabel(_ query: InvocationSetQuery) -> String {
     let start = Date(timeIntervalSince1970: TimeInterval(query.startedAfter))
     let end = Date(timeIntervalSince1970: TimeInterval(query.startedBefore))
     return "\(start.formatted(date: .abbreviated, time: .omitted)) – \(end.formatted(date: .abbreviated, time: .omitted))"

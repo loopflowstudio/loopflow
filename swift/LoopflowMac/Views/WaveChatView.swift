@@ -22,7 +22,7 @@ struct WaveChatView: View {
     @State private var connection: WaveChatConnection?
     @State private var composerText = ""
     @State private var sendError: String?
-    @State private var launch: LaunchState = .idle
+    @State private var startState: WaveStartState = .idle
     @State private var isStopping = false
     @State private var confirmStop = false
     @State private var isFollowingLatest = true
@@ -30,7 +30,7 @@ struct WaveChatView: View {
     @State private var githubBase: URL?
     @FocusState private var composerFocused: Bool
 
-    enum LaunchState: Equatable {
+    enum WaveStartState: Equatable {
         case idle
         case starting
         case failed(String)
@@ -79,7 +79,7 @@ struct WaveChatView: View {
         .task(id: identity) {
             connection?.stop()
             sendError = nil
-            launch = .idle
+            startState = .idle
             isStopping = false
             confirmStop = false
             isFollowingLatest = true
@@ -376,17 +376,17 @@ struct WaveChatView: View {
                 startWave()
             } label: {
                 HStack(spacing: Spacing.xs) {
-                    if launch == .starting {
+                    if startState == .starting {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Text(launch == .starting ? "Starting…" : "Start wave")
+                    Text(startState == .starting ? "Starting…" : "Start wave")
                 }
             }
             .buttonStyle(DarkButtonStyle())
-            .disabled(launch == .starting)
+            .disabled(startState == .starting)
             .accessibilityIdentifier("wave-chat-start")
-            if case .failed(let message) = launch {
+            if case .failed(let message) = startState {
                 Text(message)
                     .font(Typography.caption())
                     .foregroundStyle(Color.statusError)
@@ -403,8 +403,8 @@ struct WaveChatView: View {
     /// The launch itself is quick (tmux returns immediately); the wave server
     /// takes a few seconds to publish its endpoint.
     private func startWave() {
-        guard launch != .starting else { return }
-        launch = .starting
+        guard startState != .starting else { return }
+        startState = .starting
         let repoPath = repoPath
         let waveName = waveName
         Task {
@@ -413,7 +413,7 @@ struct WaveChatView: View {
                     try LocalWaveAgentLauncher.launchWave(repoPath: repoPath, waveName: waveName)
                 }.value
             } catch {
-                launch = .failed(error.localizedDescription)
+                startState = .failed(error.localizedDescription)
                 return
             }
             // The connection polls the endpoint pointer every second; give the
@@ -424,13 +424,13 @@ struct WaveChatView: View {
                 guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
                 let phase = conn.phase
                 if phase != .notRunning && phase != .idle {
-                    launch = .idle
+                    startState = .idle
                     return
                 }
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
             guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
-            launch = .failed(
+            startState = .failed(
                 "Wave didn't come up. Check the tmux session for what went wrong: "
                     + "tmux attach -r -t \(PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName))"
             )

@@ -5,8 +5,8 @@ use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
-    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, WorktreePrunePolicy,
-    WorktreeSegment,
+    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, PullRequestState,
+    WorktreePrunePolicy, WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -1491,6 +1491,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
         fresh: bool,
         dirty: bool,
         remote_gone: bool,
+        pull_request: Option<PullRequestState>,
         diff_stat: String,
     }
 
@@ -1531,6 +1532,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
                 fresh: wt.fresh,
                 dirty: wt.dirty,
                 remote_gone: wt.remote_gone,
+                pull_request: wt.pull_request,
                 diff_stat,
             }
         })
@@ -1563,6 +1565,10 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
             ("squash-merged", c.green)
         } else if row.remote_gone {
             ("remote-gone", c.yellow)
+        } else if row.pull_request == Some(PullRequestState::Closed) {
+            ("closed-pr", c.yellow)
+        } else if row.pull_request == Some(PullRequestState::Open) {
+            ("open-pr", c.cyan)
         } else {
             ("active", c.cyan)
         };
@@ -1742,14 +1748,12 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {
-            let sessions = runtime.block_on(store.list_tasks(None)).map_err(|error| {
+            let tasks = runtime.block_on(store.list_tasks(None)).map_err(|error| {
                 anyhow!("cannot verify Task worktree ownership before pruning: {error}")
             })?;
-            for session in sessions {
+            for task in tasks {
                 let work = runtime
-                    .block_on(
-                        store.work_for_child(&crate::child::ChildRef::Task(session.id.clone())),
-                    )
+                    .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
                     .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
                 let status = runtime
                     .block_on(store.work_status(&work))
@@ -1758,7 +1762,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(session.worktree);
+                    protected.insert(task.worktree);
                 }
             }
         }
@@ -2019,7 +2023,7 @@ fn launch_skill_agent(
             render_ms: 0,
             raw_provider: true,
             basis: None,
-            control: None,
+            supervision: None,
         },
     )?;
 

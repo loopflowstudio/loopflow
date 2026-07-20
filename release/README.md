@@ -23,6 +23,9 @@ cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`, and
 install it into the local bin dir.
 
+Promotion stops while draft migrations remain. Cut the release first so the
+binary embeds the schema its runtime code expects.
+
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
 

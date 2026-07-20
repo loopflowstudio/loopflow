@@ -119,11 +119,20 @@ pub struct PromotionPreview {
 /// unit-tested below.
 pub fn decide(
     authority: MigrationAuthority,
+    pending_migration_drafts: &[&str],
     compatibility: &Compatibility,
     active_runs: &[ActiveRun],
 ) -> Verdict {
     let mut reasons = Vec::new();
     let mut migrate = false;
+
+    if !pending_migration_drafts.is_empty() {
+        reasons.push(format!(
+            "candidate build does not embed its complete schema; pending draft migrations: {}; \
+             cut a release before promoting it",
+            pending_migration_drafts.join(", ")
+        ));
+    }
 
     match compatibility {
         Compatibility::Unreadable { reason } => reasons.push(format!(
@@ -330,7 +339,13 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
     let (compatibility, active_runs) = read_store_evidence(store_path);
-    let verdict = decide(candidate.authority, &compatibility, &active_runs);
+    let pending_migration_drafts = build_info::pending_migration_drafts();
+    let verdict = decide(
+        candidate.authority,
+        &pending_migration_drafts,
+        &compatibility,
+        &active_runs,
+    );
     PromotionPreview {
         candidate,
         database_path,
@@ -417,9 +432,20 @@ pub fn preflight(json: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decide, read_active_runs, read_store_evidence, ActiveRun, Compatibility, Verdict};
+    use super::{
+        decide as decide_with_drafts, read_active_runs, read_store_evidence, ActiveRun,
+        Compatibility, Verdict,
+    };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
     use crate::store::migrations::latest_known_version;
+
+    fn decide(
+        authority: crate::build_info::MigrationAuthority,
+        compatibility: &Compatibility,
+        active_runs: &[ActiveRun],
+    ) -> Verdict {
+        decide_with_drafts(authority, &[], compatibility, active_runs)
+    }
 
     fn exact() -> Compatibility {
         Compatibility::Exact {
@@ -447,6 +473,21 @@ mod tests {
     fn an_exact_frontier_promotes_for_either_authority_when_no_runs_are_active() {
         assert_eq!(decide(ValidationOnly, &exact(), &[]), Verdict::Promote);
         assert_eq!(decide(Published, &exact(), &[]), Verdict::Promote);
+    }
+
+    #[test]
+    fn pending_drafts_refuse_promotion_even_at_the_exact_store_frontier() {
+        let Verdict::Reject { reasons } = decide_with_drafts(
+            Published,
+            &["run_owns_execution", "durable_asks"],
+            &exact(),
+            &[],
+        ) else {
+            panic!("runtime code newer than the embedded schema must never become global");
+        };
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("run_owns_execution, durable_asks"));
+        assert!(reasons[0].contains("cut a release"));
     }
 
     #[test]

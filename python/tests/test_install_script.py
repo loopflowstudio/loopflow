@@ -235,8 +235,9 @@ def test_stage_binaries_errors_on_missing_cargo_output(
 
 
 def test_only_canonical_or_tagged_installs_receive_migration_authority(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    repo = tmp_path / "repo"
     values = {
         ("rev-parse", "HEAD"): "branch-head",
         ("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main",
@@ -250,14 +251,32 @@ def test_only_canonical_or_tagged_installs_receive_migration_authority(
         lambda args, repo=install.ROOT, check=True: values[tuple(args)],
     )
 
-    assert install._migration_authority() == "validation_only"
+    assert install._migration_authority(repo) == "validation_only"
     values[("rev-parse", "HEAD")] = "main-head"
-    assert install._migration_authority() == "published"
+    assert install._migration_authority(repo) == "published"
     values[("rev-parse", "HEAD")] = "tagged-head"
     values[("tag", "--points-at", "HEAD")] = "v0.11.2"
-    assert install._migration_authority() == "published"
+    assert install._migration_authority(repo) == "published"
     values[("status", "--porcelain")] = " M rust/loopflow/src/store/migrations.rs"
-    assert install._migration_authority() == "validation_only"
+    assert install._migration_authority(repo) == "validation_only"
+
+
+def test_promotion_refuses_a_checkout_with_pending_draft_migrations(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    drafts = root / "rust/loopflow/src/store/migrations/drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "run_owns_execution__0123456789abcdef0123456789abcdef.sql").write_text(
+        "SELECT 1;\n"
+    )
+    monkeypatch.setattr(install, "ROOT", root)
+
+    with pytest.raises(
+        install.StageError,
+        match="pending draft migrations: run_owns_execution; cut a release",
+    ):
+        install._promote_with_candidate(root / "lf", tmp_path / "bin")
 
 
 @pytest.mark.parametrize("no_pull", [False, True])

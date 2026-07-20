@@ -332,6 +332,17 @@ def _stage_binaries(local_bin: Path) -> None:
     _atomic_install(ROOT / "target" / "release" / "lf", local_bin / "lf")
 
 
+def _require_complete_schema_for_promotion(repo: Path) -> None:
+    drafts = sorted((repo / "rust/loopflow/src/store/migrations/drafts").glob("*.sql"))
+    if not drafts:
+        return
+    names = ", ".join(path.stem.rsplit("__", 1)[0] for path in drafts)
+    raise StageError(
+        f"refusing to promote with pending draft migrations: {names}; "
+        "cut a release so the binary embeds the schema its runtime code requires"
+    )
+
+
 def _promote_with_candidate(
     candidate: Path,
     install_dir: Path,
@@ -339,6 +350,7 @@ def _promote_with_candidate(
     applications_dir: Path | None = None,
 ) -> None:
     """Delegate every machine-global mutation to the freshly built lf."""
+    _require_complete_schema_for_promotion(ROOT)
     # Resolve the /Applications target at call time so the module global stays
     # authoritative (a def-time default would freeze the real /Applications).
     if applications_dir is None:

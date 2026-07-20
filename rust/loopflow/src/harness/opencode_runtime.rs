@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -19,9 +20,13 @@ pub struct OpenCodeReapReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct OpenCodeServerEntry {
-    opencode_pid: u32,
-    owner_loopflow_pid: u32,
+pub(crate) struct OpenCodeServerEntry {
+    pub opencode_pid: u32,
+    pub owner_loopflow_pid: u32,
+}
+
+pub(crate) fn registered_opencode_servers_at(lf_home: &Path) -> Result<Vec<OpenCodeServerEntry>> {
+    read_registry_entries(&lf_home.join(OPENCODE_REGISTRY_FILE))
 }
 
 pub(crate) fn register_opencode_server(opencode_pid: u32) -> Result<()> {
@@ -35,6 +40,21 @@ pub(crate) fn unregister_opencode_server(opencode_pid: u32) -> Result<()> {
 pub fn reap_orphaned_opencode_servers() -> OpenCodeReapReport {
     reap_orphaned_opencode_servers_at_path(
         &registry_path(),
+        |_| true,
+        pid_is_alive,
+        classify_leader,
+        process_group_alive,
+        terminate_process_group,
+    )
+}
+
+pub(crate) fn reap_selected_orphaned_opencode_servers_at(
+    lf_home: &Path,
+    process_groups: &HashSet<u32>,
+) -> OpenCodeReapReport {
+    reap_orphaned_opencode_servers_at_path(
+        &lf_home.join(OPENCODE_REGISTRY_FILE),
+        |pid| process_groups.contains(&pid),
         pid_is_alive,
         classify_leader,
         process_group_alive,
@@ -86,6 +106,7 @@ enum LeaderState {
 
 fn reap_orphaned_opencode_servers_at_path(
     path: &Path,
+    eligible: impl Fn(u32) -> bool,
     owner_pid_alive: impl Fn(u32) -> bool,
     leader: impl Fn(u32) -> LeaderState,
     group_alive: impl Fn(u32) -> bool,
@@ -103,6 +124,10 @@ fn reap_orphaned_opencode_servers_at_path(
 
     let mut retained = Vec::with_capacity(entries.len());
     for entry in entries {
+        if !eligible(entry.opencode_pid) {
+            retained.push(entry);
+            continue;
+        }
         if owner_pid_alive(entry.owner_loopflow_pid) {
             retained.push(entry);
             continue;
@@ -370,6 +395,7 @@ mod tests {
 
         let report = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |pid| owner_alive.contains(&pid),
             |pid| {
                 if opencode_pids.contains(&pid) {
@@ -412,6 +438,7 @@ mod tests {
 
         let report = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |_| false,
             |_| LeaderState::Dead,
             |pgid| alive_groups.contains(&pgid),
@@ -443,6 +470,7 @@ mod tests {
         let killed = Mutex::new(Vec::new());
         let report = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |_| false,
             |_| LeaderState::Dead,
             |_| false,
@@ -469,6 +497,7 @@ mod tests {
         let killed = Mutex::new(Vec::new());
         let report = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |_| false,
             |_| LeaderState::Other,
             |_| true,
@@ -494,6 +523,7 @@ mod tests {
 
         let report = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |_| false,
             |_| LeaderState::Opencode,
             |_| true,
@@ -514,6 +544,28 @@ mod tests {
     }
 
     #[test]
+    fn selected_reap_preserves_unlisted_orphans() {
+        let tmp = tempdir().expect("tempdir");
+        let path = registry_path(tmp.path());
+        write_registry_entries(&path, &[entry(60, 2), entry(61, 2)]).expect("write registry");
+
+        let report = reap_orphaned_opencode_servers_at_path(
+            &path,
+            |pid| pid == 60,
+            |_| false,
+            |_| LeaderState::Opencode,
+            |_| true,
+            |_| true,
+        );
+
+        assert_eq!(report.reaped, 1);
+        assert_eq!(
+            read_registry_entries(&path).expect("read entries"),
+            vec![entry(61, 2)]
+        );
+    }
+
+    #[test]
     fn reap_is_idempotent() {
         let tmp = tempdir().expect("tempdir");
         let path = registry_path(tmp.path());
@@ -521,6 +573,7 @@ mod tests {
 
         let first = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |_| false,
             |pid| {
                 if pid == 20 {
@@ -542,6 +595,7 @@ mod tests {
 
         let second = reap_orphaned_opencode_servers_at_path(
             &path,
+            |_| true,
             |_| false,
             |pid| {
                 if pid == 20 {

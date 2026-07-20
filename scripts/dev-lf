@@ -33,7 +33,11 @@ run_dev_lf() {
         set -e
         set -o pipefail
 
-        export RUST_LOG="${RUST_LOG:-lf=debug,loopflow=debug}"
+        if [[ -z "${RUST_LOG:-}" && ( "${1:-}" == "ps" || "${1:-}" == "top" || "${1:-}" == "prune" ) ]]; then
+            export RUST_LOG="lf=info,loopflow=info"
+        else
+            export RUST_LOG="${RUST_LOG:-lf=debug,loopflow=debug}"
+        fi
         cargo build -p loopflow --bin lf --manifest-path "$repo/Cargo.toml" </dev/null 2>&1 |
             grep -E '^   Compiling|^    Finished|^error' >&2
         echo "running: $repo/target/debug/lf $*" >&2

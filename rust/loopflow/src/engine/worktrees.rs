@@ -1,14 +1,13 @@
 use crate::engine::error::GitError;
 use crate::engine::git::{
-    delete_local_branch, get_default_branch, has_commits_beyond, is_ancestor,
-    is_clean_ignoring_scratch, is_squash_merged, rev_parse, sync_main, worktree_add,
-    worktree_remove, WorktreeBranch,
+    delete_local_branch, get_default_branch, has_commits_beyond, is_ancestor, is_clean,
+    is_squash_merged, rev_parse, sync_main, worktree_add, worktree_remove, WorktreeBranch,
 };
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -68,11 +67,20 @@ pub struct WorktreeState {
     pub base_branch: Option<String>,
     pub merged: bool,
     pub squash_merged: bool,
-    pub prunable: bool,
     /// No commits beyond main and not merged — a brand new worktree.
     pub fresh: bool,
     pub dirty: bool,
     pub remote_gone: bool,
+    pub pull_request: Option<PullRequestState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    Merged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -80,9 +88,9 @@ pub struct WorktreeState {
 pub enum WorktreePruneReason {
     Merged,
     SquashMerged,
+    ClosedPullRequest,
     RemoteGone,
-    Fresh,
-    Unprotected,
+    Stale,
     Terminal,
 }
 
@@ -91,9 +99,9 @@ impl WorktreePruneReason {
         match self {
             Self::Merged => "merged",
             Self::SquashMerged => "squash-merged",
+            Self::ClosedPullRequest => "closed-pr",
             Self::RemoteGone => "remote-gone",
-            Self::Fresh => "fresh",
-            Self::Unprotected => "unprotected",
+            Self::Stale => "stale",
             Self::Terminal => "terminal",
         }
     }
@@ -122,20 +130,18 @@ pub struct WorktreePruneReport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorktreePrunePolicy {
-    pub remove_unprotected: bool,
+    stale_after: Option<Duration>,
 }
 
 impl WorktreePrunePolicy {
     pub fn manual() -> Self {
         Self {
-            remove_unprotected: true,
+            stale_after: Some(Duration::from_secs(7 * 24 * 60 * 60)),
         }
     }
 
     pub fn automatic() -> Self {
-        Self {
-            remove_unprotected: false,
-        }
+        Self { stale_after: None }
     }
 }
 
@@ -360,14 +366,21 @@ pub(crate) fn github_repo_nwo(repo: &Path) -> Option<(String, String)> {
     Some((owner.to_string(), name.to_string()))
 }
 
-/// Check which branches have merged PRs using a single GitHub GraphQL call.
-fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
+/// Read the current head's PR state for each branch in one GitHub call.
+///
+/// `None` means GitHub was applicable but unavailable, so callers must not
+/// infer that a stale branch has no open PR. A non-GitHub remote has no GitHub
+/// PR state and returns a known-empty map.
+fn pull_request_states(
+    repo: &Path,
+    branches: &[String],
+) -> Option<HashMap<String, PullRequestState>> {
     if branches.is_empty() {
-        return HashSet::new();
+        return Some(HashMap::new());
     }
     let (owner, name) = match github_repo_nwo(repo) {
         Some(nwo) => nwo,
-        None => return HashSet::new(),
+        None => return Some(HashMap::new()),
     };
 
     let branch_heads = branches
@@ -379,7 +392,7 @@ fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
         })
         .collect::<Vec<_>>();
     if branch_heads.is_empty() {
-        return HashSet::new();
+        return Some(HashMap::new());
     }
 
     // Build aliased GraphQL query: one field per branch. Branch names are
@@ -402,39 +415,47 @@ fn merged_pr_branches(repo: &Path, branches: &[String]) -> HashSet<String> {
 
     let stdout = match output {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return HashSet::new(),
+        _ => return None,
     };
 
-    parse_merged_pr_branches(&stdout, &branch_heads)
+    parse_pull_request_states(&stdout, &branch_heads)
 }
 
-fn parse_merged_pr_branches(response: &str, branch_heads: &[(String, String)]) -> HashSet<String> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(response) else {
-        return HashSet::new();
-    };
-    let Some(repository) = value.pointer("/data/repository") else {
-        return HashSet::new();
-    };
+fn parse_pull_request_states(
+    response: &str,
+    branch_heads: &[(String, String)],
+) -> Option<HashMap<String, PullRequestState>> {
+    let value = serde_json::from_str::<serde_json::Value>(response).ok()?;
+    let repository = value.pointer("/data/repository")?;
 
-    branch_heads
-        .iter()
-        .enumerate()
-        .filter_map(|(index, (branch, head))| {
-            let nodes = repository
-                .pointer(&format!("/b{index}/nodes"))?
-                .as_array()?;
-            let states = nodes
-                .iter()
-                .filter(|node| {
-                    node.get("headRefOid").and_then(serde_json::Value::as_str)
-                        == Some(head.as_str())
-                })
-                .filter_map(|node| node.get("state").and_then(serde_json::Value::as_str));
-            let has_open = states.clone().any(|state| state == "OPEN");
-            let merged = !has_open && states.into_iter().any(|state| state == "MERGED");
-            merged.then(|| branch.clone())
-        })
-        .collect()
+    Some(
+        branch_heads
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (branch, head))| {
+                let nodes = repository
+                    .pointer(&format!("/b{index}/nodes"))?
+                    .as_array()?;
+                let mut states = nodes
+                    .iter()
+                    .filter(|node| {
+                        node.get("headRefOid").and_then(serde_json::Value::as_str)
+                            == Some(head.as_str())
+                    })
+                    .filter_map(|node| node.get("state").and_then(serde_json::Value::as_str));
+                let state = if states.clone().any(|state| state == "OPEN") {
+                    PullRequestState::Open
+                } else if states.clone().any(|state| state == "MERGED") {
+                    PullRequestState::Merged
+                } else if states.any(|state| state == "CLOSED") {
+                    PullRequestState::Closed
+                } else {
+                    return None;
+                };
+                Some((branch.clone(), state))
+            })
+            .collect(),
+    )
 }
 
 /// List all remote branch names via a single `git ls-remote --heads origin` call.
@@ -465,9 +486,8 @@ fn list_remote_branches(repo: &Path) -> HashSet<String> {
 /// default branch to `enrich_worktrees_network` without a redundant git call.
 ///
 /// `merged` reflects local detection only (fast-forward ancestor check and
-/// squash-merge patch-id comparison). `remote_gone` is always `false`.
-/// `prunable` is conservative — network enrichment may mark additional
-/// worktrees as prunable.
+/// squash-merge patch-id comparison). `remote_gone` is always `false`, and
+/// `pull_request` is always `None` until network enrichment.
 pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>), GitError> {
     let default_branch = get_default_branch(repo)?;
     let merge_target = format!("origin/{default_branch}");
@@ -525,22 +545,22 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
         let squash_merged_flag = branch
             .as_deref()
             .is_some_and(|b| !is_default && has_commits && squash_merged.contains(b));
-        let dirty = !is_clean_ignoring_scratch(&path).unwrap_or(true);
+        // A failed cleanliness check is not evidence that removal is safe.
+        let dirty = !is_clean(&path).unwrap_or(false);
         // "Fresh" means no net content delta against main yet.
         // This includes newly-rotated branches that were forked from a landed
         // branch (commit graph differs, but tree is identical to main).
         let fresh = !is_default && !merged && (!has_commits || squash_merged_flag);
-        let prunable = !is_default && (merged || (squash_merged_flag && !fresh));
         results.push(WorktreeState {
             branch,
             path,
             base_branch,
             merged,
             squash_merged: squash_merged_flag,
-            prunable,
             fresh,
             dirty,
             remote_gone: false,
+            pull_request: None,
         });
     }
 
@@ -549,13 +569,18 @@ pub fn list_worktrees_local(repo: &Path) -> Result<(String, Vec<WorktreeState>),
 
 /// Enrich worktree states with network-dependent checks.
 ///
-/// Queries GitHub for merged PRs and `git ls-remote` for remote branch
-/// existence. Updates `merged`, `remote_gone`, and `prunable` fields.
-/// Silently skips enrichment on network failure.
+/// Queries GitHub for current-head PR state and `git ls-remote` for remote
+/// branch existence. Updates `merged`, `remote_gone`, and `pull_request`.
+/// Returns false when GitHub was applicable but unavailable; callers use that
+/// to retain stale branches whose open-PR state could not be checked.
 ///
 /// `default_branch` should match what `list_worktrees_local` used
 /// (typically from `get_default_branch`).
-pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut [WorktreeState]) {
+fn enrich_worktrees_network(
+    repo: &Path,
+    default_branch: &str,
+    states: &mut [WorktreeState],
+) -> bool {
     let branches: Vec<String> = states
         .iter()
         .filter_map(|wt| wt.branch.as_ref())
@@ -564,26 +589,29 @@ pub fn enrich_worktrees_network(repo: &Path, default_branch: &str, states: &mut 
         .collect();
 
     if branches.is_empty() {
-        return;
+        return true;
     }
 
     let repo_for_pr = repo.to_path_buf();
     let pr_branches = branches;
-    let pr_handle = thread::spawn(move || merged_pr_branches(&repo_for_pr, &pr_branches));
+    let pr_handle = thread::spawn(move || pull_request_states(&repo_for_pr, &pr_branches));
 
     let repo_for_remote = repo.to_path_buf();
     let remote_handle = thread::spawn(move || list_remote_branches(&repo_for_remote));
 
-    let pr_merged = pr_handle.join().unwrap_or_default();
+    let pr_states = pr_handle.join().ok().flatten();
+    let pull_requests_known = pr_states.is_some();
+    let pr_states = pr_states.unwrap_or_default();
     let remote_branches = remote_handle.join().unwrap_or_default();
 
-    apply_network_enrichment(states, default_branch, &pr_merged, &remote_branches);
+    apply_network_enrichment(states, default_branch, &pr_states, &remote_branches);
+    pull_requests_known
 }
 
 fn apply_network_enrichment(
     states: &mut [WorktreeState],
     default_branch: &str,
-    pr_merged: &HashSet<String>,
+    pr_states: &HashMap<String, PullRequestState>,
     remote_branches: &HashSet<String>,
 ) {
     for state in states.iter_mut() {
@@ -592,13 +620,15 @@ fn apply_network_enrichment(
             continue;
         }
 
-        if !state.merged
-            && state
-                .branch
-                .as_deref()
-                .is_some_and(|b| pr_merged.contains(b))
-        {
+        state.pull_request = state
+            .branch
+            .as_deref()
+            .and_then(|branch| pr_states.get(branch))
+            .copied();
+
+        if !state.merged && state.pull_request == Some(PullRequestState::Merged) {
             state.merged = true;
+            state.fresh = false;
         }
 
         if !remote_branches.is_empty() {
@@ -607,61 +637,101 @@ fn apply_network_enrichment(
                 .as_deref()
                 .is_some_and(|b| !remote_branches.contains(b));
         }
-
-        if !state.prunable && state.merged {
-            state.prunable = true;
-            state.fresh = false;
-        }
-        if !state.prunable && state.squash_merged && !state.fresh {
-            state.prunable = true;
-        }
-        // remote_gone on a non-fresh worktree means the PR was likely merged
-        // or the branch was deleted upstream — mark prunable.
-        if !state.prunable && !state.fresh && state.remote_gone && !state.dirty {
-            state.prunable = true;
-        }
     }
 }
 
 /// Full worktree listing with all checks (local + network).
 pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     let (default_branch, mut states) = list_worktrees_local(repo)?;
-    enrich_worktrees_network(repo, &default_branch, &mut states);
+    let _ = enrich_worktrees_network(repo, &default_branch, &mut states);
     Ok(states)
 }
 
-fn worktree_prune_reason(
-    state: &WorktreeState,
-    policy: WorktreePrunePolicy,
-) -> Option<WorktreePruneReason> {
-    if policy.remove_unprotected {
-        return Some(if state.merged {
-            WorktreePruneReason::Merged
-        } else if state.squash_merged {
-            WorktreePruneReason::SquashMerged
-        } else if state.remote_gone {
-            WorktreePruneReason::RemoteGone
-        } else if state.fresh {
-            WorktreePruneReason::Fresh
-        } else {
-            WorktreePruneReason::Unprotected
-        });
-    }
-    if state.fresh {
-        return None;
-    }
-    if !state.prunable || state.dirty {
+fn worktree_prune_reason(state: &WorktreeState) -> Option<WorktreePruneReason> {
+    if state.dirty {
         return None;
     }
     if state.merged {
         Some(WorktreePruneReason::Merged)
-    } else if state.squash_merged {
+    } else if state.squash_merged && !state.fresh {
         Some(WorktreePruneReason::SquashMerged)
+    } else if state.pull_request == Some(PullRequestState::Closed) {
+        Some(WorktreePruneReason::ClosedPullRequest)
     } else if state.remote_gone {
         Some(WorktreePruneReason::RemoteGone)
     } else {
         None
     }
+}
+
+fn abandoned_prune_reason(
+    state: &WorktreeState,
+    pull_requests_known: bool,
+    stale: bool,
+) -> Option<WorktreePruneReason> {
+    (pull_requests_known
+        && state.pull_request != Some(PullRequestState::Open)
+        && !state.dirty
+        && stale)
+        .then_some(WorktreePruneReason::Stale)
+}
+
+fn branch_is_stale(
+    repo: &Path,
+    branch: &str,
+    stale_after: Duration,
+    now: SystemTime,
+) -> Result<bool, GitError> {
+    let reflog = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "reflog",
+            "show",
+            "-1",
+            "--date=unix",
+            "--format=%gd",
+            branch,
+        ])
+        .output()?;
+    let reflog_seconds = if reflog.status.success() {
+        let raw = String::from_utf8_lossy(&reflog.stdout);
+        raw.trim()
+            .rsplit_once("@{")
+            .and_then(|(_, suffix)| suffix.strip_suffix('}'))
+            .and_then(|seconds| seconds.parse::<u64>().ok())
+    } else {
+        None
+    };
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["show", "-s", "--format=%ct", branch])
+        .output()?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: format!("git show -s --format=%ct {branch}"),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let commit_seconds = raw
+        .parse::<u64>()
+        .map_err(|error| GitError::CommandFailed {
+            command: format!("git show -s --format=%ct {branch}"),
+            stderr: format!("invalid commit timestamp '{raw}': {error}"),
+        })?;
+    let activity_seconds = reflog_seconds
+        .map(|seconds| seconds.max(commit_seconds))
+        .unwrap_or(commit_seconds);
+    let active_at = SystemTime::UNIX_EPOCH
+        .checked_add(Duration::from_secs(activity_seconds))
+        .ok_or_else(|| GitError::CommandFailed {
+            command: format!("git reflog show {branch}"),
+            stderr: format!("branch activity timestamp '{activity_seconds}' is out of range"),
+        })?;
+    Ok(now.duration_since(active_at).unwrap_or_default() >= stale_after)
 }
 
 fn prune_stale_worktree_metadata(repo: &Path) -> Result<(), GitError> {
@@ -705,10 +775,12 @@ fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
         .any(|protected| protected == path || protected.starts_with(&path))
 }
 
-/// Remove worktrees selected from local Git state plus GitHub/remote evidence.
+/// Remove clean worktrees with terminal evidence or manual abandonment evidence.
 ///
-/// Automatic callers retain dirty worktrees. The manual CLI may explicitly use
-/// the more aggressive policy it historically exposed.
+/// Merged, squash-landed, closed-PR, and remote-gone branches are terminal.
+/// Manual pruning additionally removes branches with no activity for seven days,
+/// unless their current head has an open PR. Explicit `wt remove --force` is the
+/// destructive escape hatch; no prune path removes uncommitted files.
 pub fn prune_worktrees(
     repo: &Path,
     current_path: &Path,
@@ -717,13 +789,10 @@ pub fn prune_worktrees(
     dry_run: bool,
 ) -> Result<WorktreePruneReport, GitError> {
     prune_stale_worktree_metadata(repo)?;
-    let default_branch = get_default_branch(repo)?;
-    let states = if policy.remove_unprotected {
-        list_worktrees_local(repo)?.1
-    } else {
-        list_worktrees(repo)?
-    };
+    let (default_branch, mut states) = list_worktrees_local(repo)?;
+    let pull_requests_known = enrich_worktrees_network(repo, &default_branch, &mut states);
     let mut report = WorktreePruneReport::default();
+    let now = SystemTime::now();
 
     for state in states {
         if state.path == current_path
@@ -732,11 +801,22 @@ pub fn prune_worktrees(
         {
             continue;
         }
-        if state.dirty && state.prunable && !policy.remove_unprotected {
+        if state.dirty {
             report.retained_dirty.push(state.path.clone());
             continue;
         }
-        let Some(reason) = worktree_prune_reason(&state, policy) else {
+        let reason = if let Some(reason) = worktree_prune_reason(&state) {
+            reason
+        } else if let Some(stale_after) = policy.stale_after {
+            let Some(branch) = state.branch.as_deref() else {
+                continue;
+            };
+            let stale = branch_is_stale(repo, branch, stale_after, now)?;
+            let Some(reason) = abandoned_prune_reason(&state, pull_requests_known, stale) else {
+                continue;
+            };
+            reason
+        } else {
             continue;
         };
         report.candidates.push(WorktreePruneTarget {
@@ -777,7 +857,7 @@ fn targeted_prune(
     {
         return Ok(TargetedPruneOutcome::Protected);
     }
-    if !is_clean_ignoring_scratch(path)? {
+    if !is_clean(path)? {
         return Ok(TargetedPruneOutcome::RetainedDirty(path.to_path_buf()));
     }
     let target = WorktreePruneTarget {
@@ -1098,12 +1178,12 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_network_enrichment, parse_merged_pr_branches, plan_placement,
-        prune_abandoned_prompt_logs, prune_branch_worktree, worktree_path, worktree_prune_reason,
-        PlacementError, PlacementStrategy, TargetedPruneOutcome, WorktreePrunePolicy,
-        WorktreePruneReason, WorktreeSegment, WorktreeState,
+        abandoned_prune_reason, apply_network_enrichment, parse_pull_request_states,
+        plan_placement, prune_abandoned_prompt_logs, prune_branch_worktree, worktree_path,
+        worktree_prune_reason, PlacementError, PlacementStrategy, PullRequestState,
+        TargetedPruneOutcome, WorktreePruneReason, WorktreeSegment, WorktreeState,
     };
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::fs;
     use std::path::Path;
     use std::process::Command;
@@ -1151,10 +1231,10 @@ mod tests {
                 base_branch: None,
                 merged: false,
                 squash_merged: true,
-                prunable: false,
                 fresh: true,
                 dirty: false,
                 remote_gone: false,
+                pull_request: None,
             },
             WorktreeState {
                 branch: Some("new".to_string()),
@@ -1162,38 +1242,35 @@ mod tests {
                 base_branch: None,
                 merged: false,
                 squash_merged: true,
-                prunable: false,
                 fresh: true,
                 dirty: false,
                 remote_gone: false,
+                pull_request: None,
             },
         ];
 
-        let pr_merged = HashSet::from(["old".to_string()]);
+        let pr_states = HashMap::from([("old".to_string(), PullRequestState::Merged)]);
         let remote_branches = HashSet::from(["old".to_string(), "new".to_string()]);
-        apply_network_enrichment(&mut states, "main", &pr_merged, &remote_branches);
+        apply_network_enrichment(&mut states, "main", &pr_states, &remote_branches);
 
         let old = states
             .iter()
             .find(|state| state.branch.as_deref() == Some("old"))
             .unwrap();
         assert!(old.merged, "merged PR branch should be marked merged");
-        assert!(old.prunable, "merged PR branch should be prunable");
+        assert_eq!(old.pull_request, Some(PullRequestState::Merged));
         assert!(!old.fresh, "merged PR branch should not stay fresh");
 
         let new = states
             .iter()
             .find(|state| state.branch.as_deref() == Some("new"))
             .unwrap();
-        assert!(
-            !new.prunable,
-            "new squashed-equivalent branch should stay unprunable while fresh"
-        );
+        assert_eq!(new.pull_request, None);
         assert!(new.fresh, "new branch should remain fresh");
     }
 
     #[test]
-    fn merged_pr_history_follows_current_heads() {
+    fn pull_request_state_follows_current_heads() {
         let response = serde_json::json!({
             "data": {
                 "repository": {
@@ -1207,6 +1284,11 @@ mod tests {
                         "nodes": [
                             {"headRefOid": "landed", "state": "MERGED"}
                         ]
+                    },
+                    "b2": {
+                        "nodes": [
+                            {"headRefOid": "closed", "state": "CLOSED"}
+                        ]
                     }
                 }
             }
@@ -1214,59 +1296,93 @@ mod tests {
         let branches = vec![
             ("jack-heart/product".to_string(), "current".to_string()),
             ("jack-heart/landed".to_string(), "landed".to_string()),
+            ("jack-heart/closed".to_string(), "closed".to_string()),
         ];
 
         assert_eq!(
-            parse_merged_pr_branches(&response.to_string(), &branches),
-            HashSet::from(["jack-heart/landed".to_string()])
+            parse_pull_request_states(&response.to_string(), &branches),
+            Some(HashMap::from([
+                ("jack-heart/product".to_string(), PullRequestState::Open),
+                ("jack-heart/landed".to_string(), PullRequestState::Merged),
+                ("jack-heart/closed".to_string(), PullRequestState::Closed),
+            ]))
         );
     }
 
     #[test]
-    fn automatic_prune_retains_dirty_landed_worktrees() {
+    fn every_prune_policy_retains_dirty_landed_worktrees() {
         let state = WorktreeState {
             branch: Some("landed".to_string()),
             path: Path::new("/tmp/repo.landed").to_path_buf(),
             base_branch: None,
             merged: true,
             squash_merged: false,
-            prunable: true,
             fresh: false,
             dirty: true,
             remote_gone: true,
+            pull_request: Some(PullRequestState::Merged),
         };
 
-        assert_eq!(
-            worktree_prune_reason(&state, WorktreePrunePolicy::automatic()),
-            None
-        );
-        assert_eq!(
-            worktree_prune_reason(&state, WorktreePrunePolicy::manual()),
-            Some(WorktreePruneReason::Merged)
-        );
+        assert_eq!(worktree_prune_reason(&state), None);
     }
 
     #[test]
-    fn manual_prune_selects_unmerged_dirty_worktrees() {
+    fn manual_prune_retains_unmerged_dirty_worktrees() {
         let state = WorktreeState {
             branch: Some("abandoned".to_string()),
             path: Path::new("/tmp/repo.abandoned").to_path_buf(),
             base_branch: None,
             merged: false,
             squash_merged: false,
-            prunable: false,
             fresh: false,
             dirty: true,
             remote_gone: false,
+            pull_request: None,
+        };
+
+        assert_eq!(worktree_prune_reason(&state), None);
+    }
+
+    #[test]
+    fn open_or_unknown_pull_request_state_blocks_abandonment_prune() {
+        let mut state = WorktreeState {
+            branch: Some("active".to_string()),
+            path: Path::new("/tmp/repo.active").to_path_buf(),
+            base_branch: None,
+            merged: false,
+            squash_merged: false,
+            fresh: false,
+            dirty: false,
+            remote_gone: false,
+            pull_request: Some(PullRequestState::Open),
+        };
+
+        assert_eq!(abandoned_prune_reason(&state, true, true), None);
+        state.pull_request = None;
+        assert_eq!(abandoned_prune_reason(&state, false, true), None);
+        assert_eq!(
+            abandoned_prune_reason(&state, true, true),
+            Some(WorktreePruneReason::Stale)
+        );
+    }
+
+    #[test]
+    fn closed_pull_request_is_terminal_without_an_age_gate() {
+        let state = WorktreeState {
+            branch: Some("closed".to_string()),
+            path: Path::new("/tmp/repo.closed").to_path_buf(),
+            base_branch: None,
+            merged: false,
+            squash_merged: false,
+            fresh: false,
+            dirty: false,
+            remote_gone: false,
+            pull_request: Some(PullRequestState::Closed),
         };
 
         assert_eq!(
-            worktree_prune_reason(&state, WorktreePrunePolicy::automatic()),
-            None
-        );
-        assert_eq!(
-            worktree_prune_reason(&state, WorktreePrunePolicy::manual()),
-            Some(WorktreePruneReason::Unprotected)
+            worktree_prune_reason(&state),
+            Some(WorktreePruneReason::ClosedPullRequest)
         );
     }
 

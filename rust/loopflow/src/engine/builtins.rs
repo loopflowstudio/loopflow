@@ -4,7 +4,7 @@
 //! subdirectory and build.rs generates the HashMap entries.
 
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
-/// agent receives, including the speech vocabulary (`lf chat`, `lf memory`).
+/// agent receives, including the speech vocabulary (`lf chat`).
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn interactive_skills_support_human_and_parent_feedback() {
+    fn interactive_skills_include_the_shared_runtime_contract() {
         for name in [
             "design",
             "explore",
@@ -270,7 +270,15 @@ mod tests {
                 "review-slice omits {evidence:?} evidence"
             );
         }
-        assert!(get_builtin_skill("demo").is_none());
+        let demo = get_builtin_skill("demo").expect("demo skill");
+        for contract in [
+            "interactive: true",
+            "User explicitly confirms",
+            "run `lf ask`",
+            "closing, detaching, provider exit, or lack of response",
+        ] {
+            assert!(demo.contains(contract), "demo omits {contract:?}");
+        }
         assert!(get_builtin_skill("code-review").is_none());
     }
 
@@ -421,8 +429,9 @@ mod tests {
         let flow = get_builtin_flow("build").expect("build flow");
         assert!(flow.contains("- kickoff"));
         assert!(flow.contains("flow: code"));
-        assert!(flow.contains("name: review-design"));
-        assert!(flow.contains("feedback: true"));
+        assert!(flow.contains("- demo"));
+        assert!(!flow.contains("name: review-design"));
+        assert!(!flow.contains("feedback:"));
         assert!(!flow.contains("loop:"));
         assert!(!flow.contains("- gate"));
         assert!(!flow.contains("deploy"));
@@ -462,6 +471,6 @@ mod tests {
         assert!(skill.contains("lf pm show --wave <parent> --project <slug> --json"));
         assert!(skill.contains("parent_wave_id"));
         assert!(skill.contains("lf pm show"));
-        assert!(skill.contains("lf radio pub --parent"));
+        assert!(skill.contains("typed Wave and Project relationship"));
     }
 }

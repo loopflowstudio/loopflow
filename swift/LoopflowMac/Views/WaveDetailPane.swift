@@ -48,7 +48,7 @@ struct WaveDetailPane: View {
     // A shared singleton is externally owned, so it observes as an @ObservedObject.
     // Wrapping it in @StateObject installs StateObject's create-and-own lifecycle
     // during the first body pass, which fires the singleton's publisher mid-eval —
-    // an AttributeGraph dependency cycle at cold launch and sheet presentation.
+    // an AttributeGraph dependency cycle at cold invocation and sheet presentation.
     @ObservedObject private var terminalStore = TaskTerminalStore.shared
 
     var body: some View {
@@ -107,7 +107,7 @@ struct WaveDetailPane: View {
                     .font(Typography.caption())
             }
             .buttonStyle(.borderless)
-            .help("Study the instructions seen by this Wave's agent sessions")
+            .help("Study the instructions seen by this Wave's invocations")
             .accessibilityIdentifier("wave-context-lab")
 
             Button {
@@ -593,7 +593,7 @@ private struct WaveWorkInspector: View {
                     attention: task.attention,
                     repoPath: repoPath,
                     terminalStore: terminalStore,
-                    initialSection: task.attention.level == .blue ? .feedback : .changes
+                    initialSection: .changes
                 )
             }
         }
@@ -666,12 +666,12 @@ private struct PrLink: View {
     var body: some View {
         if let github = pr.publication?.github {
             Link(
-                "PR #\(github.number) · \(pr.phase.rawValue)\(pr.publication?.afterMerge == .completeTask ? " · completes Task" : "")",
+                "PR #\(github.number) · \(pr.phase.rawValue)\(pr.publication?.merge?.afterMerge == .completeTask ? " · completes Task" : "")",
                 destination: github.url
             )
             .font(Typography.caption(10))
         } else {
-            Text("PR \(pr.sequence) · \(pr.phase.rawValue)\(pr.publication?.afterMerge == .completeTask ? " · completes Task" : "") · \(pr.branch)")
+            Text("PR \(pr.sequence) · \(pr.phase.rawValue)\(pr.publication?.merge?.afterMerge == .completeTask ? " · completes Task" : "") · \(pr.branch)")
                 .font(Typography.caption(10))
                 .foregroundStyle(palette.textSecondary)
         }

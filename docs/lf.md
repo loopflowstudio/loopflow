@@ -8,7 +8,7 @@ whoever is watching. The map:
 |---|---|---|
 | A human running prompts | [Basic Usage](#basic-usage), [Context Flags](#context-flags) | [Get Started](getting-started.md) |
 | A human operating waves | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [Speaking to Waves](#speaking-to-waves) | [Waves](waves.md) |
-| An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks), [The Agent Bus](#the-agent-bus) | [The Agent API](agent-api.md) |
+| An agent driving other agents | [Running Waves, Projects, and Tasks](#running-waves-projects-and-tasks) | [The Agent API](agent-api.md) |
 | Watching the whole machine | [Reading the Local Ledger](#reading-the-local-ledger) | [Conducting](conducting.md) |
 
 Every read surface takes `--json`; that JSON is the same wire the Mac app
@@ -86,6 +86,7 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
+| `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 Project skills — shape and pursue measured bets inside a Wave:
@@ -136,7 +137,7 @@ Write global flags before a built-in subcommand. Unambiguous flags also work
 after it:
 
 ```bash
-lf task run DES-123 --json                           # durable Task Session
+lf task run DES-123 --json                           # durable Task Work
 lf task status DES-123 --json                        # same identity and worktree
 lf task changes DES-123 --json                       # committed + working changes
 lf task diff DES-123 src/parser.rs --json            # one file's Task patch
@@ -220,7 +221,7 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → review-design → code → review-slice |
+| `build` | kickoff → code → review-slice → demo |
 | `code` | implement → compress |
 | `pair` | design → code |
 | `task-design` | kickoff → review-design |
@@ -251,20 +252,17 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ## Running Waves, Projects, and Tasks
 
 ```bash
-lf start designer                                  # serve it from its placed Home
+lf start designer                                  # serve it on this machine
 lf wave designer                                   # foreground development mode
 lf stop designer                                   # stop it; leave the Home keeper running
-lf project run <linear-project-id>                  # durable Project Session
+lf project run <linear-project-id>                  # durable Project Work
 lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
-lf task run DES-125 --headless                       # route Feedback to the Project
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
-lf queue                                             # User-attention Feedback, oldest first
-lf work feedback task task_...                       # open the recorded Launch
-lf work feedback task task_... --continue-on-success # clean exit advances
-lf work feedback task task_... --continue-on-exit   # every exit advances
+lf work asks project proj_...                          # pending questions from owned Tasks
+lf work answer ask_... "keep the public name"       # answer one exact Ask
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -272,44 +270,37 @@ lf task wait DES-123
 lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
-lf work continue task task_...                      # advance past current Feedback
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-`lf start <name>` asks the placed Home's shared keeper to serve the Wave.
+`lf start <name>` asks this machine's shared keeper to serve the Wave and
+records this machine as its Home. It never follows a remote placement record.
+Bare `lf start` is the automatic form: it starts only repo Waves whose optional
+`owner` and `home` fields in `GOAL.md` match this machine and whose recorded
+placement is local. The named form is the explicit override.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
-development. A Project Session pursues one Linear Project's KRs without a worktree.
-Each Project has at most one current Session; terminal Sessions remain readable
+development. Project Work pursues one Linear Project's KRs without a worktree.
+Each Linear Project has at most one current Work; terminal Work remains readable
 history and the next pursuit creates a successor. Every Task requires the
-current Project Session; `task start/run` ensures it before reserving the Task.
+current Project Work; `task start/run` ensures it before reserving the Task.
 The Task starts only after its Linear issue exists and owns one stable worktree.
 Its provider process and transcript are replaceable execution state: plain
 `resume` keeps compatible history; `resume --model <agent>` preserves the same
 Work, durable Steers, worktree, and PR chain while selecting another provider.
-The Session remains resumable through serial PRs, review, and explicit
+The Task remains resumable through serial PRs, review, and explicit
 completion.
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
-`--finally` override them only while creating the Task. A flow step declares
-`feedback: true`; the active Launch routes that Feedback to the User or the
-immediate parent Run.
-Standard Tasks route first and finally Feedback to the human, while the owning
-Project conducts interactive loop steps. `--headless` routes all three to the
-Project without skipping their skills.
+`--finally` override them only while creating the Task. A skill that needs judgment runs
+`lf ask "<question>"`; the exchange routes to the immediate parent Run, or to
+the User for a supported interactive root. `lf ask wait` recovers the same
+exchange after shell loss.
 
-Feedback is the current flow step plus its live Launch and route; there is no
-Feedback id or disposition. `lf task steer` and `lf project steer` append
-durable direction before attempting live delivery. `lf work continue` advances
-past Feedback under its current Basis fence. Interrupt and
-replacement direction stay separate: interrupt the active boundary, then
-Steer normally.
-
-`lf work feedback` opens the current Feedback's recorded Launch presentation —
-the Launch's tmux attach route today. Bare mode leaves Feedback open when that
-presentation exits. `--continue-on-success`
-advances after exit status zero; `--continue-on-exit` advances after any exit or
-client crash, but only while the same Launch and Basis still own User attention.
+Ask/Answer does not move Work Basis or advance the flow. `lf task steer` and
+`lf project steer` remain unsolicited durable direction, appended before live
+delivery is attempted. Interrupt and replacement direction stay separate:
+interrupt the active boundary, then Steer normally.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
@@ -324,44 +315,47 @@ lf home observe <home-id> ssh://jack@mini.local
 lf work place wave <wave-id> <home-id>
 lf start shipper --json
 lf stop shipper
-lf ssh <home-id> --remote-native -- lf status shipper --json
+lf ssh <home-id> status shipper --json
+lf ssh <home-id> start shipper --json
 ```
 
 `lf start` returns the same Wave rows as `lf ls --json`; it does not define a
-second launch-result model. With no names it starts every Wave in the current
-repo. `lf stop` stops the selected Wave while the Home keeper and sibling Waves
-continue.
+second launch-result model. With no names it starts every eligible Wave in the
+current repo on this machine. `lfd` starts the same eligible set across all
+repositories known to its local store and reconciles it every 30 seconds.
+`lf stop` stops the selected Wave on this machine while `lfd` and sibling Waves
+continue. It suppresses reconciliation until an explicit `lf start` or the
+next `lfd` restart; change `owner`, `home`, or placement for a durable
+assignment change.
 
 `lf ssh <HomeId>` resolves the Home's current observed route and makes the
-target prove that identity. Add `--remote-native` for durable lifecycle: no
-origin provider, GitHub, PM, account, or secret authority crosses SSH. Raw
-`lf ssh <host> -- <command>` keeps the foreground credential-forwarding
-behavior.
+target prove that identity. The remote `lf` is implicit, so everything after
+the target is normal `lf` syntax. Foreground commands can use origin and target
+accounts; durable processes scrub forwarded authority before detaching.
 
-## Presenting an Opaque Launch
+## Presenting an Opaque AgentInvocation
 
 ```bash
-lf launch list --active --json
-lf launch status launch_... --json
-lf launch present launch_...                 # exec the tmux/provider attach route
-lf launch handback launch_... --outcome succeeded
+lf invocation list --active --json
+lf invocation status invocation_... --json
+lf invocation present invocation_...                 # exec the tmux/provider attach route
+lf invocation handback invocation_... --outcome succeeded
 ```
 
-`present` is the generic presentation adapter for an opaque TUI Launch: it
-executes that Launch's attach route but does not create Feedback or become its
-identity. The descriptor carries stable Work and Wave identity, Home route,
-provider, cwd, attention route, explicit handback evidence, and optional attach
-argv; tmux or the provider owns terminal bytes.
+`present` is the generic presentation adapter for an opaque TUI Invocation: it
+executes that Invocation's attach route but does not create an Ask or become
+its identity. The descriptor carries the supervising Run and its stable Work,
+Wave, Home, cwd, and containment alongside provider trace, explicit
+handback evidence, and optional attach argv.
 
-Closing the app or terminal does not end the Launch. Record the observed
+Closing the app or terminal does not end the Invocation. Record the observed
 boundary result with `handback --outcome succeeded|failed|interrupted|unknown`;
 process exit alone does not claim success.
 
 ## Speaking to Waves
 
-Two wires, not one. The **thread** is the human surface: durable, replayed,
-owned by a running Wave. The **bus** is how agents call to each other: a table in
-the shared store, ephemeral, no server in the path.
+The **thread** is the human surface: durable, replayed, and owned by a running
+Wave. Typed Work observations carry Project and Task progress to their parent.
 
 ```bash
 lf chat "ship the button audit first"       # post into the current wave's thread
@@ -369,65 +363,26 @@ lf chat -w infra "CI is red on the PR"      # target a wave by name
 lf chat --parent "blocked on schema change" # escalate to the parent wave
 lf chat --follow -w intelligence            # watch and speak from one terminal pane
 lf chat --history --json -w intelligence    # read the saved tail while stopped
-lf memory                                   # print the wave's MEMORY.md
-lf memory add "buttons: variants unified"   # publish one replayable fact
-lf memory add "workers report via stream" --receipt chat_turn:turn-3
-lf memory log                               # print facts added since the last update
-lf memory log --json                        # facts with their evidence receipts
-lf memory update < MEMORY.md                # replace it from stdin
-lf receipt show chat_turn:turn-3            # drill one receipt to its record
-lf receipt show pr:loopflow/loopflow#912 --json
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `lf chat [TEXT]` | Post into a wave's thread; `--follow` replays the latest 12 turns and continues live while typed lines post, `/status` reads health, and `/quit` leaves. `--history --json` reads the same bounded tail directly from the journal without a listener. Commands, tools, and loop bookkeeping stay out of chat; turn failures remain visible. Without `--follow`, omitted TEXT reads stdin. Outside any wave, one-shot chat prints a short drop note and exits 0 |
-| `lf memory [show\|log\|update\|add]` | Read or curate a wave's memory — `log` prints the add stream since the last update; `log --json` emits facts with their evidence receipts; `update` replaces the compiled `MEMORY.md`; `add` publishes a replayable fact, with repeatable `--receipt kind:reference` evidence bindings |
-| `lf receipt show TOKEN` | Drill one evidence receipt (`kind:reference`) to its canonical local record — a journal turn, run-events report, trace turn, PM snapshot item, or Task PR. `--json` emits the resolved record |
 
-Managed sessions default to their invoking Wave through `LF_WAVE_ID`. From a
+A Wave's durable memory is the ordinary repository file `wave/<name>/MEMORY.md`
+— read and edit it directly.
+
+Managed Work processes default to their invoking Wave through `LF_WAVE_ID`. From a
 human shell, pass `--wave`; repository location does not identify one of the
 Waves sharing `main`.
 
 | Flag | Description |
 |------|-------------|
 | `-w, --wave NAME` | Target a wave by name |
-| `--parent` | Target the invoking wave's parent (`lf chat` / `lf memory`) |
+| `--parent` | Target the invoking wave's parent (`lf chat`) |
 | `--follow` | Replay the selected thread's latest 12 turns and continue live while typed lines post (`lf chat`) |
 | `--history --json` | Read the selected Wave's durable local thread without requiring a listener (`lf chat`) |
 | `--limit N` | Bound a `--history` read (default: 12) |
-
-## The Agent Bus
-
-```bash
-lf radio pub "landed PR #91, tests green"       # report on your own channel
-lf radio pub -c infra.148e "rebase and retry"   # steer a specific hand
-lf radio pub --parent "blocked on schema change" # escalate to the parent's channel
-lf radio sub                                      # hear your channel and its hands
-lf radio sub infra.148e --json                    # one hand's traffic as NDJSON
-```
-
-Channels are a dot tree: `infra` is the wave, `infra.148e` is one of its hands.
-A subscription is a prefix, so `lf radio sub infra` hears the whole family.
-
-| Command | What it does |
-|---------|--------------|
-| `lf radio pub [TEXT]` | Broadcast one frame on a channel. An INSERT into the shared store, so it works with no wave running; reads stdin when TEXT is omitted. No channel resolves, or no store on this machine — the broadcast drops with exit 0 |
-| `lf radio sub [CHANNEL] [--json]` | Tune in to a channel and its descendants until killed. Never opens a socket — the Wave need not be running |
-
-Broadcast, not delivery. `lf radio sub` tunes in at the head and hears only what is
-said while it listens: nothing is replayed, and a frame published to a channel
-nobody was on is gone. A frame survives one hour, then the sweeper takes it —
-the bus is a wire, and `lf runs` plus the merged PR are the records of record. A
-running Wave is the one durable subscriber: it polls from a saved cursor, so it
-catches its hands' reports across a restart, and when a frame aged out before it
-woke, the miss is announced in its thread rather than passed over in silence.
-
-| Flag | Description |
-|------|-------------|
-| `-c, --channel NAME` | Broadcast on any channel (`lf radio pub`) |
-| `--parent` | Broadcast on the parent wave's channel (`lf radio pub`) |
-| `--from LABEL` | Byline for machine speech (`--from ci`). Testimony, not proof: the row records it beside the channel the frame arrived on |
 
 ## Reading the Local Ledger
 
@@ -438,8 +393,8 @@ lf roadmap --json               # current plan across Waves joined to runtime tr
 lf runs                         # one row per skill call: context, tokens, cost
 lf execs                        # one row per lf process
 lf trace 66863649               # select an exec or trace; render its process tree
-lf trace 66863649 --json        # inspect the same tree and its skill launches
-lf trace 66863649 --json --content --launch <launch> --turn <turn>
+lf trace 66863649 --json        # inspect the same tree and its skill invocations
+lf trace 66863649 --json --content --invocation <invocation> --turn <turn>
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # subscription % per account + spend by repo/provider
@@ -496,14 +451,14 @@ spend from the local execution ledger.
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a
 trace. `lf trace` accepts an exec or trace id and leaves killed processes open instead
-of hiding them. `lf context` aggregates one filtered session set without opening
+of hiding them. `lf context` aggregates one filtered Invocation set without opening
 bodies. Its Project and Task filters use captured control identity rather than
 inferring ownership from a worktree path. The research-state flags require an
 observed steer or a launch containing a current resolvable file-backed instruction
 revision; missing revision identity does not match the current-only filter.
 `lf trace --content` is the explicit
 reader for the exact prompt and normalized conversation at one immutable
-run/launch/turn address.
+run/invocation/turn address.
 
 `lf ci` reads durable CI incidents from the local Home store. One failed head is
 one attempt; later passing and merge observations close every open attempt on
@@ -512,13 +467,6 @@ that PR. `--wave` and `--repo owner/repo` filter the same local report.
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
-The `receipts` check sweeps every wave's memory facts for receipt health:
-missing (zero receipts), orphaned (reference resolves to no known record),
-cross-wave (receipt wave differs from the claim's wave), and inaccessible
-(the evidence source couldn't be read this run, so the receipt can't be
-judged — surfaced with the read error, never silently called orphaned).
-During the post-contract grace window all findings are warnings, not failures.
-
 ## Measuring Codebase Weight
 
 ```bash
@@ -657,6 +605,19 @@ page in the browser. The explicit, human-initiated review action; agents use
 `publish`, `submit`, or `land`. If launching the browser fails, only `open`
 fails — the PR is already published and its URL printed.
 
+### lf pr submit
+
+Prepare the exact PR head, assign it to you, and stop for your merge click.
+Nothing merges automatically.
+
+```bash
+lf pr submit
+```
+
+On Task PRs, submit records one User merge request containing the exact head
+and Continue/Complete disposition. A later Task resume or head-changing
+Loopflow operation clears it.
+
 ### lf pr land
 
 Arm auto-merge. GitHub merges when required checks and repository rules pass.
@@ -666,6 +627,11 @@ lf pr land                    # land one PR; the Task stays open
 lf pr land -c                 # land, then complete the owning Task
 lf pr land --next parser-proof  # name the next serial Task PR
 ```
+
+On Task PRs, land records the same head-and-disposition request with Auto as
+the operator. `--match-head-commit` fences the arming command; Loopflow revokes
+Auto before its own later head mutation. Concurrent Loopflow finalization and
+push commands in one worktree are refused rather than interleaved.
 
 Submit and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned
@@ -741,14 +707,16 @@ dependent roadmap work through `lf task run CHILD --stack-on PARENT`, not
 lf wt switch bugs             # by directory name, identity leaf, or full branch
 lf wt list                    # worktrees as a tree; --format json
 lf wt ci                      # CI status for the current branch
-lf wt prune --dry-run         # show every unprotected worktree
-lf wt prune                   # force-remove them and their local branches
+lf wt prune --dry-run         # show terminal or week-stale worktrees
+lf wt prune                   # remove them and their local branches
 ```
 
-`prune` is intentionally destructive: it preserves main, the current
-worktree, nonterminal Task Sessions, and worktrees owned by live processes —
-everything else goes, including dirty and unpushed work. Run `--dry-run`
-first when the repository contains work created outside Loopflow.
+`prune` never removes a worktree with uncommitted files. It removes clean
+worktrees immediately when the remote branch is gone, the work landed, or the
+current-head PR closed. It also removes a clean branch after seven days without
+branch activity when no current-head PR is open. Main, the current worktree,
+nonterminal Tasks, and worktrees owned by live processes remain protected.
+Use `lf wt remove NAME --force` for an explicit destructive override.
 
 `lfd` runs a lossless sweep on startup and every 15 minutes: only clean
 landed, remotely deleted, or terminal Task worktrees are removed. Disable
@@ -820,7 +788,7 @@ waits on Linear.
 
 `lf pm reteam` migrates a wave's existing issues into its own team. It
 **defaults to a dry run** and only mutates with `--apply`; it defers an issue
-only while a Task body can write to its Session. Completed issues move too:
+only while a Task body can write in its worktree. Completed issues move too:
 Linear cannot remove the shared team from a Project while any issue in that
 Project still belongs to it. Before each issue moves, Loopflow records its old
 identifier in a comment; after every issue is on the wave team, it narrows the

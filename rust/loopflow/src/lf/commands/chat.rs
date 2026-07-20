@@ -6,15 +6,9 @@
 //! human act journals the same way on every surface (the Mac composer sends
 //! the identical op).
 //!
-//! Agents do not use this verb. Their wire is `lf radio pub` — a broadcast on the
-//! shared-store bus, with no server in the path ([`super::radio`]). Two words,
-//! two wires: `lf chat` needs a live mind; `lf radio pub` needs nothing.
-//!
 //! # Targeting
-//! - default: the invoking context's wave — `LF_CHANNEL` env first (set by
-//!   dispatch), else `LF_WAVE_ID`. A dotted name
-//!   resolves to its family head: a hand's channel has no thread to converse
-//!   with. No managed wave context drops the
+//! - default: the invoking context's wave from `LF_WAVE_ID`.
+//!   No managed wave context drops the
 //!   message with exit 0 and one stderr note.
 //! - `--parent`: walk `parent_wave_id` in the registry and post to the parent
 //!   Wave's listener. The parent row resolves its repository and Wave-owned
@@ -24,12 +18,6 @@
 //! The local `wave/<name>/.wave-endpoint` discovery file names the listener. A
 //! resolvable wave with no live server is a clear error — a dead wave's mail
 //! bounces, it doesn't vanish; queuing for offline waves is future work.
-//!
-//! # Attribution
-//! None, ever. The thread is unattributed by convention and the server
-//! rejects a byline on this door. Machine speech — webhook facts, worker
-//! reports, escalations — rides the bus with `lf radio pub --from`, and the
-//! listener's bus sweep folds it into the thread attributed.
 //!
 //! # Following
 //! `--follow` composes the same post door with [`super::thread`]'s SSE replay.
@@ -45,14 +33,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::chat::turns::ChatTurn;
 use crate::engine::wave_context::{
-    read_endpoint_pointer, resolve_ambient_channel, resolve_managed_wave_name, wave_origin,
-    AmbientChannelRef, WaveResolveError,
+    read_endpoint_pointer, resolve_managed_wave_name, wave_origin, WaveResolveError,
 };
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
 use crate::lf::WaveTargetArgs;
 use crate::store::{open_existing_store, SharedStore};
-use crate::wave::channel::family_head;
 use crate::wave::journal::{
     fold_thread, journal_path, read_events_with_state, MessageOp, ReadOnlyJournalState,
 };
@@ -117,7 +103,6 @@ async fn history_with_context(
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
     )
     .await?
     else {
@@ -168,7 +153,6 @@ pub(crate) async fn run_with_context(
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
     )
     .await?
     else {
@@ -201,7 +185,6 @@ async fn follow_with_context(
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
     )
     .await?
     else {
@@ -295,7 +278,6 @@ async fn handle_command(command: &str, endpoint: &str) -> Result<bool> {
 
 /// Post one unattributed human act, shared by one-shot and followed chat.
 async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
-    // Machine speech carries a byline and rides the bus (`lf radio pub`).
     let op = if steer {
         MessageOp::Steer
     } else {
@@ -320,7 +302,6 @@ pub(crate) async fn nudge_child_observations(wave: &str) -> Result<bool> {
         context.store.as_ref(),
         context.repo.as_deref(),
         context.env_wave_id.as_deref(),
-        context.env_channel.as_deref(),
     )
     .await?
     .ok_or_else(|| anyhow!("wave {wave:?} cannot be resolved"))?;
@@ -338,7 +319,6 @@ pub(crate) struct CliContext {
     pub store: Option<SharedStore>,
     pub repo: Option<PathBuf>,
     pub env_wave_id: Option<String>,
-    pub env_channel: Option<String>,
 }
 
 impl CliContext {
@@ -347,9 +327,6 @@ impl CliContext {
             store: open_existing_store().await.map(Arc::new),
             repo: find_repo_root().ok(),
             env_wave_id: std::env::var(crate::engine::wave_context::WAVE_ID_ENV)
-                .ok()
-                .filter(|value| !value.is_empty()),
-            env_channel: std::env::var(crate::engine::wave_context::CHANNEL_ENV)
                 .ok()
                 .filter(|value| !value.is_empty()),
         }
@@ -388,46 +365,33 @@ pub(crate) async fn resolve_target(
     store: Option<&SharedStore>,
     repo: Option<&Path>,
     env_wave_id: Option<&str>,
-    env_channel: Option<&str>,
 ) -> Result<Option<ResolvedWave>> {
     let main_repo = repo.map(wave_origin);
 
-    // The invoking context's channel: the shared ambient rule (LF_CHANNEL
-    // first, else LF_WAVE_ID) — the same resolution context assembly uses. The
-    // invoking WAVE is the channel's family head. Only resolved when the target
+    // The invoking context's Wave comes from LF_WAVE_ID. It is only resolved when the target
     // is the ambient wave (default or `--parent`); an explicit `--wave` always
     // wins, so its stale/mis-set env is never consulted.
     let mut own_row: Option<Wave> = None;
     let mut own_name: Option<String> = None;
     if args.wave.is_none() {
-        match resolve_ambient_channel(env_channel, env_wave_id) {
-            Some(AmbientChannelRef::WaveId(id)) => {
-                // The shared ambient-Wave rule: `LF_WAVE_ID` as a durable UUID
-                // maps to its registry name, else a hand-set name is used
-                // directly. A UUID the registry has never seen is a loud
-                // `StaleIdentity` error, never a silent drop.
-                let name = resolve_managed_wave_name(store.map(|store| &**store), None, Some(&id))
-                    .await
-                    .map_err(|err| anyhow!("{err}"))?;
-                own_row = match store {
-                    Some(store) => store.get_wave_by_name(&name).await?,
-                    None => None,
-                };
-                own_name = Some(name);
-            }
-            Some(AmbientChannelRef::Channel(name)) => {
-                let head = family_head(&name).to_string();
-                if let Some(store) = store {
-                    own_row = store.get_wave_by_name(&head).await?;
-                }
-                own_name = Some(head);
-            }
-            None => {}
+        if let Some(id) = env_wave_id {
+            // The shared ambient-Wave rule: `LF_WAVE_ID` as a durable UUID
+            // maps to its registry name, else a hand-set name is used
+            // directly. A UUID the registry has never seen is a loud
+            // `StaleIdentity` error, never a silent drop.
+            let name = resolve_managed_wave_name(store.map(|store| &**store), None, Some(id))
+                .await
+                .map_err(|err| anyhow!("{err}"))?;
+            own_row = match store {
+                Some(store) => store.get_wave_by_name(&name).await?,
+                None => None,
+            };
+            own_name = Some(name);
         }
     }
 
     let (target_row, target_name): (Option<Wave>, String) = if let Some(name) = &args.wave {
-        let head = family_head(name).to_string();
+        let name = name.to_string();
         let store = store.ok_or_else(|| {
             anyhow!(
                 "{}",
@@ -435,11 +399,11 @@ pub(crate) async fn resolve_target(
             )
         })?;
         let row = store
-            .get_wave_by_name(&head)
+            .get_wave_by_name(&name)
             .await
             .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-            .ok_or_else(|| anyhow!("{}", WaveResolveError::UnknownExplicit(head.clone())))?;
-        (Some(row), head)
+            .ok_or_else(|| anyhow!("{}", WaveResolveError::UnknownExplicit(name.clone())))?;
+        (Some(row), name)
     } else if args.parent {
         let store = store.ok_or_else(|| {
             anyhow!(
@@ -490,9 +454,7 @@ pub(crate) async fn resolve_target(
     }))
 }
 
-/// Walk one step up the wave tree. Both speech verbs escalate this way —
-/// `lf chat --parent` to the parent's thread, `lf radio pub --parent` to its
-/// channel — and a root wave is the same clear error for both.
+/// Walk one step up the wave tree for `lf chat --parent`.
 pub(crate) async fn parent_wave(store: &SharedStore, own: &Wave) -> Result<Wave> {
     let parent_id = own.parent_wave_id().ok_or_else(|| {
         anyhow!(
@@ -638,7 +600,6 @@ mod tests {
             Some(&store),
             None,
             Some(wave.id().as_str()),
-            None,
         )
         .await
         .expect("resolve")
@@ -660,16 +621,10 @@ mod tests {
         let wave = make_wave("ship", &origin, None);
         store.create_wave(&wave).await.expect("seed wave");
 
-        let resolved = resolve_target(
-            &WaveTargetArgs::default(),
-            Some(&store),
-            None,
-            Some("ship"),
-            None,
-        )
-        .await
-        .expect("resolve")
-        .expect("hand-set name is a wave context");
+        let resolved = resolve_target(&WaveTargetArgs::default(), Some(&store), None, Some("ship"))
+            .await
+            .expect("resolve")
+            .expect("hand-set name is a wave context");
         assert_eq!(resolved.name, "ship");
         assert_eq!(resolved.endpoint.as_deref(), Some(addr.as_str()));
     }
@@ -683,15 +638,9 @@ mod tests {
         let store = temp_store(tmp.path()).await;
         let stale = crate::id::WaveId::new().to_string();
 
-        let err = resolve_target(
-            &WaveTargetArgs::default(),
-            Some(&store),
-            None,
-            Some(&stale),
-            None,
-        )
-        .await
-        .expect_err("stale id is a loud error");
+        let err = resolve_target(&WaveTargetArgs::default(), Some(&store), None, Some(&stale))
+            .await
+            .expect_err("stale id is a loud error");
         let message = err.to_string();
         assert!(message.contains("stale"), "{message}");
         assert!(message.contains(&stale), "{message}");
@@ -707,18 +656,11 @@ mod tests {
             store: None,
             repo: Some(tmp.path().to_path_buf()),
             env_wave_id: None,
-            env_channel: None,
         };
 
-        let resolved = resolve_target(
-            &WaveTargetArgs::default(),
-            None,
-            Some(tmp.path()),
-            None,
-            None,
-        )
-        .await
-        .expect("resolve");
+        let resolved = resolve_target(&WaveTargetArgs::default(), None, Some(tmp.path()), None)
+            .await
+            .expect("resolve");
         assert!(resolved.is_none(), "plain temp dir is not a wave context");
 
         run_with_context(
@@ -747,7 +689,6 @@ mod tests {
             store: Some(store),
             repo: None,
             env_wave_id: None,
-            env_channel: None,
         };
         run_with_context(
             &context,
@@ -764,7 +705,6 @@ mod tests {
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "skip the migration");
-        assert_eq!(thread[0].from, None);
         let InboxItem::Message(message) = inbox.try_recv().expect("steer inbox item") else {
             panic!("expected message inbox item");
         };
@@ -773,7 +713,7 @@ mod tests {
 
     /// The same human act journals the same way on every surface: a plain
     /// CLI message is unattributed and op `message`, exactly what the Mac
-    /// composer sends. Bylines belong to the bus.
+    /// composer sends.
     #[tokio::test]
     async fn plain_chat_is_unattributed_like_the_mac_composer() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -788,7 +728,6 @@ mod tests {
             store: Some(store),
             repo: None,
             env_wave_id: None,
-            env_channel: None,
         };
         run_with_context(
             &context,
@@ -805,7 +744,6 @@ mod tests {
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "CI failed");
-        assert_eq!(thread[0].from, None, "human turns carry no byline");
         let InboxItem::Message(message) = inbox.try_recv().expect("inbox item") else {
             panic!("expected message inbox item");
         };
@@ -835,7 +773,6 @@ mod tests {
             Some(&store),
             None,
             Some(child.id().as_str()),
-            None,
         )
         .await
         .expect("resolve parent")
@@ -844,8 +781,8 @@ mod tests {
         let endpoint = resolved.require_endpoint().expect("live endpoint");
         assert_eq!(endpoint, addr);
 
-        // The thread door takes no bylines: attributed escalation rides the
-        // bus and arrives through the parent's bus sweep, not this wire.
+        // The thread door's schema has no bylines or machine-only operations.
+        // Axum rejects the retired enum value before the handler runs.
         let refused = reqwest::Client::new()
             .post(format!("http://{endpoint}/messages"))
             .json(&serde_json::json!({
@@ -856,7 +793,7 @@ mod tests {
             .send()
             .await
             .expect("post");
-        assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert_eq!(refused.status(), reqwest::StatusCode::UNPROCESSABLE_ENTITY);
 
         // A human standing in the child steers the parent: unattributed, like
         // every human turn.
@@ -870,7 +807,6 @@ mod tests {
         let thread = parent_runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "blocked on the schema");
-        assert_eq!(thread[0].from, None);
         let InboxItem::Message(msg) = parent_inbox.try_recv().expect("inbox item") else {
             panic!("expected message inbox item");
         };
@@ -884,7 +820,6 @@ mod tests {
             &events[0].kind,
             EventKind::UserMessage {
                 op: MessageOp::Message,
-                from: None,
                 ..
             }
         ));
@@ -905,7 +840,6 @@ mod tests {
             Some(&store),
             None,
             Some(root.id().as_str()),
-            None,
         )
         .await
         .expect_err("root has no parent");
@@ -913,36 +847,6 @@ mod tests {
             err.to_string().contains("wave 'goals' has no parent"),
             "error names the root wave: {err}"
         );
-    }
-
-    /// A dotted name still resolves to its family head: a hand's channel is a
-    /// bus address, and the bus has no thread to converse with. The mind's
-    /// server answers.
-    #[tokio::test]
-    async fn a_dotted_name_resolves_to_the_family_head() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let store = temp_store(tmp.path()).await;
-        let origin = tmp.path().join("repo");
-        std::fs::create_dir_all(&origin).unwrap();
-        let (addr, _runtime, _inbox) = boot_server(&origin, "ship").await;
-        let wave = make_wave("ship", &origin, None);
-        store.create_wave(&wave).await.expect("seed wave");
-
-        let resolved = resolve_target(
-            &WaveTargetArgs {
-                wave: Some("ship.148e".into()),
-                parent: false,
-            },
-            Some(&store),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("resolve")
-        .expect("wave context");
-        assert_eq!(resolved.name, "ship", "the family head is the wave");
-        assert_eq!(resolved.endpoint.as_deref(), Some(addr.as_str()));
     }
 
     /// No live server anywhere (no registry row, no discovery file): the
@@ -959,7 +863,6 @@ mod tests {
             Some(&store),
             None,
             Some(wave.id().as_str()),
-            None,
         )
         .await
         .expect("resolve")

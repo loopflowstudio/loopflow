@@ -196,6 +196,7 @@ impl Harness for ClaudeHarness {
             cmd.current_dir(cwd);
         }
         super::configure_vendor_tokio_env(&mut cmd)?;
+        super::configure_agent_authority(&mut cmd, config.authority);
 
         self.shutdown_requested.store(false, Ordering::SeqCst);
         self.interrupt_requested.store(false, Ordering::SeqCst);
@@ -388,6 +389,7 @@ mod tests {
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
             max_turns: None,
             resume_token: None,
+            authority: crate::engine::agent::AgentAuthority::Inherit,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,

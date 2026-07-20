@@ -2,17 +2,17 @@
 import Loopflow
 import SwiftUI
 
-/// Active Sessions: a machine-wide census of every live body, grouped by Wave.
-/// The projection (`ActiveSessionsCensus`) owns every rule — red propagation,
+/// Work Census: a machine-wide census of every live body, grouped by Wave.
+/// The projection (`WorkCensus`) owns every rule — red propagation,
 /// evidence classification, and which rows are view-only. This view only renders
 /// what the census decided and, for a deliberate interactive launch, offers the
-/// one mutation: Open, which re-attaches the exact durable Session in Ghostty.
-struct ActiveSessionsView: View {
+/// one mutation: Open, which re-attaches the exact Invocation in Ghostty.
+struct WorkCensusView: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
 
     @Environment(\.palette) private var palette
-    @State private var reading = ActiveSessionsReading()
-    @State private var openTarget: LaunchSurfaceRecord?
+    @State private var reading = WorkCensusReading()
+    @State private var openTarget: InvocationSurfaceRecord?
 
     var body: some View {
         ScrollView {
@@ -24,7 +24,7 @@ struct ActiveSessionsView: View {
                     notice(message, color: .statusWarning)
                 }
                 if let census = reading.census {
-                    // "No active sessions" is a *healthy* empty state, so it may
+                    // "No active work" is a *healthy* empty state, so it may
                     // only show when nothing is wrong: no live bodies, no scoped
                     // read failure, and no Wave whose evidence is unavailable.
                     let anyUnavailable = census.groups.contains { $0.evidence == .unavailable }
@@ -32,7 +32,7 @@ struct ActiveSessionsView: View {
                         emptyState
                     }
                     ForEach(census.groups) { group in
-                        WaveGroupView(group: group, onOpen: openLaunch)
+                        WaveGroupView(group: group, onOpen: openInvocation)
                     }
                 } else if reading.error == nil {
                     ProgressView().padding(Spacing.xxl)
@@ -49,15 +49,15 @@ struct ActiveSessionsView: View {
             }
         }
         .refreshable { await load() }
-        .sheet(item: $openTarget) { launch in
-            LaunchAttachSheet(launch: launch, query: query) { openTarget = nil }
+        .sheet(item: $openTarget) { invocation in
+            InvocationAttachSheet(invocation: invocation, query: query) { openTarget = nil }
         }
-        .accessibilityIdentifier("control-active-sessions")
+        .accessibilityIdentifier("control-work-census")
     }
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("No active sessions")
+            Text("No active work")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             Text("Nothing is running across the machine right now.")
@@ -74,10 +74,10 @@ struct ActiveSessionsView: View {
             .textSelection(.enabled)
     }
 
-    private func openLaunch(_ launchId: String) {
+    private func openInvocation(_ invocationId: String) {
         // Open needs the durable row's provider, Home, and resume token to
         // resolve the surface; look it up from the same list the census read.
-        openTarget = reading.launches.first { $0.id == launchId }
+        openTarget = reading.invocations.first { $0.id == invocationId }
     }
 
     private func load() async {
@@ -91,33 +91,33 @@ struct ActiveSessionsView: View {
                 runs = []
                 notices.append("Direct executions unavailable: \(error.localizedDescription)")
             }
-            let launches: [LaunchSurfaceRecord]
+            let invocations: [InvocationSurfaceRecord]
             do {
-                launches = try await query.activeLaunches()
+                invocations = try await query.activeInvocations()
             } catch {
-                launches = []
-                notices.append("Interactive launches unavailable: \(error.localizedDescription)")
+                invocations = []
+                notices.append("Interactive invocations unavailable: \(error.localizedDescription)")
             }
-            reading = ActiveSessionsReading(
-                census: ActiveSessionsCensus(roadmap: roadmap, runs: runs, launches: launches),
-                launches: launches,
+            reading = WorkCensusReading(
+                census: WorkCensus(roadmap: roadmap, runs: runs, invocations: invocations),
+                invocations: invocations,
                 notices: notices,
                 error: nil
             )
         } catch {
-            reading = ActiveSessionsReading(
+            reading = WorkCensusReading(
                 census: nil,
-                launches: [],
+                invocations: [],
                 notices: [],
-                error: "Active Sessions unavailable: \(error.localizedDescription)"
+                error: "Work Census unavailable: \(error.localizedDescription)"
             )
         }
     }
 }
 
-private struct ActiveSessionsReading {
-    var census: ActiveSessionsCensus?
-    var launches: [LaunchSurfaceRecord] = []
+private struct WorkCensusReading {
+    var census: WorkCensus?
+    var invocations: [InvocationSurfaceRecord] = []
     var notices: [String] = []
     var error: String?
 }
@@ -125,13 +125,13 @@ private struct ActiveSessionsReading {
 // MARK: - One Wave's group
 
 private struct WaveGroupView: View {
-    let group: ActiveSessionWaveGroup
+    let group: WaveActivity
     let onOpen: (String) -> Void
 
     @Environment(\.palette) private var palette
 
     /// Parent index built once per group, so row indentation is an O(1) lookup.
-    private var rowsById: [String: ActiveSessionRow] {
+    private var rowsById: [String: WorkActivity] {
         Dictionary(group.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -151,7 +151,7 @@ private struct WaveGroupView: View {
                     .foregroundStyle(palette.textSecondary)
             }
             ForEach(group.rows) { row in
-                SessionRowView(
+                WorkActivityRowView(
                     row: row,
                     depth: Self.depth(of: row, in: byId),
                     onOpen: onOpen
@@ -188,7 +188,7 @@ private struct WaveGroupView: View {
     }
 
     /// Indent a row under the parent the census declared, by walking parent ids.
-    private static func depth(of row: ActiveSessionRow, in byId: [String: ActiveSessionRow]) -> Int {
+    private static func depth(of row: WorkActivity, in byId: [String: WorkActivity]) -> Int {
         var depth = 0
         var current = row.parentRowId
         while let parentId = current, let parent = byId[parentId], depth < 4 {
@@ -201,8 +201,8 @@ private struct WaveGroupView: View {
 
 // MARK: - One body row
 
-private struct SessionRowView: View {
-    let row: ActiveSessionRow
+private struct WorkActivityRowView: View {
+    let row: WorkActivity
     let depth: Int
     let onOpen: (String) -> Void
 
@@ -243,7 +243,7 @@ private struct SessionRowView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                 }
-                if let reason = row.reason, !reason.isEmpty, row.kind != .launch {
+                if let reason = row.reason, !reason.isEmpty, row.kind != .invocation {
                     Text(reason)
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
@@ -253,8 +253,8 @@ private struct SessionRowView: View {
 
             Spacer(minLength: Spacing.sm)
 
-            if row.isOpenable, let sessionId = row.launchId {
-                Button("Open") { onOpen(sessionId) }
+            if row.isOpenable, let launchId = row.invocationId {
+                Button("Open") { onOpen(launchId) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .accessibilityLabel("Open interactive launch")
@@ -274,7 +274,7 @@ private struct SessionRowView: View {
         case .project: "square.stack.3d.up"
         case .task: "checklist"
         case .directExecution: "bolt"
-        case .launch: "hand.raised"
+        case .invocation: "hand.raised"
         }
     }
 
@@ -289,7 +289,7 @@ private struct SessionRowView: View {
         }
         if let step = row.step { parts.append(step) }
         if let age = row.ageSecs { parts.append("\(RelativeAge.phrase(age)) ago") }
-        if let owner = row.nextOwner, row.kind != .launch {
+        if let owner = row.nextOwner, row.kind != .invocation {
             parts.append("→ \(owner.rawValue)")
         }
         return parts.joined(separator: " · ")
@@ -311,7 +311,7 @@ private enum TintStyle {
 }
 
 private enum EvidenceStyle {
-    static func badge(_ evidence: SessionEvidence) -> (text: String, color: Color)? {
+    static func badge(_ evidence: ActivityEvidence) -> (text: String, color: Color)? {
         switch evidence {
         case .observed: nil
         case .stale: ("stale", .statusWarning)
@@ -322,7 +322,7 @@ private enum EvidenceStyle {
         }
     }
 
-    static func groupEmptyPhrase(_ evidence: SessionEvidence) -> String {
+    static func groupEmptyPhrase(_ evidence: ActivityEvidence) -> String {
         evidence == .missing ? "No active bodies in this Wave." : "No rows to show."
     }
 }
@@ -351,21 +351,21 @@ private enum RelativeAge {
     }
 }
 
-// MARK: - Open: present the exact durable Session in the remembered surface
+// MARK: - Open: present the exact Invocation in the remembered surface
 
 /// Open resolves *where* to present the launch — the last successful surface for
 /// this provider on this Home, then the last overall, then embedded Ghostty — and
 /// records the choice only after a launch succeeds. Every target attaches the one
-/// durable Session by running the argv the contract hands back; this view owns no
-/// lifecycle and never creates or names the Session.
-private struct LaunchAttachSheet: View {
-    let launch: LaunchSurfaceRecord
+/// Invocation by running the argv the contract hands back; this view owns no
+/// lifecycle and never creates or names the provider session.
+private struct InvocationAttachSheet: View {
+    let invocation: InvocationSurfaceRecord
     let query: RegistryQuery
     let onClose: () -> Void
     var preferences: LaunchTargetPreferences = .shared
 
     @Environment(\.palette) private var palette
-    @State private var attach: LaunchSurfaceRecord?
+    @State private var attach: InvocationSurfaceRecord?
     @State private var capability: LaunchTargetCapability?
     @State private var surface: LaunchTarget?
     @State private var externalNote: String?
@@ -385,7 +385,7 @@ private struct LaunchAttachSheet: View {
 
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            Text(launch.attention?.kind == "user" ? "Feedback" : "Interactive launch")
+            Text("Interactive invocation")
                 .font(Typography.sectionTitle(15))
                 .foregroundStyle(palette.text)
             if let fallbackNotice {
@@ -411,7 +411,7 @@ private struct LaunchAttachSheet: View {
     /// by the reach it delivers so a worktree-only option never overclaims.
     private func surfaceMenu(
         capability: LaunchTargetCapability,
-        attach: LaunchSurfaceRecord
+        attach: InvocationSurfaceRecord
     ) -> some View {
         Menu {
             ForEach(capability.offeredOptions) { option in
@@ -430,16 +430,14 @@ private struct LaunchAttachSheet: View {
     @ViewBuilder
     private var content: some View {
         if let attach, surface == .ghostty {
-            let command = launch.attention?.kind == "user"
-                ? LaunchTargetLauncher.feedbackCommand(for: attach)
-                : LaunchTargetLauncher.command(for: attach, home: launch.home)
+            let command = LaunchTargetLauncher.command(for: attach, home: invocation.home)
             GhosttyTerminalView(
                 workingDirectory: command.cwd,
                 argv: command.argv,
                 env: command.environment,
-                sessionId: "feedback-\(attach.sessionId)"
+                sessionId: "invocation-\(attach.invocationId)"
             )
-            .id(attach.sessionId)
+            .id(attach.invocationId)
         } else if let surface, let externalNote {
             ContentUnavailableView {
                 Label("Presented in \(surface.appName)", systemImage: "arrow.up.forward.app")
@@ -465,13 +463,8 @@ private struct LaunchAttachSheet: View {
 
     private func start() async {
         do {
-            let descriptor = try await query.attachLaunch(launchId: launch.id)
+            let descriptor = try await query.attachInvocation(invocationId: invocation.id)
             attach = descriptor
-            if descriptor.attention?.kind == "user" {
-                surface = .ghostty
-                externalNote = nil
-                return
-            }
             // Consume the descriptor's Home, not a local-only assumption: a remote
             // worktree makes local editors and plain windows unavailable. The
             // provider and session id determine whether an IDE can attach (Claude
@@ -479,13 +472,13 @@ private struct LaunchAttachSheet: View {
             let cap = LaunchTargetLauncher.capability(
                 host: descriptor.host,
                 cwd: descriptor.cwd,
-                provider: launch.provider,
-                providerSessionId: launch.providerSessionId
+                provider: invocation.provider,
+                providerSessionId: invocation.providerSessionId
             )
             capability = cap
             let resolution = LaunchTargetResolver.resolve(
-                provider: launch.provider,
-                home: launch.home,
+                provider: invocation.provider,
+                home: invocation.home,
                 memory: preferences.memory,
                 capability: cap
             )
@@ -507,7 +500,7 @@ private struct LaunchAttachSheet: View {
     /// launch falls back visibly to the embedded terminal.
     private func present(
         _ target: LaunchTarget,
-        attach: LaunchSurfaceRecord,
+        attach: InvocationSurfaceRecord,
         capability: LaunchTargetCapability,
         userInitiated: Bool
     ) async {
@@ -527,7 +520,7 @@ private struct LaunchAttachSheet: View {
         let result = await LaunchTargetLauncher.launch(
             target,
             attach: attach,
-            home: launch.home,
+            home: invocation.home,
             reach: reach
         )
         switch result {
@@ -538,7 +531,7 @@ private struct LaunchAttachSheet: View {
             recordIfEarned(target, reach: reach, userInitiated: userInitiated, launched: true)
         case .worktreeOnly:
             surface = target
-            externalNote = "Opened the worktree in \(target.appName) — this does not attach the Session."
+            externalNote = "Opened the worktree in \(target.appName) — this does not attach the provider session."
             if userInitiated { fallbackNotice = nil }
             // A worktree-only outcome never overwrites the last attach preference.
         case .failed:
@@ -557,8 +550,8 @@ private struct LaunchAttachSheet: View {
     ) {
         preferences.recordLaunch(
             surface,
-            provider: launch.provider,
-            home: launch.home,
+            provider: invocation.provider,
+            home: invocation.home,
             reach: reach,
             userInitiated: userInitiated,
             launchSucceeded: launched

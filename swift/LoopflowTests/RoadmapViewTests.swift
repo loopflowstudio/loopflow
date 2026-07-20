@@ -16,13 +16,13 @@ struct RoadmapViewTests {
         #expect(roadmapTaskAction(tasks[0]) == .attach)
         #expect(roadmapTaskCanInterrupt(tasks[0]))
 
-        // Waiting on an open PR advertises Review, not Resume: the server
-        // recommends review, and the app must not re-derive Resume from status.
-        #expect(tasks[1].attention.actions.recommended == .review)
-        #expect(roadmapTaskAction(tasks[1]) == .review)
+        // An explicit User merge request advertises Open PR: the server
+        // recommends the exact head, and the app does not re-derive it.
+        #expect(tasks[1].attention.actions.recommended == .openPr)
+        #expect(roadmapTaskAction(tasks[1]) == .openPr)
         #expect(!roadmapTaskCanInterrupt(tasks[1]))
 
-        // No Session yet, and a terminal Task offers nothing.
+        // No Task Work yet, and a terminal Task offers nothing.
         #expect(roadmapTaskAction(tasks[2]) == .run)
         #expect(roadmapTaskAction(tasks[3]) == nil)
     }
@@ -31,10 +31,10 @@ struct RoadmapViewTests {
     func recommendedActionCarriesItsReason() throws {
         let snapshot = try loadRoadmapFixture()
         let project = try #require(snapshot.waves.first?.projects.items.first)
-        let reviewing = project.tasks[1].attention.actions
+        let openingPR = project.tasks[1].attention.actions
 
-        #expect(reviewing.recommended == .review)
-        #expect(reviewing.reason == "checks passed; awaiting review")
+        #expect(openingPR.recommended == .openPr)
+        #expect(openingPR.reason == "merge head abc1234 on GitHub")
     }
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {

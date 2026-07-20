@@ -47,10 +47,7 @@ struct PromptBuild {
     context_render_ms: u64,
 }
 
-/// A headless skill turn ready for the live session harness. The caller owns
-/// the session and sends `input` as its first turn, which keeps session
-/// streaming and steering available instead of hiding the body in a child
-/// `lf` process.
+/// A skill turn ready for a runner-owned provider surface.
 #[derive(Debug)]
 pub(crate) struct PreparedHarnessTurn {
     pub config: AgentConfig,
@@ -74,7 +71,24 @@ pub(crate) fn prepare_harness_turn(
         max_turns,
         ..Cli::default()
     };
-    let mut built = build_prompt(Some(skill), Some(message), &cli)?;
+    prepare_runner_turn(skill, message, &cli)
+}
+
+pub(crate) fn prepare_interactive_harness_turn(
+    skill: &str,
+    message: &str,
+    wave: &str,
+) -> Result<PreparedHarnessTurn> {
+    let cli = Cli {
+        interactive: true,
+        wave: Some(wave.to_string()),
+        ..Cli::default()
+    };
+    prepare_runner_turn(skill, message, &cli)
+}
+
+fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
+    let mut built = build_prompt(Some(skill), Some(message), cli)?;
     built.components.message_context = Some((
         crate::trace::ContextAssetKind::Goal,
         crate::trace::ContextScope::Step,
@@ -215,13 +229,15 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
                 elapsed_ms = sync_start.elapsed().as_millis(),
                 "synced vendor skills"
             );
+            let wave_memory =
+                crate::engine::prompt::format_wave_memory_section(&prepared.components);
             prompt = skill_launch_seed(
                 &harness,
                 surface,
                 skill_name,
                 message,
                 prepared.components.operate,
-                &crate::engine::prompt::format_wave_context_sections(&prepared.components),
+                wave_memory.as_deref(),
             );
             agent_config.system_prompt.clear();
             agent_config.task_prompt = prompt.clone();
@@ -289,9 +305,8 @@ fn should_launch_via_skill(skill_name: &str) -> bool {
 }
 
 /// Build the launch seed for a vendor skill handoff: the skill invocation,
-/// system-safe instruction sections, the ambient wave sections (a run born
-/// inside a wave inherits the wave's memory and recent chat — hard-capped,
-/// and empty outside a wave), and optional user message. Orientation now
+/// system-safe instruction sections, Wave memory (when non-empty), and an
+/// optional user message. Orientation now
 /// lives in the skill bodies themselves, and the skill body loads from the
 /// synced skill on invoke, so this stays small enough for the GUI deep-link
 /// cap.
@@ -305,7 +320,7 @@ fn skill_launch_seed(
     skill_name: &str,
     message: Option<&str>,
     loopflow: bool,
-    wave_sections: &[String],
+    wave_memory: Option<&str>,
 ) -> String {
     let sigil = if harness == "codex" { '$' } else { '/' };
     let system_components = PromptComponents {
@@ -315,9 +330,9 @@ fn skill_launch_seed(
     };
     let system_sections = crate::engine::prompt::format_system_sections(&system_components);
     let mut seed = format!("{sigil}{skill_name}\n\n{}", system_sections.join("\n\n"));
-    for section in wave_sections {
+    if let Some(memory) = wave_memory {
         seed.push_str("\n\n");
-        seed.push_str(section);
+        seed.push_str(memory);
     }
     if let Some(message) = message.filter(|value| !value.trim().is_empty()) {
         seed.push_str("\n\n<lf:message>\n");
@@ -499,7 +514,7 @@ fn begin_capture(built: &PromptBuild, surface: &str) -> Result<crate::trace::Cap
             render_ms: built.context_render_ms,
             raw_provider: surface == "headless",
             basis: None,
-            control: None,
+            supervision: None,
         },
     )
     .map_err(|error| anyhow!("failed to establish trace capture before agent launch: {error}"))
@@ -615,16 +630,6 @@ pub(crate) fn attributed_context(
             Scope::Wave,
             "wave memory".to_string(),
             Some(memory.path.clone()),
-            "wave",
-        );
-    }
-    if let Some(chat) = &components.wave_chat {
-        push(
-            chat,
-            Kind::Chat,
-            Scope::Wave,
-            "recent wave chat".to_string(),
-            None,
             "wave",
         );
     }
@@ -865,7 +870,7 @@ mod tests {
             "implement",
             Some("build auth"),
             false,
-            &[],
+            None,
         );
         assert!(seed.starts_with("/implement\n\n"));
         // Orientation now lives in the skill body, not the seed.
@@ -877,14 +882,14 @@ mod tests {
     fn skill_launch_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, &[]);
+        let seed = skill_launch_seed("codex", Surface::Cli, "gate", None, false, None);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
     fn skill_launch_seed_interactive_surfaces_have_no_preamble() {
         for surface in [Surface::Cli, Surface::Ide, Surface::Mac] {
-            let seed = skill_launch_seed("claude", surface, "gate", None, false, &[]);
+            let seed = skill_launch_seed("claude", surface, "gate", None, false, None);
             assert!(seed.starts_with("/gate\n\n"));
             assert!(!seed.contains("Run mode"), "surface {surface:?}");
         }
@@ -892,27 +897,27 @@ mod tests {
 
     #[test]
     fn skill_launch_seed_omits_message_when_absent() {
-        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, &[]);
+        let seed = skill_launch_seed("claude", Surface::Cli, "gate", None, false, None);
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]
     fn skill_launch_seed_headless_includes_preamble() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, &[]);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
         assert!(seed.contains("Run mode is headless"));
     }
 
     #[test]
     fn skill_launch_seed_omits_loopflow_when_disabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, &[]);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, false, None);
         assert!(!seed.contains("<lf:loopflow>"));
         assert!(!seed.contains("lf commit"));
     }
 
     #[test]
     fn skill_launch_seed_includes_loopflow_when_enabled() {
-        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, &[]);
+        let seed = skill_launch_seed("claude", Surface::Headless, "implement", None, true, None);
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("lf commit"));
         assert!(seed.contains("</lf:loopflow>"));
@@ -922,30 +927,25 @@ mod tests {
             "the skill seed carries the loopflow operating document once"
         );
         assert!(seed.contains("Execute Here First"));
-        assert!(seed.contains("lf memory add"));
+        assert!(seed.contains("edit\n`wave/<name>/MEMORY.md`"));
         assert!(!seed.contains("lf pm show"));
         assert!(!seed.contains("--detach"));
     }
 
     #[test]
-    fn skill_launch_seed_carries_ambient_wave_sections_before_the_message() {
-        let sections = vec![
-            "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>".to_string(),
-            "<lf:wave-chat-recent>\nuser: status?\n</lf:wave-chat-recent>".to_string(),
-        ];
+    fn skill_launch_seed_carries_wave_memory_before_the_message() {
+        let memory = "<lf:wave-memory>\n- prefer small PRs\n</lf:wave-memory>";
         let seed = skill_launch_seed(
             "claude",
             Surface::Headless,
             "implement",
             Some("build auth"),
             false,
-            &sections,
+            Some(memory),
         );
         let memory_pos = seed.find("<lf:wave-memory>").unwrap();
-        let chat_pos = seed.find("<lf:wave-chat-recent>").unwrap();
         let message_pos = seed.find("<lf:message>").unwrap();
-        assert!(memory_pos < chat_pos);
-        assert!(chat_pos < message_pos);
+        assert!(memory_pos < message_pos);
     }
 
     #[test]

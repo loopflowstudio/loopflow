@@ -13,12 +13,12 @@ The split is runtime plumbing behind one command:
 lf wave <name>                     lf __resident <name>
 ┌──────────────────────┐ spawns   ┌──────────────────────┐
 │ listener             │────────▶│ resident             │
-│ journal · HTTP · bus │◀────────│ cadence · agent     │
+│ journal · HTTP       │◀────────│ cadence · agent     │
 └──────────────────────┘ deltas   └──────────────────────┘
 ```
 
-The listener owns the durable thread, HTTP routes, local discovery, Project and
-Task observations, and the bus subscription. The resident owns the pass
+The listener owns the durable thread, HTTP routes, local discovery, and typed
+Project and Task observations. The resident owns the pass
 scheduler and provider process. It reads the listener's inbox and returns
 ordered deltas; it never writes the journal directly.
 
@@ -40,12 +40,12 @@ The journal rebuilds the thread, playhead, and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
 
-The shared `~/.lf/loopflow.db` stores the Wave row, bus messages, and typed
-Project and Task observations. A Wave can still run when that store does not
+The shared `~/.lf/loopflow.db` stores the Wave row and typed Project and Task
+observations. A Wave can still run when that store does not
 exist, but child observations are unavailable. The live endpoint enforces one
 listener per Wave; `--force` explicitly takes over a live endpoint.
 
-## Thread and bus
+## Thread
 
 `lf chat` writes to the durable human thread. `--steer` injects into a compatible
 active provider turn and otherwise queues the message for the next pass.
@@ -57,11 +57,6 @@ that journal, so a stopped listener does not make the conversation disappear.
 The response distinguishes missing, partial, and unavailable evidence from a
 valid empty thread.
 
-`lf radio pub` and `lf radio sub` use the SQLite bus. The bus is a short-lived,
-prefix-addressed transport between Wave, Project, and Task work; it is not a
-second journal. A listener folds messages from its channel family into its
-Wave journal and advances a durable cursor.
-
 ## Listener HTTP surface
 
 The endpoint file contains `127.0.0.1:<port>`. User-facing routes are local and
@@ -71,12 +66,9 @@ do not require the resident token:
 | --- | --- |
 | `GET /health` | Reports listener and resident state. |
 | `GET /conversation` | Returns the durable thread; `?limit=N` tails it. |
-| `GET /events` | Replays the latest 12 human-thread turns, then streams thread, state, playhead, and memory events over SSE; `?limit=N` overrides the replay tail. |
+| `GET /events` | Replays the latest 12 human-thread turns, then streams turn, turn-delta, state, and playhead events over SSE; `?limit=N` overrides the replay tail. |
 | `POST /messages` | Sends `message`, `steer`, or `interrupt`. |
 | `GET /playhead` | Returns the durable pass cursor. |
-| `GET /memory` | Reads the Wave checkpoint. |
-| `GET /memory/log` | Reads facts added since the checkpoint. |
-| `POST /memory` | Updates the checkpoint or adds a fact. |
 | `POST /stop` | Gracefully stops the listener and resident. |
 
 The hidden `/resident/*` routes carry listener/resident coordination and require

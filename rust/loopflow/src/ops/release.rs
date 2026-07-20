@@ -1515,16 +1515,20 @@ fn latest_tag(repo: &Path, target: &ReleaseTarget) -> OpsResult<String> {
 }
 
 fn latest_tag_optional(repo: &Path, target: &ReleaseTarget) -> OpsResult<Option<String>> {
-    // Fetch tags from origin so we see tags created in worktrees or other clones.
-    let fetch = run_output(repo, "git", &["fetch", "origin", "--tags", "--quiet"])?;
+    // Release tags on origin are authoritative. Long-lived release hosts may
+    // retain an old object for a tag that was repaired remotely; force-update
+    // this target's remote version tags while preserving local-only tags from
+    // an interrupted push.
+    let pattern = tag_glob(target);
+    let refspec = format!("+refs/tags/{pattern}:refs/tags/{pattern}");
+    let fetch = run_output(repo, "git", &["fetch", "origin", "--quiet", &refspec])?;
     if !fetch.status.success() {
         return Err(OpsError::CommandFailed {
-            command: "git fetch origin --tags --quiet".to_string(),
+            command: format!("git fetch origin --quiet {refspec}"),
             stderr: String::from_utf8_lossy(&fetch.stderr).to_string(),
         });
     }
 
-    let pattern = tag_glob(target);
     let tags = run_stdout(
         repo,
         "git",

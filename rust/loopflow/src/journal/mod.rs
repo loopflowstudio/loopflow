@@ -385,14 +385,14 @@ fn child_work_attribution() -> (Option<String>, Option<String>) {
             .project(&id)
             .ok()
             .flatten()
-            .map_or((None, None), |project| {
-                (Some(project.launch.project.slug), None)
-            }),
+            .map_or((None, None), |project| (Some(project.plan.slug), None)),
         WorkRef::Task(id) => store.task(&id).ok().flatten().map_or((None, None), |task| {
-            (
-                Some(task.launch.project.slug),
-                Some(task.launch.issue.identifier),
-            )
+            let project = store
+                .project(&task.project_id)
+                .ok()
+                .flatten()
+                .map(|project| project.plan.slug);
+            (project, Some(task.plan.identifier))
         }),
         WorkRef::Wave(_) => (None, None),
     }

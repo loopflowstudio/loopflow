@@ -2675,11 +2675,8 @@ fn pm_to_ops(err: PmError) -> OpsError {
 mod tests {
     use super::*;
     use crate::id::WaveId;
-    use crate::launch_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        ProjectLaunchReceipt, TaskLaunchReceipt,
-    };
     use crate::ops::NullProgress;
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::test_server::{self, json_response, QueuedResponse};
     use crate::project::{Project, ProjectId};
     use crate::task::{
@@ -2852,18 +2849,16 @@ mod tests {
             "/repo".to_string(),
         );
         store.create_wave(&wave).await.expect("create wave");
-        let project_snapshot = LinearProjectSnapshot {
+        let project_definition = ProjectPlan {
             id: LinearProjectId::new("project-uuid").expect("project id"),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
             prompt_context: "Keep development fast.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
         };
         let project = Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: project_snapshot.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
+            plan: project_definition,
             wave_id: wave.id().clone(),
             iteration: 1,
             observation_cursor: 0,
@@ -2878,19 +2873,16 @@ mod tests {
         store
             .create_project(&project)
             .await
-            .expect("create project session");
+            .expect("create Project Work");
 
-        let session_id = TaskId::new();
-        let session = Task {
-            id: session_id.clone(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(issue_id).expect("issue id"),
-                    identifier: identifier.to_string(),
-                    title: format!("Task {identifier}"),
-                    description: String::new(),
-                },
-                project: project_snapshot,
+        let task_id = TaskId::new();
+        let task = Task {
+            id: task_id.clone(),
+            plan: TaskPlan {
+                id: LinearIssueId::new(issue_id).expect("issue id"),
+                identifier: identifier.to_string(),
+                title: format!("Task {identifier}"),
+                description: String::new(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             pm_writeback: PmWritebackState::Current,
@@ -2915,10 +2907,10 @@ mod tests {
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_id: session.id.clone(),
+            task_id: task.id.clone(),
             sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: format!("jack/{}", session.workspace_slug),
+            slug: task.workspace_slug.clone(),
+            branch: format!("jack/{}", task.workspace_slug),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -2933,10 +2925,10 @@ mod tests {
             updated_at: now,
         };
         store
-            .create_task(&session, &pr)
+            .create_task(&task, &pr)
             .await
-            .expect("create task session");
-        session_id
+            .expect("create Task Work");
+        task_id
     }
 
     #[test]
@@ -3411,14 +3403,14 @@ mod tests {
     #[tokio::test]
     async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
-        let session = store
-            .get_task(&session_id)
+        let task_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
+        let task = store
+            .get_task(&task_id)
             .await
-            .expect("read session")
-            .expect("session exists");
+            .expect("read task")
+            .expect("task exists");
         let work = store
-            .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
             .await
             .expect("resolve Task Work");
         store
@@ -3463,7 +3455,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_retry_reuses_pre_move_comment_then_moves_and_rebinds() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
+        let task_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
         let initial_project = || {
             reteam_project_node(
                 "project-1",
@@ -3500,12 +3492,11 @@ mod tests {
         assert!(error.to_string().contains("issue move failed"));
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
-                .launch
-                .issue
+                .expect("read task")
+                .expect("task exists")
+                .plan
                 .identifier,
             "W2-9"
         );
@@ -3542,12 +3533,11 @@ mod tests {
         assert_eq!(result.task_updates, 1);
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
-                .launch
-                .issue
+                .expect("read task")
+                .expect("task exists")
+                .plan
                 .identifier,
             "PRD-9"
         );
@@ -3573,7 +3563,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_already_moved_issue_only_rebinds_a_stale_task() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
+        let task_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([reteam_project_node(
                 "project-1",
@@ -3615,12 +3605,11 @@ mod tests {
         assert!(result.moves.is_empty());
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
-                .launch
-                .issue
+                .expect("read task")
+                .expect("task exists")
+                .plan
                 .identifier,
             "PRD-10"
         );
@@ -3995,7 +3984,7 @@ mod tests {
 
         let outcome = link_pr_with_client(
             &client,
-            &link_request("Open · in review"),
+            &link_request("Open · published"),
             &PrLinkageIds::default(),
         )
         .await;
@@ -4079,7 +4068,7 @@ mod tests {
 
         let degraded = link_pr_with_client(
             &client,
-            &link_request("Open · in review"),
+            &link_request("Open · published"),
             &PrLinkageIds::default(),
         )
         .await;
@@ -4099,7 +4088,7 @@ mod tests {
         let client = linear_test_ctx(base_url, "initiative-1").client;
 
         let healed =
-            link_pr_with_client(&client, &link_request("Open · in review"), &degraded.ids).await;
+            link_pr_with_client(&client, &link_request("Open · published"), &degraded.ids).await;
 
         assert!(healed.error.is_none());
         assert_eq!(healed.ids.attachment_id.as_deref(), Some("att-1"));

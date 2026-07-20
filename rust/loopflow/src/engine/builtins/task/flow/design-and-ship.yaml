@@ -1,6 +1,5 @@
 - step:
     name: design
-    feedback: true
 - flow: code
 - reduce
 - polish

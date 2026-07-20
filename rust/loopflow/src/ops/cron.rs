@@ -371,8 +371,8 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let launchctl = FakeLaunchctl::default();
         let spec = CronSpec {
-            wave: "memory".to_string(),
-            flow: "export-memory".to_string(),
+            wave: "reliability".to_string(),
+            flow: "wave-report".to_string(),
             schedule: Schedule::DailyAt { hour: 3, minute: 0 },
             working_directory: temp.path().join("repo"),
             lf_path: PathBuf::from("/bin/lf"),
@@ -380,15 +380,15 @@ mod tests {
         fs::create_dir_all(&spec.working_directory).unwrap();
 
         let installed = add_cron(temp.path(), &spec, &launchctl).unwrap();
-        assert_eq!(installed.label, "loopflow.cron.memory.export-memory");
+        assert_eq!(installed.label, "loopflow.cron.reliability.wave-report");
         assert!(installed.path.exists());
         assert!(spec.working_directory.join(".lf/logs").is_dir());
 
         let content = fs::read_to_string(&installed.path).unwrap();
         assert!(content.contains("<string>/bin/lf</string>"));
-        assert!(content.contains("<string>export-memory</string>"));
+        assert!(content.contains("<string>wave-report</string>"));
         assert!(content.contains("<string>--wave</string>"));
-        assert!(content.contains("<string>memory</string>"));
+        assert!(content.contains("<string>reliability</string>"));
         assert!(content.contains("<key>StartCalendarInterval</key>"));
         assert!(content.contains(&format!(
             "<string>{}</string>",
@@ -398,7 +398,7 @@ mod tests {
         let crons = list_crons(temp.path()).unwrap();
         assert_eq!(crons, vec![installed.clone()]);
 
-        let removed = remove_cron(temp.path(), "memory", "export-memory", &launchctl).unwrap();
+        let removed = remove_cron(temp.path(), "reliability", "wave-report", &launchctl).unwrap();
         assert_eq!(removed, Some(installed.clone()));
         assert!(!installed.path.exists());
         assert_eq!(

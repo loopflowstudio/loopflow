@@ -247,8 +247,13 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     ]
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
-    assert bootstrap.count("--remote-native") == 5
-    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index("lf cron sync")
+    assert "--remote-native" not in bootstrap
+    assert 'lf ssh "$host" --version' in bootstrap
+    assert 'lf ssh "$host" cron sync --wave "$wave"' in bootstrap
+    assert 'lf ssh "$host" cron list' in bootstrap
+    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
+        'lf ssh "$host" cron sync'
+    )
 
 
 def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():

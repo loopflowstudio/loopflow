@@ -1,4 +1,4 @@
-//! Parse the mutable route observed for a durable Home authority.
+//! Parse the mutable route observed for a stable Home identity.
 //!
 //! A route is either this process's machine (`local`) or one SSH destination:
 //!
@@ -15,10 +15,6 @@ use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-
-/// Set on the remote hop by the router. Its presence means "you are already the
-/// home host; run the command locally" — the single break in the forward loop.
-pub const HOME_ROUTED_ENV: &str = "LF_HOME_ROUTED";
 
 pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> {
     let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;

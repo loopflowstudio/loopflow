@@ -62,14 +62,16 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf start designer                           # serve it from this Home's one keeper
 lf chat --steer "ship the button audit first"
-lf memory add "buttons: variants unified" --receipt chat_turn:turn-3
 lf stop designer
 ```
+
+Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
+reviewed repository file, not live server state.
 
 Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
-lf task run INF-123                                   # durable Task Session, own worktree
+lf task run INF-123                                   # durable Task Work, own worktree
 lf task steer INF-123 "take the smaller approach"     # redirect the active turn
 lf task status INF-123 --json                         # inspect durable state
 lf pr land -c                                         # merge the PR, complete the Task
@@ -93,7 +95,7 @@ lf usage               # subscription state and spend, per account and repo
 | **Flow** | Chains skills together | `.lf/flows/*.yaml` |
 | **Wave** | Durable operating context: memory, cadence, chat, project selection | `wave/<name>/` |
 | **Project** | Measured bet inside exactly one wave | Linear, via `lf pm` |
-| **Task** | Concrete work; its Session owns the only delivery worktree | Linear, via `lf pm` |
+| **Task** | Concrete work; its Work owns the only delivery worktree | Linear, via `lf pm` |
 | **Home** | Stable execution authority; its route may move without changing identity | local SQLite |
 
 | Built-in | What it does |
@@ -115,7 +117,7 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 | [The Agent API](docs/agent-api.md) | How agents launch, steer, and prove control of other agents |
 | [Conducting](docs/conducting.md) | Monitoring and steering many agents; the Mac podium |
 | [Authoring](docs/authoring.md) | Writing skills, flows, directions, and goals |
-| [Architecture](docs/architecture.md) | Decentralized stores, Home residents, journals, `lf ssh`, `lfd` |
+| [Architecture](docs/architecture.md) | Decentralized stores, Wave hosts, journals, `lf ssh`, `lfd` |
 | [Security](docs/security.md) | Execution boundaries, permissions, credentials, and account authority |
 | [`lf` reference](docs/lf.md) | Every command, PR/planning/release operations, the builtin catalog |
 | [Configuration](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) | Reference |

@@ -27,10 +27,10 @@ selection. Follow the repo style guide.
 - Implement the smallest coherent slice described by the design doc.
 - Add or update tests for user-visible behavior.
 - Run the narrowest verification that covers the touched code.
-- When progress requires supervisor judgment, state the exact question and
-  alternatives in the interactive step, then stop dependent work. The derived
-  Feedback routes the Turn to the parent; do not invent a provider-specific
-  decision command or start unrelated work while it is pending.
+- When progress requires supervisor judgment, run `lf ask "<exact question>"`.
+  The command blocks without spending model tokens and returns the parent's
+  Answer to this Turn. Do not invent a provider-specific decision command or
+  start unrelated work while it is pending.
 - Use `lf pr publish` when the branch has a reviewable PR-shaped change; it
   pushes and creates or refreshes the PR without opening a browser. Reach for
   `lf pr open` only when a human explicitly asked to see the PR for review.

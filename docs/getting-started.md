@@ -18,7 +18,7 @@ Requires macOS or Linux, and one of: [Claude Code](https://docs.anthropic.com/en
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf start <name>` → `lf chat --steer` / `lf status` |
-| Run on another machine | Observe its HomeId, place the Wave, then `lf start <name>` ([Go Remote](#go-remote)) |
+| Run on another machine | `lf ssh <home-id> start <name>` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -147,6 +147,7 @@ contracts, evidence loops, Wave goals, and directions.
 ```bash
 lf pr publish   # push + create or update PR (no browser)
 lf pr open      # publish, then open the PR for review
+lf pr submit    # prepare the exact head; you click merge
 lf pr land      # arm auto-merge; GitHub merges after required checks pass
 ```
 
@@ -158,19 +159,19 @@ Ready to automate? Waves remain available continuously and run a complete flow
 when chat, child observations, crons, or a heartbeat wake them.
 
 `lf` skills are manual building blocks. A Wave is a named agent that reads its
-Linear Projects and tasks, starts durable Task Sessions, and supervises their
+Linear Projects and tasks, starts durable Tasks, and supervises their
 results.
 
 Author `wave/shipper/GOAL.md` (the body is the goal prompt; optional
-frontmatter sets machine config such as `crons:` and `pm:`), then open it in
+frontmatter sets machine config such as `owner:`, `home:`, `crons:`, and `pm:`), then open it in
 **Loopflow** (macOS) — the home for running waves. Select the repository and
 the Wave to get its persistent conversation beside the Linear-backed
 Project → Task work map; the app starts the Wave's resident process when
 needed. From the CLI, `lf start shipper` does the same start.
 
 The Wave creates or selects a Linear task, starts it with `lf task run
-<issue-id>`, and stays steerable while the Task Session works in its immutable
-worktree. CI failures and review feedback return to the same session; linked
+<issue-id>`, and stays steerable while the Task runs in its immutable
+worktree. CI failures and review feedback return to the same Task; linked
 events land in the Wave thread.
 
 Detached processes use named tmux sessions for process lifetime and read-only
@@ -181,8 +182,8 @@ tmux ls               # live agent sessions
 tmux attach -r -t <name> # inspect one; never mutate the session directly
 ```
 
-Use `lf queue`, then `lf work feedback <kind> <id>`, for work that
-needs you. Stop a running Wave with `lf stop <name>`.
+Use `lf work asks`, then `lf work answer <ask-id> <text>`, for questions that
+need you. Stop a running Wave with `lf stop <name>`.
 
 Use `lf prompt: draft wave/shipper/GOAL.md` to author the loop contract. Use
 `lf design` to explore an uncertain operating context, or write it by hand.
@@ -194,25 +195,26 @@ Once `wave/` files exist, `lf wave <name>` runs them and Loopflow picks them up.
 
 ## Go Remote
 
-Run agents while you sleep. A Home is stable execution authority; its SSH
-route is a mutable observation. Bootstrap the remote identity once:
+Run agents while you sleep. A Home is a stable machine identity; its SSH route
+can change. Bootstrap the remote identity once:
 
 ```bash
-lf ssh jack@mini.local --remote-native -- lf home id --json
+lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf ls --json
-lf work place wave <wave-id> <home-id>
-lf start shipper
+lf work place wave <wave-id> <home-id>    # record origin-side planning state
+lf ssh <home-id> start shipper
 ```
 
-The remote host needs `lf`, SSH, and its own credentials. `lf start` routes
-through `lf ssh <home-id> --remote-native`: it forwards no origin credentials,
-and the remote Home verifies that the addressed HomeId is its own before
-changing lifecycle state. One Home keeper serves every placed Wave.
+`lf start shipper` always starts shipper on the machine executing that command.
+`lf ssh <home-id> start shipper` executes the same operation on the named Home,
+which proves its identity before changing lifecycle state. One Home keeper
+serves every Wave running there.
 
-Use ordinary `lf ssh <host> -- <command>` for foreground work that should borrow
-the origin's short-lived credential lease. Use `--remote-native` for durable
-remote work that must outlive SSH.
+Foreground `lf ssh` commands can choose from subscription accounts installed on
+the origin and target. A resident that outlives SSH sheds forwarded credentials
+and uses authority installed on its own machine. See
+[Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
 
 Auth connects your providers locally:
 

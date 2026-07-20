@@ -21,9 +21,11 @@ pub(crate) async fn temp_store(dir: &Path) -> SharedStore {
 }
 
 pub(crate) fn make_wave(name: &str, repo: &Path, parent: Option<&WaveId>) -> Wave {
-    let mut wave = Wave::new(WaveId::new(), name.to_string(), repo.display().to_string());
-    wave.parent_wave_id = parent.cloned();
-    wave
+    let wave = Wave::new(WaveId::new(), name.to_string(), repo.display().to_string());
+    match parent {
+        Some(parent) => wave.with_parent(parent.clone()),
+        None => wave,
+    }
 }
 
 /// Boot the HTTP surface over a runtime (the wave/mod.rs harness pattern).
@@ -42,10 +44,13 @@ pub(crate) async fn boot_server(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     server::write_endpoint(origin, wave, addr).expect("write endpoint pointer");
-    let app = server::router(
+    let app = server::router_with_observer(
         runtime.clone(),
         server::ResidentDoor::new("test-token"),
-        None,
+        Arc::new(crate::wave::registry::ObserverSlot::new(
+            runtime.clone(),
+            None,
+        )),
         None,
         server::ShutdownDoor::new(),
     );

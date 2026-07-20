@@ -19,7 +19,7 @@ pub struct ContextSourceOverrides {
     pub clipboard: Option<bool>,
 }
 
-/// Canonical launch-prep input shared by CLI and session call sites.
+/// Canonical launch-prep input shared by CLI and Work-runner call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchPromptInput {
     pub repo_root: PathBuf,
@@ -175,6 +175,7 @@ pub fn prepare_launch_prompt(
         max_turns,
         resume_token: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
+        authority: crate::engine::agent::AgentAuthority::Inherit,
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
@@ -577,7 +578,6 @@ Test skill body.
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
                     interactive: Some(true),
-                    feedback: false,
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,

@@ -26,7 +26,7 @@ struct TraceEvidenceView: View {
                     Text("Trace evidence")
                         .font(Typography.heroTitle(24))
                         .foregroundStyle(palette.text)
-                    Text("\(shortTrace(address.runId)) / \(shortTrace(address.launchId)) / \(shortTrace(address.turnId))")
+                    Text("\(shortTrace(address.runId)) / \(shortTrace(address.invocationId)) / \(shortTrace(address.turnId))")
                         .font(Typography.code(10))
                         .foregroundStyle(palette.textSecondary)
                         .textSelection(.enabled)
@@ -141,7 +141,7 @@ struct TaskWorkspaceWindow: View {
                     attention: task.attention,
                     repoPath: route.repoPath,
                     terminalStore: TaskTerminalStore.shared,
-                    initialSection: task.attention.level == .blue ? .feedback : .changes
+                    initialSection: .changes
                 )
             } else if let errorMessage {
                 ContentUnavailableView(

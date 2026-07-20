@@ -402,7 +402,13 @@ lf usage --refresh              # poll every account's provider now
 lf usage --json --days 30       # one additive row per measured provider Turn
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
-lf top                          # persisted last-hour Turn throughput + live processes
+lf ps                            # one live call-tree snapshot, ranked by completed output
+lf ps --sort rate-5m             # rank siblings by five-minute completion throughput
+lf ps --json                     # versioned flat nodes with stable parent ids
+lf top                           # refresh the same snapshot every two seconds on a TTY
+lf top --json                    # emit once; redirected output also emits once without ANSI
+lf prune --dry-run               # list stale receipts and registered orphan process groups
+lf prune                         # remove those receipts and reap those process groups
 lf doctor                       # audit continuity, identity, lineage, coverage, receipts
 lf doctor --json                # machine-readable audit
 ```
@@ -410,6 +416,20 @@ lf doctor --json                # machine-readable audit
 `lf ls` reads the Wave registry. `lf status` focuses one Wave's operational
 truth. `lf roadmap` overlays the current Linear-backed plan without creating a
 second runtime model.
+
+`lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
+attach `lf` processes to call records; exact ancestry attaches provider
+processes. Completed calls and launches disappear. A live provider's completed
+Turns supply cumulative tokens, while five- and thirty-minute rates divide
+tokens completed inside each exact window. Exec rows fold their live descendants
+once. Missing measurements stay explicit and elapsed time never implies death.
+
+Both commands open the live Home ledger and ownership registry read-only. This
+also applies under `scripts/dev-lf`: source builds can inspect real activity
+without gaining migration or write authority over the installed database.
+`lf prune` is the separate write boundary. It removes dead Exec receipts and
+reaps only OpenCode process groups whose registered owner is absent. It never
+kills unclaimed provider PIDs; inspect exact targets with `--dry-run` first.
 
 ```bash
 lf -m codex --account manabot-eng@ : "fix the tests"   # prefer this login, then route

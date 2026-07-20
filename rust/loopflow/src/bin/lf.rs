@@ -1381,7 +1381,15 @@ fn main() -> anyhow::Result<()> {
                 repo.as_deref(),
                 *json,
             ),
-            Some(Commands::Top) => loopflow::lf::commands::top::run(),
+            Some(Commands::Ps { json, sort }) => {
+                loopflow::lf::commands::top::run_ps(*json, *sort)
+            }
+            Some(Commands::Top { json, sort }) => {
+                loopflow::lf::commands::top::run_top(*json, *sort)
+            }
+            Some(Commands::Prune { dry_run, json }) => {
+                loopflow::lf::commands::top::run_prune(*json, *dry_run)
+            }
             Some(Commands::Context {
                 days,
                 started_after,

@@ -3,8 +3,8 @@
 Running one agent is a conversation. Running many is conducting: knowing what
 is playing, what is stuck, what needs you, what it cost — and redirecting a
 performer without stopping the piece. Loopflow answers all of that from the
-local ledger. Its read surfaces take `--json`; `lf top` is the human-oriented
-exception because it renders a live terminal graph.
+local ledger. Use `lf ps --json` for a machine-readable activity frame and
+`lf top` for the continuously refreshed terminal view.
 
 ## See everything
 
@@ -38,15 +38,21 @@ wave, project, task, repo, flow, skill, provider, model, or outcome.
 ## Health and spend
 
 ```bash
-lf top             # output-token throughput last hour + running processes
+lf ps              # one call-tree snapshot ranked by completed output
+lf top             # continuously refresh rates, age, idle time, and health
+lf prune --dry-run # inspect safely removable process state
 lf usage           # subscription state per account, spend by repo/provider
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf doctor          # audit the ledger: continuity, attribution, lineage
 ```
 
-`lf top` is the first move when work feels slow — machine-health evidence
-before guessing. `lf ci` reads the local ledger, not GitHub: it reports how
+`lf top` is the first move when work feels slow — live machine-health evidence.
+Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
+Both contain only OS-live process trees; completed calls disappear. Run
+`lf prune --dry-run` before cleanup. Plain `lf prune` removes stale Exec
+receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
+`lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a human.
 
 ## Steer

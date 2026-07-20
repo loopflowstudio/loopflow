@@ -84,6 +84,9 @@ lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across every wave, bucketed by need
 lf status designer     # one wave's live Project → Task hierarchy
 lf trace <exec-id>     # what one agent did — and exactly what it was told
+lf ps                  # rank live call trees by cumulative completed output
+lf top                 # refresh call-tree rates, age, idle time, and health
+lf prune --dry-run     # inspect dead receipts and registered orphan providers
 lf usage               # subscription state and spend, per account and repo
 ```
 

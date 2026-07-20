@@ -129,6 +129,45 @@ pub(crate) fn production_database_path() -> PathBuf {
     machine_home_dir().join(".lf/loopflow.db")
 }
 
+/// Resolve the live Home evidence store for read-only operator surfaces.
+///
+/// Development builds normally isolate writes under `.lf-dev/worktrees`.
+/// Observability is different: it must describe the Home that launched the
+/// process, and opening it through `open_run_ledger_read_only` cannot migrate
+/// or otherwise mutate its schema. Explicit control authority wins, followed
+/// by an ordinary override, then the installed Home.
+pub(crate) fn observability_home_dir() -> PathBuf {
+    std::env::var_os(CONTROL_HOME_ENV)
+        .or_else(|| std::env::var_os("LF_HOME"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| machine_home_dir().join(".lf"))
+}
+
+pub(crate) fn observability_database_path() -> Result<PathBuf, std::io::Error> {
+    let home = observability_home_dir();
+    let candidate = std::env::var_os(CONTROL_DB_PATH_ENV)
+        .or_else(|| std::env::var_os("LF_DB_PATH"))
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join("loopflow.db"));
+    if candidate.is_absolute() {
+        return Ok(candidate);
+    }
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "observability database path must not escape its Home",
+        ));
+    }
+    Ok(home.join(candidate))
+}
+
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
     sqlite::read_nonterminal_task_worktrees(path)
 }

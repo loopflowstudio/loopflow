@@ -364,8 +364,33 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Graph output-token throughput for the last hour and show running lf processes
-    Top,
+    /// Print one parseable snapshot of live Loopflow call trees
+    Ps {
+        /// Emit the versioned activity snapshot as JSON
+        #[arg(long)]
+        json: bool,
+        /// Rank siblings by cumulative completed tokens or five-minute rate
+        #[arg(long, value_enum, default_value_t)]
+        sort: commands::top::ActivitySort,
+    },
+    /// Refresh live Loopflow call trees on a terminal; print once when redirected
+    Top {
+        /// Emit one versioned activity snapshot as JSON
+        #[arg(long)]
+        json: bool,
+        /// Rank siblings by cumulative completed tokens or five-minute rate
+        #[arg(long, value_enum, default_value = "rate-5m")]
+        sort: commands::top::ActivitySort,
+    },
+    /// Reap registered orphan providers and remove dead process receipts
+    Prune {
+        /// Show exact targets without changing process or receipt state
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit the versioned prune report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Inspect supplied agent context and its contributing assets
     Context {
         /// Window in days
@@ -2253,7 +2278,33 @@ mod tests {
     #[test]
     fn top_is_a_first_class_machine_dashboard() {
         let cli = Cli::try_parse_from(["lf", "top"]).expect("parse top");
-        assert!(matches!(cli.command, Some(Commands::Top)));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Top {
+                json: false,
+                sort: commands::top::ActivitySort::Rate5m,
+            })
+        ));
+
+        let cli =
+            Cli::try_parse_from(["lf", "ps", "--json", "--sort", "tokens"]).expect("parse ps");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Ps {
+                json: true,
+                sort: commands::top::ActivitySort::Tokens,
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["lf", "prune", "--dry-run", "--json"])
+            .expect("parse process prune");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Prune {
+                dry_run: true,
+                json: true,
+            })
+        ));
     }
 
     #[test]

@@ -410,6 +410,38 @@ impl SqliteStore {
         })
     }
 
+    /// Run several ledger queries against one SQLite read snapshot.
+    ///
+    /// The store must not be cloned into the closure: each query briefly takes
+    /// the same connection lock while the connection-level transaction stays
+    /// open. Observability callers create a private read-only store for this
+    /// operation, so no unrelated reader can join the transaction.
+    pub(crate) fn read_run_ledger_snapshot<T>(
+        &self,
+        read: impl FnOnce(&Self) -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.execute_batch("BEGIN DEFERRED TRANSACTION")?;
+        }
+        let result = read(self);
+        let finish = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            if result.is_ok() {
+                conn.execute_batch("COMMIT")
+            } else {
+                conn.execute_batch("ROLLBACK")
+            }
+        };
+        match result {
+            Ok(value) => {
+                finish?;
+                Ok(value)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

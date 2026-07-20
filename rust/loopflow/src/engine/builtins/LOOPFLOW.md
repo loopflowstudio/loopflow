@@ -98,10 +98,20 @@ Task with `--stack-on <parent-task>`. Do not rotate the parent Task onto a secon
 simultaneously open PR; its multi-PR history remains serial. The child binds to
 the parent's active PR at launch and never follows later serial PRs implicitly.
 
-When work feels slow or stuck, run `lf top` before guessing. It shows provider-
-reported output-token throughput for the last hour and the currently running
-`lf` and provider processes; use it as machine-health evidence, not as a
-lifecycle control.
+When work feels slow or stuck, run `lf top` before guessing. It continuously
+ranks OS-live Loopflow call trees by five-minute completed-output throughput and
+shows cumulative tokens, age, idle time, health, and provider PIDs. Completed
+calls and launches disappear. Use it as machine-health evidence, not as a
+lifecycle control. Use `lf ps --json` for one stable, parseable frame;
+redirected `lf top` also emits once without ANSI. Both commands read the live
+Home's ledger and ownership registry without migrating or writing them,
+including when invoked through `scripts/dev-lf`.
+
+Rates count provider-reported output only when a Turn ends; they are completion
+throughput, not decoding speed. Time alone never means dead. `lf prune
+--dry-run` lists the separate cleanup boundary; plain `lf prune` removes dead
+Exec receipts and reaps registered orphan OpenCode process groups. Never kill
+an `unclaimed` provider PID from `lf ps`: ownership is not proven.
 
 ## Inspect
 

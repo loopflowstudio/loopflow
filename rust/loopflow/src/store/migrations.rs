@@ -2188,7 +2188,11 @@ mod tests {
         )
         .unwrap();
 
-        apply_sqlite(&conn).unwrap();
+        let terminal_index = MIGRATIONS
+            .iter()
+            .position(|migration| migration.name == "capture_terminal_states")
+            .expect("capture terminal migration is registered");
+        apply_set(&conn, &MIGRATIONS[..=terminal_index]).unwrap();
 
         let legacy_trace = conn
             .query_row(
@@ -2239,7 +2243,6 @@ mod tests {
         assert_eq!(
             indexes,
             vec![
-                "idx_agent_invocations_attention",
                 "idx_agent_invocations_one_live_answer",
                 "idx_agent_invocations_process",
                 "idx_agent_invocations_project",

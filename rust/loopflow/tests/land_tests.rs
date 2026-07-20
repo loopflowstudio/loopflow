@@ -1038,13 +1038,20 @@ fn latest_land_disposition_wins_before_merge() {
     let disable = log
         .rfind("pr merge 912 --disable")
         .expect("second land revokes prior Auto request");
-    let push = log
-        .find("git-push")
-        .expect("second land pushes its new head");
-    assert!(
-        disable < push,
-        "Auto intent must be revoked before the LF-owned head-changing push:\n{log}"
-    );
+    if revised_head != head {
+        let push = log
+            .find("git-push")
+            .expect("a changed head is pushed by the second land");
+        assert!(
+            disable < push,
+            "Auto intent must be revoked before the LF-owned head-changing push:\n{log}"
+        );
+    } else {
+        assert!(
+            !log.contains("git-push"),
+            "an unchanged head needs no replacement push:\n{log}"
+        );
+    }
 
     submit(
         repo.path(),

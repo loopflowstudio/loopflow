@@ -14,7 +14,7 @@ automatically except the app, `lf start`, or a cron wake.
 ```bash
 lf status <wave> --json    # current registry + runtime evidence
 lf home probe <wave>       # reachable? stopped? running? — with the next action
-lf start <wave>            # idempotently start the Wave on its placed Home
+lf start <wave>            # idempotently start the Wave on this machine
 ```
 
 ## Task Work stops advancing

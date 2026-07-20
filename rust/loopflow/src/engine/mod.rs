@@ -10,6 +10,7 @@ pub mod flow;
 pub mod git;
 pub mod identity;
 pub mod launch;
+pub(crate) mod machine;
 pub mod naming;
 pub mod platform;
 pub(crate) mod process;

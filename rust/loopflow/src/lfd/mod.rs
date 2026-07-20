@@ -1,9 +1,9 @@
-//! `lfd` — the machine-level Home daemon: durable webhook ingress + liveness.
+//! `lfd` — the machine-level Home daemon: Wave startup, webhook ingress, and liveness.
 //!
 //! `lfd` is the one process that must always be running on a Home machine: it
-//! receives external HTTP that cannot be SSH/`lf` (webhook deliveries) and
-//! serves liveness probes. It is *not* an API — reads become `lf` queries;
-//! hands become `lf` directly.
+//! ensures the local Home resident, receives external HTTP that cannot be
+//! SSH/`lf` (webhook deliveries), and serves liveness probes. It is *not* a
+//! remote control API — reads become `lf` queries; hands become `lf` directly.
 //!
 //! The ingress path is a durable delivery inbox: each signed Linear delivery is
 //! persisted to `provider_deliveries` *before* it is acknowledged, deduplicated
@@ -759,9 +759,9 @@ async fn ensure_github_subscriptions(state: &LfdState) {
 /// inbox lives there); Linear and GitHub config are optional — absent webhook
 /// credentials leave their corresponding route at 503.
 ///
-/// A non-loopback bind is refused unless `LF_LFD_AUTH_TOKEN` is set, matching
-/// the Home-only posture: the daemon is meant to receive external HTTP on a
-/// machine that also runs `lf`, not to be exposed.
+/// A non-loopback bind is refused unless `LF_LFD_AUTH_TOKEN` is set as an
+/// explicit exposure acknowledgment. The value is not request middleware;
+/// operators must gate the network boundary independently.
 pub async fn serve(
     repo_root: PathBuf,
     addr: SocketAddr,
@@ -773,7 +773,7 @@ pub async fn serve(
         tracing::warn!(
             %addr,
             "lfd bound off loopback with LF_LFD_AUTH_TOKEN set; \
-             ensure the token gates access at the network boundary"
+             the value does not authenticate requests, so gate this listener at the network boundary"
         );
     }
     let state = LfdState {
@@ -782,6 +782,36 @@ pub async fn serve(
         store,
         linear,
     };
+    let resident_store = state.store.clone();
+    let resident_repo = repo_root.clone();
+    tokio::spawn(async move {
+        let local = match resident_store.local_home().await {
+            Ok(local) => local,
+            Err(error) => {
+                tracing::error!(%error, "could not read local Home for Wave startup");
+                return;
+            }
+        };
+        let assigned =
+            match crate::home_resident::waves_for_home(&resident_store, &local.id, None).await {
+                Ok(assigned) => assigned,
+                Err(error) => {
+                    tracing::error!(%error, "could not select Waves for Home startup");
+                    return;
+                }
+            };
+        if assigned.is_empty() {
+            return;
+        }
+        if let Err(error) = crate::home_resident::ensure(&local.id, &resident_repo).await {
+            tracing::error!(home_id = %local.id, %error, "could not start Home resident");
+            return;
+        }
+        let wave_ids = assigned.into_iter().map(|wave| wave.id().clone()).collect();
+        if let Err(error) = crate::home_resident::start_waves(&local.id, wave_ids).await {
+            tracing::error!(home_id = %local.id, %error, "could not start every assigned Wave");
+        }
+    });
     let autoprune = load_config_or_default(Some(&repo_root)).autoprune;
     if autoprune.enabled {
         let maintenance_state = state.clone();
@@ -796,9 +826,9 @@ pub async fn serve(
     Ok(())
 }
 
-/// Refuse a non-loopback bind unless `LF_LFD_AUTH_TOKEN` is present. The daemon
-/// is meant to receive external HTTP on a Home machine, not to be exposed; the
-/// token is the opt-in for an operator who has gated the network boundary.
+/// Refuse a non-loopback bind unless `LF_LFD_AUTH_TOKEN` acknowledges that the
+/// operator has gated the network boundary. The value itself is not read from
+/// requests.
 fn ensure_loopback_or_token(addr: SocketAddr, auth_token: Option<&OsStr>) -> anyhow::Result<()> {
     if addr.ip().is_loopback() || auth_token.is_some() {
         return Ok(());

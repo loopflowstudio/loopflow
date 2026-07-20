@@ -168,6 +168,48 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
+/// Insert clap's internal `--` at the public `lf ssh` target boundary.
+///
+/// The public syntax omits it, but making the boundary explicit before parsing
+/// prevents a remote `--account` from being consumed by the origin command.
+fn normalize_ssh_args(mut args: Vec<String>) -> Vec<String> {
+    if args.len() <= 1 {
+        return args;
+    }
+    let rest = &args[1..];
+    let Some(command_index) = first_target_index(rest) else {
+        return args;
+    };
+    if rest[command_index] != "ssh" {
+        return args;
+    }
+
+    let ssh_args = &arg_tables()
+        .commands
+        .get("ssh")
+        .expect("ssh command has derived argument metadata")
+        .direct;
+    let mut index = command_index + 2;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--" {
+            return args;
+        }
+        if arg.starts_with('-') {
+            let takes_value = ssh_args.takes_value(arg) || is_value_flag(arg);
+            if takes_value && !has_inline_value(arg) {
+                index += 1;
+            }
+            index += 1;
+            continue;
+        }
+
+        args.insert(index + 1, "--".to_string());
+        return args;
+    }
+    args
+}
+
 #[derive(Clone, Copy)]
 struct SelectedCommand<'a> {
     index: usize,
@@ -305,6 +347,13 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         return args;
     };
     if let Some(command) = arg_tables().commands.get(rest[target_index].as_str()) {
+        // `lf ssh` has a deliberate positional boundary: origin options come
+        // before the target and every later token belongs to the remote lf.
+        // Moving global flags across that boundary changes which machine owns
+        // an account selection.
+        if rest[target_index] == "ssh" {
+            return args;
+        }
         return reorder_command_args(program, rest, target_index, command);
     }
 
@@ -1076,7 +1125,7 @@ fn main() -> anyhow::Result<()> {
 
     // Reorder args so flags can appear after the skill name
     let raw_args: Vec<String> = std::env::args().collect();
-    let args = reorder_args(raw_args.clone());
+    let args = reorder_args(normalize_ssh_args(raw_args.clone()));
 
     let mut cli = Cli::parse_from(args.clone());
     // The shared Home resident owns an async, multi-Wave shutdown sequence.
@@ -1105,14 +1154,35 @@ fn main() -> anyhow::Result<()> {
             wave.id().to_string(),
         )
     });
-    // `--account`/`--only-account` are resolved once at the outer invocation.
-    // Under an already-forwarded lease the grant is fixed, so a nested
-    // selection is rejected rather than silently re-derived.
+    // Account flags before an SSH target shape the origin grant. Flags in the
+    // remote lf arguments become preferences over its merged local/forwarded
+    // catalog through LF_ACCOUNT_SELECTION.
+    let mut preferred_accounts = cli.account.clone();
+    let mut restricted_accounts = cli.only_account.clone();
+    if let Some(Commands::Ssh {
+        origin_account,
+        origin_only_account,
+        ..
+    }) = &cli.command
+    {
+        preferred_accounts.extend(origin_account.iter().cloned());
+        restricted_accounts.extend(origin_only_account.iter().cloned());
+    }
     let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
-        &cli.account,
-        &cli.only_account,
+        &preferred_accounts,
+        &restricted_accounts,
     )?;
     loopflow::provider_account::lease::validate_account_selection(&account_selection)?;
+    let inherited_account_lease = loopflow::provider_account::lease::account_lease_active();
+    let _forwarded_account_selection = if inherited_account_lease && !account_selection.is_default()
+    {
+        Some(EnvGuard::set(
+            loopflow::provider_account::lease::ACCOUNT_SELECTION_ENV,
+            account_selection.env_value()?,
+        ))
+    } else {
+        None
+    };
     if cli.account_lease_probe {
         return loopflow::provider_account::lease::probe_forwarded_authority()
             .map_err(anyhow::Error::from);
@@ -1154,30 +1224,15 @@ fn main() -> anyhow::Result<()> {
     // expectation and falls through.
     loopflow::lf::commands::home::validate_expected_home_process()?;
 
-    // Route repo/PR/release/PM commands to the Wave's execution home before local
-    // dispatch. A remote (SSH) home forwards over `lf ssh`; a local or absent home
-    // falls through and runs in-process exactly as before.
-    if let Some(command) = &cli.command {
-        if let Some(routed) = loopflow::lf::commands::home::route(
-            command,
-            cli.wave.as_deref(),
-            &account_selection,
-            &args,
-        ) {
-            return routed;
-        }
-    }
-
-    // SSH and remote-Home commands build and forward their broker in the
-    // transport path. Every local command with a selection gets an in-process
-    // broker here, after early install and Home routing have had their chance
-    // to dispatch without opening the ordinary account store.
+    // SSH commands build and forward their broker in the transport path. Every
+    // local command with a selection gets an in-process broker here.
     let is_ssh = matches!(cli.command, Some(loopflow::lf::Commands::Ssh { .. }));
-    let _local_account_lease = if is_ssh || account_selection.is_default() {
-        None
-    } else {
-        build_local_account_lease(&account_selection)?
-    };
+    let _local_account_lease =
+        if is_ssh || inherited_account_lease || account_selection.is_default() {
+            None
+        } else {
+            build_local_account_lease(&account_selection)?
+        };
 
     let result = if cli.list {
         in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
@@ -1435,16 +1490,16 @@ fn main() -> anyhow::Result<()> {
                 repo,
                 secret,
                 forward_agent,
-                remote_native,
-                cmd,
+                origin_account: _,
+                origin_only_account: _,
+                lf_args,
             }) => loopflow::lf::commands::ssh::run(
                 target,
                 repo.as_deref(),
                 secret,
                 *forward_agent,
-                *remote_native,
                 &account_selection,
-                cmd,
+                lf_args,
             ),
             Some(Commands::Flow { name, args: rest }) => {
                 require_target_kind(name, TargetKind::Flow)?;
@@ -1477,7 +1532,7 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{arg_tables, format_task_pr_line, reorder_args};
+    use super::{arg_tables, format_task_pr_line, normalize_ssh_args, reorder_args};
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PmCommand, PmTaskCommand, PrCommand};
@@ -1699,19 +1754,13 @@ mod tests {
             "lf",
             "ssh",
             "home_00000000000000000000000000000001",
-            "--remote-native",
-            "--",
-            "lf",
             "start",
             "product",
         ])
         .unwrap();
         assert!(matches!(
             ssh.command,
-            Some(Commands::Ssh {
-                remote_native: true,
-                ..
-            })
+            Some(Commands::Ssh { lf_args, .. }) if lf_args == ["start", "product"]
         ));
     }
 
@@ -1898,6 +1947,65 @@ mod tests {
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
         assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
+    }
+
+    #[test]
+    fn reorder_args_preserves_the_ssh_target_boundary() {
+        let args = vec![
+            "lf".to_string(),
+            "ssh".to_string(),
+            "build-vm".to_string(),
+            "--account".to_string(),
+            "remote@company".to_string(),
+            "task".to_string(),
+            "pursue".to_string(),
+        ];
+
+        assert_eq!(reorder_args(args.clone()), args);
+    }
+
+    #[test]
+    fn normalize_ssh_args_makes_the_target_a_hard_boundary() {
+        let args = [
+            "lf",
+            "ssh",
+            "--account",
+            "origin@example.com",
+            "build-vm",
+            "--account",
+            "remote@example.com",
+            "task",
+            "pursue",
+        ]
+        .map(str::to_string)
+        .to_vec();
+
+        let normalized = normalize_ssh_args(args);
+        assert_eq!(
+            normalized,
+            [
+                "lf",
+                "ssh",
+                "--account",
+                "origin@example.com",
+                "build-vm",
+                "--",
+                "--account",
+                "remote@example.com",
+                "task",
+                "pursue",
+            ]
+        );
+        let cli = Cli::try_parse_from(normalized).expect("parse normalized SSH command");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Ssh {
+                origin_account,
+                lf_args,
+                ..
+            }) if origin_account == ["origin@example.com"]
+                && lf_args == ["--account", "remote@example.com", "task", "pursue"]
+        ));
     }
 
     #[test]

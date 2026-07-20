@@ -44,7 +44,7 @@ CLI:
 
 ```bash
 # author wave/engbot/GOAL.md, then:
-lf start engbot           # idempotently start the Wave on its placed Home
+lf start engbot           # idempotently start the Wave on this machine
 lf chat --steer "ship the parser fix first"
 lf status engbot          # its live Project → Task hierarchy
 lf stop engbot
@@ -153,4 +153,4 @@ long form.
 
 ## Reference
 
-[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)
+[`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Architecture](architecture.md) · [Troubleshooting](troubleshooting.md)

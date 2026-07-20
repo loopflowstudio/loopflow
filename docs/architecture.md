@@ -134,14 +134,23 @@ for the existing opaque interactive surface until Demo owns that protocol.
 ```text
 App / CLI -> shared local SQLite, Linear, GitHub
 
-lf start -> Home resident -> Wave listener -> Wave resident
+lf start (machine-local) -> Home resident -> Wave listener -> Wave resident
 parent or CLI -> reserve Run -> __work project -> Project runner -> Task Runs
 parent or CLI -> reserve Run -> __work task -> Task runner -> worktree -> PRs
 ```
 
-Each Wave names one durable Home authority. The Home's SSH route may change
-without moving the Work. `lf start` routes to the placed Home; `lf wave` keeps a
-foreground development path.
+Each Wave records one Home placement. Optional `owner` and `home` fields in its
+goal control automatic startup; they are policy, not authorization. Ordinary
+commands run on the current machine: named `lf start <wave>` records the local
+Home and starts it, while bare `lf start` starts only policy-matching, locally
+placed Waves. Crossing machines is explicit through `lf ssh <HomeId> ...`, and
+the target proves its stable Home identity before acting. Hostnames and SSH
+routes may change without moving the Work. `lf wave` keeps a foreground
+development path.
+
+At startup, `lfd` ensures the machine-local Home resident. The resident starts
+every eligible Wave known to the local store across repositories and owns the
+per-Wave listener children; `lfd` is not a remote control API.
 
 Current truth is split deliberately:
 
@@ -151,6 +160,7 @@ Current truth is split deliberately:
 | Repository | Wave goals and `MEMORY.md`; Task worktrees and authored changes |
 | Linear | shared Wave/Project/Task planning truth |
 | GitHub | branches, pull requests, checks, and merges |
+| SSH | explicit foreground reach to another Home |
 | Wave journal | Wave conversation and resident loop events |
 
 ## Public projections

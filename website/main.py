@@ -184,6 +184,7 @@ DOCS_NAV = [
     # Reference
     ("lf", "lf"),
     ("Config", "config"),
+    ("Subscriptions", "subscriptions"),
     ("Security", "security"),
     ("Troubleshooting", "troubleshooting"),
 ]
@@ -198,8 +199,9 @@ DOC_DESCRIPTIONS = {
     "conducting": "Monitoring and steering many agents; the Mac podium",
     "architecture": "No server: the store, the journal, Homes, lf ssh, lfd",
     "lf": "Every command, PR/planning/release operations, the builtin catalog",
-    "config": "Config files, context assembly, models, accounts and profiles",
-    "security": "Execution boundaries, permissions, credentials, and account authority",
+    "config": "Config files, context assembly, models, and launch behavior",
+    "subscriptions": "Claude and Codex identities, routes, health, and remote selection",
+    "security": "Execution boundaries, permissions, and credential trust boundaries",
     "troubleshooting": "Exact failure → cause → fix",
 }
 

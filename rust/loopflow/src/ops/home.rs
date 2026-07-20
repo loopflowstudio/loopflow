@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::durable::Home;
 use crate::engine::wave_home::{resolve_home_relative_repo, HomeRoute, HomeRuntimeDto, HomeState};
-use crate::lf::commands::ssh::{capture_remote_native, SshCaptureError};
+use crate::lf::commands::ssh::{capture_home_command, SshCaptureError};
 use crate::wave::server::live_endpoint;
 
 pub async fn probe_home(wave: &str, home: &Home, repo: &Path) -> HomeRuntimeDto {
@@ -53,7 +53,7 @@ async fn probe_remote(wave: &str, home: &Home, _route: &HomeRoute, repo: &Path) 
         "--json".to_string(),
     ];
     let captured =
-        tokio::task::spawn_blocking(move || capture_remote_native(&home_id, &remote_repo, &cmd))
+        tokio::task::spawn_blocking(move || capture_home_command(&home_id, &remote_repo, &cmd))
             .await;
     match captured {
         Ok(Ok(stdout)) => classify_remote_status(home, &stdout),

@@ -386,93 +386,18 @@ summaries:
 
 ### Accounts and Profiles
 
-Connect providers once, then route each repository through managed accounts:
+Account state and repository routes are managed through CLI commands rather
+than `config.yaml`:
 
 ```bash
-lf auth status                   # GitHub / Claude / Codex / OpenCode Zen / Linear
-lf auth github                   # connect a provider in your browser
-lf auth opencode                 # connect OpenCode Zen in your browser
-lf auth configure opencode       # store OPENCODE_API_KEY from the environment
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf auth accounts claude          # cached account state; no network request
-lf auth accounts --verify        # compare cached state with every provider now
-
-lf profile create --chrome-profile primary@example.com --as primary
-lf auth access set claude primary@ --profile primary
 lf route set claude primary@ engineering@
-lf route show
+lf --account primary@ implement
 ```
 
-Each provider login keeps independent auth and session state under
-`~/.lf/accounts/`. Commands identify a login by its full email or an unambiguous
-email prefix; path-safe internal IDs remain private storage keys. Access profiles
-record the Chrome venues that can authenticate a login, and repository routes
-record the ordered logins a provider may use. A provider child stays pinned to
-its selected login for its lifetime. Shared logins are tried once and share one
-cooldown. Profiles, bindings, and repo routes live in the local database —
-Loopflow sends no account topology to a central service.
-
-Managed Claude and Codex launches use the repository route, then the default
-route. Without either route, every automatic managed login is eligible.
-Missing, disabled, cooling, and limited logins are skipped. With no managed
-login, the provider CLI uses its ambient default credentials.
-
-An active usage window at 95% or above demotes that login behind accounts below
-the threshold. Declared route order decides ties.
-
-OpenCode Zen uses one provider credential rather than the managed subscription
-account route. Its stored credential applies to local headless and terminal
-OpenCode launches and foreground SSH; subscription polling and the 95% demotion
-threshold do not apply.
-
-`auth connect <provider> <email-prefix> --chrome-profile` opens the selected
-Chrome directory and binds the verified login. Codex
-verifies the login email from its ID token; Claude uses the selected Chrome
-profile email. `auth import` adopts an existing isolated credential — or the
-current macOS Keychain login when the account home is empty — without another
-OAuth flow.
-
-`auth accounts --verify` labels cached and live state separately. A revoked
-credential is recorded as missing and prints the exact `lf auth connect`
-recovery command; agent routes skip it and continue through the next healthy
-account.
-
-Routing controls per account:
-
-```bash
-lf auth set claude <email-prefix> --paid-through 2026-08-14
-lf auth set claude <email-prefix> --routing explicit-only
-lf auth reset claude <email-prefix>
-lf auth disconnect claude --email <email-prefix>
-```
-
-Once `paid-through` passes, automatic routing treats the account as
-`explicit-only` until cleared.
-
-Prefer accounts for one invocation, or restrict the process tree to exactly the
-selected accounts:
-
-```bash
-lf -m codex --account eng@example.com : "fix the tests"
-lf --account claude=jack@ --account codex=loopflow-eng@ implement
-lf --only-account codex=manabot-eng@ review
-```
-
-`--account` keeps the normal provider route as fallback; `--only-account`
-removes every unselected account and provider. Both accept repeatable
-`claude=<selector>` and `codex=<selector>` forms.
-
-`lf ssh <host> -- <cmd>` resolves the selected route locally and forwards an
-opaque handle to a foreground credential broker. It writes no managed provider
-credential files on the remote host. Detached remote sessions are rejected —
-their lease would vanish when SSH exits — so authenticate on the remote host
-for long-running work.
-
-`lf ssh <HomeId> -- <cmd>` resolves the Home's current SSH route from the
-durable store and makes the target prove that identity. Add `--remote-native`
-to forward no provider, GitHub, PM, or secret authority. Use that mode for Home
-lifecycle commands that rely on credentials installed on the remote machine
-and outlive the SSH process.
+See [Subscription Management](/docs/subscriptions) for identity storage,
+access profiles, routing, health, selectors, and remote development. See
+[Security](/docs/security) for credential forwarding and trust boundaries.
 
 ### External Skills
 

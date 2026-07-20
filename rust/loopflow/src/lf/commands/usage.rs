@@ -64,9 +64,7 @@ struct AccountStatus {
 /// again when the poll fails. A revoked credential is reported as the fix
 /// (`lf auth connect`), never a blank row.
 async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStatus>> {
-    if crate::provider_account::lease::account_lease_active() {
-        anyhow::bail!("subscription usage is unavailable while account authority is fixed by an outer invocation");
-    }
+    let forwarded_client = crate::provider_account::lease::AccountLeaseClient::from_env()?;
     let store = open_account_store().await?;
     let accounts: Vec<ProviderAccount> = store
         .list_provider_accounts(None)
@@ -99,7 +97,11 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
         let stored_windows = windows_for(&stored, account);
         let mut status = AccountStatus {
             provider: account.provider.clone(),
-            label: account_label(account),
+            label: if forwarded_client.is_some() {
+                format!("{} (local)", account_label(account))
+            } else {
+                account_label(account)
+            },
             plan: None,
             windows: stored_windows
                 .iter()
@@ -155,6 +157,36 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
             });
         }
         statuses.push(status);
+    }
+    if let Some(client) = forwarded_client {
+        for grant in client.describe()?.grants {
+            for account_id in grant.accounts {
+                let facts = client.account_facts(grant.provider, &account_id)?;
+                let Some(account) = facts.account else {
+                    continue;
+                };
+                let observed_at = facts.limits.iter().map(|row| row.observed_at).max();
+                statuses.push(AccountStatus {
+                    provider: account.provider.clone(),
+                    label: format!("{} (forwarded)", account_label(&account)),
+                    plan: facts.limits.iter().find_map(|row| row.plan.clone()),
+                    windows: facts
+                        .limits
+                        .into_iter()
+                        .map(|row| AccountLimitWindow {
+                            window: row.window,
+                            used_percent: row.used_percent,
+                            resets_at: row.resets_at,
+                            plan: row.plan,
+                        })
+                        .collect(),
+                    observed_at,
+                    note: (refresh && !cached)
+                        .then(|| "forwarded · refresh on origin".to_string())
+                        .or_else(|| Some("forwarded · cached".to_string())),
+                });
+            }
+        }
     }
     Ok(statuses)
 }

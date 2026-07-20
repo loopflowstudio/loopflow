@@ -64,19 +64,14 @@ pub fn run(cmd: &AuthCommand) -> Result<()> {
 }
 
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return match cmd {
-            AuthCommand::Status { provider }
-            | AuthCommand::Accounts {
-                provider,
-                verify: false,
-            } => {
-                forwarded_accounts(provider.as_deref())
-            }
-            _ => Err(anyhow!(
-                "provider account authentication and account edits are unavailable while account authority is fixed by an outer invocation"
-            )),
+    if crate::provider_account::lease::account_lease_active()
+        && matches!(cmd, AuthCommand::Accounts { verify: false, .. })
+    {
+        let AuthCommand::Accounts { provider, .. } = cmd else {
+            unreachable!("the guarded command is accounts")
         };
+        accounts(provider.as_deref(), false).await?;
+        return forwarded_accounts(provider.as_deref());
     }
     match cmd {
         AuthCommand::Status { provider } => status(provider.as_deref()).await,
@@ -1014,11 +1009,18 @@ async fn accounts(raw_provider: Option<&str>, verify: bool) -> Result<()> {
         .filter(|account| account.home.is_some())
         .collect();
     if accounts.is_empty() {
-        println!("No managed OAuth accounts");
+        if !crate::provider_account::lease::account_lease_active() {
+            println!("No managed OAuth accounts");
+        }
         return Ok(());
     }
     for mut account in accounts {
-        println!("{}", format_account(&account));
+        let provenance = if crate::provider_account::lease::account_lease_active() {
+            "  local"
+        } else {
+            ""
+        };
+        println!("{}{provenance}", format_account(&account));
         let cached = account.credential_state.as_str();
         if verify {
             match crate::subscription::poll_account(&account).await {

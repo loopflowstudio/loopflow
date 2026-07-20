@@ -16,11 +16,6 @@ use crate::repository::RepoId;
 use crate::store::{ProviderAccount, SharedStore};
 
 pub fn run(cmd: &ProfileCommand, _repo_root: &Path) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return Err(anyhow!(
-            "access-profile inspection and edits are unavailable while account authority is fixed by an outer invocation"
-        ));
-    }
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     runtime.block_on(run_async(cmd))
 }
@@ -43,14 +38,6 @@ async fn run_async(cmd: &ProfileCommand) -> Result<()> {
 }
 
 async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return match cmd {
-            RouteCommand::Show { .. } => show_forwarded_routes(),
-            _ => Err(anyhow!(
-                "provider route edits are unavailable while account authority is fixed by an outer invocation"
-            )),
-        };
-    }
     let store = open_account_store().await?;
     match cmd {
         RouteCommand::Set {
@@ -66,7 +53,13 @@ async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
                 set_route(&store, RouteScope::Default, provider, accounts).await
             }
         },
-        RouteCommand::Show { repo } => show_routes(&store, repo_root, repo.as_deref()).await,
+        RouteCommand::Show { repo } => {
+            show_routes(&store, repo_root, repo.as_deref()).await?;
+            if crate::provider_account::lease::account_lease_active() {
+                show_forwarded_routes()?;
+            }
+            Ok(())
+        }
     }
 }
 

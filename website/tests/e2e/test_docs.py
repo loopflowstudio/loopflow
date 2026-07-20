@@ -10,6 +10,7 @@ NAV_SLUGS = [
     "architecture",
     "lf",
     "config",
+    "subscriptions",
     "security",
     "troubleshooting",
 ]
@@ -51,12 +52,24 @@ def test_docs_security_page_states_forwarded_authority_guarantees(
     content = page.locator(".docs-content")
     assert content.is_visible()
     text = content.inner_text()
-    assert "--only-account" in text
     assert "Only the first is general containment" in text
     assert "workspace-write" in text
     assert "fail closed" in text
     assert "Doppler master credential never" in text
-    assert "second SSH hop" in text
+    assert "second SSH" in text
+
+
+def test_docs_subscriptions_page_owns_account_selection(
+    page: Page, base_url: str
+):
+    page.goto(f"{base_url}/docs/subscriptions")
+    content = page.locator(".docs-content")
+    assert content.is_visible()
+    text = content.inner_text()
+    assert "--only-account" in text
+    assert "repository account route" in text
+    assert "target-side --account" in text
+    assert "local or forwarded provenance" in text
 
 
 def test_docs_nonexistent_redirects(page: Page, base_url: str):

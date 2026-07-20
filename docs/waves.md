@@ -17,7 +17,7 @@ start it beside its conversation and work map. The same controls exist from
 the CLI:
 
 ```bash
-lf start shipper                       # idempotently start the Wave on its Home
+lf start shipper                       # explicitly start the Wave on this machine
 lf chat --steer "invoices first"       # steer the live body, else queue
 lf status shipper                      # its Project → Task hierarchy
 lf stop shipper                        # stop this Wave; sibling Waves keep running
@@ -56,6 +56,11 @@ Product wave
 the prompt the wave runs each loop.
 
 ```markdown
+---
+owner: jack
+home: build-vm.example.com
+---
+
 ## Objective
 
 Keep the runtime architecture legible. Each loop: read Linear tasks and
@@ -73,6 +78,11 @@ memory.
 Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
+
+`owner` and `home` are independent, optional automatic-start filters. `owner`
+names the OS user that should run the Wave. `home` accepts this machine's
+HomeId, hostname, or IP address. Omit either field to leave that dimension
+unrestricted. An explicit `lf start <name>` still starts that Wave here.
 
 Builtin goals resolve by name, so the five Viable System Model charters ship
 as `s1`…`s5`:
@@ -103,20 +113,24 @@ don't drop.
 
 ### Home
 
-A **Home** is stable execution authority. Work stores a `HomeId`; the Home
-stores its currently observed route. Changing a hostname or SSH route does not
-change Work placement.
+A **Home** is a stable machine identity. Work records the Home where it runs;
+the Home records its currently observed route. Changing a hostname or SSH route
+does not change that location record, and the record never opens SSH by itself.
 
 ```bash
 lf home id                    # this machine's stable HomeId
 lf ls --json                  # Wave ids and their current Homes
-lf start shipper              # start one Wave on its placed Home
-lf start                      # start every Wave in the current repo
-lf stop shipper               # stop only this Wave
+lf start shipper              # start one Wave on this machine
+lf start                      # start eligible repo Waves on this machine
+lf stop shipper               # stop this machine's Wave
 ```
 
-New Project or Task Work inherits its parent's placement once. Move Wave Work
-only while it has no live Run:
+With a name, `lf start` is an explicit instruction: it records this machine as
+the Wave's Home and starts it. Without names, it starts only Waves whose
+optional `owner` and `home` policy matches this process and whose recorded
+placement is already local. New Project or Task Work inherits its parent's
+recorded Home once. Record a different Home only while the Wave has no live
+Run:
 
 ```bash
 lf work place wave <wave-id> <home-id>
@@ -126,32 +140,40 @@ Project and Task movement stays closed while their Runs remain the
 executor. The shared Run supervisor will open that placement boundary without
 another Work-to-Run routing bridge.
 
-One keeper process per Home serves all placed Waves. Starting or stopping one
-Wave does not create or kill a machine-wide controller and does not disturb
-sibling Waves.
+One keeper process per Home serves all placed Waves. When it starts, it starts
+every eligible Wave known to the local store, across repositories. `lfd`
+ensures that keeper after login or reboot. Starting or stopping one Wave does
+not kill the keeper or disturb sibling Waves.
+
+`home: localhost`, `home: 127.0.0.1`, and `home: ::1` always match the current
+machine. Loopflow also matches its stable HomeId, hostname and short hostname,
+and local interface addresses, including a directly assigned public address.
+An `lf ssh <host> ...` invocation additionally treats the SSH destination as
+this machine for that foreground command. Prefer the HomeId for machines behind
+NAT or with changing public addresses.
 
 Register a remote Home by asking that machine for its own identity, then record
-the route locally and place Work on it:
+the route locally and start the Wave there:
 
 ```bash
-lf ssh jack@mini.local --remote-native -- lf home id --json
+lf ssh jack@mini.local home id --json
 lf home observe <home-id> ssh://jack@mini.local
-lf work place wave <wave-id> <home-id>
-lf start shipper
+lf work place wave <wave-id> <home-id>    # record origin-side planning state
+lf ssh <home-id> start shipper
 ```
 
 After bootstrap, address the authority rather than its current hostname. Every
 HomeId-addressed hop makes the target prove its identity:
 
 ```bash
-lf ssh <home-id> --remote-native -- lf status shipper --json
+lf ssh <home-id> status shipper --json
 lf home probe shipper
 ```
 
-`--remote-native` forwards no provider, GitHub, PM, or secret authority. The
-remote Home uses credentials installed there, which lets its resident outlive
-the SSH process. Foreground one-shot work can continue to use ordinary
-credential-forwarding `lf ssh`.
+`lf start shipper` starts here; `lf ssh <home-id> start shipper` starts there.
+Foreground SSH work can use origin and target subscription accounts. Durable
+residents shed forwarded authority before detaching and use credentials
+installed on their machine.
 
 See [Architecture → Decentralized Home](architecture.md#decentralized-home).
 

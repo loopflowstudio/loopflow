@@ -120,21 +120,25 @@ overlay, not a second runtime model.
 
 ## Place And Run
 
-Execution placement is durable state, not authored goal text. A Work names one
-stable Home authority; the Home's SSH route may change without moving the Work.
+Execution placement is durable state. Optional `owner` and `home` fields in a
+Wave's `GOAL.md` only filter automatic startup; they do not replace placement.
+A Work names one stable Home authority, whose SSH route may change without
+moving the Work.
 
 ```bash
 lf home id                                      # this machine's HomeId
 lf work place wave <wave-id> <home-id>          # only while no Run is live
-lf start <wave>                                 # route to its placed Home
-lf stop <wave>                                  # leave the Home keeper and siblings running
-lf ssh <home-id> --remote-native -- lf status <wave> --json
+lf start <wave>                                 # start it on this machine
+lf stop <wave>                                  # stop it on this machine
+lf ssh <home-id> status <wave> --json           # inspect it on that Home
+lf ssh <home-id> start <wave>                   # start it on that Home
 ```
 
-Use `--remote-native` for durable remote lifecycle. It forwards no provider,
-GitHub, PM, or secret authority; the remote Home uses its installed authority.
-Use ordinary `lf ssh <host> -- <command>` only for foreground work that should
-borrow the origin's short-lived credential lease.
+`lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
+are implicit. Foreground commands can choose from origin-forwarded and
+target-local subscription accounts. Durable processes scrub forwarded provider,
+GitHub, PM, and secret authority before detaching and use credentials installed
+on their machine.
 
 ## Speak
 

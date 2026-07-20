@@ -114,7 +114,28 @@ The base system is single-machine:
 Home-aware commands compose those primitives. A future `lf home start shipper`
 can read placement, resolve the Home's SSH route, verify its `HomeId`, and invoke
 the remote machine's ordinary `lf start shipper`. The Home layer does not alter
-the semantics of `start` itself.
+the semantics of `start` itself. Placement is readable location state and a
+local consistency check, never an instruction for an ordinary command to open
+SSH. `lf work place` records a remote plan; explicit `lf ssh <HomeId> start`
+executes it.
+
+Automatic startup is authored with two independent optional fields in
+`wave/<name>/GOAL.md`: `owner` names the OS user and `home` names a HomeId,
+hostname, or address. Bare `lf start` and the Home resident filter on both and
+on recorded local placement. Named `lf start <wave>` remains the explicit local
+override. `lfd` ensures the resident, which starts all eligible Waves known to
+the machine across repositories.
+
+## Resolved selection rules
+
+- Target-side preferences precede origin-side preferences, the target route,
+  the forwarded origin route, and remaining eligible accounts.
+- An outer `--only-account` bounds the whole remote process to the selected
+  origin identities. The target may narrow that grant but cannot widen it.
+- When the same login exists locally and through the broker, target-local wins
+  unless an origin-side preference explicitly selects the forwarded source.
+- Invocation selectors are foreground state. Durable account choice comes from
+  repository routes stored on the machine running the resident.
 
 ## Required failures
 

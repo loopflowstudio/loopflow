@@ -141,6 +141,9 @@ pub struct ReleaseTargetConfig {
     pub prepare: Vec<String>,
     #[serde(default)]
     pub completion: Option<ReleaseCompletion>,
+    /// Repo-owned publisher command. Loopflow appends `check` or `publish` args.
+    #[serde(default)]
+    pub publisher: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -726,6 +729,12 @@ release:
       prepare:
         - scripts/prepare-release {version}
       completion: github-release
+      publisher:
+        - doppler
+        - run
+        - --
+        - python
+        - scripts/publish.py
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         let target = config.release.targets.get("cli").expect("cli target");
@@ -739,6 +748,10 @@ release:
         assert_eq!(target.verify, vec!["scripts/check-release"]);
         assert_eq!(target.prepare, vec!["scripts/prepare-release {version}"]);
         assert_eq!(target.completion, Some(ReleaseCompletion::GithubRelease));
+        assert_eq!(
+            target.publisher,
+            vec!["doppler", "run", "--", "python", "scripts/publish.py"]
+        );
     }
 
     // ==========================================================================

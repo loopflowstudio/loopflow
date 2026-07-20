@@ -7,12 +7,13 @@ from pathlib import Path
 
 import yaml
 from fasthtml.common import *
-from starlette.responses import PlainTextResponse, RedirectResponse
+from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
 from internal_pages import colors_page, design_page, fonts_page
 
 BASE_URL = "https://loopflow.studio"
+RELEASE_TAG = os.environ.get("LOOPFLOW_RELEASE_TAG", "development")
 
 app, rt = fast_app(
     htmlkw={"lang": "en"},
@@ -870,10 +871,15 @@ def _sitemap_handler(request):
     return PlainTextResponse(SITEMAP_XML_CONTENT, media_type="application/xml")
 
 
+def _healthz_handler(request):
+    return JSONResponse({"status": "ok", "release": RELEASE_TAG})
+
+
 # Insert machine-readable routes at the beginning to avoid the static handler
 app.routes.insert(0, Route("/llms.txt", _llms_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms-full.txt", _llms_full_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/sitemap.xml", _sitemap_handler, methods=["GET"]))
+app.routes.insert(0, Route("/healthz", _healthz_handler, methods=["GET"]))
 
 
 @rt("/favicon.ico")

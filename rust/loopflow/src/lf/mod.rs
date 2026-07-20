@@ -1725,6 +1725,20 @@ pub enum ReleaseCommand {
         #[arg(short = 't', long = "target")]
         target: Option<String>,
     },
+    /// Stage or publish a GitHub Release
+    Publish {
+        /// Release tag (for example v0.12.4)
+        tag: String,
+        /// Release notes used while creating or updating the draft
+        #[arg(long)]
+        notes: Option<PathBuf>,
+        /// Asset to upload; repeat for multiple files
+        #[arg(long = "asset")]
+        assets: Vec<PathBuf>,
+        /// Publish the existing draft and mark it latest
+        #[arg(long)]
+        finalize: bool,
+    },
     /// Check release workflow status
     Status {
         #[arg(short = 't', long = "target")]

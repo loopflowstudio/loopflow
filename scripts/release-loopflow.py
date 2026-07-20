@@ -137,21 +137,24 @@ def _notarize_dmg(dmg_path: Path) -> int:
 
 
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
-    cargo_cmd = ["cargo", "build", "--release", "--bin", "lf"]
-    bin_dir = REPO_ROOT / "target" / "release"
-
-    result = run(
-        cargo_cmd,
-        cwd=REPO_ROOT,
-        check=False,
-        timeout=20 * 60,
-        env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
-    )
-    if result.returncode != 0:
-        raise RuntimeError("Failed to build bundled lf binary")
+    release_binary = os.environ.get("LF_RELEASE_BINARY")
+    if release_binary:
+        bin_dir = Path(release_binary).parent
+    else:
+        cargo_cmd = ["cargo", "build", "--release", "--bin", "lf"]
+        bin_dir = REPO_ROOT / "target" / "release"
+        result = run(
+            cargo_cmd,
+            cwd=REPO_ROOT,
+            check=False,
+            timeout=20 * 60,
+            env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Failed to build bundled lf binary")
 
     for binary in ("lf",):
-        source = bin_dir / binary
+        source = Path(release_binary) if release_binary else bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")
         shutil.copy(source, app_macos_dir / binary)

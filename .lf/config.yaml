@@ -12,13 +12,21 @@ linear:
 
 release:
   targets:
-    loopflow:
+    default:
       workflow: .github/workflows/release.yml
       verify:
         - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
       prepare:
         - uv run python scripts/canonicalize_migrations.py {version} --release-cut
       completion: github-release
+      publisher:
+        - doppler
+        - run
+        - --
+        - uv
+        - run
+        - python
+        - scripts/publish_release.py
 
 internal:
   use_rust: true

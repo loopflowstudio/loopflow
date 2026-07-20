@@ -23,9 +23,9 @@ use crate::ops::{
     abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
     create_or_update_pr, current_pr, finish_land_after_rebase, finish_submit_after_rebase, land,
     plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
-    release_bump, release_check, release_notes, release_run, release_status, release_tag,
-    start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec, LandOptions,
-    PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    release_bump, release_check, release_notes, release_publish, release_run, release_status,
+    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
+    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -136,6 +136,24 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
             release_bump_cmd(version, target.as_deref(), &progress)
         }
         ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
+        ReleaseCommand::Publish {
+            tag,
+            notes,
+            assets,
+            finalize,
+        } => {
+            let repo_root = find_repo_root()?;
+            release_publish(&repo_root, tag, notes.as_deref(), assets, *finalize)?;
+            println!(
+                "GitHub Release {tag}: {}",
+                if *finalize {
+                    "published"
+                } else {
+                    "draft staged"
+                }
+            );
+            Ok(())
+        }
         ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
     }
 }
@@ -1222,17 +1240,31 @@ fn release_run_cmd(
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let input = version_input.unwrap_or("patch");
-    let result = release_run(&repo_root, input, target_name, progress)?;
+    match release_run(&repo_root, input, target_name, progress)? {
+        crate::ops::ReleaseRunOutcome::NoChanges { target, latest_tag } => {
+            let latest = latest_tag.as_deref().unwrap_or("(none)");
+            println!("No release ({target}): no merged PRs since {latest}");
+        }
+        crate::ops::ReleaseRunOutcome::Released(receipt) => {
+            print_release_receipt("Released", &receipt);
+        }
+        crate::ops::ReleaseRunOutcome::Resumed(receipt) => {
+            print_release_receipt("Resumed", &receipt);
+        }
+    }
+    Ok(())
+}
 
-    println!("Released {} ({})", result.tag, result.target);
-    if let Some(url) = result.workflow_url.as_deref() {
+fn print_release_receipt(action: &str, receipt: &crate::ops::ReleaseReceipt) {
+    println!("{action} {} ({})", receipt.tag, receipt.target);
+    println!("Commit: {}", receipt.commit);
+    if let Some(url) = receipt.workflow_url.as_deref() {
         println!("Workflow URL: {url}");
     }
     println!(
         "GitHub Release: {}",
-        if result.release_exists { "yes" } else { "no" }
+        if receipt.release_exists { "yes" } else { "no" }
     );
-    Ok(())
 }
 
 fn release_notes_cmd(

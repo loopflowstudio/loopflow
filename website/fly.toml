@@ -19,7 +19,7 @@ primary_region = "sjc"
     timeout = "5s"
     grace_period = "10s"
     method = "GET"
-    path = "/"
+    path = "/healthz"
 
 [[vm]]
   size = "shared-cpu-1x"

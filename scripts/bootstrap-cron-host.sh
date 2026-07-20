@@ -20,15 +20,19 @@ step() { printf '\n== %s ==\n' "$1"; }
 
 step "reachability + auth ($host)"
 # Bounded lf ssh: an unreachable host fails in ~10s instead of hanging.
-lf ssh "$host" -- lf --version
+lf ssh "$host" --remote-native -- lf --version
 
 step "host prerequisites"
-lf ssh "$host" -- doppler --version
+lf ssh "$host" --remote-native -- doppler --version
+
+step "release publisher preflight"
+lf ssh "$host" --remote-native -- \
+  doppler run -- uv run python scripts/publish_release.py check
 
 step "sync repo-owned schedules (wave: $wave)"
-lf ssh "$host" -- lf cron sync --wave "$wave"
+lf ssh "$host" --remote-native -- lf cron sync --wave "$wave"
 
 step "installed schedules"
-lf ssh "$host" -- lf cron list
+lf ssh "$host" --remote-native -- lf cron list
 
 printf '\nbootstrap complete: %s runs wave %s schedules via launchd\n' "$host" "$wave"

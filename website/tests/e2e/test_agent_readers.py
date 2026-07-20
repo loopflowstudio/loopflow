@@ -8,6 +8,12 @@ and the machine indexes.
 from playwright.sync_api import Page
 
 
+def test_health_reports_the_exact_release(page: Page, base_url: str):
+    response = page.request.get(f"{base_url}/healthz")
+    assert response.status == 200
+    assert response.json() == {"status": "ok", "release": "development"}
+
+
 def test_doc_md_endpoint(page: Page, base_url: str):
     response = page.request.get(f"{base_url}/docs/waves.md")
     assert response.status == 200

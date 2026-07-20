@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+ARG LOOPFLOW_RELEASE_TAG=development
+ENV LOOPFLOW_RELEASE_TAG=$LOOPFLOW_RELEASE_TAG
+
 WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/

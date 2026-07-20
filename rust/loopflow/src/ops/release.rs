@@ -12,7 +12,7 @@ use crate::engine::command::{run_command, CommandError};
 use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
-use crate::engine::git::{delete_local_branch, get_default_branch, worktree_remove};
+use crate::engine::git::{delete_local_branch, get_default_branch, sync_main, worktree_remove};
 use crate::engine::naming::{git_user, sanitize_for_branch};
 use crate::engine::worktrees::{create_named_worktree, main_repo_root};
 use crate::ops::commit::{commit_workflow, CommitOptions};
@@ -82,6 +82,8 @@ struct GhApiPrFile {
 
 #[derive(Debug, Deserialize, Clone)]
 struct GhRunListEntry {
+    #[serde(rename = "databaseId")]
+    database_id: u64,
     #[serde(default, rename = "headBranch")]
     head_branch: Option<String>,
     #[serde(default, rename = "displayTitle")]
@@ -152,6 +154,7 @@ struct ReleaseTarget {
     verify: Vec<String>,
     prepare: Vec<String>,
     completion: ReleaseCompletion,
+    publisher: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,13 +167,44 @@ pub struct ReleaseStatusResult {
     pub release_exists: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct ReleaseRunResult {
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReleaseReceipt {
     pub target: String,
     pub version: String,
     pub tag: String,
+    pub commit: String,
+    pub workflow_run_id: u64,
     pub workflow_url: Option<String>,
     pub release_exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReleaseRunOutcome {
+    NoChanges {
+        target: String,
+        latest_tag: Option<String>,
+    },
+    Released(ReleaseReceipt),
+    Resumed(ReleaseReceipt),
+}
+
+#[derive(Debug)]
+struct ReleaseWorkflowResult {
+    database_id: u64,
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReleaseView {
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitHubReleaseState {
+    Missing,
+    Draft,
+    Published,
 }
 
 /// Generate release notes and write RELEASE_NOTES.md.
@@ -323,6 +357,99 @@ pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> Ops
     tag_and_push(&main_repo, &version, &target)
 }
 
+/// Stage assets on a draft GitHub Release or publish that draft as latest.
+pub fn release_publish(
+    repo: &Path,
+    tag: &str,
+    notes: Option<&Path>,
+    assets: &[PathBuf],
+    finalize: bool,
+) -> OpsResult<()> {
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".to_string()));
+    }
+    let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+
+    if finalize {
+        if github_release_state(&main_repo, tag)? == GitHubReleaseState::Missing {
+            return Err(OpsError::Message(format!(
+                "cannot publish {tag}: draft GitHub Release does not exist"
+            )));
+        }
+        run_stdout(
+            &main_repo,
+            "gh",
+            &["release", "edit", tag, "--draft=false", "--latest"],
+        )?;
+        return Ok(());
+    }
+
+    let notes = notes.ok_or_else(|| {
+        OpsError::Message("release publish requires --notes before --finalize".to_string())
+    })?;
+    if !notes.is_file() {
+        return Err(OpsError::Message(format!(
+            "release notes not found: {}",
+            notes.display()
+        )));
+    }
+    for asset in assets {
+        if !asset.is_file() {
+            return Err(OpsError::Message(format!(
+                "release asset not found: {}",
+                asset.display()
+            )));
+        }
+    }
+
+    let notes_arg = notes.to_string_lossy().to_string();
+    match github_release_state(&main_repo, tag)? {
+        GitHubReleaseState::Missing => {
+            let mut args = vec![
+                "release".to_string(),
+                "create".to_string(),
+                tag.to_string(),
+                "--draft".to_string(),
+                "--verify-tag".to_string(),
+                "--title".to_string(),
+                tag.to_string(),
+                "--notes-file".to_string(),
+                notes_arg,
+            ];
+            args.extend(
+                assets
+                    .iter()
+                    .map(|asset| asset.to_string_lossy().to_string()),
+            );
+            let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+            run_stdout(&main_repo, "gh", &refs)?;
+        }
+        GitHubReleaseState::Draft | GitHubReleaseState::Published => {
+            run_stdout(
+                &main_repo,
+                "gh",
+                &["release", "edit", tag, "--notes-file", &notes_arg],
+            )?;
+            if !assets.is_empty() {
+                let mut args = vec![
+                    "release".to_string(),
+                    "upload".to_string(),
+                    tag.to_string(),
+                    "--clobber".to_string(),
+                ];
+                args.extend(
+                    assets
+                        .iter()
+                        .map(|asset| asset.to_string_lossy().to_string()),
+                );
+                let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+                run_stdout(&main_repo, "gh", &refs)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Run the full release workflow in one shot.
 ///
 /// Flow:
@@ -331,36 +458,58 @@ pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> Ops
 /// 3) commit, open PR, and enqueue auto-merge
 /// 4) wait for merge queue completion
 /// 5) tag merged commit and push
-/// 6) wait for configured completion evidence
+/// 6) wait for the credential-free release build
+/// 7) run the repo publisher, when configured
 pub fn release_run(
     repo: &Path,
     version_input: &str,
     target_name: Option<&str>,
     progress: &impl Progress,
-) -> OpsResult<ReleaseRunResult> {
+) -> OpsResult<ReleaseRunOutcome> {
     if !command_exists("gh") {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
-    if matches!(version_input.trim(), "patch" | "minor" | "major") {
-        if let Some(tag) = latest_tag_optional(&main_repo, &target)? {
-            if remote_tag_sha(&main_repo, &tag)?.is_some()
-                && !release_completion_satisfied(&main_repo, &tag, &target)?
-            {
-                let version = version_from_tag(&tag, &target)?;
-                progress.status(&format!("Resuming release completion for {tag}..."));
-                let (workflow_url, release_exists) =
-                    wait_for_release_publication(&main_repo, &tag, &target, progress)?;
-                return Ok(ReleaseRunResult {
-                    target: target.name,
-                    version,
-                    tag,
-                    workflow_url,
-                    release_exists,
-                });
+    let default_branch = get_default_branch(&main_repo)?;
+    if !sync_main(&main_repo, &default_branch)? {
+        return Err(OpsError::Message(format!(
+            "could not synchronize {default_branch} with origin before release selection"
+        )));
+    }
+
+    run_publisher_check(&main_repo, &target, progress)?;
+
+    let latest_tag = latest_tag_optional(&main_repo, &target)?;
+    let mut failed_latest_build = None;
+
+    if let Some(tag) = latest_tag.as_deref() {
+        if !target.publisher.is_empty()
+            && github_release_state(&main_repo, tag)? != GitHubReleaseState::Published
+        {
+            let run = find_workflow_run(&main_repo, tag, &target)?.ok_or_else(|| {
+                OpsError::Message(format!(
+                    "latest release {tag} is incomplete and has no hosted build to resume"
+                ))
+            })?;
+            let conclusion = run
+                .conclusion
+                .as_deref()
+                .unwrap_or("unknown")
+                .to_lowercase();
+            if run.status == "completed" && conclusion != "success" {
+                failed_latest_build = Some((conclusion, run.url));
+            } else {
+                progress.status(&format!("Resuming incomplete release {tag}..."));
+                return resume_existing_release(&main_repo, tag, &target, progress);
             }
+        } else if target.publisher.is_empty()
+            && matches!(version_input.trim(), "patch" | "minor" | "major")
+            && !release_completion_satisfied(&main_repo, tag, &target)?
+        {
+            progress.status(&format!("Resuming release completion for {tag}..."));
+            return resume_existing_release(&main_repo, tag, &target, progress);
         }
     }
 
@@ -369,22 +518,29 @@ pub fn release_run(
         let tag = target_tag(&target, &version);
         if remote_tag_sha(&main_repo, &tag)?.is_some() {
             progress.status(&format!("Resuming release completion for {tag}..."));
-            let (workflow_url, release_exists) =
-                wait_for_release_publication(&main_repo, &tag, &target, progress)?;
-            return Ok(ReleaseRunResult {
-                target: target.name,
-                version,
-                tag,
-                workflow_url,
-                release_exists,
-            });
+            return resume_existing_release(&main_repo, &tag, &target, progress);
         }
     }
 
     let changes = collect_release_changes(&main_repo, &target)?;
     if changes.commits.is_empty() {
-        return Err(OpsError::Message(
-            "no commits in the target area since the last tag; nothing to release".to_string(),
+        if let Some((conclusion, url)) = failed_latest_build {
+            let url = url.unwrap_or_else(|| "workflow URL unavailable".to_string());
+            let tag = latest_tag.as_deref().unwrap_or("latest tag");
+            return Err(OpsError::Message(format!(
+                "latest release build failed for {tag}: {conclusion} ({url}); no merged fix is available"
+            )));
+        }
+        return Ok(ReleaseRunOutcome::NoChanges {
+            target: target.name,
+            latest_tag: changes.previous_tag,
+        });
+    }
+
+    if let Some((conclusion, _)) = failed_latest_build.as_ref() {
+        let tag = latest_tag.as_deref().unwrap_or("latest tag");
+        progress.status(&format!(
+            "Advancing past failed {tag} build ({conclusion}) with merged fixes..."
         ));
     }
 
@@ -405,15 +561,7 @@ pub fn release_run(
     let new_tag = target_tag(&target, &version);
     if remote_tag_sha(&main_repo, &new_tag)?.is_some() {
         progress.status(&format!("Resuming release completion for {new_tag}..."));
-        let (workflow_url, release_exists) =
-            wait_for_release_publication(&main_repo, &new_tag, &target, progress)?;
-        return Ok(ReleaseRunResult {
-            target: target.name,
-            version,
-            tag: new_tag,
-            workflow_url,
-            release_exists,
-        });
+        return resume_existing_release(&main_repo, &new_tag, &target, progress);
     }
 
     let wt_name = release_worktree_name(&target, &version);
@@ -465,22 +613,141 @@ pub fn release_run(
     let tag = tag_and_push_ref(&main_repo, &version, &target, Some(&merged_commit))?;
 
     progress.status(&format!("Waiting for release pipeline for {tag}..."));
-    let (workflow_url, release_exists) =
-        wait_for_release_publication(&main_repo, &tag, &target, progress)?;
+    let workflow = wait_for_release_workflow(&main_repo, &tag, &target, progress)?;
+    if !target.publisher.is_empty() {
+        run_publisher(&main_repo, &tag, &target, &workflow, progress)?;
+    }
+    let release_exists = github_release_exists(&main_repo, &tag)?;
 
-    Ok(ReleaseRunResult {
+    Ok(ReleaseRunOutcome::Released(ReleaseReceipt {
         target: target.name,
         version,
         tag,
-        workflow_url,
+        commit: merged_commit,
+        workflow_run_id: workflow.database_id,
+        workflow_url: workflow.url,
         release_exists,
-    })
+    }))
+}
+
+fn resume_existing_release(
+    repo: &Path,
+    tag: &str,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+) -> OpsResult<ReleaseRunOutcome> {
+    let workflow = wait_for_release_workflow(repo, tag, target, progress)?;
+    if !target.publisher.is_empty() {
+        run_publisher(repo, tag, target, &workflow, progress)?;
+    }
+    let commit = local_tag_sha(repo, tag)?
+        .ok_or_else(|| OpsError::Message(format!("release tag {tag} is not present locally")))?;
+
+    Ok(ReleaseRunOutcome::Resumed(ReleaseReceipt {
+        target: target.name.clone(),
+        version: version_from_tag(tag, target)?,
+        tag: tag.to_string(),
+        commit,
+        workflow_run_id: workflow.database_id,
+        workflow_url: workflow.url,
+        release_exists: github_release_exists(repo, tag)?,
+    }))
 }
 
 fn release_worktree_name(target: &ReleaseTarget, version: &str) -> String {
     let target_name = target.name.replace('.', "-");
     let version = version.replace('.', "-");
     format!("release-{target_name}-v{version}")
+}
+
+fn publish_worktree_name(target: &ReleaseTarget, tag: &str) -> String {
+    let target_name = target.name.replace('.', "-");
+    let tag = tag.replace(['/', '.'], "-");
+    format!("publish-{target_name}-{tag}")
+}
+
+fn run_publisher_check(
+    repo: &Path,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let Some((program, args)) = target.publisher.split_first() else {
+        return Ok(());
+    };
+    progress.status("Checking release host...");
+    let mut cmd = Command::new(program);
+    cmd.args(args).arg("check").current_dir(repo);
+    run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+        command: err.command_line(),
+        stderr: err.stderr,
+    })?;
+    Ok(())
+}
+
+fn run_publisher(
+    repo: &Path,
+    tag: &str,
+    target: &ReleaseTarget,
+    workflow: &ReleaseWorkflowResult,
+    progress: &impl Progress,
+) -> OpsResult<()> {
+    let Some((program, args)) = target.publisher.split_first() else {
+        return Ok(());
+    };
+    if workflow.database_id == 0 {
+        return Err(OpsError::Message(format!(
+            "release workflow for {tag} did not expose a run id"
+        )));
+    }
+
+    let artifact_dir = tempfile::tempdir()?;
+    let run_id = workflow.database_id.to_string();
+    progress.status(&format!("Downloading release artifacts for {tag}..."));
+    run_stdout(
+        repo,
+        "gh",
+        &[
+            "run",
+            "download",
+            &run_id,
+            "--dir",
+            artifact_dir.path().to_string_lossy().as_ref(),
+        ],
+    )?;
+
+    let wt_name = publish_worktree_name(target, tag);
+    progress.status(&format!(
+        "Materializing tagged publisher worktree {wt_name}..."
+    ));
+    let wt = create_named_worktree(repo, &wt_name, Some(tag), false)?;
+    let publish_result = {
+        let mut cmd = Command::new(program);
+        cmd.args(args)
+            .arg("publish")
+            .arg("--tag")
+            .arg(tag)
+            .arg("--artifacts")
+            .arg(artifact_dir.path())
+            .env("LF_RELEASE_MAIN_REPO", repo)
+            .env(
+                "LF_RELEASE_WORKFLOW_RUN_ID",
+                workflow.database_id.to_string(),
+            )
+            .current_dir(&wt.path);
+        run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        })
+    };
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, progress);
+    publish_result?;
+
+    if github_release_state(repo, tag)? != GitHubReleaseState::Published {
+        return Err(OpsError::Message(format!(
+            "publisher completed without publishing GitHub Release {tag}"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -817,39 +1084,55 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
     }
 }
 
-fn wait_for_release_publication(
+fn wait_for_release_workflow(
     repo: &Path,
     tag: &str,
     target: &ReleaseTarget,
     progress: &impl Progress,
-) -> OpsResult<(Option<String>, bool)> {
-    if target.completion == ReleaseCompletion::Tag {
-        return Ok((None, github_release_exists(repo, tag)?));
+) -> OpsResult<ReleaseWorkflowResult> {
+    if target.publisher.is_empty() && target.completion == ReleaseCompletion::Tag {
+        return Ok(ReleaseWorkflowResult {
+            database_id: 0,
+            url: None,
+        });
     }
 
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 60);
     let poll = Duration::from_secs(10);
+    let no_workflow_grace = Duration::from_secs(90);
     let mut attempt: u64 = 0;
+    let mut saw_workflow = false;
 
     loop {
         let workflow = find_workflow_run(repo, tag, target)?;
         let release_exists = github_release_exists(repo, tag)?;
-        let workflow_url = workflow.as_ref().and_then(|run| run.url.clone());
 
-        if target.completion == ReleaseCompletion::GithubRelease && release_exists {
-            return Ok((workflow_url, true));
+        if target.publisher.is_empty()
+            && target.completion == ReleaseCompletion::GithubRelease
+            && release_exists
+        {
+            return Ok(ReleaseWorkflowResult {
+                database_id: workflow.as_ref().map_or(0, |run| run.database_id),
+                url: workflow.and_then(|run| run.url),
+            });
         }
 
         if let Some(run) = workflow {
+            saw_workflow = true;
             if run.status == "completed" {
                 let conclusion = run
                     .conclusion
                     .unwrap_or_else(|| "unknown".to_string())
                     .to_lowercase();
                 if conclusion == "success" {
-                    if target.completion == ReleaseCompletion::Workflow {
-                        return Ok((run.url, release_exists));
+                    if !target.publisher.is_empty()
+                        || target.completion == ReleaseCompletion::Workflow
+                    {
+                        return Ok(ReleaseWorkflowResult {
+                            database_id: run.database_id,
+                            url: run.url,
+                        });
                     }
                 } else {
                     let url = run
@@ -860,6 +1143,17 @@ fn wait_for_release_publication(
                     )));
                 }
             }
+        } else if !saw_workflow
+            && target.workflow.is_none()
+            && started.elapsed() >= no_workflow_grace
+        {
+            progress.status(&format!(
+                "No release workflow detected for {tag}; tag push complete"
+            ));
+            return Ok(ReleaseWorkflowResult {
+                database_id: 0,
+                url: None,
+            });
         }
 
         if started.elapsed() >= timeout {
@@ -1011,6 +1305,7 @@ fn build_release_target(name: &str, config: &ReleaseTargetConfig, repo: &Path) -
         verify: config.verify.clone(),
         prepare: config.prepare.clone(),
         completion,
+        publisher: config.publisher.clone(),
     }
 }
 
@@ -1024,6 +1319,7 @@ fn default_release_target(repo: &Path) -> ReleaseTarget {
         verify: Vec::new(),
         prepare: Vec::new(),
         completion: ReleaseCompletion::Tag,
+        publisher: Vec::new(),
     }
 }
 
@@ -1929,7 +2225,7 @@ fn find_workflow_run(
         "run".to_string(),
         "list".to_string(),
         "--json".to_string(),
-        "headBranch,displayTitle,status,conclusion,url".to_string(),
+        "databaseId,headBranch,displayTitle,status,conclusion,url".to_string(),
         "--limit".to_string(),
         "50".to_string(),
     ];
@@ -1943,20 +2239,37 @@ fn find_workflow_run(
     let runs: Vec<GhRunListEntry> = serde_json::from_str(&output)
         .map_err(|err| OpsError::Parse(format!("failed to parse workflow run list: {err}")))?;
 
-    let matching = runs.into_iter().find(|run| {
-        run.head_branch.as_deref() == Some(tag)
-            || run
-                .display_title
-                .as_deref()
-                .is_some_and(|title| title.contains(tag))
-    });
+    let matching = runs
+        .iter()
+        .find(|run| run.head_branch.as_deref() == Some(tag))
+        .cloned()
+        .or_else(|| {
+            runs.into_iter().find(|run| {
+                run.display_title
+                    .as_deref()
+                    .is_some_and(|title| title.contains(tag))
+            })
+        });
 
     Ok(matching)
 }
 
 fn github_release_exists(repo: &Path, tag: &str) -> OpsResult<bool> {
-    let output = run_output(repo, "gh", &["release", "view", tag, "--json", "tagName"])?;
-    Ok(output.status.success())
+    Ok(github_release_state(repo, tag)? == GitHubReleaseState::Published)
+}
+
+fn github_release_state(repo: &Path, tag: &str) -> OpsResult<GitHubReleaseState> {
+    let output = run_output(repo, "gh", &["release", "view", tag, "--json", "isDraft"])?;
+    if !output.status.success() {
+        return Ok(GitHubReleaseState::Missing);
+    }
+    let view: GhReleaseView = serde_json::from_slice(&output.stdout)
+        .map_err(|err| OpsError::Parse(format!("failed to parse GitHub Release state: {err}")))?;
+    Ok(if view.is_draft {
+        GitHubReleaseState::Draft
+    } else {
+        GitHubReleaseState::Published
+    })
 }
 
 fn run_release_hooks(
@@ -2015,6 +2328,7 @@ mod tests {
             verify: Vec::new(),
             prepare: Vec::new(),
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
 
         assert_eq!(
@@ -2109,6 +2423,7 @@ mod tests {
                 "python3 scripts/canonicalize_migrations.py {version} --release-cut".to_string(),
             ],
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
         let result = prepare_release_in_worktree(
             root,
@@ -2393,6 +2708,7 @@ version = "2.0.0"
             verify: vec![],
             prepare: vec![],
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
         assert_eq!(version_from_tag("v1.2.3", &target).unwrap(), "1.2.3");
     }
@@ -2408,6 +2724,7 @@ version = "2.0.0"
             verify: vec![],
             prepare: vec![],
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
         assert_eq!(version_from_tag("cli/v1.2.3", &target).unwrap(), "1.2.3");
     }
@@ -2423,6 +2740,7 @@ version = "2.0.0"
             verify: vec![],
             prepare: vec![],
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
         assert!(version_from_tag("v1.2.3", &target).is_err());
     }
@@ -2449,6 +2767,7 @@ version = "2.0.0"
             verify: vec![],
             prepare: vec![],
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
         assert_eq!(target_tag(&target, "1.0.0"), "v1.0.0");
     }
@@ -2464,6 +2783,7 @@ version = "2.0.0"
             verify: vec![],
             prepare: vec![],
             completion: ReleaseCompletion::Tag,
+            publisher: Vec::new(),
         };
         assert_eq!(target_tag(&target, "2.0.0"), "cli/v2.0.0");
     }

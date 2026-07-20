@@ -837,8 +837,17 @@ lf release check              # exact commits in the target range
 lf release notes 1.2.3        # narrative notes from decisions + commits + PRs
 lf release bump 1.2.3         # bump manifests
 lf release tag 1.2.3          # create + push git tag
+lf release publish v1.2.3 --notes RELEASE_NOTES.md --asset dist/lf.tar.gz
+lf release publish v1.2.3 --finalize
 lf release status             # workflow + GitHub Release status
 ```
+
+`release.targets.<name>.publisher` is an argv list for the credentialed host
+publisher. `lf release run` appends `check` before changing release state, then
+downloads the successful hosted build and invokes it with `publish --tag ...
+--artifacts ...` from an exact-tag worktree. No merged changes is a successful
+no-op. An incomplete latest tag resumes; it never cuts a newer tag around a
+failed publication.
 
 | Path | What it holds |
 |------|--------------|

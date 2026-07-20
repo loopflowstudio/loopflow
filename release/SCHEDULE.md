@@ -1,43 +1,41 @@
 # Release schedule contract
 
-Loopflow and Cadenza use the same release rhythm. Keep the cadence identical; only the repo-specific commands and package matrix should differ.
+Loopflow separates hosted compilation from credentialed publishing. GitHub
+proves target-specific binaries; the maintained Loopflow host decides and ships
+releases.
 
 | Cadence | Time | Required gate | Publishes? | Repo-specific knobs |
 |---------|------|---------------|------------|---------------------|
 | Nightly package verification | `0 9 * * *` UTC | Build official packages, extract them, run smoke commands | No | package targets, build commands, smoke commands |
-| Weekly auto-release | `0 12 * * 0` UTC | Run the nightly package verification first, then bump and tag only if commits landed since the last tag | Yes | manifests, release-note source, publish workflow |
+| Daily patch release | `0 0 10 * * *` host-local | Host preflight, merged changes, successful tag build, exact-tag website health | Yes | manifests, release-note source, publisher command |
 | Local dev refresh | ad hoc / high frequency | Build from default branch and atomically replace local binaries/apps | Local only | install dir, artifact names |
 
 ## Repository contract
 
-Each repo should carry these files with carbon-copy cadence:
+Loopflow carries these release boundaries:
 
 ```text
-.github/workflows/nightly-packages.yml   # same schedule; repo-specific package test body
-.github/workflows/weekly-release.yml     # same schedule; calls nightly package verification before publishing
-scripts/install.py                       # single local build entry: lf + desktop app -> per-worktree local-bin/
-uv run python scripts/install.py refresh # or repo-equivalent CLI-only local updater
+.github/workflows/nightly-packages.yml   # scheduled, credential-free package proof
+.github/workflows/release.yml            # tag-triggered, credential-free native matrix
+release-run                              # built-in daily entry point: lf release run patch
+scripts/publish_release.py               # credentialed publisher and completion receipt
+scripts/deploy_website.py                # exact-tag deploy, proof, and rollback
+scripts/install.py                       # local lf + desktop app build entry
 ```
 
-The desktop app is a first-class release artifact, not a side build. The
-publishing workflow ships the signed app (`Loopflow.dmg`) next to the `lf`
-tarballs, and the app's bundle version is stamped from the release tag so it
-never drifts from the CLI. The single local build entry produces the CLI and the
-app together into a per-worktree `local-bin/`.
-
-Loopflow and Cadenza both carry the scheduled release workflow pair. Each repo
-replaces only the commands that are truly product-specific: Rust package
-targets for Loopflow; server image, Swift app build, signing-sensitive publish
-choices, and release manifests for Cadenza.
+The desktop app is a first-class release artifact. The host publisher ships the
+signed app (`Loopflow.dmg`) next to the `lf` tarballs, and stamps the app bundle
+from the release tag so it cannot drift from the CLI. The local build entry
+produces the CLI and app together into a per-worktree `local-bin/`.
 
 ## Shared invariants
 
 - Nightly jobs prove release artifacts without deploying them.
-- Weekly publishing never runs unless nightly-style package verification passed in the same workflow run.
-- Weekly publishing uses the canonical `lf release run patch` path, including
-  the `release-notes` skill and `release/unreleased/DECISIONS.md` narrative
-  context. Do not duplicate release-note generation in workflow YAML.
-- Release-note generation uses token compression: read the full release context, group repetition, preserve decisions and unique facts, and never substitute first-N commits or lines for summarization.
-- Secrets stay in Doppler or host-local env files, never committed config.
+- GitHub workflows use no Doppler, signing, registry, R2, or deployment credentials.
+- Daily publishing uses the canonical `lf release run patch` path, including the `release-notes` step and `release/unreleased/DECISIONS.md` narrative context. Do not duplicate release-note generation in workflow YAML.
+- A release is complete only after the tagged website is healthy and the GitHub Release is non-draft.
+- Failed website proof restores the previous image. The next daily run resumes an incomplete successful tag build.
+- Release-note generation reads the full release context, groups repetition, preserves decisions and unique facts, and never substitutes first-N commits or lines for summarization.
+- Secrets come from Doppler on the maintained host and never enter committed config or GitHub Actions.
 - Local updater scripts refuse to pull a non-default branch unless explicitly told not to pull.
 - Automation spend uses the company card feed as source of truth and stops for approval above $100/month.

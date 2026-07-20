@@ -5,7 +5,7 @@ use std::process::Command;
 
 use loopflow::ops::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
-    release_status, release_tag, NullProgress,
+    release_status, release_tag, NullProgress, ReleaseRunOutcome,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -18,8 +18,16 @@ fn write_gh_script(pr_list: &str) -> String {
 
 fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
     format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    case \"$*\" in *databaseId*) ;; *) echo 'databaseId was not requested' >&2; exit 1;; esac\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
     )
+}
+
+fn write_gh_incomplete_release_script() -> &'static str {
+    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+}
+
+fn write_gh_failed_release_script() -> &'static str {
+    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') cat <<'JSON'\n[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"status\":\"completed\",\"conclusion\":\"failure\",\"url\":\"https://example.com/run/42\"}]\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
 }
 
 fn git(repo: &TestRepo, args: &[&str]) {
@@ -280,6 +288,64 @@ fn release_check_returns_empty_without_tag() {
 }
 
 #[test]
+fn release_run_is_a_green_noop_without_merged_changes() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("empty release should succeed");
+
+    assert_eq!(
+        outcome,
+        ReleaseRunOutcome::NoChanges {
+            target: "default".to_string(),
+            latest_tag: Some("v0.9.1".to_string()),
+        }
+    );
+}
+
+#[test]
+fn release_run_refuses_to_skip_an_incomplete_tag() {
+    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script())]);
+
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+    )
+    .expect("write config");
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("incomplete tag should stop the release");
+
+    assert!(error.to_string().contains("v0.9.1 is incomplete"));
+}
+
+#[test]
+fn release_run_keeps_a_failed_tag_red_until_a_fix_merges() {
+    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script())]);
+
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+    )
+    .expect("write config");
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("failed build without a fix should stay red");
+
+    assert!(error.to_string().contains("no merged fix is available"));
+}
+
+#[test]
 fn release_bump_updates_cargo_toml() {
     let repo = TestRepo::new();
     fs::write(
@@ -298,8 +364,8 @@ fn release_bump_updates_cargo_toml() {
 #[test]
 fn release_status_reports_latest_tag_and_release() {
     let gh_script = write_gh_status_script(
-        r#"[{"databaseId":42,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
-        r#"{"tagName":"v0.9.1"}"#,
+        r#"[{"databaseId":7,"headBranch":"main","displayTitle":"Retry v0.9.1","status":"completed","conclusion":"failure","url":"https://example.com/run/7"},{"databaseId":42,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
+        r#"{"isDraft":false}"#,
     );
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
@@ -315,10 +381,26 @@ fn release_status_reports_latest_tag_and_release() {
 }
 
 #[test]
+fn release_status_does_not_count_a_draft_as_complete() {
+    let gh_script = write_gh_status_script(
+        r#"[{"databaseId":42,"headBranch":"v0.9.1","status":"completed","conclusion":"success"}]"#,
+        r#"{"isDraft":true}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should succeed");
+
+    assert!(!status.release_exists);
+}
+
+#[test]
 fn release_status_scopes_to_named_target() {
     let gh_script = write_gh_status_script(
         r#"[{"databaseId":7,"headBranch":"cli/v1.2.3","displayTitle":"Release cli/v1.2.3","status":"completed","conclusion":"success","url":"https://example.com/run/7"}]"#,
-        r#"{"tagName":"cli/v1.2.3"}"#,
+        r#"{"isDraft":false}"#,
     );
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
@@ -359,7 +441,7 @@ fn release_tag_is_idempotent_when_remote_tag_matches_head() {
 
 #[test]
 fn release_run_resumes_an_existing_explicit_tag() {
-    let gh_script = write_gh_status_script("[]", r#"{"tagName":"v0.9.1"}"#);
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
     let repo = TestRepo::new();
     release_tag(repo.path(), "0.9.1", None).expect("tag should succeed");
@@ -367,9 +449,12 @@ fn release_run_resumes_an_existing_explicit_tag() {
     let result = release_run(repo.path(), "0.9.1", None, &NullProgress)
         .expect("interrupted release should resume from its tag");
 
-    assert_eq!(result.version, "0.9.1");
-    assert_eq!(result.tag, "v0.9.1");
-    assert!(result.release_exists);
+    let ReleaseRunOutcome::Resumed(receipt) = result else {
+        panic!("expected resumed release");
+    };
+    assert_eq!(receipt.version, "0.9.1");
+    assert_eq!(receipt.tag, "v0.9.1");
+    assert!(receipt.release_exists);
 }
 
 #[test]

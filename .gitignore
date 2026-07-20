@@ -23,6 +23,7 @@ local-bin/
 **/.wave-resident-token
 .lf/log/
 .lf/logs/
+.lf/locks/
 .lf/prompts/
 .lf/journal/
 .lf/summaries/

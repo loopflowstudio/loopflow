@@ -536,18 +536,6 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
-    /// Read or curate a wave's MEMORY.md (server-owned; bare `lf memory` = show)
-    Memory {
-        #[command(subcommand)]
-        cmd: Option<MemoryCommand>,
-        #[command(flatten)]
-        target: WaveTargetArgs,
-    },
-    /// Resolve one evidence receipt to its canonical local record
-    Receipt {
-        #[command(subcommand)]
-        cmd: ReceiptCommand,
-    },
     /// Run lf on a Home or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over

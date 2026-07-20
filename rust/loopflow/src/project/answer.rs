@@ -466,7 +466,7 @@ async fn run_answer_attempt(
     let invocation_id = supervision.invocation_id.clone();
     let capture_result = crate::journal::trace_capture_context(
         &repo,
-        Some("project-answer".to_string()),
+        Some("answer-child".to_string()),
         Some("answer-child".to_string()),
     )
     .map(|trace_context| {
@@ -966,5 +966,71 @@ mod tests {
             2,
             "Linear publication remains a retryable outbox side effect"
         );
+    }
+
+    #[tokio::test]
+    async fn wave_answers_a_project_without_entering_the_wave_core() {
+        let (
+            store,
+            wave,
+            _project,
+            _task,
+            project_lease,
+            project_invocation,
+            _task_lease,
+            _task_invocation,
+        ) = fixture().await;
+        let wave_work = WorkRef::Wave(wave.id().clone());
+        let (wave_lease, wave_core) = start_invocation(&store, &wave_work, 103).await;
+        store
+            .advance_run(
+                &wave_lease,
+                RunAdvance::TurnStarting {
+                    invocation_id: wave_core.id.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let basis = store.current_epoch(&wave_work).await.unwrap().current_basis;
+        let ask = store
+            .open_ask(
+                &project_lease,
+                &project_invocation.id,
+                "Which KR should this Project optimize for?",
+            )
+            .await
+            .unwrap();
+        let mut lane =
+            AnswerLane::with_harness(wave_work.clone(), wave_lease.clone(), create_answer_harness);
+
+        lane.reconcile_wave(&store, &wave).await.unwrap();
+        let attempt = tokio::time::timeout(std::time::Duration::from_secs(5), lane.receive())
+            .await
+            .unwrap()
+            .unwrap();
+        lane.settle(&store, attempt).await.unwrap();
+
+        let answered = store
+            .current_ask(&project_lease, &project_invocation.id, Some(&ask.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            answered.answer.unwrap().text,
+            "Use the durable exchange as the proof."
+        );
+        assert_eq!(
+            store.current_epoch(&wave_work).await.unwrap().current_basis,
+            basis
+        );
+        let invocations = store.invocations_for_run(&wave_lease.run_id).await.unwrap();
+        assert!(invocations
+            .iter()
+            .find(|invocation| invocation.id == wave_core.id)
+            .unwrap()
+            .ended_at
+            .is_none());
+        assert!(invocations.iter().any(|invocation| {
+            invocation.answer_ask_id.as_ref() == Some(&ask.id) && invocation.ended_at.is_some()
+        }));
     }
 }

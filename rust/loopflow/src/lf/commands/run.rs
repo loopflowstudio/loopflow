@@ -47,10 +47,7 @@ struct PromptBuild {
     context_render_ms: u64,
 }
 
-/// A headless skill turn ready for the live session harness. The caller owns
-/// the session and sends `input` as its first turn, which keeps session
-/// streaming and steering available instead of hiding the body in a child
-/// `lf` process.
+/// A skill turn ready for a runner-owned provider surface.
 #[derive(Debug)]
 pub(crate) struct PreparedHarnessTurn {
     pub config: AgentConfig,
@@ -74,7 +71,24 @@ pub(crate) fn prepare_harness_turn(
         max_turns,
         ..Cli::default()
     };
-    let mut built = build_prompt(Some(skill), Some(message), &cli)?;
+    prepare_runner_turn(skill, message, &cli)
+}
+
+pub(crate) fn prepare_interactive_harness_turn(
+    skill: &str,
+    message: &str,
+    wave: &str,
+) -> Result<PreparedHarnessTurn> {
+    let cli = Cli {
+        interactive: true,
+        wave: Some(wave.to_string()),
+        ..Cli::default()
+    };
+    prepare_runner_turn(skill, message, &cli)
+}
+
+fn prepare_runner_turn(skill: &str, message: &str, cli: &Cli) -> Result<PreparedHarnessTurn> {
+    let mut built = build_prompt(Some(skill), Some(message), cli)?;
     built.components.message_context = Some((
         crate::trace::ContextAssetKind::Goal,
         crate::trace::ContextScope::Step,

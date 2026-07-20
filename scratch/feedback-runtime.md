@@ -24,33 +24,24 @@ and:
 
 ## Current implementation slice
 
-### Slice 3: Project answer lane
+### Final integration and gate
 
-Implement the primary Task-to-Project servicing path in this pass:
+The execution model, durable Ask/Answer exchange, Linear outbox, Project answer
+lane, and Wave answer lane are implemented. The remaining pass connects
+`demo` to the Task runner and checks the cross-lane invariants:
 
-- reconcile the oldest answerable Task Ask beside the Project core turn;
-- launch one fresh answer AgentInvocation with the exact Ask, Project/Wave
-  context, Task evidence, and prior exchanges from that Task Epoch;
-- withhold the Project Run lease from the answer agent and commit its final text
-  as Answer from the supervising runner;
-- keep core playhead state, provider conversation, and Turn settlement isolated
-  from the answer attempt;
-- wake a stopped Project directly into Ask servicing and retain an answer-only
-  Run supervisor while owned Tasks remain live;
-- drain the durable Linear comment outbox from the resident supervisor so
-  `lf work answer` and the child response path never await Linear;
-- cap repeated answer failures from durable attempt evidence and surface the
-  pending Ask without a token-burning retry loop.
+- a normal attended `demo` starts a TUI AgentInvocation in the Task Run's tmux
+  containment and opens the Mac app;
+- only explicit successful handback advances the playhead; failed,
+  interrupted, unknown, closed, or detached invocations do not;
+- core and detached-answer AgentInvocations cannot use the handback surface;
+- `lf -b <flow-containing-demo>` runs the same skill headlessly, where its
+  ordinary shell call to `lf ask` supplies any genuinely blocking judgment;
+- a Project Ask is answered beside the Wave core without entering Wave chat or
+  changing Wave Basis.
 
-Do not implement the Wave answer lane or interactive Demo handback in this
-slice. They reuse this result in Slice 4.
-
-Use one defining proof: while a Project core Turn remains active, a Task blocks
-in `lf ask`; a detached answer invocation receives no Run lease, commits the
-Answer, and the same Task Turn resumes without interrupting or advancing the
-Project core Turn. The proof also shows a Linear failure does not delay the
-Answer and is retried by the resident supervisor. Defer broad suites and clippy
-to the final gate.
+Use focused behavioral proofs for those boundaries, then run formatting and
+static analysis once. Do not rerun broad intermediate suites.
 
 ## Execution model
 
@@ -257,7 +248,6 @@ Attention projects only Asks which are still answerable under those lifecycle
 facts.
 
 Work remains `Running` while its live Turn is blocked in `lf ask`. Do not add a
-`WaitingOnAsk` WorkStatus variant: the active Run and containment still exist.
 Status and UI views may project the pending Ask beside WorkStatus when they need
 to explain what the running Work is waiting for.
 

@@ -270,7 +270,15 @@ mod tests {
                 "review-slice omits {evidence:?} evidence"
             );
         }
-        assert!(get_builtin_skill("demo").is_none());
+        let demo = get_builtin_skill("demo").expect("demo skill");
+        for contract in [
+            "interactive: true",
+            "User explicitly confirms",
+            "run `lf ask`",
+            "closing, detaching, provider exit, or lack of response",
+        ] {
+            assert!(demo.contains(contract), "demo omits {contract:?}");
+        }
         assert!(get_builtin_skill("code-review").is_none());
     }
 
@@ -421,6 +429,7 @@ mod tests {
         let flow = get_builtin_flow("build").expect("build flow");
         assert!(flow.contains("- kickoff"));
         assert!(flow.contains("flow: code"));
+        assert!(flow.contains("- demo"));
         assert!(!flow.contains("name: review-design"));
         assert!(!flow.contains("feedback:"));
         assert!(!flow.contains("loop:"));

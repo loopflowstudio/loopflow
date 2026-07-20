@@ -1167,7 +1167,8 @@ impl SqliteStore {
             "UPDATE agent_invocations
              SET ended_at=COALESCE(ended_at, ?2),
                  outcome=?3, handback_state=?4
-             WHERE id=?1 AND supervising_run_id IS NOT NULL AND ended_at IS NULL",
+             WHERE id=?1 AND supervising_run_id IS NOT NULL AND ended_at IS NULL
+               AND surface IN ('tui', 'ide') AND answer_ask_id IS NULL",
             params![
                 invocation_id.as_str(),
                 now_unix(),

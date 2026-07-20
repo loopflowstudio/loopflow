@@ -86,6 +86,7 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
 | `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
+| `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
 Project skills — shape and pursue measured bets inside a Wave:
@@ -220,7 +221,7 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → review-design → code → review-slice |
+| `build` | kickoff → code → review-slice → demo |
 | `code` | implement → compress |
 | `pair` | design → code |
 | `task-design` | kickoff → review-design |

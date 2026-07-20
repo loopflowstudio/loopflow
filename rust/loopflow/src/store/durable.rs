@@ -1111,7 +1111,7 @@ mod tests {
     #[tokio::test]
     async fn invocation_surface_reopens_without_owning_liveness() {
         let (store, work) = wave_work().await;
-        let (_lease, invocation) = start_invocation(&store, &work).await;
+        let (lease, invocation) = start_invocation(&store, &work).await;
 
         let first = store
             .invocation_surface(&invocation.id)
@@ -1132,5 +1132,29 @@ mod tests {
             .unwrap();
         assert!(ended.invocation.ended_at.is_some());
         assert_eq!(ended.handback, Some(BoundaryState::Unknown));
+
+        let receipt = store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "codex".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Invocation(headless) = receipt else {
+            panic!("expected Invocation receipt")
+        };
+        assert!(store
+            .handback_invocation(&headless.id, BoundaryState::Succeeded)
+            .await
+            .is_err());
     }
 }

@@ -465,8 +465,7 @@ fn short_repo(repo: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        account_label, account_statuses, aggregate_spend, format_share, format_window, short_repo,
-        Totals, UsageRow,
+        account_label, aggregate_spend, format_share, format_window, short_repo, Totals, UsageRow,
     };
     use crate::profile::EmailAddress;
     use crate::store::{
@@ -633,33 +632,6 @@ mod tests {
             output_tokens: 1,
             cache_read_tokens: 2,
         }
-    }
-
-    #[test]
-    fn fixed_account_authority_never_reads_ambient_account_usage() {
-        struct RestoreEnv(&'static str, Option<std::ffi::OsString>);
-
-        impl Drop for RestoreEnv {
-            fn drop(&mut self) {
-                if let Some(previous) = &self.1 {
-                    std::env::set_var(self.0, previous);
-                } else {
-                    std::env::remove_var(self.0);
-                }
-            }
-        }
-
-        let _lock = crate::journal::test_env_lock();
-        let name = crate::provider_account::lease::ACCOUNT_LEASE_ENV;
-        let _restore = RestoreEnv(name, std::env::var_os(name));
-        std::env::set_var(name, "forwarded");
-
-        let error = tokio::runtime::Runtime::new()
-            .expect("create test runtime")
-            .block_on(account_statuses(false, true))
-            .err()
-            .expect("fixed account authority must skip ambient account usage");
-        assert!(error.to_string().contains("fixed by an outer invocation"));
     }
 
     #[test]

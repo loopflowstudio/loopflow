@@ -267,9 +267,7 @@ def test_promotion_refuses_a_checkout_with_pending_draft_migrations(
     root = tmp_path / "repo"
     drafts = root / "rust/loopflow/src/store/migrations/drafts"
     drafts.mkdir(parents=True)
-    (drafts / "run_owns_execution__0123456789abcdef0123456789abcdef.sql").write_text(
-        "SELECT 1;\n"
-    )
+    (drafts / "run_owns_execution__0123456789abcdef0123456789abcdef.sql").write_text("SELECT 1;\n")
     monkeypatch.setattr(install, "ROOT", root)
 
     with pytest.raises(
@@ -295,7 +293,12 @@ def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
 
     monkeypatch.setattr(install, "ROOT", root)
     monkeypatch.setattr(install, "_build_cli_binaries", lambda: None)
-    monkeypatch.setattr(install, "_refresh_default_branch", refreshed.append)
+
+    def refresh_repo(repo: Path) -> bool:
+        refreshed.append(repo)
+        return True
+
+    monkeypatch.setattr(install, "_refresh_default_branch", refresh_repo)
     monkeypatch.setenv("PROMOTION_LOG", str(log))
     monkeypatch.setenv("PROMOTED_BINARY", str(immutable))
 
@@ -308,6 +311,102 @@ def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
     assert f"--cli-target {install_dir / 'lf'}" in command
     assert "--sync-skills" in command
     assert refreshed == ([] if no_pull else [root])
+
+
+def test_refresh_skips_build_and_promotion_when_main_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "repo"
+    install_dir = tmp_path / "bin"
+    install_dir.mkdir()
+    (install_dir / "lf").write_text("installed")
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "_refresh_default_branch", lambda _repo: False)
+    monkeypatch.setattr(
+        install,
+        "_git_stdout",
+        lambda args, repo=install.ROOT, check=True: "abc123" if "--short" in args else "",
+    )
+    monkeypatch.setattr(
+        install,
+        "_build_cli_binaries",
+        lambda: pytest.fail("unchanged refresh must not build"),
+    )
+    monkeypatch.setattr(
+        install,
+        "_promote_with_candidate",
+        lambda *_args: pytest.fail("unchanged refresh must not promote"),
+    )
+
+    install.refresh(no_pull=False, install_dir=install_dir)
+
+    assert "already current: abc123" in capsys.readouterr().out
+
+
+def test_refresh_builds_unchanged_main_when_lf_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    candidate = root / "target/release/lf"
+    _write_fake_promotion_boundary(candidate)
+    install_dir = tmp_path / "bin"
+    install_dir.mkdir()
+    log = tmp_path / "promotion.log"
+    immutable = tmp_path / "immutable-lf"
+    built: list[bool] = []
+
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "_refresh_default_branch", lambda _repo: False)
+    monkeypatch.setattr(install, "_build_cli_binaries", lambda: built.append(True))
+    monkeypatch.setenv("PROMOTION_LOG", str(log))
+    monkeypatch.setenv("PROMOTED_BINARY", str(immutable))
+
+    install.refresh(no_pull=False, install_dir=install_dir)
+
+    assert built == [True]
+    assert (install_dir / "lf").resolve() == immutable
+
+
+def test_refresh_refuses_pending_drafts_before_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    drafts = root / "rust/loopflow/src/store/migrations/drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "pending__0123456789abcdef0123456789abcdef.sql").write_text("SELECT 1;\n")
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "_refresh_default_branch", lambda _repo: True)
+    monkeypatch.setattr(
+        install,
+        "_build_cli_binaries",
+        lambda: pytest.fail("schema preflight must run before cargo"),
+    )
+
+    with pytest.raises(install.typer.Exit):
+        install.refresh(no_pull=False, install_dir=tmp_path / "bin")
+
+
+def test_local_use_refuses_pending_drafts_before_build(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "repo"
+    drafts = root / "rust/loopflow/src/store/migrations/drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "pending__0123456789abcdef0123456789abcdef.sql").write_text("SELECT 1;\n")
+    bundle_spec = install.default_bundle_spec(root)
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "LOCAL_BIN", root / "local-bin")
+    monkeypatch.setattr(install, "default_bundle_spec", lambda: bundle_spec)
+    monkeypatch.setattr(install, "_resolve_install_dir", lambda: tmp_path / "bin")
+    monkeypatch.setattr(install, "read_release_version", lambda _root: "9.9.9")
+    monkeypatch.setattr(
+        install,
+        "_run_parallel_builds",
+        lambda _skip: pytest.fail("schema preflight must run before local builds"),
+    )
+
+    with pytest.raises(install.typer.Exit):
+        install.local(use=True, dry_run=False, skip=[])
 
 
 def test_refresh_fast_forwards_default_branch_despite_pull_config(tmp_path: Path) -> None:
@@ -347,10 +446,11 @@ def test_refresh_fast_forwards_default_branch_despite_pull_config(tmp_path: Path
     _git(author, "commit", "-am", "update")
     _git(author, "push")
 
-    install._refresh_default_branch(checkout)
+    assert install._refresh_default_branch(checkout) is True
 
     assert (checkout / "version.txt").read_text() == "two\n"
     assert _git(checkout, "rev-parse", "HEAD") == _git(author, "rev-parse", "HEAD")
+    assert install._refresh_default_branch(checkout) is False
 
 
 def test_local_use_routes_cli_app_bundled_helper_and_skills_through_rust_promotion(

@@ -14,17 +14,17 @@ lf cron list
 
 ```bash
 uv run python scripts/install.py local --use   # full build: lf + Loopflow.app -> local-bin/, make active
-uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf
+uv run python scripts/install.py refresh       # update/install lf; unchanged main is a no-op
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
 `install.py` is the local entry point. `local --use` builds this worktree's
 `lf` and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build.
-`refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`, and
-install it into the local bin dir.
+`refresh` is the fast CLI-only path: pull the default branch, then rebuild and
+install `lf` only when main moved or the install target is missing.
 
-Promotion stops while draft migrations remain. Cut the release first so the
-binary embeds the schema its runtime code expects.
+Promotion stops before compilation while draft migrations remain. Cut the
+release first so the binary embeds the schema its runtime code expects.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.

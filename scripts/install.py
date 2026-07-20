@@ -5,7 +5,7 @@
     install.py local --use      # promote this worktree onto PATH and /Applications
     install.py local --skip swift
     install.py local -n         # dry run
-    install.py refresh          # pull default branch, rebuild lf, install to PATH
+    install.py refresh          # update lf when the default branch moves
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
@@ -149,7 +149,7 @@ def _git_stdout(args: list[str], repo: Path = ROOT, check: bool = True) -> str:
     return result.stdout.strip()
 
 
-def _refresh_default_branch(repo: Path = ROOT) -> None:
+def _refresh_default_branch(repo: Path = ROOT) -> bool:
     default_branch = _git_stdout(
         ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
         repo=repo,
@@ -161,6 +161,7 @@ def _refresh_default_branch(repo: Path = ROOT) -> None:
             f"refusing to pull {current_branch}; checkout {default_branch} or pass --no-pull"
         )
 
+    before = _git_stdout(["rev-parse", "HEAD"], repo=repo)
     typer.echo(f"Pulling {repo}...")
     if default_branch:
         _run_or_raise(["git", "fetch", "origin", default_branch], "git", cwd=repo)
@@ -168,6 +169,7 @@ def _refresh_default_branch(repo: Path = ROOT) -> None:
     else:
         _run_or_raise(["git", "fetch"], "git", cwd=repo)
         _run_or_raise(["git", "merge", "--ff-only", "@{upstream}"], "git", cwd=repo)
+    return _git_stdout(["rev-parse", "HEAD"], repo=repo) != before
 
 
 # --- Builds ---
@@ -545,20 +547,24 @@ def refresh(
         None, "--install-dir", help="Install lf here instead of the resolved local bin dir"
     ),
 ) -> None:
-    """Pull the default branch, rebuild lf, and install it locally."""
+    """Pull the default branch and install lf when it moves."""
     resolved_install_dir = install_dir.expanduser() if install_dir else _resolve_install_dir()
 
     try:
-        if not no_pull:
-            _refresh_default_branch(ROOT)
+        target = resolved_install_dir / "lf"
+        if not no_pull and not _refresh_default_branch(ROOT) and target.exists():
+            revision = _git_stdout(["rev-parse", "--short", "HEAD"], repo=ROOT)
+            typer.echo(f"already current: {revision}")
+            return
+        _require_complete_schema_for_promotion(ROOT)
         _build_cli_binaries()
         _promote_with_candidate(ROOT / "target" / "release" / "lf", resolved_install_dir)
     except (subprocess.CalledProcessError, StageError) as exc:
         typer.echo(f"refresh failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(f"installed: {resolved_install_dir / 'lf'}")
-    result = subprocess.run([str(resolved_install_dir / "lf"), "--version"], text=True)
+    typer.echo(f"installed: {target}")
+    result = subprocess.run([str(target), "--version"], text=True)
     if result.returncode != 0:
         raise typer.Exit(code=result.returncode)
 
@@ -599,6 +605,8 @@ def local(
 
     total_start = time.monotonic()
     try:
+        if use:
+            _require_complete_schema_for_promotion(ROOT)
         _run_parallel_builds(skip_set)
 
         typer.echo(f"Staging lf + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")

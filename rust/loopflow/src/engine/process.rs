@@ -294,6 +294,39 @@ pub(crate) async fn start_lf_session_with_env(
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
+pub(crate) async fn start_tmux_window_with_env(
+    session: &str,
+    window: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let context = pinned_execution_context()?;
+    let mut child_env = env
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect::<Vec<_>>();
+    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell_command = lf_session_shell_command(argv, &environment);
+    let status = tokio::process::Command::new("tmux")
+        .args(["new-window", "-d", "-t", session, "-n", window, "-c"])
+        .arg(cwd)
+        .args(["/bin/zsh", "-lc", &shell_command])
+        .status()
+        .await
+        .map_err(|error| anyhow!("tmux failed to spawn window: {error}"))?;
+    if !status.success() {
+        return Err(anyhow!(
+            "tmux failed to launch window '{window}' in session '{session}'"
+        ));
+    }
+    Ok(())
+}
+
 fn reject_detached_forwarded_account(forwarded: bool) -> Result<()> {
     if forwarded {
         return Err(anyhow!(

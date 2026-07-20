@@ -27,10 +27,10 @@ pub(crate) fn message_text(args: &[String], mut stdin: impl Read) -> Result<Stri
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SessionCommand {
-    program: String,
-    args: Vec<String>,
-    cwd: PathBuf,
+pub(crate) struct SessionCommand {
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) cwd: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,7 +93,7 @@ fn build_ide_url(harness: &str, worktree: &Path, prompt: &str) -> Option<String>
     }
 }
 
-fn build_session_command(
+pub(crate) fn build_session_command(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,

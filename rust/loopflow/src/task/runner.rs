@@ -40,12 +40,19 @@ struct PreparedTaskStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     position: FlowPosition,
     basis: Basis,
+    interactive: bool,
 }
 
 #[derive(Debug)]
 struct StartedTaskStep {
     provider_turn_active: bool,
     basis: Option<Basis>,
+}
+
+#[derive(Debug)]
+struct ActiveDemo {
+    invocation_id: crate::durable::AgentInvocationId,
+    completion_sent: bool,
 }
 
 pub(crate) async fn run(store: SharedStore, task_id: TaskId, lease: &RunLease) -> Result<()> {

@@ -69,15 +69,49 @@ impl AnswerLane {
         project: &Project,
         wave: &Wave,
     ) -> Result<()> {
-        if self.active.is_some() {
+        let Some(context) = self.next_context(store).await? else {
             return Ok(());
+        };
+        let prepared = prepare_answer_turn(store, project, wave, &context).await?;
+        self.start(
+            store,
+            &project.agent,
+            Path::new(wave.repo()),
+            context,
+            prepared,
+        )
+        .await
+    }
+
+    pub(crate) async fn reconcile_wave(&mut self, store: &SharedStore, wave: &Wave) -> Result<()> {
+        let Some(context) = self.next_context(store).await? else {
+            return Ok(());
+        };
+        let configured =
+            crate::engine::wave_config::read_wave_config(Path::new(wave.repo()), wave.name());
+        let agent = configured
+            .and_then(|config| config.agent)
+            .unwrap_or_else(|| {
+                crate::engine::load_config_or_default(Some(Path::new(wave.repo())))
+                    .agent()
+                    .to_string()
+            });
+        let mut prepared = prepare_wave_answer_turn(store, wave, &context).await?;
+        prepared.config.agent = Some(agent.clone());
+        self.start(store, &agent, Path::new(wave.repo()), context, prepared)
+            .await
+    }
+
+    async fn next_context(&mut self, store: &SharedStore) -> Result<Option<AnswerContext>> {
+        if self.active.is_some() {
+            return Ok(None);
         }
         let Some(context) = store.oldest_answer_context(&self.parent).await? else {
             self.parked_ask = None;
-            return Ok(());
+            return Ok(None);
         };
         if self.parked_ask.as_ref() == Some(&context.ask.id) {
-            return Ok(());
+            return Ok(None);
         }
         self.parked_ask = None;
         let history = store.answer_attempt_history(&context.ask.id).await?;
@@ -88,17 +122,26 @@ impl AnswerLane {
                 "Ask remains pending after bounded answer attempts"
             );
             self.parked_ask = Some(context.ask.id);
-            return Ok(());
+            return Ok(None);
         }
         if let Some(last_failed_at) = history.last_failed_at {
             let delay = retry_delay(history.failed_attempts);
             if OffsetDateTime::now_utc() < last_failed_at + delay {
-                return Ok(());
+                return Ok(None);
             }
         }
+        Ok(Some(context))
+    }
 
-        let prepared = prepare_answer_turn(store, project, wave, &context).await?;
-        let (provider, model) = crate::engine::config::parse_agent(&project.agent);
+    async fn start(
+        &mut self,
+        store: &SharedStore,
+        agent: &str,
+        repo: &Path,
+        context: AnswerContext,
+        prepared: crate::lf::commands::run::PreparedHarnessTurn,
+    ) -> Result<()> {
+        let (provider, model) = crate::engine::config::parse_agent(agent);
         let receipt = store
             .advance_run(
                 &self.lease,
@@ -133,7 +176,7 @@ impl AnswerLane {
         let events = self.events_tx.clone();
         let ask_id = context.ask.id;
         let create_harness = self.create_harness;
-        let repo = Path::new(wave.repo()).to_path_buf();
+        let repo = repo.to_path_buf();
         tokio::spawn(async move {
             let answer = run_answer_attempt(
                 &store,
@@ -154,6 +197,10 @@ impl AnswerLane {
 
     pub(crate) async fn receive(&mut self) -> Option<AnswerAttempt> {
         self.events_rx.recv().await
+    }
+
+    pub(crate) fn try_receive(&mut self) -> Option<AnswerAttempt> {
+        self.events_rx.try_recv().ok()
     }
 
     pub(crate) async fn settle(
@@ -257,6 +304,103 @@ async fn prepare_answer_turn(
     Ok(prepared)
 }
 
+async fn prepare_wave_answer_turn(
+    store: &SharedStore,
+    wave: &Wave,
+    context: &AnswerContext,
+) -> Result<crate::lf::commands::run::PreparedHarnessTurn> {
+    let WorkRef::Project(project_id) = &context.child else {
+        return Err(anyhow!(
+            "Wave {} received an Ask from non-Project {} {}",
+            wave.name(),
+            context.child.kind(),
+            context.child.id()
+        ));
+    };
+    let project = store
+        .get_project(project_id)
+        .await?
+        .ok_or_else(|| anyhow!("asking Project {project_id} is not registered"))?;
+    if project.wave_id != *wave.id() {
+        return Err(anyhow!(
+            "Project {} belongs to Wave {}, not {}",
+            project.id,
+            project.wave_id,
+            wave.id()
+        ));
+    }
+    let wave_boundary = store.boundary_seed(&context.ask.route.parent()?).await?;
+    let project_boundary = store.boundary_seed(&context.child).await?;
+    let mut events = store.project_events_after(&project.id, 0).await?;
+    if events.len() > 8 {
+        events.drain(..events.len() - 8);
+    }
+    let seed = wave_answer_seed(
+        wave,
+        &project,
+        &wave_boundary,
+        &project_boundary,
+        context,
+        &events,
+    )?;
+    let mut prepared =
+        crate::lf::commands::run::prepare_harness_turn("answer-child", &seed, wave.name(), None)?;
+    prepared.config.cwd = Some(Path::new(wave.repo()).to_path_buf());
+    prepared.config.authority = AgentAuthority::Detached;
+    Ok(prepared)
+}
+
+fn wave_answer_seed(
+    wave: &Wave,
+    project: &Project,
+    wave_boundary: &BoundarySeed,
+    project_boundary: &BoundarySeed,
+    context: &AnswerContext,
+    events: &[crate::project::ProjectEvent],
+) -> Result<String> {
+    let repo = Path::new(wave.repo());
+    let goal_path = repo.join("wave").join(wave.name()).join("GOAL.md");
+    let goal = std::fs::read_to_string(goal_path).unwrap_or_else(|_| "(goal unavailable)".into());
+    let memory = crate::engine::wave_context::gather_wave_memory(repo, wave.name())
+        .unwrap_or_else(|| "(memory unavailable)".into());
+    Ok(format!(
+        "Answer Ask {ask_id} from Project {project_name} ({project_id}) in Epoch {epoch_id}.\n\n\
+         Exact question:\n{question}\n\nWave {wave_name} goal:\n{goal}\n\n\
+         Current Wave memory:\n{memory}\n\nCurrent Wave direction:\n{wave_direction}\n\n\
+         Project definition and KRs:\n{project_context}\n\nCurrent Project direction:\n{project_direction}\n\n\
+         Recent Project evidence:\n{events}\n\nPrior Ask/Answer exchanges in this Project Epoch:\n{prior}",
+        ask_id = context.ask.id,
+        project_name = project.plan.name,
+        project_id = project.id,
+        epoch_id = context.epoch_id,
+        question = context.ask.question,
+        wave_name = wave.name(),
+        wave_direction = wave_boundary.render(),
+        project_context = project.plan.prompt_context,
+        project_direction = project_boundary.render(),
+        events = serde_json::to_string_pretty(events)?,
+        prior = prior_exchange_seed(context),
+    ))
+}
+
+fn prior_exchange_seed(context: &AnswerContext) -> String {
+    if context.prior_exchanges.is_empty() {
+        return "(none)".to_string();
+    }
+    context
+        .prior_exchanges
+        .iter()
+        .map(|exchange| {
+            let answer = exchange
+                .answer
+                .as_ref()
+                .expect("prior answer context contains only answered exchanges");
+            format!("Q: {}\nA: {}", exchange.question, answer.text)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn answer_seed(
     project: &Project,
@@ -273,22 +417,7 @@ fn answer_seed(
     let goal = std::fs::read_to_string(goal_path).unwrap_or_else(|_| "(goal unavailable)".into());
     let memory = crate::engine::wave_context::gather_wave_memory(repo, wave.name())
         .unwrap_or_else(|| "(memory unavailable)".into());
-    let prior = if context.prior_exchanges.is_empty() {
-        "(none)".to_string()
-    } else {
-        context
-            .prior_exchanges
-            .iter()
-            .map(|exchange| {
-                let answer = exchange
-                    .answer
-                    .as_ref()
-                    .expect("prior answer context contains only answered exchanges");
-                format!("Q: {}\nA: {}", exchange.question, answer.text)
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
+    let prior = prior_exchange_seed(context);
     let pr = pr
         .map(serde_json::to_string_pretty)
         .transpose()?

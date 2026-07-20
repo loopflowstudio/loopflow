@@ -117,6 +117,8 @@ async fn run_project_inner(
         account_id: invocation.route.account_id.clone(),
         resume_token: invocation.resume_token.clone(),
     };
+    let mut answer_lane = crate::project::answer::AnswerLane::new(work.clone(), lease.clone());
+    answer_lane.reconcile(&store, &project, &wave).await?;
     let mut pending = VecDeque::new();
     let initial_input = take_current_input(&store, &project, lease, &mut pending).await?;
     let observations = consume_task_observations(&store, &mut project, lease).await?;
@@ -236,6 +238,7 @@ async fn run_project_inner(
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut task_supervision = tokio::time::interval(TASK_SUPERVISION_INTERVAL);
     task_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    spawn_ask_comment_publication(store.clone());
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
     loop {
@@ -246,6 +249,7 @@ async fn run_project_inner(
                 }
             }
             _ = poll.tick() => {
+                answer_lane.reconcile(&store, &project, &wave).await?;
                 let active_turn_id = provider_turn_active
                     .then(|| capture.as_ref().map(|capture| capture.current_turn_id()))
                     .flatten();
@@ -280,6 +284,7 @@ async fn run_project_inner(
                 }
             }
             _ = task_supervision.tick() => {
+                spawn_ask_comment_publication(store.clone());
                 if let Err(error) = crate::ops::task::supervise_project_task_bodies(
                     &store,
                     &project,
@@ -290,6 +295,12 @@ async fn run_project_inner(
                         "could not supervise Task progress leases"
                     );
                 }
+            }
+            answer = answer_lane.receive(), if answer_lane.active() => {
+                let Some(answer) = answer else {
+                    return Err(anyhow!("Project answer lane event stream closed"));
+                };
+                answer_lane.settle(&store, answer).await?;
             }
             event = event_rx.recv() => {
                 let Some(event) = event else {
@@ -479,25 +490,36 @@ async fn run_project_inner(
                                 outcome: crate::durable::BoundaryState::Succeeded,
                             },
                         ).await?;
-                        if outcome.disposition == ProjectDisposition::Done {
-                            store
-                                .append_project_event_for_run(
-                                    &project.id,
-                                    lease,
-                                    &ProjectEventKind::Completed { summary },
-                                )
-                                .await?;
-                        }
                         finish_capture(capture.as_ref(), "completed");
-                        if outcome.disposition == ProjectDisposition::Done {
-                            store.done(lease, &active_basis).await?;
-                        } else {
-                            store.finish_project_run(
-                                &project,
+                        if project_run_must_remain_resident(
+                            &store,
+                            &project,
+                            &work,
+                            &answer_lane,
+                            outcome.disposition,
+                        ).await? {
+                            return run_answer_only_supervisor(
+                                &store,
+                                &mut project,
                                 lease,
-                                crate::durable::BoundaryState::Succeeded,
-                            ).await?;
+                                &run_lease,
+                                &wave,
+                                &work,
+                                &active_basis,
+                                outcome.disposition,
+                                summary,
+                                &mut answer_lane,
+                                &mut attachment_rx,
+                            ).await;
                         }
+                        finish_project_outcome(
+                            &store,
+                            &project,
+                            lease,
+                            &active_basis,
+                            outcome.disposition,
+                            summary,
+                        ).await?;
                         return Ok(());
                     }
                     ConversationEvent::Error { code, message, .. } => {
@@ -527,6 +549,163 @@ async fn run_project_inner(
             }
         }
     }
+}
+
+fn spawn_ask_comment_publication(store: SharedStore) {
+    tokio::spawn(async move {
+        if let Err(error) = crate::ops::publish_pending_ask_comments(&store).await {
+            tracing::warn!(%error, "Ask comment outbox publication failed");
+        }
+    });
+}
+
+async fn project_run_must_remain_resident(
+    store: &SharedStore,
+    project: &Project,
+    work: &crate::durable::WorkRef,
+    answer_lane: &crate::project::answer::AnswerLane,
+    disposition: ProjectDisposition,
+) -> Result<bool> {
+    if answer_lane.active() || !store.pending_asks_for_parent(work).await?.is_empty() {
+        return Ok(true);
+    }
+    if disposition != ProjectDisposition::Wait {
+        return Ok(false);
+    }
+    project_has_running_tasks(store, project).await
+}
+
+async fn project_has_running_tasks(store: &SharedStore, project: &Project) -> Result<bool> {
+    for task in store.list_tasks(Some(&project.wave_id)).await? {
+        if task.project_id != project.id {
+            continue;
+        }
+        let work = store.work_for_child(&ChildRef::Task(task.id)).await?;
+        if matches!(store.work_status(&work).await?, WorkStatus::Running { .. }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_answer_only_supervisor(
+    store: &SharedStore,
+    project: &mut Project,
+    lease: &RunLease,
+    run_lease: &RunLease,
+    wave: &Wave,
+    work: &crate::durable::WorkRef,
+    settled_basis: &Basis,
+    disposition: ProjectDisposition,
+    summary: String,
+    answer_lane: &mut crate::project::answer::AnswerLane,
+    attachment_rx: &mut mpsc::UnboundedReceiver<String>,
+) -> Result<()> {
+    let mut poll = tokio::time::interval(Duration::from_millis(200));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut task_supervision = tokio::time::interval(TASK_SUPERVISION_INTERVAL);
+    task_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    spawn_ask_comment_publication(store.clone());
+    loop {
+        tokio::select! {
+            line = attachment_rx.recv() => {
+                if let Some(line) = line {
+                    handle_attachment(store, project, lease, line).await?;
+                }
+            }
+            _ = poll.tick() => {
+                match store.run_control(run_lease, None).await? {
+                    Some(crate::durable::RunControl::Interrupt)
+                    | Some(crate::durable::RunControl::Abandon { .. }) => {
+                        answer_lane.cancel();
+                        store.finish_project_run(
+                            project,
+                            lease,
+                            crate::durable::BoundaryState::Interrupted,
+                        ).await?;
+                        return Ok(());
+                    }
+                    None => {}
+                }
+                answer_lane.reconcile(store, project, wave).await?;
+                if answer_lane.active() {
+                    continue;
+                }
+                if !store.pending_asks_for_parent(work).await?.is_empty() {
+                    continue;
+                }
+                let new_direction = store.boundary_seed(work).await?.basis.revision
+                    > settled_basis.revision;
+                let new_observations = !store.pending_project_observations(&project.id).await?.is_empty();
+                if new_direction || new_observations {
+                    store.finish_project_run(
+                        project,
+                        lease,
+                        crate::durable::BoundaryState::Succeeded,
+                    ).await?;
+                    crate::ops::project::wake_project(&project.id)
+                        .await
+                        .map_err(|error| anyhow!(error.to_string()))?;
+                    return Ok(());
+                }
+                if disposition != ProjectDisposition::Wait
+                    || !project_has_running_tasks(store, project).await?
+                {
+                    finish_project_outcome(
+                        store,
+                        project,
+                        lease,
+                        settled_basis,
+                        disposition,
+                        summary,
+                    ).await?;
+                    return Ok(());
+                }
+            }
+            _ = task_supervision.tick() => {
+                spawn_ask_comment_publication(store.clone());
+                if let Err(error) = crate::ops::task::supervise_project_task_bodies(store, project).await {
+                    tracing::warn!(
+                        project = %project.id,
+                        error = %error,
+                        "could not supervise Task progress leases"
+                    );
+                }
+            }
+            answer = answer_lane.receive(), if answer_lane.active() => {
+                let Some(answer) = answer else {
+                    return Err(anyhow!("Project answer lane event stream closed"));
+                };
+                answer_lane.settle(store, answer).await?;
+            }
+        }
+    }
+}
+
+async fn finish_project_outcome(
+    store: &SharedStore,
+    project: &Project,
+    lease: &RunLease,
+    basis: &Basis,
+    disposition: ProjectDisposition,
+    summary: String,
+) -> Result<()> {
+    if disposition == ProjectDisposition::Done {
+        store
+            .append_project_event_for_run(
+                &project.id,
+                lease,
+                &ProjectEventKind::Completed { summary },
+            )
+            .await?;
+        store.done(lease, basis).await?;
+    } else {
+        store
+            .finish_project_run(project, lease, crate::durable::BoundaryState::Succeeded)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn prepare_project_flow_step(

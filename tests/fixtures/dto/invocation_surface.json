@@ -2,6 +2,7 @@
   "invocation": {
     "id": "invocation_00000000000000000000000000000001",
     "supervising_run_id": "run_00000000000000000000000000000002",
+    "answer_ask_id": null,
     "route": {
       "provider": "opaque",
       "model": null,

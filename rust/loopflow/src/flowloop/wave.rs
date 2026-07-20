@@ -633,6 +633,7 @@ impl WaveLoop {
                     },
                     surface: "headless".to_string(),
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await?;

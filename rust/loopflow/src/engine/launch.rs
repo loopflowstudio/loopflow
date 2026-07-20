@@ -175,6 +175,7 @@ pub fn prepare_launch_prompt(
         max_turns,
         resume_token: None,
         cwd: Some(cwd.unwrap_or(repo_root)),
+        authority: crate::engine::agent::AgentAuthority::Inherit,
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,

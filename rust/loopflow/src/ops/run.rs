@@ -61,6 +61,7 @@ pub(crate) async fn launch_in_run(
                 },
                 surface: "headless".to_string(),
                 resume_token: request.resume_token,
+                answer_ask_id: None,
             },
         )
         .await

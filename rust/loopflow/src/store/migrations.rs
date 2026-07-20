@@ -569,6 +569,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "ask_linear_comment_outbox",
         sql: include_str!("migrations/0.12.3.009_ask_linear_comment_outbox.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 10,
+        },
+        name: "answer_invocations",
+        sql: include_str!("migrations/0.12.3.010_answer_invocations.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -2287,6 +2297,7 @@ mod tests {
             indexes,
             vec![
                 "idx_agent_invocations_attention",
+                "idx_agent_invocations_one_live_answer",
                 "idx_agent_invocations_process",
                 "idx_agent_invocations_project",
                 "idx_agent_invocations_run",

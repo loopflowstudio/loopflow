@@ -684,6 +684,7 @@ pub enum RecordedConversationPayload {
 pub struct AgentInvocationRow {
     pub id: String,
     pub run_id: String,
+    pub answer_ask_id: Option<String>,
     pub process_id: String,
     pub started_at: i64,
     pub ended_at: Option<i64>,
@@ -1037,6 +1038,7 @@ impl TraceCapture {
         let invocation = AgentInvocationRow {
             id: invocation_id.to_string(),
             run_id: context.run_id.to_string(),
+            answer_ask_id: None,
             process_id: context.process_id.to_string(),
             started_at,
             ended_at: None,
@@ -1992,6 +1994,7 @@ mod tests {
                         },
                         surface: "headless".to_string(),
                         resume_token: None,
+                        answer_ask_id: None,
                     },
                 )
                 .await

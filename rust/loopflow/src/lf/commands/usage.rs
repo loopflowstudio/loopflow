@@ -491,6 +491,7 @@ mod tests {
         AgentInvocationRow {
             id: format!("invocation-{id}"),
             run_id: format!("trace-{id}"),
+            answer_ask_id: None,
             process_id: format!("exec-{id}"),
             started_at: 100,
             ended_at: Some(110),

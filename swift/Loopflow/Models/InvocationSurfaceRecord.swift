@@ -148,6 +148,7 @@ public enum InvocationBoundaryStateRecord: String, Codable, Sendable, Hashable {
 public struct AgentInvocationRecord: Codable, Sendable, Hashable {
     public let id: String
     public let supervisingRunId: String?
+    public let answerAskId: String?
     public let route: InvocationRouteRecord
     public let surface: String
     public let resumeToken: String?
@@ -157,6 +158,7 @@ public struct AgentInvocationRecord: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, route, surface
         case supervisingRunId = "supervising_run_id"
+        case answerAskId = "answer_ask_id"
         case resumeToken = "resume_token"
         case startedAt = "started_at"
         case endedAt = "ended_at"

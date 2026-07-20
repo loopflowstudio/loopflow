@@ -198,6 +198,7 @@ impl Store {
                 },
                 surface: "headless".to_string(),
                 resume_token: task.provider_session_id.clone(),
+                answer_ask_id: None,
             },
         )
         .await?;
@@ -690,6 +691,7 @@ impl Store {
                 },
                 surface: "headless".to_string(),
                 resume_token: project.provider_session_id.clone(),
+                answer_ask_id: None,
             },
         )
         .await?;

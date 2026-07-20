@@ -42,6 +42,7 @@ struct WorkCensusTests {
             invocation: AgentInvocationRecord(
                 id: id,
                 supervisingRunId: "run-\(id)",
+                answerAskId: nil,
                 route: InvocationRouteRecord(provider: "opaque", model: nil, accountId: nil),
                 surface: "terminal",
                 resumeToken: nil,

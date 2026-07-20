@@ -3,13 +3,14 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AnswerRoute, AskExchange, AskId,
-    Author, Basis, BoundarySeed, BoundaryState, Containment, ContainmentObservation, DoneProposal,
-    DoneProposalId, Epoch, EpochId, EpochReceipt, EpochState, FlowPosition, Home, HomeId,
-    InterruptReceipt, InvocationRoute, InvocationSurface, Placement, ProjectId, Run, RunAdvance,
-    RunId, RunLease, RunLeaseToken, RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer,
-    SteerId, SteerReceipt, StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt,
-    ToolResponseWrite, Turn, TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
+    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AnswerAttemptHistory,
+    AnswerContext, AnswerRoute, AskExchange, AskId, Author, Basis, BoundarySeed, BoundaryState,
+    Containment, ContainmentObservation, DoneProposal, DoneProposalId, Epoch, EpochId,
+    EpochReceipt, EpochState, FlowPosition, Home, HomeId, InterruptReceipt, InvocationRoute,
+    InvocationSurface, Placement, ProjectId, Run, RunAdvance, RunId, RunLease, RunLeaseToken,
+    RunState, RunTrigger, Send, SendId, SendState, SendVia, Steer, SteerId, SteerReceipt,
+    StopCause, StopReceipt, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, Turn,
+    TurnId, Wait, WaitId, WaitOn, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::project::Project;
@@ -341,6 +342,7 @@ impl SqliteStore {
                 route,
                 surface,
                 resume_token,
+                answer_ask_id,
             } => {
                 if run.state != RunState::Active {
                     return Err(StoreError::InvalidData(format!(
@@ -356,6 +358,7 @@ impl SqliteStore {
                 let invocation = AgentInvocation {
                     id: AgentInvocationId::new(),
                     supervising_run_id: Some(run.id.clone()),
+                    answer_ask_id: answer_ask_id.clone(),
                     route: route.clone(),
                     surface: surface.clone(),
                     resume_token: resume_token.clone(),
@@ -899,6 +902,62 @@ impl SqliteStore {
             "a.route_kind='parent' AND a.route_work_kind=?1 AND a.route_work_id=?2",
             params![parent.kind(), parent.id()],
         )
+    }
+
+    pub(crate) fn oldest_answer_context(
+        &self,
+        parent: &WorkRef,
+    ) -> StoreResult<Option<AnswerContext>> {
+        let Some(ask) = self.pending_asks_for_parent(parent)?.into_iter().next() else {
+            return Ok(None);
+        };
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (epoch_id, child) = ask_epoch_work_in(&conn, &ask.turn_id)?;
+        let mut statement = conn.prepare(
+            "SELECT a.id FROM ask_exchanges a
+             JOIN agent_turns t ON t.id=a.turn_id
+             WHERE t.epoch_id=?1 AND a.id!=?2 AND a.answered_at IS NOT NULL
+             ORDER BY a.asked_at, a.rowid",
+        )?;
+        let ids = statement
+            .query_map(params![epoch_id.as_str(), ask.id.as_str()], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let prior_exchanges = ids
+            .into_iter()
+            .map(|id| {
+                let id = AskId::parse(&id).map_err(invalid_durable)?;
+                ask_by_id_in(&conn, &id)
+            })
+            .collect::<StoreResult<Vec<_>>>()?;
+        Ok(Some(AnswerContext {
+            ask,
+            child,
+            epoch_id,
+            prior_exchanges,
+        }))
+    }
+
+    pub(crate) fn answer_attempt_history(
+        &self,
+        ask_id: &AskId,
+    ) -> StoreResult<AnswerAttemptHistory> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (failed_attempts, last_failed_at) = conn.query_row(
+            "SELECT COUNT(*), MAX(ended_at) FROM agent_invocations
+             WHERE answer_ask_id=?1 AND ended_at IS NOT NULL
+               AND COALESCE(handback_state, 'unknown') != 'succeeded'",
+            [ask_id.as_str()],
+            |row| Ok((row.get::<_, u32>(0)?, row.get::<_, Option<i64>>(1)?)),
+        )?;
+        Ok(AnswerAttemptHistory {
+            failed_attempts,
+            last_failed_at: last_failed_at
+                .map(OffsetDateTime::from_unix_timestamp)
+                .transpose()
+                .map_err(invalid_durable)?,
+        })
     }
 
     pub fn pending_user_asks(&self) -> StoreResult<Vec<AskExchange>> {
@@ -1943,6 +2002,20 @@ fn insert_supervised_invocation(
     run: &Run,
     invocation: &AgentInvocation,
 ) -> StoreResult<()> {
+    if let Some(ask_id) = invocation.answer_ask_id.as_ref() {
+        let ask = ask_by_id_in(tx, ask_id)?;
+        if ask.route != AnswerRoute::Parent(run.work.clone()) {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} does not own Ask {ask_id}'s answer route",
+                run.id
+            )));
+        }
+        if !ask_is_answerable_in(tx, ask_id)? {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Ask {ask_id} is no longer answerable"
+            )));
+        }
+    }
     let labels = work_labels(tx, &run.work)?;
     let cwd = run
         .cwd
@@ -1962,11 +2035,11 @@ fn insert_supervised_invocation(
             incomplete_reason, outcome, artifact_dir, conversation_path,
             provider_events_path, provider_session_id, provider_session_path,
             conversation_event_count, conversation_bytes, supervising_run_id,
-            account_id, resume_token
+            account_id, resume_token, answer_ask_id
          ) VALUES (
             ?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, NULL, NULL, ?8, ?9, ?10, ?11,
             ?12, 'prompt_only', NULL, 'running', '', '', NULL, NULL, NULL, 0, 0,
-            ?2, ?13, ?14
+            ?2, ?13, ?14, ?15
          )",
         params![
             invocation.id.as_str(),
@@ -1983,6 +2056,7 @@ fn insert_supervised_invocation(
             invocation.surface,
             invocation.route.account_id,
             invocation.resume_token,
+            invocation.answer_ask_id.as_ref().map(AskId::as_str),
         ],
     )?;
     Ok(())
@@ -2101,7 +2175,7 @@ fn supervised_invocation_in(
 ) -> StoreResult<AgentInvocation> {
     let row = conn.query_row(
         "SELECT supervising_run_id, provider, model, account_id, surface,
-                resume_token, started_at, ended_at
+                resume_token, started_at, ended_at, answer_ask_id
          FROM agent_invocations WHERE id=?1 AND supervising_run_id IS NOT NULL",
         [invocation_id.as_str()],
         |row| {
@@ -2114,12 +2188,17 @@ fn supervised_invocation_in(
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, i64>(6)?,
                 row.get::<_, Option<i64>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         },
     )?;
     Ok(AgentInvocation {
         id: invocation_id.clone(),
         supervising_run_id: Some(RunId::parse(&row.0).map_err(invalid_durable)?),
+        answer_ask_id: row
+            .8
+            .map(|id| AskId::parse(&id).map_err(invalid_durable))
+            .transpose()?,
         route: InvocationRoute {
             provider: row.1,
             model: row.2,
@@ -3590,6 +3669,7 @@ mod observe_invocation_provider_tests {
                     },
                     surface: "headless".to_string(),
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .expect("start an AgentInvocation");

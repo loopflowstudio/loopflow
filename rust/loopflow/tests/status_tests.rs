@@ -84,6 +84,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     let invocation = AgentInvocationRow {
         id: "invocation-wave-mutate".to_string(),
         run_id: "run-resident".to_string(),
+        answer_ask_id: None,
         process_id: "proc-resident".to_string(),
         started_at: now - 30,
         ended_at: Some(now - 20),

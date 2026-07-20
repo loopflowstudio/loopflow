@@ -94,6 +94,13 @@ pub struct LaunchResult {
 }
 
 /// Configuration for launching an agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentAuthority {
+    #[default]
+    Inherit,
+    Detached,
+}
+
 #[derive(Clone, Default)]
 pub struct AgentConfig {
     /// System/context prompt content.
@@ -108,6 +115,8 @@ pub struct AgentConfig {
     pub resume_token: Option<String>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
+    /// Whether the provider process inherits ambient Work execution authority.
+    pub authority: AgentAuthority,
     /// Skip permission prompts
     pub skip_permissions: bool,
     /// Engine-injected structured replies (rendered via harness prompt guidance).
@@ -143,6 +152,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("agent", &self.agent)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
+            .field("authority", &self.authority)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -2466,6 +2476,7 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
+            authority: AgentAuthority::Inherit,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2491,6 +2502,7 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
             resume_token: None,
+            authority: AgentAuthority::Inherit,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2516,6 +2528,7 @@ trust_level = "trusted"
             cwd: Some("/tmp".into()),
             max_turns: None,
             resume_token: None,
+            authority: AgentAuthority::Inherit,
             skip_permissions: false,
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".to_string(),

@@ -111,9 +111,6 @@ async fn run_async(command: &WorkCommand) -> anyhow::Result<()> {
                     .await?
             };
             print_answer(&answer, *json)?;
-            if let Err(error) = crate::ops::publish_pending_ask_comments(&store).await {
-                tracing::warn!(%error, "Ask comment outbox publication failed");
-            }
         }
         WorkCommand::Interrupt { kind, id, json } => {
             let work = parse_work(kind, id)?;

@@ -813,6 +813,7 @@ mod tests {
                     route: InvocationRoute::from(route),
                     surface: "headless".to_string(),
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await

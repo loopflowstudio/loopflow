@@ -352,6 +352,7 @@ impl Containment {
 pub struct AgentInvocation {
     pub id: AgentInvocationId,
     pub supervising_run_id: Option<RunId>,
+    pub answer_ask_id: Option<AskId>,
     pub route: InvocationRoute,
     pub surface: String,
     pub resume_token: Option<String>,
@@ -465,6 +466,20 @@ pub struct AskExchange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerContext {
+    pub ask: AskExchange,
+    pub child: WorkRef,
+    pub epoch_id: EpochId,
+    pub prior_exchanges: Vec<AskExchange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerAttemptHistory {
+    pub failed_attempts: u32,
+    pub last_failed_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunAdvance {
     RunStarting {
         containment: Containment,
@@ -474,6 +489,7 @@ pub enum RunAdvance {
         route: InvocationRoute,
         surface: String,
         resume_token: Option<String>,
+        answer_ask_id: Option<AskId>,
     },
     InvocationEnded {
         invocation_id: AgentInvocationId,

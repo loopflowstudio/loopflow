@@ -1,10 +1,11 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AskExchange, AskId, Author, Basis,
-    BoundarySeed, ContainmentObservation, ControlCtx, DoneProposal, EpochReceipt, FlowPosition,
-    Home, HomeId, InterruptReceipt, InvocationSurface, Placement, Run, RunAdvance, RunControl,
-    RunLease, RunTrigger, Send, SendId, SendState, SteerId, SteerReceipt, StopCause, StopReceipt,
-    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AdvanceReceipt, AgentInvocation, AgentInvocationId, Answer, AnswerAttemptHistory,
+    AnswerContext, AskExchange, AskId, Author, Basis, BoundarySeed, ContainmentObservation,
+    ControlCtx, DoneProposal, EpochReceipt, FlowPosition, Home, HomeId, InterruptReceipt,
+    InvocationSurface, Placement, Run, RunAdvance, RunControl, RunLease, RunTrigger, Send, SendId,
+    SendState, SteerId, SteerReceipt, StopCause, StopReceipt, ToolResponseReceipt,
+    ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreError, StoreResult};
@@ -306,6 +307,28 @@ impl Store {
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.pending_asks_for_parent(&parent)
+        })
+        .await
+    }
+
+    pub(crate) async fn oldest_answer_context(
+        &self,
+        parent: &WorkRef,
+    ) -> StoreResult<Option<AnswerContext>> {
+        let parent = parent.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.oldest_answer_context(&parent)
+        })
+        .await
+    }
+
+    pub(crate) async fn answer_attempt_history(
+        &self,
+        ask_id: &AskId,
+    ) -> StoreResult<AnswerAttemptHistory> {
+        let ask_id = ask_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.answer_attempt_history(&ask_id)
         })
         .await
     }
@@ -703,6 +726,7 @@ mod tests {
                     },
                     surface: "tui".to_string(),
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await
@@ -742,6 +766,7 @@ mod tests {
             },
             surface: "headless".to_string(),
             resume_token: None,
+            answer_ask_id: None,
         };
 
         let crate::durable::AdvanceReceipt::Invocation(second) =
@@ -984,6 +1009,7 @@ mod tests {
                     },
                     surface: "headless".to_string(),
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await

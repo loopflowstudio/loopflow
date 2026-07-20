@@ -366,6 +366,7 @@ fn register_task_with_process(
                     },
                     surface: "test".to_string(),
                     resume_token: None,
+                    answer_ask_id: None,
                 },
             )
             .await

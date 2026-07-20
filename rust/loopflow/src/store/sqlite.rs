@@ -1532,10 +1532,10 @@ impl SqliteStore {
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
                     conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token
+                    account_id, resume_token, answer_ask_id
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-                    ?26, ?27, ?28)",
+                    ?26, ?27, ?28, ?29)",
                 params![
                     invocation.id,
                     invocation.run_id,
@@ -1565,6 +1565,7 @@ impl SqliteStore {
                     supervising_run_id,
                     account_id,
                     resume_token,
+                    invocation.answer_ask_id,
                 ],
             )?;
         }
@@ -1764,7 +1765,7 @@ impl SqliteStore {
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
                     conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token
+                    account_id, resume_token, answer_ask_id
              FROM agent_invocations WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
@@ -1777,7 +1778,7 @@ impl SqliteStore {
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
                     conversation_event_count, conversation_bytes, supervising_run_id,
-                    account_id, resume_token
+                    account_id, resume_token, answer_ask_id
              FROM agent_invocations WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
@@ -1794,6 +1795,7 @@ impl SqliteStore {
             Ok(AgentInvocationRow {
                 id: row.get(0)?,
                 run_id: row.get(1)?,
+                answer_ask_id: row.get(28)?,
                 process_id: row.get(2)?,
                 started_at: row.get(3)?,
                 ended_at: row.get(4)?,

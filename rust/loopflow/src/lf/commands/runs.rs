@@ -1469,6 +1469,7 @@ mod tests {
         AgentInvocationRow {
             id: id.to_string(),
             run_id: format!("run-{id}"),
+            answer_ask_id: None,
             process_id: id.to_string(),
             started_at,
             ended_at,

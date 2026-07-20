@@ -138,13 +138,30 @@ async fn lfd_dedups_signed_deliveries_across_restart() {
     .await;
     assert_eq!(health["status"], "ok");
     assert_eq!(health["home_id"], expected_home_id.as_str());
-    let endpoint = std::fs::read_to_string(
-        repo.path()
-            .join(".lf-test/lfd")
-            .join(format!("{}.endpoint", expected_home_id.as_str())),
-    )
-    .expect("read lfd endpoint");
-    assert_eq!(endpoint.trim(), lfd_addr.to_string());
+    let endpoint_path = repo
+        .path()
+        .join(".lf-test/lfd")
+        .join(format!("{}.endpoint", expected_home_id.as_str()));
+    let endpoint: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&endpoint_path).expect("read lfd endpoint"))
+            .expect("parse lfd endpoint");
+    assert_eq!(endpoint["endpoint"], lfd_addr.to_string());
+    assert!(endpoint["token"]
+        .as_str()
+        .is_some_and(|token| !token.is_empty()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            std::fs::metadata(&endpoint_path)
+                .expect("read lfd endpoint metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
 
     // /status — fresh store, zero deliveries, zero wave endpoints.
     let status = poll_json_until(

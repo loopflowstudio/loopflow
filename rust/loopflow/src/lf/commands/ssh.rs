@@ -534,6 +534,20 @@ fn build_preamble(
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
+    if extra_env
+        .iter()
+        .any(|(name, _)| *name == EXPECTED_HOME_ID_ENV)
+    {
+        lines.push(
+            "LF_REACHED_HOME_ID=$(lf home id) || { echo 'remote lf could not read its HomeId' >&2; exit 1; }"
+                .to_string(),
+        );
+        lines.push(
+            "[ \"$LF_REACHED_HOME_ID\" = \"$LF_EXPECTED_HOME_ID\" ] || { echo \"remote Home identity mismatch: expected $LF_EXPECTED_HOME_ID, reached $LF_REACHED_HOME_ID\" >&2; exit 1; }"
+                .to_string(),
+        );
+        lines.push("unset LF_REACHED_HOME_ID".to_string());
+    }
 
     if let Some(token) = nonempty(&credentials.gh_token) {
         lines.push(format!("export GH_TOKEN={}", sh_quote(token)));
@@ -990,6 +1004,8 @@ mod tests {
         assert!(
             preamble.contains("export LF_EXPECTED_HOME_ID='home_00000000000000000000000000000001'")
         );
+        assert!(preamble.contains("LF_REACHED_HOME_ID=$(lf home id)"));
+        assert!(preamble.contains("remote Home identity mismatch"));
         for secret in [
             "GH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN",

@@ -4,6 +4,7 @@
 pub mod lease;
 pub mod recovery;
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -680,16 +681,45 @@ async fn resolve_merged_provider_account(
             });
         }
     }
+    let selection = lease::AccountSelection::from_env()?;
+    // Resolve target-side selectors across both providers. A selector qualified
+    // for Codex must not fail a Claude launch, and vice versa. Equivalent
+    // identities are one selection entry, with the target's local copy first;
+    // origin preferences retain forwarded provenance through `grant.preferred`.
+    let mut catalog = Vec::new();
+    let mut seen_accounts = HashSet::new();
+    if !forwarded.restricted {
+        if let Some(store) = &local_store {
+            for account in store.list_provider_accounts(None).await? {
+                let key = (account.provider.clone(), account.account_id.clone());
+                if account.home.is_some() && seen_accounts.insert(key) {
+                    catalog.push(account);
+                }
+            }
+        }
+    }
+    for forwarded_grant in &forwarded.grants {
+        for account_id in &forwarded_grant.accounts {
+            let facts = client.account_facts(forwarded_grant.provider, account_id)?;
+            if let Some(account) = facts.account {
+                let key = (account.provider.clone(), account.account_id.clone());
+                if seen_accounts.insert(key) {
+                    catalog.push(account);
+                }
+            }
+        }
+    }
+    let selected = selection.resolved_accounts(&catalog)?;
     if candidates.is_empty() {
+        if forwarded.restricted || selection.is_restricted() || exact_account_id.is_some() {
+            return Err(ProviderAccountError::NoEligibleAccount {
+                provider,
+                accounts: "the restricted merged account selection excludes this provider"
+                    .to_string(),
+            });
+        }
         return Ok(None);
     }
-
-    let selection = lease::AccountSelection::from_env()?;
-    let catalog = candidates
-        .iter()
-        .map(|candidate| candidate.account.clone())
-        .collect::<Vec<_>>();
-    let selected = selection.resolved_accounts(&catalog)?;
     let mut explicitly_preferred = Vec::new();
     for (selected_provider, account_id) in selected {
         if selected_provider != provider {
@@ -725,6 +755,12 @@ async fn resolve_merged_provider_account(
         }
         if let Some(grant) = &grant {
             for account_id in &grant.accounts {
+                if let Some(index) = candidates[..local_count]
+                    .iter()
+                    .position(|candidate| candidate.account.account_id == *account_id)
+                {
+                    push_candidate(&mut order, index);
+                }
                 if let Some(index) = candidates.iter().position(|candidate| {
                     candidate.is_forwarded() && candidate.account.account_id == *account_id
                 }) {
@@ -780,6 +816,9 @@ async fn resolve_merged_provider_account(
     for (position, index) in order.into_iter().enumerate() {
         let candidate = &candidates[index];
         let explicit = position < preferred_count;
+        if !candidate.credential_available {
+            continue;
+        }
         if !explicit && !candidate.eligible_for_automatic_routing(now) {
             continue;
         }

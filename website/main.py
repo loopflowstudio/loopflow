@@ -197,7 +197,7 @@ DOC_DESCRIPTIONS = {
     "authoring": "Writing skills, flows, directions, and goals",
     "agent-api": "How agents launch, steer, and prove control of other agents",
     "conducting": "Monitoring and steering many agents; the Mac podium",
-    "architecture": "No server: the store, the journal, Homes, lf ssh, lfd",
+    "architecture": "Decentralized stores, Home identity, WaveHost, SSH, and lfd",
     "lf": "Every command, PR/planning/release operations, the builtin catalog",
     "config": "Config files, context assembly, models, and launch behavior",
     "subscriptions": "Claude and Codex identities, routes, health, and remote selection",
@@ -213,7 +213,7 @@ def generate_llms_txt() -> str:
         for title, slug in DOCS_NAV
     )
     return f"""# Loopflow
-> Persistent agents, no server. Waves hold a goal, remember what they learn, and stay steerable — and lf is the command humans type and the API agents call to launch, steer, and observe other agents.
+> Persistent agents, no central server. Waves hold a goal, remember what they learn, and stay steerable — and lf is the command humans type and the API agents call to launch, steer, and observe other agents.
 
 Loopflow creates and runs Waves: each coordinates Linear-backed Projects and
 Tasks, keeps one steerable conversation beside the live work map, and folds
@@ -794,7 +794,7 @@ def get():
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
                     H1("Install"),
-                    P("One binary. No server. Nothing to register.", cls="tagline"),
+                    P("Local-first. No central server. Nothing to register.", cls="tagline"),
                     Div(
                         H2("CLI"),
                         P(

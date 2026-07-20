@@ -19,6 +19,8 @@
 //!   ┌────────────────────────────────────────────────┐
 //!   │ /health          → liveness probe              │
 //!   │ /status          → wave count + delivery count │
+//!   │ /waves/start     → local capability → start    │
+//!   │ /waves/stop      → local capability → stop     │
 //!   │ /linear/webhook  → verify → inbox → ingest     │
 //!   │ /github/webhook  → verify → prune worktree     │
 //!   └────────────────────────────────────────────────┘
@@ -38,7 +40,7 @@ use std::time::Duration;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header::AUTHORIZATION, HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use fs2::FileExt;
@@ -80,6 +82,8 @@ pub struct LfdState {
     github: Option<GithubConfig>,
     /// The machine-local host for Wave listener tasks.
     wave_host: WaveHost,
+    /// Local capability required by the Wave control routes.
+    control_token: Arc<String>,
 }
 
 /// Linear webhook verification + ingestion config, sourced from env.
@@ -105,6 +109,7 @@ async fn build_state(
     Ok(LfdState {
         repo_root,
         wave_host: WaveHost::new(local.id, store.clone()),
+        control_token: Arc::new(uuid::Uuid::new_v4().to_string()),
         store,
         linear,
         github,
@@ -163,8 +168,10 @@ struct StartWavesRequest {
 
 async fn start_waves_handler(
     State(state): State<LfdState>,
+    headers: HeaderMap,
     Json(request): Json<StartWavesRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    authorize_wave_control(&state, &headers)?;
     state
         .wave_host
         .start_waves(request.wave_ids)
@@ -180,8 +187,10 @@ struct StopWaveRequest {
 
 async fn stop_wave_handler(
     State(state): State<LfdState>,
+    headers: HeaderMap,
     Json(request): Json<StopWaveRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    authorize_wave_control(&state, &headers)?;
     state
         .wave_host
         .stop_wave(&request.wave_id)
@@ -194,6 +203,24 @@ async fn stop_wave_handler(
             }
         })
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+fn authorize_wave_control(
+    state: &LfdState,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, String)> {
+    let supplied = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if supplied == Some(state.control_token.as_str()) {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::UNAUTHORIZED,
+            "Wave control requires the local lfd capability".to_string(),
+        ))
+    }
 }
 
 /// Receive a signed Linear delivery, persist it to the durable inbox, and route
@@ -802,21 +829,24 @@ async fn ensure_github_subscriptions(state: &LfdState) {
 /// inbox lives there); Linear and GitHub config are optional — absent webhook
 /// credentials leave their corresponding route at 503.
 ///
-/// A non-loopback bind is refused unless `LF_LFD_AUTH_TOKEN` is set as an
-/// explicit exposure acknowledgment. The value is not request middleware;
-/// operators must gate the network boundary independently.
+/// A non-loopback bind is refused unless `LF_LFD_ALLOW_NON_LOOPBACK=1`
+/// explicitly permits exposure. Operators must gate the network boundary
+/// independently.
 pub async fn serve(
     repo_root: PathBuf,
     addr: SocketAddr,
     store: Arc<Store>,
     linear: Option<LinearConfig>,
 ) -> anyhow::Result<()> {
-    ensure_loopback_or_token(addr, std::env::var_os("LF_LFD_AUTH_TOKEN").as_deref())?;
+    ensure_bind_allowed(
+        addr,
+        std::env::var_os("LF_LFD_ALLOW_NON_LOOPBACK").as_deref(),
+    )?;
     if !addr.ip().is_loopback() {
         tracing::warn!(
             %addr,
-            "lfd bound off loopback with LF_LFD_AUTH_TOKEN set; \
-             the value does not authenticate requests, so gate this listener at the network boundary"
+            "lfd bound off loopback with LF_LFD_ALLOW_NON_LOOPBACK=1; \
+             gate this listener at the network boundary"
         );
     }
     let state = build_state(repo_root.clone(), store, linear, github_config(&repo_root)).await?;
@@ -836,8 +866,11 @@ pub async fn serve(
     tokio::spawn(async move { ensure_github_subscriptions(&subscription_state).await });
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let bound = listener.local_addr()?;
-    let endpoint = local_client_endpoint(bound);
-    write_endpoint(wave_host.home_id(), &endpoint)?;
+    let client = LfdClientEndpoint {
+        endpoint: local_client_endpoint(bound),
+        token: state.control_token.as_ref().clone(),
+    };
+    write_endpoint(wave_host.home_id(), &client)?;
     tracing::info!(addr = %bound, home_id = %wave_host.home_id(), "lfd serving");
     let result = axum::serve(listener, router(state).into_make_service())
         .with_graceful_shutdown(shutdown_signal())
@@ -845,7 +878,7 @@ pub async fn serve(
     reconciliation.abort();
     let _ = reconciliation.await;
     wave_host.shutdown().await;
-    remove_endpoint(wave_host.home_id(), &endpoint);
+    remove_endpoint(wave_host.home_id(), &client);
     result.map_err(anyhow::Error::from)
 }
 
@@ -879,9 +912,9 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<String> {
-    if let Some(endpoint) = live_endpoint(home_id).await {
-        return Ok(endpoint);
+pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> {
+    if live_endpoint(home_id).await.is_some() {
+        return Ok(());
     }
     let argv = vec![
         crate::engine::process::resolve_lfd_binary()
@@ -904,8 +937,8 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<Stri
     .await;
     for _ in 0..40 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if let Some(endpoint) = live_endpoint(home_id).await {
-            return Ok(endpoint);
+        if live_endpoint(home_id).await.is_some() {
+            return Ok(());
         }
     }
     match launch {
@@ -919,11 +952,12 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<Stri
 }
 
 pub(crate) async fn start_waves(home_id: &HomeId, wave_ids: Vec<WaveId>) -> anyhow::Result<()> {
-    let endpoint = live_endpoint(home_id)
+    let client = live_endpoint(home_id)
         .await
         .ok_or_else(|| anyhow::anyhow!("lfd is not running for Home {home_id}"))?;
     let response = reqwest::Client::new()
-        .post(format!("http://{endpoint}/waves/start"))
+        .post(format!("http://{}/waves/start", client.endpoint))
+        .bearer_auth(&client.token)
         .json(&StartWavesRequest { wave_ids })
         .send()
         .await?;
@@ -939,11 +973,12 @@ pub(crate) async fn start_waves(home_id: &HomeId, wave_ids: Vec<WaveId>) -> anyh
 }
 
 pub(crate) async fn stop_wave(home_id: &HomeId, wave_id: &WaveId) -> anyhow::Result<Option<bool>> {
-    let Some(endpoint) = live_endpoint(home_id).await else {
+    let Some(client) = live_endpoint(home_id).await else {
         return Ok(None);
     };
     let response = reqwest::Client::new()
-        .post(format!("http://{endpoint}/waves/stop"))
+        .post(format!("http://{}/waves/stop", client.endpoint))
+        .bearer_auth(&client.token)
         .json(&StopWaveRequest {
             wave_id: wave_id.clone(),
         })
@@ -959,14 +994,16 @@ pub(crate) async fn stop_wave(home_id: &HomeId, wave_id: &WaveId) -> anyhow::Res
     }
 }
 
-async fn live_endpoint(home_id: &HomeId) -> Option<String> {
-    let endpoint = std::fs::read_to_string(endpoint_path(home_id)).ok()?;
-    let endpoint = endpoint.trim();
-    if endpoint.is_empty() {
-        return None;
-    }
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct LfdClientEndpoint {
+    endpoint: String,
+    token: String,
+}
+
+async fn live_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
+    let client = read_endpoint(home_id)?;
     let health = reqwest::Client::new()
-        .get(format!("http://{endpoint}/health"))
+        .get(format!("http://{}/health", client.endpoint))
         .timeout(Duration::from_millis(500))
         .send()
         .await
@@ -974,7 +1011,7 @@ async fn live_endpoint(home_id: &HomeId) -> Option<String> {
         .json::<HealthBody>()
         .await
         .ok()?;
-    (health.home_id == *home_id && health.status == "ok").then(|| endpoint.to_string())
+    (health.home_id == *home_id && health.status == "ok").then_some(client)
 }
 
 fn endpoint_path(home_id: &HomeId) -> PathBuf {
@@ -1000,36 +1037,52 @@ fn lock_home(home_id: &HomeId) -> anyhow::Result<File> {
     Ok(file)
 }
 
-fn write_endpoint(home_id: &HomeId, endpoint: &str) -> anyhow::Result<()> {
+fn read_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
+    let bytes = std::fs::read(endpoint_path(home_id)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn write_endpoint(home_id: &HomeId, client: &LfdClientEndpoint) -> anyhow::Result<()> {
     let path = endpoint_path(home_id);
     let parent = path
         .parent()
         .expect("an lfd endpoint always has a parent directory");
     std::fs::create_dir_all(parent)?;
-    std::fs::write(path, format!("{endpoint}\n"))?;
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.mode(0o600);
+    }
+    let mut file = options.open(&path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(&serde_json::to_vec(client)?)?;
     Ok(())
 }
 
-fn remove_endpoint(home_id: &HomeId, endpoint: &str) {
+fn remove_endpoint(home_id: &HomeId, client: &LfdClientEndpoint) {
     let path = endpoint_path(home_id);
-    let owned = std::fs::read_to_string(&path)
-        .ok()
-        .is_some_and(|value| value.trim() == endpoint);
+    let owned = read_endpoint(home_id).as_ref() == Some(client);
     if owned {
         let _ = std::fs::remove_file(path);
     }
 }
 
-/// Refuse a non-loopback bind unless `LF_LFD_AUTH_TOKEN` acknowledges that the
-/// operator has gated the network boundary. The value itself is not read from
-/// requests.
-fn ensure_loopback_or_token(addr: SocketAddr, auth_token: Option<&OsStr>) -> anyhow::Result<()> {
-    if addr.ip().is_loopback() || auth_token.is_some() {
+/// Refuse a non-loopback bind unless the operator explicitly allows it.
+fn ensure_bind_allowed(addr: SocketAddr, allow_non_loopback: Option<&OsStr>) -> anyhow::Result<()> {
+    if addr.ip().is_loopback() || allow_non_loopback == Some(OsStr::new("1")) {
         return Ok(());
     }
     anyhow::bail!(
-        "refusing non-loopback bind {addr} without LF_LFD_AUTH_TOKEN; \
-         bind 127.0.0.1 or set LF_LFD_AUTH_TOKEN to opt in"
+        "refusing non-loopback bind {addr}; bind 127.0.0.1 or set \
+         LF_LFD_ALLOW_NON_LOOPBACK=1"
     )
 }
 
@@ -1084,6 +1137,7 @@ mod tests {
     async fn wave_start_attempts_every_requested_wave() {
         let repo = tempfile::tempdir().unwrap();
         let state = make_state(repo.path(), open_store(repo.path()).await, None).await;
+        let control_token = state.control_token.as_ref().clone();
         let first = WaveId::new();
         let second = WaveId::new();
         let app = router(state);
@@ -1091,7 +1145,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.ok() });
 
-        let response = reqwest::Client::new()
+        let unauthorized = reqwest::Client::new()
             .post(format!("http://{addr}/waves/start"))
             .json(&StartWavesRequest {
                 wave_ids: vec![first.clone(), second.clone()],
@@ -1099,7 +1153,17 @@ mod tests {
             .send()
             .await
             .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/waves/start"))
+            .bearer_auth(control_token)
+            .json(&StartWavesRequest {
+                wave_ids: vec![first.clone(), second.clone()],
+            })
+            .send()
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let message = response.text().await.unwrap();
         assert!(message.contains(first.as_str()));
@@ -1403,11 +1467,13 @@ mod tests {
     }
 
     #[test]
-    fn bind_guard_allows_loopback_without_token_and_refuses_off_loopback() {
+    fn bind_guard_requires_an_explicit_non_loopback_value() {
         let loopback: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        assert!(ensure_loopback_or_token(loopback, None).is_ok());
+        assert!(ensure_bind_allowed(loopback, None).is_ok());
         let off: SocketAddr = "0.0.0.0:8080".parse().unwrap();
-        assert!(ensure_loopback_or_token(off, None).is_err());
-        assert!(ensure_loopback_or_token(off, Some(&OsString::from("tok"))).is_ok());
+        assert!(ensure_bind_allowed(off, None).is_err());
+        assert!(ensure_bind_allowed(off, Some(&OsString::new())).is_err());
+        assert!(ensure_bind_allowed(off, Some(&OsString::from("true"))).is_err());
+        assert!(ensure_bind_allowed(off, Some(&OsString::from("1"))).is_ok());
     }
 }

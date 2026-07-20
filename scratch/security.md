@@ -163,6 +163,23 @@ the explicit stop/move boundary.
 - Fail closed when the account broker, Home identity proof, or remote `lf`
   compatibility probe fails.
 
+## Done when
+
+- Security and subscription docs explain where identities and credentials live,
+  what crosses SSH, who can use it, and when remote login is unnecessary.
+- `lf ssh <target> <args...>` runs only remote `lf`, treats the target as the
+  origin/target account boundary, and rejects nested SSH.
+- The target selects over one local-plus-forwarded catalog without refreshing
+  every origin credential, preserves authority-owned health and session pins,
+  and fails over unhealthy preferences.
+- Every durable spawn removes forwarded account handles, singleton credentials,
+  named Doppler secrets, SSH target context, and daemon ingress authority.
+- `lf start` and `lf stop` are machine-local; explicit HomeId SSH proves the
+  reached identity; bare startup respects optional `owner`/`home` policy and
+  recorded local placement.
+- One lfd process owns the Home endpoint and an in-process `WaveHost` that
+  reconciles eligible Waves without exposing unauthenticated Wave mutation.
+
 ## Demo
 
 On a credential-free SSH target, run an agent with a subscription account that

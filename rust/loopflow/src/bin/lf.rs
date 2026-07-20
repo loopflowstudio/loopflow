@@ -1168,7 +1168,6 @@ fn main() -> anyhow::Result<()> {
         &preferred_accounts,
         &restricted_accounts,
     )?;
-    loopflow::provider_account::lease::validate_account_selection(&account_selection)?;
     let inherited_account_lease = loopflow::provider_account::lease::account_lease_active();
     let _forwarded_account_selection = if inherited_account_lease && !account_selection.is_default()
     {

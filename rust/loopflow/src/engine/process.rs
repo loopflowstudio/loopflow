@@ -411,7 +411,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_AUTH_TOKEN GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -465,7 +465,7 @@ fn forwarded_authority_env_names() -> Vec<String> {
         "LF_LINEAR_VIEWER_ID".to_string(),
         "LF_GITHUB_WEBHOOK_SECRET".to_string(),
         "LF_GITHUB_WEBHOOK_URL".to_string(),
-        "LF_LFD_AUTH_TOKEN".to_string(),
+        "LF_LFD_ALLOW_NON_LOOPBACK".to_string(),
         "GH_TOKEN".to_string(),
         "OPENCODE_API_KEY".to_string(),
         "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
@@ -662,7 +662,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
         assert!(names.iter().any(|name| name == "GH_TOKEN"));
         assert!(names.iter().any(|name| name == "LF_LINEAR_WEBHOOK_SECRET"));
-        assert!(names.iter().any(|name| name == "LF_LFD_AUTH_TOKEN"));
+        assert!(names.iter().any(|name| name == "LF_LFD_ALLOW_NON_LOOPBACK"));
         assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
         assert!(names.iter().any(|name| name == "STRIPE_KEY"));
     }

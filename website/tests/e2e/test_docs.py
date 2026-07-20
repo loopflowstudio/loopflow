@@ -57,6 +57,7 @@ def test_docs_security_page_states_forwarded_authority_guarantees(
     assert "fail closed" in text
     assert "Doppler master credential never" in text
     assert "second SSH" in text
+    assert "per-process control capability" in text
 
 
 def test_docs_subscriptions_page_owns_account_selection(

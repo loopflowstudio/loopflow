@@ -59,7 +59,7 @@ lf stop engbot
 | Writing skills, flows, and goals | [Authoring](authoring.md) |
 | Writing an agent that drives other agents | [The Agent API](agent-api.md) |
 | Watching and steering many agents | [Conducting](conducting.md) |
-| Understanding how it works with no server | [Architecture](architecture.md) |
+| Understanding how it works without a central server | [Architecture](architecture.md) |
 | Looking up a command | [`lf` reference](lf.md) |
 
 ## Skills, flows, directions

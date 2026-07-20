@@ -1235,12 +1235,6 @@ pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
     Ok(())
 }
 
-pub fn validate_account_selection(
-    _selection: &AccountSelection,
-) -> Result<(), ProviderAccountError> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
@@ -1251,15 +1245,16 @@ mod tests {
 
     use super::{
         account_lease_active, grants_for_selection, prepare_root_lease, probe_forwarded_authority,
-        resolve_selectors, validate_account_selection, AccountLease, AccountLeaseBroker,
-        AccountLeaseClient, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
-        ProviderAccountSelector, ProviderGrant, ResolvedSelector, ACCOUNT_LEASE_ENV,
-        ACCOUNT_SELECTION_ENV,
+        resolve_selectors, AccountLease, AccountLeaseBroker, AccountLeaseClient,
+        AccountLeaseHandle, AccountSelection, PreparedAccountLease, ProviderAccountSelector,
+        ProviderGrant, ResolvedSelector, ACCOUNT_LEASE_ENV, ACCOUNT_SELECTION_ENV,
     };
     use crate::profile::{ProviderRoute, RouteScope};
     use crate::provider_account::{new_account, parse_account_id, RateLimitSignal};
     use crate::provider_auth::Provider;
-    use crate::store::{open_store, ProviderAccount, ProviderAccountId, StorageConfig};
+    use crate::store::{
+        open_store, CredentialState, ProviderAccount, ProviderAccountId, StorageConfig,
+    };
     use tempfile::tempdir;
     fn id(value: &str) -> ProviderAccountId {
         parse_account_id(value).unwrap()
@@ -1397,12 +1392,9 @@ mod tests {
         let _selection_restore = RestoreEnv::capture(ACCOUNT_SELECTION_ENV);
         let selection = selection_from("codex=reserve");
         std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
-        validate_account_selection(&selection).unwrap();
         std::env::set_var(ACCOUNT_SELECTION_ENV, selection.env_value().unwrap());
         assert_eq!(AccountSelection::from_env().unwrap(), selection);
-        validate_account_selection(&AccountSelection::default()).unwrap();
         std::env::remove_var(ACCOUNT_LEASE_ENV);
-        validate_account_selection(&selection).unwrap();
         std::env::set_var(ACCOUNT_LEASE_ENV, std::ffi::OsString::from_vec(vec![0xff]));
         assert!(account_lease_active());
         assert!(AccountLeaseClient::from_env().is_err());
@@ -1495,6 +1487,22 @@ mod tests {
         let mut local = account(Provider::Claude, "local", "local@example.com");
         local.home = Some(target_home.join("accounts/claude/local"));
         target_store.upsert_provider_account(&local).await.unwrap();
+        let mut shared = account(Provider::Claude, "shared", "shared@example.com");
+        shared.home = Some(target_home.join("accounts/claude/shared"));
+        target_store.upsert_provider_account(&shared).await.unwrap();
+        let mut missing = account(Provider::Claude, "missing", "missing@example.com");
+        missing.home = Some(target_home.join("accounts/claude/missing"));
+        missing.credential_state = CredentialState::Missing;
+        target_store
+            .upsert_provider_account(&missing)
+            .await
+            .unwrap();
+        let mut local_codex = account(Provider::Codex, "codex", "codex@example.com");
+        local_codex.home = Some(target_home.join("accounts/codex/codex"));
+        target_store
+            .upsert_provider_account(&local_codex)
+            .await
+            .unwrap();
         target_store
             .set_provider_route(&ProviderRoute {
                 scope: RouteScope::Default,
@@ -1517,21 +1525,39 @@ mod tests {
             .upsert_provider_account(&forwarded)
             .await
             .unwrap();
+        let mut forwarded_shared = shared.clone();
+        forwarded_shared.home = Some(temp.path().join("origin/accounts/claude/shared"));
+        origin_store
+            .upsert_provider_account(&forwarded_shared)
+            .await
+            .unwrap();
+        let mut forwarded_codex = local_codex.clone();
+        forwarded_codex.home = Some(temp.path().join("origin/accounts/codex/codex"));
+        origin_store
+            .upsert_provider_account(&forwarded_codex)
+            .await
+            .unwrap();
         let broker = AccountLeaseBroker::start(PreparedAccountLease {
             lease: AccountLease {
                 grants: vec![ProviderGrant {
                     provider: Provider::Claude,
-                    accounts: vec![forwarded.account_id.clone()],
+                    accounts: vec![shared.account_id.clone(), forwarded.account_id.clone()],
                     preferred: 0,
                 }],
                 restricted: false,
             },
-            credentials: HashMap::from([(
-                (Provider::Claude, forwarded.account_id.clone()),
-                "forwarded-access-token".to_string(),
-            )]),
+            credentials: HashMap::from([
+                (
+                    (Provider::Claude, forwarded.account_id.clone()),
+                    "forwarded-access-token".to_string(),
+                ),
+                (
+                    (Provider::Claude, shared.account_id.clone()),
+                    "shared-access-token".to_string(),
+                ),
+            ]),
             unavailable_credentials: HashSet::new(),
-            store: origin_store,
+            store: Arc::clone(&origin_store),
             restricted: false,
         })
         .unwrap();
@@ -1541,6 +1567,16 @@ mod tests {
             .await
             .unwrap()
             .expect("the target-local route should be available");
+        assert_eq!(route.account_id(), &local.account_id);
+        assert!(route.uses_native_home());
+
+        let codex_preference =
+            AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
+        std::env::set_var(ACCOUNT_SELECTION_ENV, codex_preference.env_value().unwrap());
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("a Codex preference should leave the Claude route available");
         assert_eq!(route.account_id(), &local.account_id);
         assert!(route.uses_native_home());
 
@@ -1557,11 +1593,81 @@ mod tests {
         assert_eq!(route.account_id(), &forwarded.account_id);
         assert!(!route.uses_native_home());
 
+        let shared_preference =
+            AccountSelection::from_flags(&["claude=shared@".to_string()], &[]).unwrap();
+        std::env::set_var(
+            ACCOUNT_SELECTION_ENV,
+            shared_preference.env_value().unwrap(),
+        );
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the target-local copy should win for a shared identity");
+        assert_eq!(route.account_id(), &shared.account_id);
+        assert!(route.uses_native_home());
+
+        let missing_preference =
+            AccountSelection::from_flags(&["claude=missing@".to_string()], &[]).unwrap();
+        std::env::set_var(
+            ACCOUNT_SELECTION_ENV,
+            missing_preference.env_value().unwrap(),
+        );
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("a missing target preference should fall through to the local route");
+        assert_eq!(route.account_id(), &local.account_id);
+        assert!(route.uses_native_home());
+
+        let mut missing_route = local.clone();
+        missing_route.credential_state = CredentialState::Missing;
+        target_store
+            .upsert_provider_account(&missing_route)
+            .await
+            .unwrap();
+        std::env::remove_var(ACCOUNT_SELECTION_ENV);
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the local copy should precede the forwarded origin route");
+        assert_eq!(route.account_id(), &shared.account_id);
+        assert!(route.uses_native_home());
+
         let client = AccountLeaseClient::from_env().unwrap().unwrap();
         let facts = client
             .account_facts(Provider::Claude, &forwarded.account_id)
             .unwrap();
         assert!(facts.account.is_some_and(|account| account.home.is_none()));
+
+        drop(client);
+        drop(broker);
+        let restricted_broker = AccountLeaseBroker::start(PreparedAccountLease {
+            lease: AccountLease {
+                grants: vec![ProviderGrant {
+                    provider: Provider::Codex,
+                    accounts: vec![forwarded_codex.account_id.clone()],
+                    preferred: 1,
+                }],
+                restricted: true,
+            },
+            credentials: HashMap::from([(
+                (Provider::Codex, forwarded_codex.account_id.clone()),
+                "codex-access-token".to_string(),
+            )]),
+            unavailable_credentials: HashSet::new(),
+            store: origin_store,
+            restricted: true,
+        })
+        .unwrap();
+        std::env::set_var(
+            ACCOUNT_LEASE_ENV,
+            restricted_broker.local_env_value().unwrap(),
+        );
+        std::env::remove_var(ACCOUNT_SELECTION_ENV);
+        let error = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("excludes this provider"));
     }
 
     /// Exercise the bounded grant across inheritance, fallback, resume, and cleanup.

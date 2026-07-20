@@ -143,7 +143,7 @@ enum Commands {
     /// serve liveness probes. Always opens the store.
     Serve {
         /// Address to bind (default 127.0.0.1:8080; non-loopback requires
-        /// LF_LFD_AUTH_TOKEN).
+        /// LF_LFD_ALLOW_NON_LOOPBACK=1).
         #[arg(long, default_value = "127.0.0.1:8080")]
         addr: String,
 

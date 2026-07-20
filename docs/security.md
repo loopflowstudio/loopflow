@@ -217,11 +217,17 @@ the trace store as sensitive even though it is local.
 
 `lfd` listens on `127.0.0.1` by default. It is not a remote multi-user identity
 system; use SSH for remote operation. A non-loopback bind requires
-`LF_LFD_AUTH_TOKEN` to be non-empty as an explicit exposure acknowledgment, but
-`lfd` does not authenticate that value on requests. Linear and GitHub webhook
-routes verify their provider signatures. `/health` and `/status` are public on
-the bound interface, so a non-loopback listener must sit behind a firewall or
-authenticating proxy.
+`LF_LFD_ALLOW_NON_LOOPBACK=1`. Linear and GitHub webhook routes verify their
+provider signatures. `/health` and `/status` are public on the bound interface,
+so a non-loopback listener must sit behind a firewall or authenticating proxy.
+Wave start and stop require a random per-process control capability stored in
+the local endpoint record with owner-only permissions; the capability is never
+logged or sent to agents.
+
+The detached development fallback that `lf start` launches when no lfd service
+is live is deliberately scrubbed. It can host Waves, but it does not retain
+webhook secrets from the invoking shell. Install lfd as the Home service for
+durable webhook ingress.
 
 `lfd` keeps webhook secrets inside the Home server process. Its in-process
 `WaveHost` listeners are trusted Loopflow control code, not agents. When they

@@ -1668,9 +1668,7 @@ impl SqliteStore {
             "UPDATE agent_invocations
              SET capture_status = 'pruned', incomplete_reason = ?2,
                  ended_at = COALESCE(ended_at, ?3),
-                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END,
-                 attention_kind = NULL, attention_work_kind = NULL,
-                 attention_work_id = NULL, attention_at = NULL
+                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END
              WHERE id = ?1 AND capture_status != 'pruned'",
             params![invocation_id, incomplete_reason, ended_at_fallback],
         )?;
@@ -1701,9 +1699,7 @@ impl SqliteStore {
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'interrupted', incomplete_reason = ?2,
-                 ended_at = COALESCE(ended_at, ?3), outcome = 'interrupted',
-                 attention_kind = NULL, attention_work_kind = NULL,
-                 attention_work_id = NULL, attention_at = NULL
+                 ended_at = COALESCE(ended_at, ?3), outcome = 'interrupted'
              WHERE id = ?1 AND capture_status = 'capturing'",
             params![invocation_id, incomplete_reason, ended_at_fallback],
         )?;
@@ -1734,9 +1730,7 @@ impl SqliteStore {
         let updated = tx.execute(
             "UPDATE agent_invocations
              SET capture_status = 'lost', ended_at = COALESCE(ended_at, ?2),
-                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END,
-                 attention_kind = NULL, attention_work_kind = NULL,
-                 attention_work_id = NULL, attention_at = NULL
+                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END
              WHERE id = ?1 AND capture_status = 'partial'",
             params![invocation_id, ended_at_fallback],
         )?;

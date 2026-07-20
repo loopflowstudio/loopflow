@@ -1,3 +1,7 @@
+-- name: durable_asks
+-- id: 375d60ddbb8adc89aa50a2f8aa4776e1
+-- depends_on: run_owns_execution
+
 -- A question is Turn-local tool I/O. Its Work and Basis are derived through
 -- Turn -> AgentInvocation -> Run -> Epoch; only the answering route is stored.
 

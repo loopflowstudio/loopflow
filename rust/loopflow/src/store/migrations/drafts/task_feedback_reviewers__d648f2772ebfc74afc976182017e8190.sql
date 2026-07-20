@@ -1,3 +1,7 @@
+-- name: task_feedback_reviewers
+-- id: d648f2772ebfc74afc976182017e8190
+-- depends_on: drop_agent_bus
+
 -- Reviewer names authority directly; it does not suppress the authored step.
 
 ALTER TABLE tasks RENAME COLUMN iterate_interaction_policy TO iterate_reviewer;

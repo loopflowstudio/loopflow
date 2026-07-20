@@ -1,3 +1,7 @@
+-- name: run_owns_execution
+-- id: 23cf6a1d272232aef5b6102dfecb8359
+-- depends_on: explicit_pr_merge_requests
+
 -- Collapse runner authority and containment onto Run. The trace row records
 -- one provider invocation and may point at its supervisor, but that relation
 -- is provenance only.

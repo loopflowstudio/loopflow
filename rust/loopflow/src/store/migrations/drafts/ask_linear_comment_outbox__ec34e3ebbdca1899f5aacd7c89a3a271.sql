@@ -1,3 +1,7 @@
+-- name: ask_linear_comment_outbox
+-- id: ec34e3ebbdca1899f5aacd7c89a3a271
+-- depends_on: durable_asks
+
 -- Ask and Answer commits enqueue their Linear write in the same transaction.
 -- The provider call happens afterward; attempt state makes failures visible and
 -- lets a later command reconcile a remotely-created comment without duplicating

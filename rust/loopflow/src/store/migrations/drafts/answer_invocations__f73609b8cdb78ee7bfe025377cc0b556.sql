@@ -1,3 +1,7 @@
+-- name: answer_invocations
+-- id: f73609b8cdb78ee7bfe025377cc0b556
+-- depends_on: ask_linear_comment_outbox
+
 -- Correlate a detached answer attempt to the exact durable Ask it serves.
 -- The relation is purpose, not authority: only the supervising Run lease can
 -- commit the Answer.

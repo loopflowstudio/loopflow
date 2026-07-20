@@ -205,23 +205,26 @@ If the human wants remote execution, explain the durable sequence and use the
 actual ids observed from the commands:
 
 ```bash
-lf ssh <host> --remote-native -- lf home id --json
+lf ssh <host> home id --json
 lf home observe <home-id> ssh://<user>@<host>
-lf ssh <home-id> --remote-native -- lf auth status
-lf ssh <home-id> --remote-native -- lf route show
+lf ssh <home-id> auth status
+lf ssh <home-id> route show
 lf ls --json
 lf work place wave <wave-id> <home-id>
 lf home probe <wave> --json
-lf start <wave>
+lf ssh <home-id> start <wave>
 ```
 
-`--remote-native` means the remote Home uses its installed provider, GitHub,
-PM, and secret authority. Before placement, use remote-native reads to verify
-that the remote has `lf`, the repository, required accounts, and the intended
-route; origin authority is not forwarded. `lf home observe` records the mutable
-SSH route for the stable HomeId. Placement is allowed only while no Run is
-live. Ask before observing a route, changing placement, or starting a Wave;
-each changes durable execution state.
+`lf ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
+commands. The remote process can select from subscription accounts forwarded
+for that invocation and accounts installed on the remote Home. GitHub, PM, and
+secret authority use the remote machine's installed credentials. Before
+placement, use remote reads to verify that the remote has `lf`, the repository,
+required accounts, and the intended route. `lf home observe` records the
+mutable SSH route for the stable HomeId. Placement is allowed only while no Run
+is live. `lf start <wave>` starts on the current machine; use `lf ssh <home-id>
+start <wave>` to start on the remote Home. Ask before observing a route,
+changing placement, or starting a Wave; each changes durable execution state.
 
 ## 6. Prove the result
 

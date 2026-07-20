@@ -252,7 +252,7 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ## Running Waves, Projects, and Tasks
 
 ```bash
-lf start designer                                  # serve it from its placed Home
+lf start designer                                  # serve it on this machine
 lf wave designer                                   # foreground development mode
 lf stop designer                                   # stop it; leave the Home keeper running
 lf project run <linear-project-id>                  # durable Project Work
@@ -274,7 +274,11 @@ lf work place wave wave_... home_...                 # move idle Wave Work to a 
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
-`lf start <name>` asks the placed Home's shared keeper to serve the Wave.
+`lf start <name>` asks this machine's shared keeper to serve the Wave and
+records this machine as its Home. It never follows a remote placement record.
+Bare `lf start` is the automatic form: it starts only repo Waves whose optional
+`owner` and `home` fields in `GOAL.md` match this machine and whose recorded
+placement is local. The named form is the explicit override.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
 development. Project Work pursues one Linear Project's KRs without a worktree.
 Each Linear Project has at most one current Work; terminal Work remains readable
@@ -311,19 +315,23 @@ lf home observe <home-id> ssh://jack@mini.local
 lf work place wave <wave-id> <home-id>
 lf start shipper --json
 lf stop shipper
-lf ssh <home-id> --remote-native -- lf status shipper --json
+lf ssh <home-id> status shipper --json
+lf ssh <home-id> start shipper --json
 ```
 
 `lf start` returns the same Wave rows as `lf ls --json`; it does not define a
-second launch-result model. With no names it starts every Wave in the current
-repo. `lf stop` stops the selected Wave while the Home keeper and sibling Waves
-continue.
+second launch-result model. With no names it starts every eligible Wave in the
+current repo on this machine. `lfd` starts the same eligible set across all
+repositories known to its local store and reconciles it every 30 seconds.
+`lf stop` stops the selected Wave on this machine while `lfd` and sibling Waves
+continue. It suppresses reconciliation until an explicit `lf start` or the
+next `lfd` restart; change `owner`, `home`, or placement for a durable
+assignment change.
 
 `lf ssh <HomeId>` resolves the Home's current observed route and makes the
-target prove that identity. Add `--remote-native` for durable lifecycle: no
-origin provider, GitHub, PM, account, or secret authority crosses SSH. Raw
-`lf ssh <host> -- <command>` keeps the foreground credential-forwarding
-behavior.
+target prove that identity. The remote `lf` is implicit, so everything after
+the target is normal `lf` syntax. Foreground commands can use origin and target
+accounts; durable processes scrub forwarded authority before detaching.
 
 ## Presenting an Opaque AgentInvocation
 

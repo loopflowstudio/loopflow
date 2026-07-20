@@ -50,9 +50,8 @@ pub struct Cli {
     #[arg(
         id = "preferred_provider_account",
         long = "account",
-        value_name = "EMAIL",
-        conflicts_with = "restricted_provider_account",
-        global = true
+        value_name = "SELECTOR",
+        conflicts_with = "restricted_provider_account"
     )]
     pub account: Vec<String>,
 
@@ -61,9 +60,8 @@ pub struct Cli {
     #[arg(
         id = "restricted_provider_account",
         long = "only-account",
-        value_name = "EMAIL",
-        conflicts_with = "preferred_provider_account",
-        global = true
+        value_name = "SELECTOR",
+        conflicts_with = "preferred_provider_account"
     )]
     pub only_account: Vec<String>,
 
@@ -271,11 +269,11 @@ pub enum Commands {
         #[arg(long)]
         force: bool,
     },
-    /// Start one or more Waves on their authoritative Homes.
+    /// Start one or more Waves on this machine.
     Start {
-        /// Wave names. With none, starts every Wave in the current repo.
+        /// Wave names. With none, starts eligible Waves in the current repo.
         waves: Vec<String>,
-        /// Internal identity bindings used when one Home dispatches to another.
+        /// Internal identity bindings carried by an explicit Home SSH hop.
         #[arg(long = "wave-id", value_name = "NAME=ID", hide = true)]
         wave_ids: Vec<String>,
         #[arg(long)]
@@ -293,9 +291,6 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
-    /// Internal: one machine-local keeper serving every Wave on a Home.
-    #[command(name = "__home-resident", hide = true)]
-    HomeResident { home_id: crate::durable::HomeId },
     /// Internal resident primitive: execute one expanded top-level flow step.
     #[command(name = "__flow-step", hide = true)]
     FlowStep {
@@ -541,13 +536,29 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
     },
-    /// Run a command on a Home or SSH host carrying your local credentials.
+    /// Run lf on a Home or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
     /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh <home-id> -- lf pr open`.
+    /// to resolve them locally. Example: `lf ssh <home-id> pr open`.
     Ssh {
+        /// Prefer this origin account when the remote lf chooses a provider.
+        #[arg(
+            id = "ssh_preferred_provider_account",
+            long = "account",
+            value_name = "SELECTOR",
+            conflicts_with = "ssh_restricted_provider_account"
+        )]
+        origin_account: Vec<String>,
+        /// Restrict remote provider launches to these origin accounts.
+        #[arg(
+            id = "ssh_restricted_provider_account",
+            long = "only-account",
+            value_name = "SELECTOR",
+            conflicts_with = "ssh_preferred_provider_account"
+        )]
+        origin_only_account: Vec<String>,
         /// HomeId (preferred), SSH alias, or user@host
         target: String,
         /// Repository path on the remote, relative to $HOME
@@ -561,14 +572,10 @@ pub enum Commands {
         /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
         #[arg(long = "forward-agent")]
         forward_agent: bool,
-        /// Use credentials already installed on the remote Home. For detached
-        /// product lifecycle only; forwards no provider, GitHub, PM, or secret
-        /// authority.
-        #[arg(long = "remote-native")]
-        remote_native: bool,
-        /// Command to run on the remote (after `--`)
-        #[arg(last = true)]
-        cmd: Vec<String>,
+        /// Arguments for the remote lf. The target is the boundary: every
+        /// argument after it belongs to the remote invocation.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        lf_args: Vec<String>,
     },
     /// Run a flow by name — the explicit form for names that collide with a
     /// built-in command
@@ -657,7 +664,7 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Move Wave Work to a Home. Refuses while the Work has a live Run.
+    /// Record Wave Work's Home. Refuses while the Work has a live Run.
     Place {
         #[arg(value_parser = ["wave"])]
         kind: String,
@@ -1795,40 +1802,44 @@ mod tests {
     }
 
     #[test]
-    fn account_selection_applies_to_ssh_before_or_after_the_host() {
+    fn ssh_parser_respects_the_internal_target_boundary() {
         let cli = Cli::try_parse_from([
             "lf",
+            "ssh",
             "--account",
             "reserve",
-            "ssh",
             "mini",
             "--",
-            "lf",
             "task",
             "pursue",
         ])
-        .expect("parse SSH account preference");
+        .expect("parse origin SSH account preference");
 
-        assert_eq!(cli.account, vec!["reserve"]);
+        assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Ssh { cmd, .. })
-                if cmd == vec!["lf", "task", "pursue"]
+            Some(Commands::Ssh { origin_account, lf_args, .. })
+                if origin_account == vec!["reserve"]
+                    && lf_args == vec!["task", "pursue"]
         ));
 
         let after_host = Cli::try_parse_from([
             "lf",
             "ssh",
             "mini",
+            "--",
             "--account",
             "reserve",
-            "--",
-            "lf",
             "task",
             "pursue",
         ])
-        .expect("parse account preference after SSH host");
-        assert_eq!(after_host.account, vec!["reserve"]);
+        .expect("parse remote account preference");
+        assert!(after_host.account.is_empty());
+        assert!(matches!(
+            after_host.command,
+            Some(Commands::Ssh { lf_args, .. })
+                if lf_args == vec!["--account", "reserve", "task", "pursue"]
+        ));
     }
 
     #[test]

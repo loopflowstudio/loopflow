@@ -61,7 +61,7 @@ public struct RegistryQuery: Sendable {
 
     /// Probe one Wave's Home for liveness and the single contextual action.
     /// The app never does SSH — `lf home probe` classifies the Home (local reads
-    /// are instant, remote routes one `lf status` through remote-native SSH)
+    /// are instant; remote routes run one `lf status` on the target Home)
     /// and returns the shared `HomeRuntimeDto`. Probe on demand per
     /// focused Wave, never once per row.
     public func homeProbe(wave: String, cwd: String?) async throws -> HomeRuntime {

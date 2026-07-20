@@ -64,19 +64,14 @@ pub fn run(cmd: &AuthCommand) -> Result<()> {
 }
 
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return match cmd {
-            AuthCommand::Status { provider }
-            | AuthCommand::Accounts {
-                provider,
-                verify: false,
-            } => {
-                forwarded_accounts(provider.as_deref())
-            }
-            _ => Err(anyhow!(
-                "provider account authentication and account edits are unavailable while account authority is fixed by an outer invocation"
-            )),
+    if crate::provider_account::lease::account_lease_active()
+        && matches!(cmd, AuthCommand::Accounts { verify: false, .. })
+    {
+        let AuthCommand::Accounts { provider, .. } = cmd else {
+            unreachable!("the guarded command is accounts")
         };
+        accounts(provider.as_deref(), false).await?;
+        return forwarded_accounts(provider.as_deref());
     }
     match cmd {
         AuthCommand::Status { provider } => status(provider.as_deref()).await,
@@ -1014,11 +1009,18 @@ async fn accounts(raw_provider: Option<&str>, verify: bool) -> Result<()> {
         .filter(|account| account.home.is_some())
         .collect();
     if accounts.is_empty() {
-        println!("No managed OAuth accounts");
+        if !crate::provider_account::lease::account_lease_active() {
+            println!("No managed OAuth accounts");
+        }
         return Ok(());
     }
     for mut account in accounts {
-        println!("{}", format_account(&account));
+        let provenance = if crate::provider_account::lease::account_lease_active() {
+            "  local"
+        } else {
+            ""
+        };
+        println!("{}{provenance}", format_account(&account));
         let cached = account.credential_state.as_str();
         if verify {
             match crate::subscription::poll_account(&account).await {
@@ -1613,10 +1615,9 @@ mod account_first_tests {
     use base64::Engine;
 
     use super::{
-        connect_account, exhausted_access_profiles_error, run, verify_provider_login,
+        connect_account, exhausted_access_profiles_error, verify_provider_login,
         TEST_ACCESS_PROFILE_FAILURES, TEST_OPENED_CHROME_PROFILES,
     };
-    use crate::lf::AuthCommand;
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
     use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
     use crate::provider_account::{account_home_path, parse_account_id};
@@ -1646,21 +1647,6 @@ mod account_first_tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn fixed_account_authority_rejects_account_mutation() {
-        let _lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[ACCOUNT_LEASE_ENV]);
-        std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
-
-        let error = run(&AuthCommand::Reset {
-            provider: "codex".to_string(),
-            email: "reserve@example.com".to_string(),
-        })
-        .unwrap_err();
-
-        assert!(error.to_string().contains("fixed by an outer invocation"));
     }
 
     fn configure_connect_test(temp: &Path, reported_login: &str, fail_first: bool) {

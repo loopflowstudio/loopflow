@@ -101,6 +101,7 @@ fn spawn_lfd(repo: &std::path::Path, db_path: &std::path::Path, addr: SocketAddr
         .arg("--addr")
         .arg(addr.to_string())
         .env("LF_DB_PATH", db_path)
+        .env("LF_HOME", repo.join(".lf-test"))
         .env("LF_LINEAR_WEBHOOK_SECRET", SECRET)
         .env("LF_LINEAR_VIEWER_ID", VIEWER_ID)
         .stdout(Stdio::null())
@@ -116,11 +117,12 @@ async fn lfd_dedups_signed_deliveries_across_restart() {
     let db_path = repo.path().join("registry.db");
 
     // Create the store with migrations so `lfd serve` finds an existing db.
-    {
-        let _store = open_store(&StorageConfig::sqlite(db_path.clone()))
+    let expected_home_id = {
+        let store = open_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("create store");
-    }
+        store.local_home().await.expect("read local Home").id
+    };
 
     let lfd_addr = reserve_port();
     let _lfd = spawn_lfd(repo.path(), &db_path, lfd_addr);
@@ -135,6 +137,31 @@ async fn lfd_dedups_signed_deliveries_across_restart() {
     )
     .await;
     assert_eq!(health["status"], "ok");
+    assert_eq!(health["home_id"], expected_home_id.as_str());
+    let endpoint_path = repo
+        .path()
+        .join(".lf-test/lfd")
+        .join(format!("{}.endpoint", expected_home_id.as_str()));
+    let endpoint: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&endpoint_path).expect("read lfd endpoint"))
+            .expect("parse lfd endpoint");
+    assert_eq!(endpoint["endpoint"], lfd_addr.to_string());
+    assert!(endpoint["token"]
+        .as_str()
+        .is_some_and(|token| !token.is_empty()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            std::fs::metadata(&endpoint_path)
+                .expect("read lfd endpoint metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
 
     // /status — fresh store, zero deliveries, zero wave endpoints.
     let status = poll_json_until(

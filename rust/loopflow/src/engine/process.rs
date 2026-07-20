@@ -43,6 +43,38 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
+pub(crate) fn resolve_lfd_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lfd") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let lf = resolve_lf_binary();
+    if let Some(parent) = lf.parent() {
+        let sibling = parent.join("lfd");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+    if let Ok(current) = std::env::current_exe() {
+        if current
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "lfd")
+        {
+            return current;
+        }
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join("lfd");
+            if sibling.exists() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("lfd")
+}
+
 fn select_binary_override(
     provenance: crate::build_info::BuildProvenance,
     control: Option<std::ffi::OsString>,
@@ -269,7 +301,6 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    reject_detached_forwarded_account(crate::provider_account::lease::account_lease_active())?;
     let context = pinned_execution_context()?;
     let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
         .into_iter()
@@ -326,17 +357,6 @@ pub(crate) async fn start_tmux_window_with_env(
     }
     Ok(())
 }
-
-fn reject_detached_forwarded_account(forwarded: bool) -> Result<()> {
-    if forwarded {
-        return Err(anyhow!(
-            "cannot launch a detached session from an ephemeral forwarded provider account; \
-             keep the remote command in the foreground or authenticate on the remote host"
-        ));
-    }
-    Ok(())
-}
-
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,
     context: &crate::child::ChildExecutionContext,
@@ -391,7 +411,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -404,7 +424,11 @@ pub(crate) async fn start_tmux_session(
     cwd: &str,
     shell_command: &str,
 ) -> Result<()> {
-    let status = tokio::process::Command::new("tmux")
+    let mut command = tokio::process::Command::new("tmux");
+    for name in forwarded_authority_env_names() {
+        command.env_remove(name);
+    }
+    let status = command
         .args([
             "new-session",
             "-d",
@@ -429,6 +453,32 @@ pub(crate) async fn start_tmux_session(
     Ok(())
 }
 
+fn forwarded_authority_env_names() -> Vec<String> {
+    let mut names = vec![
+        crate::provider_account::lease::ACCOUNT_LEASE_ENV.to_string(),
+        crate::provider_account::lease::ACCOUNT_SELECTION_ENV.to_string(),
+        "LF_FORWARDED_PM_TOKEN".to_string(),
+        "LF_FORWARDED_PM_PROVIDER".to_string(),
+        "LF_FORWARDED_SECRET_NAMES".to_string(),
+        crate::engine::machine::SSH_TARGET_ENV.to_string(),
+        "LF_LINEAR_WEBHOOK_SECRET".to_string(),
+        "LF_LINEAR_VIEWER_ID".to_string(),
+        "LF_GITHUB_WEBHOOK_SECRET".to_string(),
+        "LF_GITHUB_WEBHOOK_URL".to_string(),
+        "LF_LFD_ALLOW_NON_LOOPBACK".to_string(),
+        "GH_TOKEN".to_string(),
+        "OPENCODE_API_KEY".to_string(),
+        "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+        "ANTHROPIC_API_KEY".to_string(),
+        "CODEX_ACCESS_TOKEN".to_string(),
+        "OPENAI_API_KEY".to_string(),
+    ];
+    if let Ok(forwarded) = std::env::var("LF_FORWARDED_SECRET_NAMES") {
+        names.extend(forwarded.split_whitespace().map(str::to_string));
+    }
+    names
+}
+
 pub(crate) fn tmux_session_slug(value: &str) -> String {
     value
         .chars()
@@ -447,9 +497,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, lf_session_shell_command, pin_control_binary,
-        reject_detached_forwarded_account, select_binary_override, select_current_home_binary,
-        tmux_installed,
+        extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
+        pin_control_binary, select_binary_override, select_current_home_binary, tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
@@ -576,10 +625,15 @@ mod tests {
             &[("LF_RUN_CONTEXT", "agent"), ("LF_WAVE_ID", "infra")],
         );
 
-        assert_eq!(
-            command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
-        );
+        assert!(command.starts_with(
+            "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
+        ));
+        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
+        assert!(command.ends_with(
+            "exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
+        ));
     }
 
     #[test]
@@ -588,10 +642,29 @@ mod tests {
 
         let command = lf_session_shell_command(&argv, &[]);
 
-        assert_eq!(
-            command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
-        );
+        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
+    }
+
+    #[test]
+    fn durable_session_scrubs_every_named_forwarded_secret() {
+        let _lock = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_FORWARDED_SECRET_NAMES");
+        std::env::set_var("LF_FORWARDED_SECRET_NAMES", "SENTRY_TOKEN STRIPE_KEY");
+
+        let names = forwarded_authority_env_names();
+
+        match previous {
+            Some(value) => std::env::set_var("LF_FORWARDED_SECRET_NAMES", value),
+            None => std::env::remove_var("LF_FORWARDED_SECRET_NAMES"),
+        }
+        assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
+        assert!(names.iter().any(|name| name == "GH_TOKEN"));
+        assert!(names.iter().any(|name| name == "LF_LINEAR_WEBHOOK_SECRET"));
+        assert!(names.iter().any(|name| name == "LF_LFD_ALLOW_NON_LOOPBACK"));
+        assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
+        assert!(names.iter().any(|name| name == "STRIPE_KEY"));
     }
 
     #[test]
@@ -612,18 +685,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(
-            command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
-        );
-    }
-
-    #[test]
-    fn detached_session_rejects_an_ephemeral_forwarded_account() {
-        assert!(reject_detached_forwarded_account(false).is_ok());
-        assert!(reject_detached_forwarded_account(true)
-            .unwrap_err()
-            .to_string()
-            .contains("cannot launch a detached session"));
+        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.ends_with(
+            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
+        ));
     }
 }

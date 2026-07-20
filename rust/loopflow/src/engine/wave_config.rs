@@ -29,6 +29,11 @@ pub struct WavePmConfig {
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
+    /// OS user allowed to start this Wave automatically. Absent means any user.
+    pub owner: Option<String>,
+    /// Machine allowed to start this Wave automatically. Accepts a HomeId,
+    /// hostname, or IP address. Absent means any Home.
+    pub home: Option<String>,
     pub crons: Option<Vec<WaveCronDef>>,
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
@@ -262,11 +267,13 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\nagent: codex\n---\nDrive the work.\n",
+            "---\nowner: jack\nhome: build.example.com\nagent: codex\n---\nDrive the work.\n",
         )
         .expect("write");
 
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
+        assert_eq!(config.owner.as_deref(), Some("jack"));
+        assert_eq!(config.home.as_deref(), Some("build.example.com"));
         assert_eq!(config.agent.as_deref(), Some("codex"));
     }
 

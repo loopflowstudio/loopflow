@@ -1,10 +1,10 @@
 # The Agent API
 
 `lf` is the API agents call to launch, steer, and observe other agents. There
-is no SDK and no server. The verbs are the same binary humans type; every read
-surface takes `--json`; and every launched agent receives the operating
-contract (`LOOPFLOW.md`) in its context, so it already knows these verbs when
-it starts.
+is no SDK and no central server. The verbs are the same binary humans type;
+every read surface takes `--json`; and every launched agent receives the
+operating contract (`LOOPFLOW.md`) in its context, so it already knows these
+verbs when it starts.
 
 ## Install the external skill
 

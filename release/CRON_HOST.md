@@ -11,7 +11,7 @@ listener required.
 |------|---------|------|
 | `mini-heart` | `100.96.227.95` (`*.tail0eda02.ts.net`), macOS | First maintained `lf cron` host |
 
-Reach it over Tailscale: `lf ssh mini-heart --remote-native -- lf --version`. First contact needs
+Reach it over Tailscale: `lf ssh mini-heart --version`. First contact needs
 the host key trusted and Tailscale up on both ends. `lf ssh` is bounded
 (`ConnectTimeout=10`, `BatchMode=yes`), so an unreachable host fails in seconds
 instead of hanging.
@@ -64,7 +64,7 @@ flow is no longer declared, and reports any schedule launchd can't run. Edit
 scripts/bootstrap-cron-host.sh mini-heart infrastructure
 ```
 
-Probes reachability and host-native auth (bounded `lf ssh --remote-native`),
+Probes reachability and host-native auth over bounded SSH,
 runs the release publisher's read-only credential/tool preflight, syncs the
 repo-owned schedules, and lists the result. Idempotent and secret-free; re-run
 it any time to reconcile.

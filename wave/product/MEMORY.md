@@ -9,8 +9,8 @@ they mean the Mac surface.
 
 - **Work is stable identity, not a process.** Wave, Project, and Task are the
   three Work kinds. A Run is one bounded period of execution authority; a
-  Launch is one provider/process attempt inside it; a Turn is one observed
-  provider boundary.
+  AgentInvocation is one provider/process attempt inside it; a Turn is one
+  observed provider boundary.
 - **Domain structure carries continuity.** A Wave owns `GOAL.md`, `MEMORY.md`,
   cadence, Chat, and its Project portfolio. A Project owns definition, KRs, and
   Tasks. A Task owns its directive, worktree, and serial PR chain. Project and
@@ -18,10 +18,11 @@ they mean the Mac surface.
 - **Steer is the one durable authored input.** Chat is its human Wave
   presentation, not a second mailbox or history truth. Radio, agent channels,
   machine bylines, and the database message bus are deleted.
-- **Feedback is an authored Task-flow checkpoint.** Its reviewer is either the
-  User or the immediate parent Project. Presentation cannot close it;
-  `lf work continue` is the explicit close. There is no Feedback escalation
-  protocol or implicit PR Review state.
+- **Ask is a targeted durable exchange, not a lifecycle checkpoint.** `lf ask`
+  blocks the child Turn until the immediate parent or authenticated User writes
+  the one first-writer-wins Answer. Project and Wave Runs service child Asks in
+  detached answer invocations beside their core loops. Feedback and Continue
+  are deleted; neither opening nor answering an Ask advances the playhead.
 - **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
   oldest-first. There is no live memory stream, and recent Wave Chat is not
   ambient Project/Task prompt context.
@@ -33,9 +34,10 @@ they mean the Mac surface.
 
 ### Runtime boundary still open
 
-- A “Project server” does not exist. A live Project runner can answer child
-  Feedback, but a stopped Project has no common Home owner that notices the
-  durable Ready fact and starts exactly one Run.
+- `lf ask` now wakes a stopped parent idempotently, and a live Project or Wave
+  Run retains an answer lane while owned child Work can still ask. The broader
+  Home server design remains open for automatic backlog dispatch, remote
+  nudges, and Ready work that has no blocking child command to trigger a wake.
 - The server design must assign one owner each for dispatch, liveness, retry,
   streaming, and remote nudge before Wave, Project, and Task controls collapse
   onto one host path.
@@ -51,10 +53,11 @@ they mean the Mac surface.
 - `lf` and durable store projections define the product API; Mac and iOS
   consume that model rather than inventing a parallel lifecycle.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
-  process, or listener is never the source of Work or Feedback truth.
-- A provider session is Launch continuity, not Work identity.
+  process, or listener is never the source of Work or Ask/Answer truth.
+- A provider session is AgentInvocation continuity, not Work identity.
 - Runtime ownership remains deliberately unresolved until the Home/Work server
-  topology can explain stopped-parent wake and failure recovery in one diagram.
+  topology can explain automatic Ready dispatch, remote nudge, and failure
+  recovery in one diagram.
 
 ### Charter model (restarted 2026-07-07, resettled 2026-07-08, Linear-owned 2026-07-10)
 
@@ -129,9 +132,10 @@ they mean the Mac surface.
   project, assignee` — matching the item shape `lf pm show --json` actually emits;
   the old `labels: [String]` was dropped for the explicit `project` slug.
 - **Vocabulary locked:** *Run* = one bounded period of execution authority plus
-  its durable record; *Launch* = one provider/process attempt; *session* names
-  only concrete provider or attachable terminal continuity (`TerminalSession`),
-  never stable Work. *Exec* remains an implementation verb, not product identity.
+  its durable record; *AgentInvocation* = one provider/process attempt;
+  *session* names only concrete provider or attachable terminal continuity
+  (`TerminalSession`), never stable Work. *Exec* remains an implementation verb,
+  not product identity.
 - **Plan render works end to end now** — `PmShowResult` carries `projects` +
   `synced_at`, `RegistryQuery.plan`'s `PmShowSnapshot` decodes them, and
   `WaveDetailPane` shows each Project + KR proof. The old decode-throws blocker is

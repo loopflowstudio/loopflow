@@ -264,11 +264,11 @@ async fn illegal_loop_transition_is_refused() {
     assert!(events.is_empty());
 }
 
-/// `/health` splits channel liveness (`status`, always `serving`) from the
+/// `/health` splits listener liveness (`status`, always `serving`) from the
 /// resident's condition (`loop`: null while no resident was ever spawned or
 /// attached, then the loop-state name).
 #[tokio::test]
-async fn health_reports_channel_liveness_and_the_loop_state() {
+async fn health_reports_listener_liveness_and_the_loop_state() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
 
@@ -294,7 +294,7 @@ async fn health_reports_channel_liveness_and_the_loop_state() {
     assert_eq!(body["status"], "serving");
     assert!(
         body["loop_state"].is_null(),
-        "no resident yet: a dormant channel"
+        "no resident yet: a dormant listener"
     );
 
     rt.set_resident_expected();
@@ -318,6 +318,6 @@ async fn health_reports_channel_liveness_and_the_loop_state() {
         .json()
         .await
         .unwrap();
-    assert_eq!(body["status"], "serving", "channel liveness is constant");
+    assert_eq!(body["status"], "serving", "listener liveness is constant");
     assert_eq!(body["loop_state"], "turning");
 }

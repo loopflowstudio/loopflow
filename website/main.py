@@ -7,12 +7,13 @@ from pathlib import Path
 
 import yaml
 from fasthtml.common import *
-from starlette.responses import PlainTextResponse, RedirectResponse
+from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.routing import Route
 
 from internal_pages import colors_page, design_page, fonts_page
 
 BASE_URL = "https://loopflow.studio"
+RELEASE_TAG = os.environ.get("LOOPFLOW_RELEASE_TAG", "development")
 
 app, rt = fast_app(
     htmlkw={"lang": "en"},
@@ -183,6 +184,7 @@ DOCS_NAV = [
     # Reference
     ("lf", "lf"),
     ("Config", "config"),
+    ("Subscriptions", "subscriptions"),
     ("Security", "security"),
     ("Troubleshooting", "troubleshooting"),
 ]
@@ -195,10 +197,11 @@ DOC_DESCRIPTIONS = {
     "authoring": "Writing skills, flows, directions, and goals",
     "agent-api": "How agents launch, steer, and prove control of other agents",
     "conducting": "Monitoring and steering many agents; the Mac podium",
-    "architecture": "No server: the store, the journal, Homes, lf ssh, lfd",
+    "architecture": "Decentralized stores, Home identity, WaveHost, SSH, and lfd",
     "lf": "Every command, PR/planning/release operations, the builtin catalog",
-    "config": "Config files, context assembly, models, accounts and profiles",
-    "security": "Execution boundaries, permissions, credentials, and account authority",
+    "config": "Config files, context assembly, models, and launch behavior",
+    "subscriptions": "Claude and Codex identities, routes, health, and remote selection",
+    "security": "Execution boundaries, permissions, and credential trust boundaries",
     "troubleshooting": "Exact failure → cause → fix",
 }
 
@@ -210,7 +213,7 @@ def generate_llms_txt() -> str:
         for title, slug in DOCS_NAV
     )
     return f"""# Loopflow
-> Persistent agents, no server. Waves hold a goal, remember what they learn, and stay steerable — and lf is the command humans type and the API agents call to launch, steer, and observe other agents.
+> Persistent agents, no central server. Waves hold a goal, remember what they learn, and stay steerable — and lf is the command humans type and the API agents call to launch, steer, and observe other agents.
 
 Loopflow creates and runs Waves: each coordinates Linear-backed Projects and
 Tasks, keeps one steerable conversation beside the live work map, and folds
@@ -791,7 +794,7 @@ def get():
                 Div(
                     Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo"),
                     H1("Install"),
-                    P("One binary. No server. Nothing to register.", cls="tagline"),
+                    P("Local-first. No central server. Nothing to register.", cls="tagline"),
                     Div(
                         H2("CLI"),
                         P(
@@ -870,10 +873,15 @@ def _sitemap_handler(request):
     return PlainTextResponse(SITEMAP_XML_CONTENT, media_type="application/xml")
 
 
+def _healthz_handler(request):
+    return JSONResponse({"status": "ok", "release": RELEASE_TAG})
+
+
 # Insert machine-readable routes at the beginning to avoid the static handler
 app.routes.insert(0, Route("/llms.txt", _llms_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/llms-full.txt", _llms_full_txt_handler, methods=["GET"]))
 app.routes.insert(0, Route("/sitemap.xml", _sitemap_handler, methods=["GET"]))
+app.routes.insert(0, Route("/healthz", _healthz_handler, methods=["GET"]))
 
 
 @rt("/favicon.ico")

@@ -1,2 +1,2 @@
-- rebase
+- op: rebase
 - integrate-upstream

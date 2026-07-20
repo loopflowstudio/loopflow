@@ -184,7 +184,7 @@ fn is_human(author_id: Option<&str>, viewer_id: &str) -> bool {
 }
 
 /// Map one verified, parsed event onto the durable Task control substrate.
-/// Resolves the target Task by Linear issue id; a missing Session or a
+/// Resolves the target Task by Linear issue id; a missing Task or a
 /// self-authored change writes nothing.
 pub async fn ingest_event(
     store: &Store,
@@ -198,7 +198,7 @@ pub async fn ingest_event(
         }
         WebhookEvent::Ignored => return Ok(WebhookOutcome::Ignored),
     };
-    let Some(session) = store.get_task_by_issue(&issue_id).await? else {
+    let Some(task) = store.get_task_by_issue(&issue_id).await? else {
         return Ok(WebhookOutcome::NoTarget);
     };
     match event {
@@ -219,7 +219,7 @@ pub async fn ingest_event(
                 comments: vec![],
             };
             let outcome =
-                reconcile_linear_observation(store, &session, observation, viewer_id, now).await?;
+                reconcile_linear_observation(store, &task, observation, viewer_id, now).await?;
             Ok(WebhookOutcome::Edit {
                 steer_applied: outcome.content_steer_applied,
             })
@@ -235,7 +235,7 @@ pub async fn ingest_event(
             }
             let text = linear_follow_up_text(&body);
             let created = store
-                .apply_linear_comment(&session.id, comment_id, text, now)
+                .apply_linear_comment(&task.id, comment_id, text, now)
                 .await?;
             Ok(WebhookOutcome::Comment {
                 delivered: created.is_some(),

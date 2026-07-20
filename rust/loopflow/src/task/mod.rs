@@ -2,7 +2,7 @@
 //!
 //! A Task owns one durable worktree and provider transcript. Ordered PRs
 //! own the serial branches that advance the Task. Publication intent is recorded
-//! before GitHub is called, then the GitHub receipt is attached to that intent.
+//! before GitHub is called, then the GitHub PR record is attached to that intent.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -13,9 +13,8 @@ use time::OffsetDateTime;
 use crate::child::{prefixed_uuid_id, AbandonIntent};
 use crate::durable::RunId;
 pub use crate::durable::TaskId;
-use crate::engine::InteractionPolicy;
 use crate::id::WaveId;
-use crate::launch_context::TaskLaunchReceipt;
+use crate::planning::TaskPlan;
 use crate::project::ProjectId;
 
 pub mod actions;
@@ -23,9 +22,9 @@ pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TaskDataError {
-    #[error("invalid task id: {0}")]
+    #[error("invalid Task id: {0}")]
     InvalidId(String),
-    #[error("invalid task session: {0}")]
+    #[error("invalid Task: {0}")]
     InvalidInvariant(String),
 }
 
@@ -35,31 +34,35 @@ prefixed_uuid_id!(TaskPrId, "pr_", TaskDataError, TaskDataError::InvalidId);
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskLifecyclePhase {
-    Kickoff,
-    Iterate,
-    Gate,
+    First,
+    Loop,
+    Finally,
 }
 
 impl TaskLifecyclePhase {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Kickoff => "kickoff",
-            Self::Iterate => "iterate",
-            Self::Gate => "gate",
+            Self::First => "first",
+            Self::Loop => "loop",
+            Self::Finally => "finally",
         }
     }
-}
 
-impl FromStr for TaskLifecyclePhase {
-    type Err = TaskDataError;
+    pub(crate) fn storage_str(self) -> &'static str {
+        match self {
+            Self::First => "kickoff",
+            Self::Loop => "iterate",
+            Self::Finally => "gate",
+        }
+    }
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
+    pub(crate) fn from_storage_str(value: &str) -> Result<Self, TaskDataError> {
         match value {
-            "kickoff" => Ok(Self::Kickoff),
-            "iterate" => Ok(Self::Iterate),
-            "gate" => Ok(Self::Gate),
+            "kickoff" => Ok(Self::First),
+            "iterate" => Ok(Self::Loop),
+            "gate" => Ok(Self::Finally),
             _ => Err(TaskDataError::InvalidInvariant(format!(
-                "invalid Task lifecycle phase: {value}"
+                "invalid stored Task lifecycle phase: {value}"
             ))),
         }
     }
@@ -68,7 +71,6 @@ impl FromStr for TaskLifecyclePhase {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPhasePlan {
     pub flow: String,
-    pub interaction_policy: InteractionPolicy,
 }
 
 impl TaskPhasePlan {
@@ -85,63 +87,46 @@ impl TaskPhasePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLifecyclePlan {
-    pub kickoff: TaskPhasePlan,
-    pub iterate: TaskPhasePlan,
-    pub gate: TaskPhasePlan,
+    pub first: TaskPhasePlan,
+    #[serde(rename = "loop")]
+    pub loop_: TaskPhasePlan,
+    pub finally: TaskPhasePlan,
 }
 
 impl TaskLifecyclePlan {
-    pub fn standard(iterate_flow: impl Into<String>) -> Self {
+    pub fn standard(
+        first_flow: impl Into<String>,
+        loop_flow: impl Into<String>,
+        finally_flow: impl Into<String>,
+    ) -> Self {
         Self {
-            kickoff: TaskPhasePlan {
-                flow: "task-kickoff".to_string(),
-                interaction_policy: InteractionPolicy::Require,
+            first: TaskPhasePlan {
+                flow: first_flow.into(),
             },
-            iterate: TaskPhasePlan {
-                flow: iterate_flow.into(),
-                interaction_policy: InteractionPolicy::Defer,
+            loop_: TaskPhasePlan {
+                flow: loop_flow.into(),
             },
-            gate: TaskPhasePlan {
-                flow: "task-gate".to_string(),
-                interaction_policy: InteractionPolicy::Require,
+            finally: TaskPhasePlan {
+                flow: finally_flow.into(),
             },
         }
     }
 
-    pub fn headless(iterate_flow: impl Into<String>) -> Self {
-        let mut plan = Self::standard(iterate_flow);
-        plan.defer_all_interactions();
-        plan
+    pub fn defaults() -> Self {
+        Self::standard("task-design", "slice", "ship")
     }
-
-    pub fn defer_all_interactions(&mut self) {
-        self.kickoff.interaction_policy = InteractionPolicy::Defer;
-        self.iterate.interaction_policy = InteractionPolicy::Defer;
-        self.gate.interaction_policy = InteractionPolicy::Defer;
-    }
-
-    pub fn all_interactions_deferred(&self) -> bool {
-        [
-            self.kickoff.interaction_policy,
-            self.iterate.interaction_policy,
-            self.gate.interaction_policy,
-        ]
-        .into_iter()
-        .all(|policy| policy == InteractionPolicy::Defer)
-    }
-
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
         match phase {
-            TaskLifecyclePhase::Kickoff => &self.kickoff,
-            TaskLifecyclePhase::Iterate => &self.iterate,
-            TaskLifecyclePhase::Gate => &self.gate,
+            TaskLifecyclePhase::First => &self.first,
+            TaskLifecyclePhase::Loop => &self.loop_,
+            TaskLifecyclePhase::Finally => &self.finally,
         }
     }
 
     fn validate(&self) -> Result<(), TaskDataError> {
-        self.kickoff.validate(TaskLifecyclePhase::Kickoff)?;
-        self.iterate.validate(TaskLifecyclePhase::Iterate)?;
-        self.gate.validate(TaskLifecyclePhase::Gate)
+        self.first.validate(TaskLifecyclePhase::First)?;
+        self.loop_.validate(TaskLifecyclePhase::Loop)?;
+        self.finally.validate(TaskLifecyclePhase::Finally)
     }
 }
 
@@ -216,10 +201,10 @@ impl CiCheck {
     /// This is the one class of required check a Task body cannot act on.
     /// `scratch-clear` fails whenever `scratch/` holds anything but `.gitkeep`,
     /// which is true of every PR carrying its own design doc — i.e. every Task PR
-    /// during kickoff and iterate, by construction — and
+    /// during first and loop, by construction — and
     /// `crate::ops::land::clear_scratch` is what greens it, not a code change. A
-    /// body woken to "repair" it could only delete the artifact the reviewer
-    /// reads, to green a check land greens anyway.
+    /// body woken to "repair" it could only delete the Task's design artifact,
+    /// to green a check land greens anyway.
     ///
     /// A name belongs here only when an `lf pr land` step is what resolves it.
     /// This is not a catalogue of CI jobs, and it is not a mute button for checks
@@ -290,9 +275,9 @@ impl CiObservation {
     ///
     /// This is the dual of [`CiObservation::wake_legal`] within the failing
     /// state: such a head holds nothing a Task body could repair (`lf pr land`
-    /// greens it by clearing `scratch/`), so it is *reviewable* rather than owned
-    /// by CI. The action model and Waves supervision read it to stop recommending
-    /// a doomed Resume and to stop labelling the reviewer's turn as "fixing CI".
+    /// greens it by clearing `scratch/`), so it does not belong to CI repair.
+    /// The action model and Waves supervision read it to stop recommending a
+    /// doomed Resume or labelling settlement preparation as "fixing CI".
     ///
     /// False for a passing or pending head, and false the moment any failure is a
     /// real leaf or an unclassified one — the same anti-mute-button rule as
@@ -388,14 +373,14 @@ impl PrPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AfterMerge {
-    Review,
+    ContinueTask,
     CompleteTask,
 }
 
 impl AfterMerge {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Review => "review",
+            Self::ContinueTask => "continue_task",
             Self::CompleteTask => "complete_task",
         }
     }
@@ -406,7 +391,7 @@ impl FromStr for AfterMerge {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "review" => Ok(Self::Review),
+            "continue_task" => Ok(Self::ContinueTask),
             "complete_task" => Ok(Self::CompleteTask),
             _ => Err(TaskDataError::InvalidInvariant(format!(
                 "invalid after-merge disposition: {value}"
@@ -415,12 +400,50 @@ impl FromStr for AfterMerge {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrMergeMode {
+    User,
+    Auto,
+}
+
+impl PrMergeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+impl FromStr for PrMergeMode {
+    type Err = TaskDataError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "user" => Ok(Self::User),
+            "auto" => Ok(Self::Auto),
+            _ => Err(TaskDataError::InvalidInvariant(format!(
+                "invalid PR merge mode: {value}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrMergeRequest {
+    pub mode: PrMergeMode,
+    pub requested_at: OffsetDateTime,
+    pub head_sha: String,
+    pub after_merge: AfterMerge,
+    pub next_slug: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrPublication {
     pub requested_at: OffsetDateTime,
-    pub after_merge: AfterMerge,
-    pub next_slug: Option<String>,
     pub github: Option<GithubPr>,
+    pub merge: Option<PrMergeRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -485,28 +508,27 @@ impl TaskPr {
             .and_then(|publication| publication.github.as_ref())
     }
 
-    /// The receipt-resolution identity for this PR: its repository, number, and
-    /// the commit sha(s) it carries. `None` until the PR has a GitHub identity
-    /// (an `owner/repo` URL and number). A `pr:` receipt resolves against this.
-    pub fn pr_identity(&self) -> Option<crate::receipt::PrIdentity> {
-        let github = self.github()?;
-        let repo = crate::receipt::github_repo_slug(&github.url)?;
-        let shas = self
-            .merge_commit
-            .iter()
-            .chain(github.head_sha.iter())
-            .cloned()
-            .collect();
-        Some(crate::receipt::PrIdentity {
-            repo,
-            number: github.number,
-            shas,
-        })
-    }
-
     /// The current head SHA of the open PR, when recorded.
     pub fn head_sha(&self) -> Option<&str> {
         self.github().and_then(|github| github.head_sha.as_deref())
+    }
+
+    /// The explicit merge request, only while it names the current PR head.
+    pub fn merge_request(&self) -> Option<&PrMergeRequest> {
+        let request = self.publication.as_ref()?.merge.as_ref()?;
+        (self.head_sha() == Some(request.head_sha.as_str())).then_some(request)
+    }
+
+    /// Settlement disposition. A PR merged without an explicit request safely
+    /// continues the Task; only a head-pinned request may complete it.
+    pub fn after_merge(&self) -> AfterMerge {
+        self.merge_request()
+            .map_or(AfterMerge::ContinueTask, |request| request.after_merge)
+    }
+
+    pub fn next_slug(&self) -> Option<&str> {
+        self.merge_request()
+            .and_then(|request| request.next_slug.as_deref())
     }
 
     /// The CI reading, but only while it still describes the PR's current head.
@@ -520,8 +542,8 @@ impl TaskPr {
         }
     }
 
-    /// Whether semantic Task review may begin for this published head.
-    pub fn review_ready(&self) -> bool {
+    /// Whether the current published head satisfies its merge checks.
+    pub fn merge_checks_passed(&self) -> bool {
         self.phase() == PrPhase::Open
             && self
                 .fresh_ci()
@@ -553,29 +575,41 @@ impl TaskPr {
             ));
         }
         if let Some(publication) = &self.publication {
-            if publication.next_slug.as_deref().is_some_and(|slug| {
-                slug.split('-').any(|word| {
-                    word.is_empty()
-                        || !word
-                            .bytes()
-                            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-                })
-            }) {
-                return Err(TaskDataError::InvalidInvariant(
-                    "next branch slug must be lowercase kebab-case".to_string(),
-                ));
-            }
-            if publication.after_merge == AfterMerge::CompleteTask
-                && publication.next_slug.is_some()
-            {
-                return Err(TaskDataError::InvalidInvariant(
-                    "a completing pull request cannot name a next branch".to_string(),
-                ));
-            }
             if let Some(github) = &publication.github {
                 if github.number == 0 || github.url.trim().is_empty() {
                     return Err(TaskDataError::InvalidInvariant(
                         "GitHub PR number and URL cannot be empty".to_string(),
+                    ));
+                }
+            }
+            if let Some(request) = &publication.merge {
+                if request.next_slug.as_deref().is_some_and(|slug| {
+                    slug.split('-').any(|word| {
+                        word.is_empty()
+                            || !word
+                                .bytes()
+                                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+                    })
+                }) {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "next branch slug must be lowercase kebab-case".to_string(),
+                    ));
+                }
+                if request.after_merge == AfterMerge::CompleteTask && request.next_slug.is_some() {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "a completing pull request cannot name a next branch".to_string(),
+                    ));
+                }
+                let github = publication.github.as_ref().ok_or_else(|| {
+                    TaskDataError::InvalidInvariant(
+                        "merge request requires a GitHub PR".to_string(),
+                    )
+                })?;
+                if request.head_sha.trim().is_empty()
+                    || github.head_sha.as_deref() != Some(request.head_sha.as_str())
+                {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "merge request must name the current GitHub PR head".to_string(),
                     ));
                 }
             }
@@ -637,8 +671,8 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Immutable PM evidence captured before placement.
-    pub launch: TaskLaunchReceipt,
+    /// Current planning facts from the PM system.
+    pub plan: TaskPlan,
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
@@ -647,10 +681,10 @@ pub struct Task {
     pub project_id: ProjectId,
     pub worktree: PathBuf,
     pub workspace_slug: String,
-    /// Three pinned phase flows and their reviewer-routing policies.
+    /// Three pinned phase flows.
     pub lifecycle: TaskLifecyclePlan,
     /// Current phase entry. `phase_epoch` advances on every transition,
-    /// including Gate → Iterate, so stale bodies cannot rewind the Task.
+    /// including Finally → Loop, so stale bodies cannot rewind the Task.
     pub lifecycle_phase: TaskLifecyclePhase,
     pub phase_epoch: u32,
     pub phase_cursor: u32,
@@ -667,7 +701,7 @@ pub struct Task {
     /// Transcript handle reusable only by a compatible provider generation.
     pub provider_session_id: Option<String>,
     /// Set when abandonment is *requested*, not when it is applied. No launch
-    /// path may start a Launch for Task Work carrying this.
+    /// path may start a Run for Task Work carrying this.
     pub abandon_intent: Option<AbandonIntent>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -683,17 +717,17 @@ impl Task {
     ///
     /// - abandonment has been *requested* — the runner has not consumed the
     ///   command yet, but the decision is made;
-    /// - the active PR is `Publishing` or `Open` — publication was requested
-    ///   and the work must not restart from clarification
-    ///   and belongs to review.
+    /// - publication or merge was explicitly requested. A merely published PR
+    ///   remains ordinary Task continuity and does not bar the supervisor.
     ///
     /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
     /// and carries no live process, so it reads exactly like Work that
     /// merely stopped. A wake therefore launched generation 2, which reopened
     /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
-    /// already open for review. An open PR is not an invitation to start over.
+    /// already awaiting a merge. An explicit merge request is not an invitation
+    /// to start over.
     ///
-    /// A User may still `lf task resume` a submitted Task to answer review;
+    /// A User may still `lf task resume` a submitted Task explicitly;
     /// this bars the supervisor, not the operator.
     pub fn supervisor_restart_bar(&self, active_pr: Option<&TaskPr>) -> Option<String> {
         if let Some(bar) = self.terminal_or_abandon_bar() {
@@ -702,7 +736,10 @@ impl Task {
         if let Some(pr) = active_pr {
             match pr.phase() {
                 PrPhase::Publishing => return Some(self.publishing_bar()),
-                PrPhase::Open => return Some(self.open_pr_bar(pr)),
+                PrPhase::Open if pr.merge_request().is_some() => {
+                    return Some(self.open_pr_bar(pr));
+                }
+                PrPhase::Open => {}
                 PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
             }
         }
@@ -728,7 +765,10 @@ impl Task {
                 // An open PR restarts only on a current-head required-check
                 // failure; otherwise it stays barred exactly as the supervisor
                 // bar leaves it.
-                PrPhase::Open if !pr.fresh_ci().is_some_and(CiObservation::wake_legal) => {
+                PrPhase::Open
+                    if pr.merge_request().is_some()
+                        && !pr.fresh_ci().is_some_and(CiObservation::wake_legal) =>
+                {
                     return Some(self.open_pr_bar(pr));
                 }
                 PrPhase::Open | PrPhase::Working | PrPhase::Merged | PrPhase::Abandoned => {}
@@ -743,7 +783,7 @@ impl Task {
         if let Some(intent) = &self.abandon_intent {
             return Some(format!(
                 "Task {} is being abandoned: {}",
-                self.launch.issue.identifier, intent.reason
+                self.plan.identifier, intent.reason
             ));
         }
         None
@@ -751,28 +791,37 @@ impl Task {
 
     fn publishing_bar(&self) -> String {
         format!(
-            "Task {} requested PR publication but has no GitHub receipt; \
+            "Task {} requested PR publication but has no GitHub PR record; \
              resume it explicitly with `lf task resume {}` to retry publication",
-            self.launch.issue.identifier, self.launch.issue.identifier,
+            self.plan.identifier, self.plan.identifier,
         )
     }
 
     /// The open-PR restart refusal. Only a *supervisor* (`supervisor_restart_bar`
     /// / a non-wake-legal `ci_fix_restart_bar`) ever reads this — an operator
-    /// resume takes the abandon-only `ExplicitResume` bar and answers review — so
-    /// the text names the real next owner (the reviewer/operator) instead of
-    /// recommending `lf task resume`, which a supervisor re-running would only
-    /// self-loop on.
+    /// resume takes the abandon-only `ExplicitResume` bar. The text names the
+    /// explicit settlement owner instead of recommending `lf task resume`, which
+    /// a supervisor re-running would only self-loop on.
     fn open_pr_bar(&self, pr: &TaskPr) -> String {
         let number = pr.github().expect("open Task PR passed validation").number;
-        format!(
-            "Task {} submitted pull request #{} and is in review. A supervisor \
-             cannot restart a submitted Task — an open PR is not an invitation to \
-             start over. This is the reviewer's to advance: an operator answering \
-             review resumes from a clean operator shell; if review is blocked, \
-             escalate to the owner.",
-            self.launch.issue.identifier, number,
-        )
+        let request = pr
+            .merge_request()
+            .expect("open PR restart bar requires a current merge request");
+        let short = request.head_sha.chars().take(12).collect::<String>();
+        match request.mode {
+            PrMergeMode::User => format!(
+                "Task {} requested a user merge of pull request #{} at head {}. \
+                 The supervisor will not restart it until that explicit merge \
+                 request settles or the head changes.",
+                self.plan.identifier, number, short,
+            ),
+            PrMergeMode::Auto => format!(
+                "Task {} requested GitHub auto-merge of pull request #{} at head {}. \
+                 The supervisor will not restart it until that explicit merge \
+                 request settles or the head changes.",
+                self.plan.identifier, number, short,
+            ),
+        }
     }
 
     pub fn validate(&self) -> Result<(), TaskDataError> {
@@ -788,14 +837,14 @@ impl Task {
                 "Task lifecycle phase epoch must be positive".to_string(),
             ));
         }
-        if self.lifecycle_phase == TaskLifecyclePhase::Gate && self.gate_proposal.is_none() {
+        if self.lifecycle_phase == TaskLifecyclePhase::Finally && self.gate_proposal.is_none() {
             return Err(TaskDataError::InvalidInvariant(
-                "Task gate phase requires a proposed outcome".to_string(),
+                "Task finally phase requires a proposed outcome".to_string(),
             ));
         }
-        if self.lifecycle_phase != TaskLifecyclePhase::Gate && self.gate_proposal.is_some() {
+        if self.lifecycle_phase != TaskLifecyclePhase::Finally && self.gate_proposal.is_some() {
             return Err(TaskDataError::InvalidInvariant(
-                "Task gate proposal is valid only during gate phase".to_string(),
+                "Task gate proposal is valid only during finally phase".to_string(),
             ));
         }
         if let Some(proposal) = &self.gate_proposal {
@@ -815,21 +864,21 @@ impl Task {
 
     pub fn lifecycle_cycle(&self) -> u32 {
         match self.lifecycle_phase {
-            TaskLifecyclePhase::Kickoff => 0,
-            TaskLifecyclePhase::Iterate => self.gate_cycle + 1,
-            TaskLifecyclePhase::Gate => self.gate_cycle,
+            TaskLifecyclePhase::First => 0,
+            TaskLifecyclePhase::Loop => self.gate_cycle + 1,
+            TaskLifecyclePhase::Finally => self.gate_cycle,
         }
     }
 
-    pub fn enter_iterate(&mut self) -> Result<(), TaskDataError> {
-        if self.lifecycle_phase != TaskLifecyclePhase::Kickoff
-            && self.lifecycle_phase != TaskLifecyclePhase::Gate
+    pub fn enter_loop(&mut self) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::First
+            && self.lifecycle_phase != TaskLifecyclePhase::Finally
         {
             return Err(TaskDataError::InvalidInvariant(
-                "only kickoff or gate may enter iterate".to_string(),
+                "only first or finally may enter loop".to_string(),
             ));
         }
-        self.lifecycle_phase = TaskLifecyclePhase::Iterate;
+        self.lifecycle_phase = TaskLifecyclePhase::Loop;
         self.phase_epoch += 1;
         self.phase_cursor = 0;
         self.phase_iteration = 0;
@@ -838,14 +887,14 @@ impl Task {
         Ok(())
     }
 
-    pub fn enter_gate(&mut self, proposal: TaskGateProposal) -> Result<(), TaskDataError> {
-        if self.lifecycle_phase != TaskLifecyclePhase::Iterate {
+    pub fn enter_finally(&mut self, proposal: TaskGateProposal) -> Result<(), TaskDataError> {
+        if self.lifecycle_phase != TaskLifecyclePhase::Loop {
             return Err(TaskDataError::InvalidInvariant(
-                "only iterate may enter gate".to_string(),
+                "only loop may enter finally".to_string(),
             ));
         }
         proposal.validate()?;
-        self.lifecycle_phase = TaskLifecyclePhase::Gate;
+        self.lifecycle_phase = TaskLifecyclePhase::Finally;
         self.phase_epoch += 1;
         self.phase_cursor = 0;
         self.phase_iteration = 0;
@@ -856,9 +905,9 @@ impl Task {
     }
 
     pub fn approved_gate_proposal(&self) -> Result<TaskGateProposal, TaskDataError> {
-        if self.lifecycle_phase != TaskLifecyclePhase::Gate {
+        if self.lifecycle_phase != TaskLifecyclePhase::Finally {
             return Err(TaskDataError::InvalidInvariant(
-                "only gate may approve a proposed outcome".to_string(),
+                "only finally may approve a proposed outcome".to_string(),
             ));
         }
         self.gate_proposal.clone().ok_or_else(|| {
@@ -911,9 +960,9 @@ impl TaskEventKind {
         !matches!(self, Self::Started | Self::Progress { .. })
     }
 
-    /// Whether a Project-supervised Task event also belongs in the root Wave.
-    /// Routine decisions stay at the immediate Project boundary; a Project
-    /// escalates by emitting its own `DecisionRequested` event.
+    /// Whether a Project-observable Task event also belongs in the root Wave.
+    /// This currently mirrors the Project boundary; the server-topology design
+    /// must decide whether the duplicate delivery remains necessary.
     pub fn is_root_wave_observable(&self) -> bool {
         self.is_project_observable()
     }
@@ -1011,28 +1060,17 @@ mod tests {
         TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
         TaskPrId,
     };
-    use crate::launch_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        TaskLaunchReceipt,
-    };
+    use crate::planning::{LinearIssueId, TaskPlan};
 
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::new(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new("issue-1").unwrap(),
-                    identifier: "INF-123".to_string(),
-                    title: "Ship it".to_string(),
-                    description: String::new(),
-                },
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-1").unwrap(),
-                    slug: "runtime".to_string(),
-                    name: "Runtime".to_string(),
-                    prompt_context: "Definition".to_string(),
-                },
+            plan: TaskPlan {
+                id: LinearIssueId::new("issue-1").unwrap(),
+                identifier: "INF-123".to_string(),
+                title: "Ship it".to_string(),
+                description: String::new(),
                 pm_snapshot_synced_at: 1,
             },
             pm_writeback: PmWritebackState::Current,
@@ -1040,8 +1078,8 @@ mod tests {
             project_id: crate::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            lifecycle: TaskLifecyclePlan::defaults(),
+            lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,
             phase_iteration: 0,
@@ -1059,8 +1097,8 @@ mod tests {
 
     #[test]
     fn task_ids_are_prefixed_and_round_trip() {
-        let session = TaskId::new();
-        assert_eq!(TaskId::parse(session.as_str()).unwrap(), session);
+        let task = TaskId::new();
+        assert_eq!(TaskId::parse(task.as_str()).unwrap(), task);
         let pr = TaskPrId::new();
         assert_eq!(TaskPrId::parse(pr.as_str()).unwrap(), pr);
     }
@@ -1125,9 +1163,8 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: now,
-            after_merge: AfterMerge::Review,
-            next_slug: None,
             github: None,
+            merge: None,
         });
         assert_eq!(pr.phase(), PrPhase::Publishing);
 
@@ -1148,7 +1185,7 @@ mod tests {
     }
 
     #[test]
-    fn publication_contains_its_github_receipt_and_disposition() {
+    fn merge_request_contains_its_disposition() {
         let now = time::OffsetDateTime::now_utc();
         let mut pr = TaskPr {
             id: TaskPrId::new(),
@@ -1160,12 +1197,17 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::Review,
-                next_slug: Some("released_upgrade".to_string()),
                 github: Some(GithubPr {
                     number: 872,
                     url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
-                    head_sha: None,
+                    head_sha: Some("head".to_string()),
+                }),
+                merge: Some(super::PrMergeRequest {
+                    mode: super::PrMergeMode::User,
+                    requested_at: now,
+                    head_sha: "head".to_string(),
+                    after_merge: AfterMerge::ContinueTask,
+                    next_slug: Some("released_upgrade".to_string()),
                 }),
             }),
             merge_commit: None,
@@ -1180,37 +1222,18 @@ mod tests {
         };
         assert!(pr.validate().is_err());
 
-        let publication = pr.publication.as_mut().unwrap();
-        publication.next_slug = Some("released-upgrade".to_string());
+        let merge = pr.publication.as_mut().unwrap().merge.as_mut().unwrap();
+        merge.next_slug = Some("released-upgrade".to_string());
         assert!(pr.validate().is_ok());
 
-        pr.publication.as_mut().unwrap().after_merge = AfterMerge::CompleteTask;
+        pr.publication
+            .as_mut()
+            .unwrap()
+            .merge
+            .as_mut()
+            .unwrap()
+            .after_merge = AfterMerge::CompleteTask;
         assert!(pr.validate().is_err());
-    }
-
-    #[test]
-    fn pr_identity_maps_repo_number_and_carried_shas() {
-        let mut pr = open_pr("headsha", None);
-        let open = pr.pr_identity().expect("open PR has an identity");
-        assert_eq!(open.repo, "loopflow/loopflow");
-        assert_eq!(open.number, 900);
-        assert_eq!(open.shas, vec!["headsha".to_string()]);
-
-        // A merged PR resolves against both its merge commit and its last head,
-        // so a claim pinned to either sha still drills.
-        pr.merge_commit = Some("mergesha".to_string());
-        let merged = pr.pr_identity().expect("merged PR has an identity");
-        assert_eq!(
-            merged.shas,
-            vec!["mergesha".to_string(), "headsha".to_string()]
-        );
-
-        // No GitHub identity yet (still working) → no receipt identity to match.
-        let working = TaskPr {
-            publication: None,
-            ..pr
-        };
-        assert_eq!(working.pr_identity(), None);
     }
 
     fn open_pr(head_sha: &str, observation: Option<super::CiObservation>) -> TaskPr {
@@ -1225,13 +1248,12 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
-                after_merge: AfterMerge::Review,
-                next_slug: None,
                 github: Some(GithubPr {
                     number: 900,
                     url: "https://github.com/loopflow/loopflow/pull/900".to_string(),
                     head_sha: Some(head_sha.to_string()),
                 }),
+                merge: None,
             }),
             merge_commit: None,
             abandoned_at: None,
@@ -1269,7 +1291,7 @@ mod tests {
     }
 
     #[test]
-    fn review_ready_requires_current_head_passing_checks() {
+    fn merge_checks_require_current_head_passing_checks() {
         let observation = |head: &str, state| super::CiObservation {
             head_sha: head.to_string(),
             state,
@@ -1281,16 +1303,17 @@ mod tests {
             "current",
             Some(observation("current", super::CiState::Passing))
         )
-        .review_ready());
+        .merge_checks_passed());
         assert!(!open_pr(
             "current",
             Some(observation("current", super::CiState::Pending))
         )
-        .review_ready());
+        .merge_checks_passed());
         assert!(
-            !open_pr("current", Some(observation("old", super::CiState::Passing))).review_ready()
+            !open_pr("current", Some(observation("old", super::CiState::Passing)))
+                .merge_checks_passed()
         );
-        assert!(!open_pr("current", None).review_ready());
+        assert!(!open_pr("current", None).merge_checks_passed());
     }
 
     fn failing(head: &str, checks: &[&str]) -> super::CiObservation {
@@ -1306,6 +1329,18 @@ mod tests {
                 .collect(),
             observed_at: time::OffsetDateTime::now_utc(),
         }
+    }
+
+    fn with_merge_request(mut pr: TaskPr, mode: super::PrMergeMode) -> TaskPr {
+        let head_sha = pr.head_sha().expect("test PR has a head").to_string();
+        pr.publication.as_mut().unwrap().merge = Some(super::PrMergeRequest {
+            mode,
+            requested_at: time::OffsetDateTime::now_utc(),
+            head_sha,
+            after_merge: AfterMerge::ContinueTask,
+            next_slug: None,
+        });
+        pr
     }
 
     /// The observation answers legality — is this head failing *now* — and nothing
@@ -1344,7 +1379,7 @@ mod tests {
 
     /// A head red *only* on a land-time precondition is not a repair a body can
     /// perform: `lf pr land` clears `scratch/`, and the only action a woken body
-    /// could take is deleting the design doc under review.
+    /// could take is deleting the Task's design doc.
     ///
     /// The direction that matters is the second half. Suppression fires only when
     /// every named failure is land-resolved — a real leaf alongside it still
@@ -1368,17 +1403,16 @@ mod tests {
         assert_eq!(obs.failure_set(), vec!["scratch-clear".to_string()]);
     }
 
-    /// The reviewable-despite-red predicate the action model and Waves
-    /// supervision adopt: it is the exact dual of `wake_legal` within the failing
-    /// state, so the two must never both refuse the same head.
+    /// The land-resolved predicate is the exact dual of `wake_legal` within the
+    /// failing state, so the two must never both refuse the same head.
     #[test]
     fn only_land_time_preconditions_is_the_dual_of_wake_legal() {
-        // Red only on scratch-clear: reviewable, and no wake.
+        // Red only on scratch-clear: land-resolved, and no wake.
         let scratch = failing("h1", &["scratch-clear"]);
         assert!(scratch.only_land_time_preconditions());
         assert!(!scratch.wake_legal());
 
-        // A real leaf beside it (or alone): not reviewable, wake arms.
+        // A real leaf beside it (or alone): not land-resolved, wake arms.
         for obs in [
             failing("h1", &["scratch-clear", "rust-test"]),
             failing("h1", &["rust-test"]),
@@ -1422,96 +1456,120 @@ mod tests {
 
     #[test]
     fn ci_fix_restart_bar_permits_only_a_failing_open_pr_wake() {
-        let session = task(); // status Waiting, no abandon intent
+        let task = task(); // status Waiting, no abandon intent
+
+        // Publication alone is not a restart bar.
+        let published = open_pr("h1", None);
+        assert!(task.supervisor_restart_bar(Some(&published)).is_none());
+        assert!(task.ci_fix_restart_bar(Some(&published)).is_none());
 
         // Open PR, fresh failing head: the ci-fix wake is permitted where the plain
         // supervisor restart stays barred.
-        let legal = open_pr("h1", Some(failing("h1", &["build"])));
-        assert!(session.supervisor_restart_bar(Some(&legal)).is_some());
-        assert!(session.ci_fix_restart_bar(Some(&legal)).is_none());
+        let legal = with_merge_request(
+            open_pr("h1", Some(failing("h1", &["build"]))),
+            super::PrMergeMode::Auto,
+        );
+        assert!(task.supervisor_restart_bar(Some(&legal)).is_some());
+        assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
 
         // Passing head → not legal → barred.
         let mut green_obs = failing("h1", &[]);
         green_obs.state = super::CiState::Passing;
-        let green = open_pr("h1", Some(green_obs));
-        assert!(session.ci_fix_restart_bar(Some(&green)).is_some());
+        let green = with_merge_request(open_pr("h1", Some(green_obs)), super::PrMergeMode::Auto);
+        assert!(task.ci_fix_restart_bar(Some(&green)).is_some());
 
         // Stale reading (observation head != PR head) → fresh_ci None → barred.
-        let stale = open_pr("h2", Some(failing("h1", &["build"])));
-        assert!(session.ci_fix_restart_bar(Some(&stale)).is_some());
+        let stale = with_merge_request(
+            open_pr("h2", Some(failing("h1", &["build"]))),
+            super::PrMergeMode::Auto,
+        );
+        assert!(task.ci_fix_restart_bar(Some(&stale)).is_some());
 
         // Red only on a land-time precondition → no repair exists → barred, and
         // the automated restart is the one path that could have overridden the
         // open-PR bar. A real leaf beside it still permits the wake.
-        let land_only = open_pr("h1", Some(failing("h1", &["scratch-clear"])));
-        assert!(session.ci_fix_restart_bar(Some(&land_only)).is_some());
-        let mixed = open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"])));
-        assert!(session.ci_fix_restart_bar(Some(&mixed)).is_none());
+        let land_only = with_merge_request(
+            open_pr("h1", Some(failing("h1", &["scratch-clear"]))),
+            super::PrMergeMode::Auto,
+        );
+        assert!(task.ci_fix_restart_bar(Some(&land_only)).is_some());
+        let mixed = with_merge_request(
+            open_pr("h1", Some(failing("h1", &["scratch-clear", "rust-test"]))),
+            super::PrMergeMode::Auto,
+        );
+        assert!(task.ci_fix_restart_bar(Some(&mixed)).is_none());
 
         // The bar does not deduplicate. A head that already woke a body still reads
         // as legal here — refusing the second launch is the ledger's job, and
         // asking the question twice is what let the two answers drift.
-        assert!(session.ci_fix_restart_bar(Some(&legal)).is_none());
+        assert!(task.ci_fix_restart_bar(Some(&legal)).is_none());
     }
 
     #[test]
     fn task_rejects_impossible_lifecycle_and_writeback_state() {
-        let mut session = task();
-        session.pm_writeback = PmWritebackState::Pending {
+        let mut task = task();
+        task.pm_writeback = PmWritebackState::Pending {
             operation: PmWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };
-        assert!(session.validate().is_err());
+        assert!(task.validate().is_err());
 
-        session.gate_cycle = 1;
-        assert!(session.validate().is_ok());
+        task.gate_cycle = 1;
+        assert!(task.validate().is_ok());
 
-        session.lifecycle.iterate.flow.clear();
-        assert!(session.validate().is_err());
+        task.lifecycle.loop_.flow.clear();
+        assert!(task.validate().is_err());
     }
 
     #[test]
-    fn task_lifecycle_repeats_iterate_and_gate_until_approval() {
-        let mut session = task();
-        session.lifecycle_phase = TaskLifecyclePhase::Kickoff;
+    fn task_lifecycle_repeats_loop_and_finally_until_approval() {
+        let mut task = task();
+        task.lifecycle_phase = TaskLifecyclePhase::First;
 
-        assert_eq!(session.lifecycle_cycle(), 0);
-        session.enter_iterate().unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
-        assert_eq!(session.lifecycle_cycle(), 1);
-        assert_eq!(session.phase_epoch, 2);
+        assert_eq!(task.lifecycle_cycle(), 0);
+        task.enter_loop().unwrap();
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Loop);
+        assert_eq!(task.lifecycle_cycle(), 1);
+        assert_eq!(task.phase_epoch, 2);
 
         let proposal = TaskGateProposal {
             done: false,
-            reason: "pull request is ready for review".to_string(),
+            reason: "iteration needs another pass".to_string(),
         };
-        session.phase_cursor = 2;
-        session.phase_iteration = 3;
-        session.enter_gate(proposal.clone()).unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Gate);
-        assert_eq!(session.lifecycle_cycle(), 1);
-        assert_eq!(session.gate_cycle, 1);
-        assert_eq!(session.approved_gate_proposal().unwrap(), proposal);
-        assert_eq!((session.phase_cursor, session.phase_iteration), (0, 0));
+        task.phase_cursor = 2;
+        task.phase_iteration = 3;
+        task.enter_finally(proposal.clone()).unwrap();
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Finally);
+        assert_eq!(task.lifecycle_cycle(), 1);
+        assert_eq!(task.gate_cycle, 1);
+        assert_eq!(task.approved_gate_proposal().unwrap(), proposal);
+        assert_eq!((task.phase_cursor, task.phase_iteration), (0, 0));
 
-        session.enter_iterate().unwrap();
-        assert_eq!(session.lifecycle_phase, TaskLifecyclePhase::Iterate);
-        assert_eq!(session.lifecycle_cycle(), 2);
-        assert_eq!(session.gate_proposal, None);
-        assert_eq!(session.phase_epoch, 4);
+        task.enter_loop().unwrap();
+        assert_eq!(task.lifecycle_phase, TaskLifecyclePhase::Loop);
+        assert_eq!(task.lifecycle_cycle(), 2);
+        assert_eq!(task.gate_proposal, None);
+        assert_eq!(task.phase_epoch, 4);
     }
 
     #[test]
-    fn headless_policy_defers_every_phase_without_changing_its_flows() {
-        let mut plan = TaskLifecyclePlan::standard("code");
-        assert!(!plan.all_interactions_deferred());
+    fn task_lifecycle_uses_public_names_without_rewriting_storage() {
+        for (phase, public, stored) in [
+            (TaskLifecyclePhase::First, "first", "kickoff"),
+            (TaskLifecyclePhase::Loop, "loop", "iterate"),
+            (TaskLifecyclePhase::Finally, "finally", "gate"),
+        ] {
+            assert_eq!(phase.as_str(), public);
+            assert_eq!(phase.storage_str(), stored);
+            assert_eq!(TaskLifecyclePhase::from_storage_str(stored).unwrap(), phase);
+        }
+    }
 
-        plan.defer_all_interactions();
-
-        assert!(plan.all_interactions_deferred());
-        assert_eq!(plan.kickoff.flow, "task-kickoff");
-        assert_eq!(plan.iterate.flow, "code");
-        assert_eq!(plan.gate.flow, "task-gate");
-        assert_eq!(plan, TaskLifecyclePlan::headless("code"));
+    #[test]
+    fn standard_lifecycle_pins_each_phase_flow() {
+        let plan = TaskLifecyclePlan::standard("task-design", "code", "ship");
+        assert_eq!(plan.first.flow, "task-design");
+        assert_eq!(plan.loop_.flow, "code");
+        assert_eq!(plan.finally.flow, "ship");
     }
 }

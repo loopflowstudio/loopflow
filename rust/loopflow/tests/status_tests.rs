@@ -8,7 +8,7 @@ use std::process::Command;
 use loopflow::id::WaveId;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::RunEventRow;
-use loopflow::trace::{AgentLaunchRow, AgentTurnRow};
+use loopflow::trace::{AgentInvocationRow, AgentTurnRow};
 use loopflow::wave::Wave;
 
 /// A machine home holding one wave with lookup noise, a flow, and a skill. The
@@ -64,7 +64,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     flow_end.event = "completed".to_string();
     store.insert_run_event(&flow_end).expect("seed flow end");
 
-    // The run boundary the resident launch below rides on. A real agent launch
+    // The run boundary the resident invocation below rides on. A real agent invocation
     // always sits inside a run, so its trace is reachable by process or run id.
     let mut resident_start = event(0, now - 30, "started");
     resident_start.run_id = "run-resident".to_string();
@@ -81,9 +81,10 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         .insert_run_event(&resident_end)
         .expect("seed resident end");
 
-    let launch = AgentLaunchRow {
-        id: "launch-wave-mutate".to_string(),
+    let invocation = AgentInvocationRow {
+        id: "invocation-wave-mutate".to_string(),
         run_id: "run-resident".to_string(),
+        answer_ask_id: None,
         process_id: "proc-resident".to_string(),
         started_at: now - 30,
         ended_at: Some(now - 20),
@@ -100,18 +101,18 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         capture_status: "complete".to_string(),
         incomplete_reason: None,
         outcome: "completed".to_string(),
-        artifact_dir: "traces/launch-wave-mutate".to_string(),
-        conversation_path: "traces/launch-wave-mutate/conversation.jsonl".to_string(),
+        artifact_dir: "traces/invocation-wave-mutate".to_string(),
+        conversation_path: "traces/invocation-wave-mutate/conversation.jsonl".to_string(),
         provider_events_path: None,
         provider_session_id: None,
         provider_session_path: None,
         conversation_event_count: 2,
         conversation_bytes: 10,
-        control: None,
+        supervision: None,
     };
     let turn = AgentTurnRow {
         id: "turn-wave-mutate".to_string(),
-        launch_id: launch.id.clone(),
+        invocation_id: invocation.id.clone(),
         ordinal: 1,
         provider_turn_id: None,
         started_at: now - 30,
@@ -121,7 +122,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         context_coverage: "assembled".to_string(),
         tokenizer: "o200k_base".to_string(),
         system_prompt_path: None,
-        task_prompt_path: "traces/launch-wave-mutate/task.md".to_string(),
+        task_prompt_path: "traces/invocation-wave-mutate/task.md".to_string(),
         system_tokens: 0,
         task_tokens: 10,
         supplied_context_tokens: 10,
@@ -143,8 +144,8 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         basis: None,
     };
     store
-        .insert_trace_capture(&launch, &turn, &[], &[])
-        .expect("seed skill launch");
+        .insert_trace_capture(&invocation, &turn, &[], &[])
+        .expect("seed skill invocation");
     wave
 }
 
@@ -160,7 +161,6 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
     if let Some(id) = ambient_wave_id {
         command.env("LF_WAVE_ID", id);
@@ -304,7 +304,7 @@ fn execs_keep_the_lookup_process_ledger() {
 }
 
 #[test]
-fn runs_are_skill_launches_with_context_and_token_evidence() {
+fn runs_are_skill_invocations_with_context_and_token_evidence() {
     let home = tempfile::tempdir().expect("tempdir");
     seed(home.path(), "audit-runs");
 
@@ -312,7 +312,7 @@ fn runs_are_skill_launches_with_context_and_token_evidence() {
     let runs = runs.as_array().expect("run array");
     assert_eq!(runs.len(), 1);
     let run = &runs[0];
-    assert_eq!(run["id"], "launch-wave-mutate");
+    assert_eq!(run["id"], "invocation-wave-mutate");
     assert_eq!(run["trace_id"], "run-resident");
     assert_eq!(run["exec_id"], "proc-resident");
     assert_eq!(run["skill"], "wave_mutate");
@@ -356,14 +356,14 @@ fn runs_drill_to_one_wave_by_name() {
     assert_eq!(missed.as_array().expect("run array").len(), 0);
 }
 
-/// The drill loop closes: `lf trace` accepts the launch id `lf runs` prints,
+/// The drill loop closes: `lf trace` accepts the invocation id `lf runs` prints,
 /// resolving it to the complete trace.
 #[test]
-fn trace_opens_from_the_launch_id_lf_runs_prints() {
+fn trace_opens_from_the_invocation_id_lf_runs_prints() {
     let home = tempfile::tempdir().expect("tempdir");
-    seed(home.path(), "audit-trace-launch");
+    seed(home.path(), "audit-trace-invocation");
 
-    let trace = trace_json(home.path(), "launch-wave-mutate");
+    let trace = trace_json(home.path(), "invocation-wave-mutate");
     assert_eq!(trace["trace_id"], "run-resident");
     let spans = trace["spans"].as_array().expect("span array");
     assert!(spans

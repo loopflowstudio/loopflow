@@ -13,14 +13,9 @@ use crate::provider_account::{
 };
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
-use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
+use crate::store::{ProviderAccount, SharedStore};
 
 pub fn run(cmd: &ProfileCommand, _repo_root: &Path) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return Err(anyhow!(
-            "access-profile inspection and edits are unavailable while account authority is fixed by an outer invocation"
-        ));
-    }
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     runtime.block_on(run_async(cmd))
 }
@@ -43,14 +38,6 @@ async fn run_async(cmd: &ProfileCommand) -> Result<()> {
 }
 
 async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return match cmd {
-            RouteCommand::Show { .. } => show_forwarded_routes(),
-            _ => Err(anyhow!(
-                "provider route edits are unavailable while account authority is fixed by an outer invocation"
-            )),
-        };
-    }
     let store = open_account_store().await?;
     match cmd {
         RouteCommand::Set {
@@ -66,7 +53,13 @@ async fn run_route_async(cmd: &RouteCommand, repo_root: &Path) -> Result<()> {
                 set_route(&store, RouteScope::Default, provider, accounts).await
             }
         },
-        RouteCommand::Show { repo } => show_routes(&store, repo_root, repo.as_deref()).await,
+        RouteCommand::Show { repo } => {
+            show_routes(&store, repo_root, repo.as_deref()).await?;
+            if crate::provider_account::lease::account_lease_active() {
+                show_forwarded_routes()?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -82,7 +75,8 @@ fn show_forwarded_routes() -> Result<()> {
             } else {
                 ""
             };
-            println!("  {}. {}{preferred}", position + 1, account_id);
+            let account = client.login_email(grant.provider, account_id)?;
+            println!("  {}. {}{preferred}", position + 1, account);
         }
     }
     Ok(())
@@ -187,18 +181,18 @@ async fn set_route(
     let provider = parse_managed_provider(raw_provider)?;
     let mut accounts = Vec::new();
     for raw_account in raw_accounts {
-        accounts.push(
-            find_provider_account(store, provider, raw_account)
-                .await?
-                .account_id,
-        );
+        accounts.push(find_provider_account(store, provider, raw_account).await?);
     }
+    let account_ids = accounts
+        .iter()
+        .map(|account| account.account_id.clone())
+        .collect();
     let now = now_unix();
     store
         .set_provider_route(&ProviderRoute {
             scope: scope.clone(),
             provider,
-            accounts: accounts.clone(),
+            accounts: account_ids,
             created_at: now,
             updated_at: now,
         })
@@ -211,7 +205,7 @@ async fn set_route(
         "{label} {provider}: {}",
         accounts
             .iter()
-            .map(ProviderAccountId::as_str)
+            .map(account_login)
             .collect::<Vec<_>>()
             .join(" -> ")
     );
@@ -325,49 +319,4 @@ fn resolve_repo_id(repo_root: &Path, raw_repo: Option<&str>) -> Result<RepoId> {
 
 fn now_unix() -> i64 {
     OffsetDateTime::now_utc().unix_timestamp()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::{run, run_route};
-    use crate::lf::{ProfileCommand, RouteCommand};
-    use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
-
-    #[test]
-    fn fixed_account_authority_rejects_profile_and_route_mutation() {
-        let _lock = crate::journal::test_env_lock();
-        let previous = std::env::var_os(ACCOUNT_LEASE_ENV);
-        std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
-        let profile = run(
-            &ProfileCommand::Create {
-                chrome_profile: "Profile 1".to_string(),
-                name: None,
-                expects: None,
-            },
-            Path::new("."),
-        );
-        let route = run_route(
-            &RouteCommand::Set {
-                provider: "codex".to_string(),
-                accounts: vec!["reserve".to_string()],
-                repo: None,
-            },
-            Path::new("."),
-        );
-        match previous {
-            Some(value) => std::env::set_var(ACCOUNT_LEASE_ENV, value),
-            None => std::env::remove_var(ACCOUNT_LEASE_ENV),
-        }
-
-        assert!(profile
-            .unwrap_err()
-            .to_string()
-            .contains("fixed by an outer invocation"));
-        assert!(route
-            .unwrap_err()
-            .to_string()
-            .contains("fixed by an outer invocation"));
-    }
 }

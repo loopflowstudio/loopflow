@@ -10,6 +10,7 @@ pub mod flow;
 pub mod git;
 pub mod identity;
 pub mod launch;
+pub(crate) mod machine;
 pub mod naming;
 pub mod platform;
 pub(crate) mod process;
@@ -43,9 +44,8 @@ pub use execution::{
 };
 pub use flow::{
     available_flow_names, expand_flow, find_skill_source_path, load_direction, load_flow,
-    load_goal, load_skill, next_action, next_action_with_policy, render_goal, ConcreteOp,
-    ConcreteSkill, ConcreteStep, ConcreteXor, Direction, Flow, FlowAction, Goal, GoalRenderContext,
-    InteractionPolicy, Op, Skill, Step, XorDef, XorPath,
+    load_goal, load_skill, render_goal, ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor,
+    Direction, Flow, Goal, GoalRenderContext, Op, Skill, Step, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

@@ -43,10 +43,6 @@ enum WaveForm {
     Positional,
     /// `WaveTargetArgs` flattened: `--wave <name>`.
     Target,
-    /// `--channel <name>` (radio pub).
-    Channel,
-    /// `<name>` positional channel (radio sub).
-    ChanPos,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -55,8 +51,8 @@ struct Special {
     /// 0 or downstream error, not a resolution error. Roadmap and `pm status`
     /// behave this way.
     global_default: bool,
-    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). Radio,
-    /// `memory add`, `chat post` drop silently instead of erroring.
+    /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). `chat post`
+    /// drops silently instead of erroring.
     silent_drop: bool,
     /// Blocks (server or subscriber); needs a kill timeout.
     long_running: bool,
@@ -90,10 +86,10 @@ struct Cmd {
 
 /// Commands that resolve an ambient wave without a `wave` arg on the
 /// subcommand itself — they inherit the top-level `--wave` or read
-/// `LF_WAVE_ID` / `LF_CHANNEL` directly. The completeness guard checks
+/// `LF_WAVE_ID` directly. The completeness guard checks
 /// these exist as real clap leaves but does not discover them via the
 /// `wave`-arg walk.
-const AMBIENT_ONLY: &[&[&str]] = &[&["radio", "pub"], &["radio", "sub"]];
+const AMBIENT_ONLY: &[&[&str]] = &[];
 
 /// Commands whose optional `--wave` narrows a machine-wide result instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
@@ -141,42 +137,10 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     Cmd {
-        id: "memory bare",
-        path: &["memory"],
-        base_args: &["memory"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "memory show",
-        path: &["memory", "show"],
-        base_args: &["memory", "show"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "memory log",
-        path: &["memory", "log"],
-        base_args: &["memory", "log"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "chat history",
         path: &["chat"],
         base_args: &["chat", "--history", "--json"],
         wave_form: WaveForm::Target,
-        kind: Kind::Read,
-        special: Special::NONE,
-    },
-    Cmd {
-        id: "receipt show",
-        path: &["receipt", "show"],
-        base_args: &["receipt", "show", "chat_turn:turn-1"],
-        wave_form: WaveForm::Flag,
         kind: Kind::Read,
         special: Special::NONE,
     },
@@ -200,31 +164,8 @@ const COMMANDS: &[Cmd] = &[
         },
     },
     // ── Mutations ────────────────────────────────────────────────────────
-    // `chat post` and `radio pub` use stdin for text: their `trailing_var_arg`
-    // would swallow `--wave`/`--channel` if text were on the command line.
-    Cmd {
-        id: "memory add",
-        path: &["memory", "add"],
-        base_args: &["memory", "add", "matrix-test-fact"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "memory update",
-        path: &["memory", "update"],
-        base_args: &["memory", "update"],
-        wave_form: WaveForm::Target,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            stdin: Some("replacement memory\n"),
-            ..Special::NONE
-        },
-    },
+    // `chat post` uses stdin for text: its `trailing_var_arg` would swallow
+    // `--wave` if text were on the command line.
     Cmd {
         id: "chat post",
         path: &["chat"],
@@ -234,30 +175,6 @@ const COMMANDS: &[Cmd] = &[
         special: Special {
             silent_drop: true,
             stdin: Some("matrix-test-message\n"),
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "radio pub",
-        path: &["radio", "pub"],
-        base_args: &["radio", "pub"],
-        wave_form: WaveForm::Channel,
-        kind: Kind::Mutation,
-        special: Special {
-            silent_drop: true,
-            stdin: Some("matrix-test\n"),
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "radio sub",
-        path: &["radio", "sub"],
-        base_args: &["radio", "sub"],
-        wave_form: WaveForm::ChanPos,
-        kind: Kind::Read,
-        special: Special {
-            silent_drop: true,
-            long_running: true,
             ..Special::NONE
         },
     },
@@ -510,21 +427,9 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// Expected outcome for a specific command × environment cell, accounting for
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
-    // Creation flows may name the Wave being registered. Direct radio channels
-    // are transport names, not managed Wave selections. All intentionally
-    // bypass managed-selection validation.
-    if env.id == "explicit-unknown"
-        && (cmd.id == "pm init" || matches!(cmd.wave_form, WaveForm::Channel | WaveForm::ChanPos))
-    {
+    // Creation flows may name the Wave being registered.
+    if env.id == "explicit-unknown" && cmd.id == "pm init" {
         return Outcome::Resolved;
-    }
-
-    // `radio pub` uses `--channel` but still resolves the ambient wave for
-    // attribution. In `explicit-override`, the ambient UUID is stale, so the
-    // command errors before checking `--channel`. `radio sub` with a
-    // positional channel subscribes directly — no ambient resolution.
-    if env.id == "explicit-override" && cmd.wave_form == WaveForm::Channel {
-        return Outcome::StaleIdentity;
     }
 
     // Project start now resolves caller authority at the CLI surface before
@@ -644,11 +549,6 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         })
         .expect("seed pm snapshot");
 
-    // Wave directory with MEMORY.md — `lf memory show` reads it.
-    let wave_dir = repo.join("wave/product");
-    std::fs::create_dir_all(&wave_dir).expect("wave dir");
-    std::fs::write(wave_dir.join("MEMORY.md"), "PRODUCT MEMORY\n").expect("seed memory");
-
     // Commit everything so the repo is clean.
     git(&["add", "."]);
     let commit = git(&["commit", "-m", "seed", "--allow-empty"]);
@@ -673,11 +573,7 @@ fn build_args(cmd: &Cmd, env: &Env) -> Vec<String> {
                 args.push("--wave".to_string());
                 args.push(w.to_string());
             }
-            WaveForm::Positional | WaveForm::ChanPos => {
-                args.push(w.to_string());
-            }
-            WaveForm::Channel => {
-                args.push("--channel".to_string());
+            WaveForm::Positional => {
                 args.push(w.to_string());
             }
         }
@@ -711,7 +607,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_CHANNEL")
         .env_remove("LF_WAVE_ID");
 
     if let Some(id) = &env.wave_id {
@@ -774,8 +669,8 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
 // ─── Matrix test ────────────────────────────────────────────────────────
 
 /// Every Wave-scoped command × every environment. The expected outcome is
-/// shared per environment (with documented special cases for roadmap and
-/// radio). A divergence — a command that silently drops a stale UUID or
+/// shared per environment (with documented special cases for roadmap). A
+/// divergence — a command that silently drops a stale UUID or
 /// invents its own resolution rule — fails a cell.
 #[test]
 fn matrix_every_command_every_environment() {
@@ -804,8 +699,8 @@ fn matrix_every_command_every_environment() {
 
         for cmd in reads.iter().chain(mutations.iter()) {
             // `lf project start` calls `ensure_clean_main` before wave
-            // resolution. Earlier mutations (memory add, chat post) dirty
-            // the repo; reset so project start reaches the resolver.
+            // resolution. Earlier mutations can dirty the repo; reset so
+            // project start reaches the resolver.
             if cmd.id == "project start" {
                 let _ = std::process::Command::new("git")
                     .args(["reset", "--hard", "HEAD"])
@@ -1014,7 +909,6 @@ fn cache_mutations_target_the_resolved_wave() {
         .env("LF_HOME", &home)
         .env("HOME", &home)
         .env("LF_WAVE_ID", alpha_uuid)
-        .env_remove("LF_CHANNEL")
         .output()
         .expect("run cron add");
 

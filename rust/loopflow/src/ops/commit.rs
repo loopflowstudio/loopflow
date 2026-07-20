@@ -4,9 +4,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
-use crate::engine::builtins::get_builtin_ops_prompt;
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{commit, current_branch, is_clean, push, push_with_upstream, stage_all};
+use crate::engine::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -124,8 +124,10 @@ struct CommitMessage {
 }
 
 fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResult<CommitMessage> {
-    let template = get_builtin_ops_prompt("commit_message")
-        .ok_or_else(|| OpsError::Message("builtin commit_message prompt not found".to_string()))?;
+    let template = load_skill("commit-message", repo)
+        .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?
+        .content
+        .ok_or_else(|| OpsError::Message("commit-message skill has no content".to_string()))?;
 
     let diff = staged_diff(repo)?;
     let diff = truncate_chars(&diff, 20_000);
@@ -253,6 +255,12 @@ fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
 }
 
 pub(crate) fn push_with_upstream_if_needed(repo: &Path) -> OpsResult<()> {
+    // Every ordinary Loopflow branch push shares the Task settlement fence.
+    // After a commit, a changed HEAD clears a head-pinned merge request (and
+    // revokes Auto remotely) before Git can expose the new head. Same-head
+    // publication remains a no-op and preserves the request.
+    let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
+    crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false)?;
     let output = std::process::Command::new("git")
         .arg("rev-parse")
         .arg("--abbrev-ref")

@@ -1,0 +1,94 @@
+import io
+import subprocess
+import tarfile
+from pathlib import Path
+
+import pytest
+
+from scripts import publish_release
+
+
+def _native_artifacts(directory: Path) -> None:
+    binary = directory / "lf"
+    binary.write_bytes(b"loopflow release binary")
+    for target in publish_release.TARGETS:
+        package_dir = directory / target
+        package_dir.mkdir()
+        with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
+            package.add(binary, arcname="lf")
+
+
+def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
+    (tmp_path / "lf-aarch64-apple-darwin.tar.gz").touch()
+
+    with pytest.raises(RuntimeError, match="x86_64-apple-darwin"):
+        publish_release._find_native_archives(tmp_path)
+
+
+def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
+    archive = tmp_path / "lf-aarch64-apple-darwin.tar.gz"
+    with tarfile.open(archive, "w:gz") as package:
+        member = tarfile.TarInfo("../lf")
+        member.size = 4
+        package.addfile(member, io.BytesIO(b"nope"))
+
+    with pytest.raises(RuntimeError, match="unexpected archive contents"):
+        publish_release._extract_arm_binary((archive,), tmp_path)
+
+
+def test_publisher_completes_all_stages_before_marking_release_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    _native_artifacts(artifact_dir)
+
+    (tmp_path / "release").mkdir()
+    (tmp_path / "release/install.sh").write_text("#!/bin/sh\n")
+    (tmp_path / "RELEASE_NOTES.md").write_text("# v1.2.3\n")
+    (tmp_path / "swift/dist").mkdir(parents=True)
+    receipts: list[publish_release.PublishReceipt] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        cwd: Path = tmp_path,
+        capture: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        if command[:3] == ["git", "tag", "--points-at"]:
+            return subprocess.CompletedProcess(command, 0, "v1.2.3\n", "")
+        if command[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(command, 0, "abc123\n", "")
+        if command[-1:] == ["scripts/release-loopflow.py"]:
+            (tmp_path / "swift/dist/Loopflow.dmg").write_bytes(b"notarized dmg")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(publish_release, "ROOT", tmp_path)
+    monkeypatch.setattr(publish_release, "check_release_host", lambda: None)
+    monkeypatch.setattr(publish_release, "_run", fake_run)
+    monkeypatch.setattr(publish_release, "_publish_crate", lambda: None)
+    monkeypatch.setattr(publish_release, "_upload_dmg", lambda *args: None)
+    monkeypatch.setattr(publish_release, "_write_receipt", receipts.append)
+    monkeypatch.setenv("LF_RELEASE_WORKFLOW_RUN_ID", "42")
+
+    receipt = publish_release.publish_release("v1.2.3", artifact_dir)
+
+    assert receipt.workflow_run_id == "42"
+    assert receipt.source_commit == "abc123"
+    assert receipt.completed_stages == (
+        "artifacts_verified",
+        "dmg_notarized",
+        "github_draft_staged",
+        "crate_published",
+        "versioned_dmg_uploaded",
+        "website_deployed",
+        "latest_dmg_uploaded",
+        "github_release_published",
+    )
+    assert set(receipt.artifact_sha256) == {
+        *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
+        "Loopflow.dmg",
+        "install.sh",
+    }
+    assert receipts == [receipt]

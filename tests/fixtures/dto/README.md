@@ -10,12 +10,10 @@ listener↔resident wire (`POST /resident/deltas`, `POST /resident/attach`,
 the same `lf` binary, so only the Rust fixture tests pin them. Swift does not
 consume this wire.
 
-`receipt.json` is one `MemoryFact` (the `lf memory log --json` shape): a curated
-fact plus its evidence `receipts`, covering every `EvidenceKind`. Pinned in Rust
-(`memory_fact_fixture_round_trips_every_evidence_kind`) and Swift
-(`memoryFactFixturePreservesReceipts`).
-
-`launch_surface.json` pins the normalized `lf launch list|attach --json` shape: one Launch, stable Work and Wave identity, Home route, optional User/parent attention, explicit handback evidence, and a generic attach argv.
+`invocation_surface.json` pins `lf invocation list|attach --json`: one
+AgentInvocation, its supervising Run authority and containment, stable Work and
+Wave identity, Home route, temporary User/parent attention and handback
+evidence, and a generic attach argv.
 `task_attention_states.json` pins the Rust-owned desktop attention fold for
 live advancing, live human wait, dead dirty, dead authored commits, clean
 backlog, completed, stale active intent, and unavailable local evidence. Rust
@@ -23,12 +21,12 @@ and Swift decode the same Task rows; consumers never reconstruct the signal
 from process flags.
 
 `context_lab_snapshot.json` is shared by Rust and Swift. It pins the atomic
-session-set query, including explicit missing token coverage and immutable trace
+invocation-set query, including explicit missing token coverage and immutable trace
 addresses. Revision evidence carries both Rust's effective-content hash and the
 current source-file hash used to reject a stale Task worktree without
 reimplementing prompt transformations in Swift.
 
 `turn_spend.json` is the additive `lf usage --json` wire. Each row names its
-Turn, Launch, trace, and exec; the second row proves a cache-only measurement
+Turn, AgentInvocation, trace, and exec; the second row proves a cache-only measurement
 survives while absent token and cost fields remain explicit nulls. Rust and
 Swift both round-trip it.

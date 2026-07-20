@@ -1,7 +1,7 @@
 import Foundation
 
-/// A place to present an interactive launch. Every surface can open the
-/// worktree; only some can honestly *attach* the exact durable Session by
+/// A place to present an interactive Invocation. Every surface can open the
+/// worktree; only some can honestly *attach* the exact Invocation by
 /// running the shared attach command against it.
 public enum LaunchTarget: String, Codable, Sendable, Hashable, CaseIterable {
     /// Embedded terminal. The required local fallback: always available, always
@@ -28,13 +28,13 @@ public enum LaunchTarget: String, Codable, Sendable, Hashable, CaseIterable {
     }
 }
 
-/// How honestly a surface reaches a launch's Session right now.
+/// How honestly a surface reaches an Invocation's provider session right now.
 public enum LaunchTargetReach: String, Codable, Sendable, Hashable {
-    /// Runs the exact shared attach command against the same Session.
+    /// Runs the exact shared attach command against the same provider session.
     case attach
     /// Opens the worktree only — a weaker action that never claims to attach.
     case worktreeOnly
-    /// The app is not installed, or the surface cannot apply to this launch.
+    /// The app is not installed, or the surface cannot apply to this Invocation.
     case unavailable
 }
 
@@ -63,7 +63,7 @@ public struct LaunchTargetOption: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// What the current machine and launch permit. The resolver reads only these
+/// What the current machine and Invocation permit. The resolver reads only these
 /// facts; it never touches the filesystem or `NSWorkspace` itself, which keeps
 /// the decision pure and testable.
 ///
@@ -141,7 +141,7 @@ public struct LaunchTargetCapability: Sendable, Hashable {
             guard !isRemoteHome, installedApps.contains(surface), workspaceProven else {
                 return .unavailable
             }
-            // Claude with a known session id can resume the exact durable Session
+            // Claude with a known session id can resume the exact Invocation
             // in the IDE's integrated terminal. Without those, the IDE can only
             // open the worktree — a weaker action labeled as such.
             return ideCanAttach ? .attach : .worktreeOnly
@@ -227,7 +227,7 @@ public struct LaunchTargetResolution: Sendable, Hashable {
 /// overall surface, then the embedded Ghostty fallback. A remembered surface is
 /// honored only while it can still `.attach`, so an uninstalled app or a lost
 /// capability falls back visibly to the next candidate rather than opening a
-/// surface that would lie about reaching the Session — and the resolution
+/// surface that would lie about reaching the Invocation — and the resolution
 /// reports *why* it fell back so the reason can be shown.
 public enum LaunchTargetResolver {
     public static func resolve(

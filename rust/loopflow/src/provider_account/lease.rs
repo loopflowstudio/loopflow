@@ -1,8 +1,9 @@
-//! Fixed account authority forwarded by `lf ssh` through a foreground broker.
+//! Account authority forwarded by `lf ssh` through a foreground broker.
 //!
-//! Descendants receive only an opaque handle and inherit the root grant
-//! unchanged. Provider launches receive one credential, and resumed provider
-//! sessions stay on the account recorded for them.
+//! The origin offers an ordered account catalog without refreshing credentials.
+//! The target merges that catalog with its local accounts, then requests only
+//! the selected credential. Descendants inherit the same bounded grant and
+//! resumed provider sessions stay on the authority that owns their account.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -27,6 +28,8 @@ use crate::store::{AccountLimitRow, ProviderAccount, ProviderAccountId, SharedSt
 
 /// The encoded [`AccountLeaseHandle`] carried across process boundaries.
 pub const ACCOUNT_LEASE_ENV: &str = "LF_ACCOUNT_LEASE";
+/// Target-side account preferences applied to the merged local/forwarded view.
+pub const ACCOUNT_SELECTION_ENV: &str = "LF_ACCOUNT_SELECTION";
 
 /// One provider's ordered grant. Preferred (`--account`-selected) ids form the
 /// leading `preferred` entries in `accounts`.
@@ -40,6 +43,7 @@ pub(crate) struct ProviderGrant {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct AccountLease {
     pub(crate) grants: Vec<ProviderGrant>,
+    pub(crate) restricted: bool,
 }
 
 impl AccountLease {
@@ -49,7 +53,7 @@ impl AccountLease {
 }
 
 /// One `--account claude=work` / `--only-account codex=reserve` token.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ProviderAccountSelector {
     provider: Option<Provider>,
     account: String,
@@ -81,7 +85,7 @@ impl ProviderAccountSelector {
         let account = account.trim();
         if account.is_empty() {
             return Err(ProviderAccountError::Runtime(format!(
-                "{provider}= requires an account id or login email"
+                "{provider}= requires a login email or prefix"
             )));
         }
         Ok(Self {
@@ -91,12 +95,12 @@ impl ProviderAccountSelector {
     }
 }
 
-/// The root account selection, resolved once at the outer invocation. This
-/// never crosses a process boundary — descendants inherit the resolved lease,
-/// not the selection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Account selection at one CLI boundary. Origin-side SSH flags become grant
+/// preferences; target-side flags cross the process boundary through
+/// [`ACCOUNT_SELECTION_ENV`] and apply to the merged catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum SelectionMode {
-    /// No flags: forward the normal healthy local route.
+    /// No flags: expose the normal catalog and routes.
     Default,
     /// `--account`: prefer these accounts, keep each provider's route as
     /// fallback.
@@ -105,8 +109,8 @@ enum SelectionMode {
     Restrict(Vec<ProviderAccountSelector>),
 }
 
-/// Root-only account flags before they become one fixed grant.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Account flags before they become a grant or merged-catalog preference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountSelection(SelectionMode);
 
 impl Default for AccountSelection {
@@ -144,7 +148,7 @@ impl AccountSelection {
         matches!(self.0, SelectionMode::Default)
     }
 
-    fn is_restricted(&self) -> bool {
+    pub(crate) fn is_restricted(&self) -> bool {
         matches!(self.0, SelectionMode::Restrict(_))
     }
 
@@ -153,6 +157,40 @@ impl AccountSelection {
             SelectionMode::Prefer(selectors) | SelectionMode::Restrict(selectors) => selectors,
             SelectionMode::Default => &[],
         }
+    }
+
+    pub fn env_value(&self) -> Result<String, ProviderAccountError> {
+        let bytes = serde_json::to_vec(self)
+            .map_err(|error| ProviderAccountError::AccountLease(error.to_string()))?;
+        Ok(URL_SAFE_NO_PAD.encode(bytes))
+    }
+
+    pub(crate) fn from_env() -> Result<Self, ProviderAccountError> {
+        let Some(value) = std::env::var_os(ACCOUNT_SELECTION_ENV) else {
+            return Ok(Self::default());
+        };
+        let value = value.into_string().map_err(|_| {
+            ProviderAccountError::AccountLease(
+                "LF_ACCOUNT_SELECTION is not valid UTF-8".to_string(),
+            )
+        })?;
+        let bytes = URL_SAFE_NO_PAD
+            .decode(value.trim())
+            .map_err(|error| ProviderAccountError::AccountLease(error.to_string()))?;
+        serde_json::from_slice(&bytes)
+            .map_err(|error| ProviderAccountError::AccountLease(error.to_string()))
+    }
+
+    pub(crate) fn resolved_accounts(
+        &self,
+        catalog: &[ProviderAccount],
+    ) -> Result<Vec<(Provider, ProviderAccountId)>, ProviderAccountError> {
+        resolve_selectors(catalog, self.selectors()).map(|resolved| {
+            resolved
+                .into_iter()
+                .map(|resolved| (resolved.provider, resolved.account_id))
+                .collect()
+        })
     }
 }
 
@@ -192,7 +230,10 @@ impl AccountLeaseHandle {
 /// A resolved root lease plus the broker-private credentials that serve it.
 pub(crate) struct PreparedAccountLease {
     pub(crate) lease: AccountLease,
+    /// Tokens are populated only after the target selects an account. Tests may
+    /// seed this cache directly; production preparation always leaves it empty.
     credentials: HashMap<(Provider, ProviderAccountId), String>,
+    unavailable_credentials: HashSet<(Provider, ProviderAccountId)>,
     store: SharedStore,
     restricted: bool,
 }
@@ -203,7 +244,7 @@ impl std::fmt::Debug for PreparedAccountLease {
             .debug_struct("PreparedAccountLease")
             .field("lease", &self.lease)
             .field(
-                "credentials",
+                "cached_credentials",
                 &format_args!("{} redacted", self.credentials.len()),
             )
             .field("restricted", &self.restricted)
@@ -323,8 +364,8 @@ fn grants_for_selection(
         .collect()
 }
 
-/// Open the local account store and prepare one fixed root grant. Returns
-/// `None` only when the default selection has no store or route to forward.
+/// Open the origin account store and prepare its forwarded catalog. Returns
+/// `None` only when the default selection has no store or accounts to offer.
 pub(crate) async fn prepare_root_lease(
     selection: &AccountSelection,
 ) -> Result<Option<PreparedAccountLease>, ProviderAccountError> {
@@ -342,12 +383,18 @@ pub(crate) async fn prepare_root_lease(
     let resolved = resolve_selectors(&catalog, selection.selectors())?;
     let mut routes = HashMap::new();
     for provider in supported_providers() {
-        routes.insert(
-            provider,
-            super::provider_route_account_ids(&store, repo_id.as_ref(), provider)
-                .await?
-                .unwrap_or_default(),
-        );
+        let mut route = super::provider_route_account_ids(&store, repo_id.as_ref(), provider)
+            .await?
+            .unwrap_or_default();
+        for account in catalog
+            .iter()
+            .filter(|account| account.provider == provider.as_str())
+        {
+            if !route.contains(&account.account_id) {
+                route.push(account.account_id.clone());
+            }
+        }
+        routes.insert(provider, route);
     }
     let grants = grants_for_selection(routes, &resolved, selection);
     if grants.is_empty() {
@@ -358,46 +405,12 @@ pub(crate) async fn prepare_root_lease(
             "account selection produced no provider grant".to_string(),
         ));
     }
-    let lease = AccountLease { grants };
-    let selected = lease
-        .grants
-        .iter()
-        .flat_map(|grant| {
-            grant
-                .accounts
-                .iter()
-                .map(move |account_id| (grant.provider, account_id))
-        })
-        .collect::<HashSet<_>>();
-    let mut credentials = HashMap::new();
     let restricted = selection.is_restricted();
-    for account in catalog.iter().filter(|account| {
-        supported_providers().iter().any(|provider| {
-            account.provider == provider.as_str()
-                && selected.contains(&(*provider, &account.account_id))
-        })
-    }) {
-        let provider = account
-            .provider
-            .parse::<Provider>()
-            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-        match crate::provider_account::prepare_account_access_token(provider, account).await {
-            Ok(access_token) => {
-                credentials.insert((provider, account.account_id.clone()), access_token);
-            }
-            Err(error) if !restricted => {
-                tracing::warn!(
-                    provider = %provider,
-                    account = %account.account_id,
-                    "skipping unavailable account in fallback grant: {error}"
-                );
-            }
-            Err(error) => return Err(error),
-        }
-    }
+    let lease = AccountLease { grants, restricted };
     Ok(Some(PreparedAccountLease {
         lease,
-        credentials,
+        credentials: HashMap::new(),
+        unavailable_credentials: HashSet::new(),
         store,
         restricted,
     }))
@@ -431,10 +444,19 @@ enum BrokerOperation {
         provider_session_id: String,
         account_id: ProviderAccountId,
     },
+    PinnedAccount {
+        provider: Provider,
+        provider_session_id: String,
+    },
     RecordHealth {
         provider: Provider,
         account_id: ProviderAccountId,
         signal: RateLimitSignal,
+    },
+    RecordCredentialInvalidated {
+        provider: Provider,
+        account_id: ProviderAccountId,
+        reason: String,
     },
 }
 
@@ -474,6 +496,7 @@ enum BrokerResponse {
     Lease(AccountLease),
     Resolution(LeaseResolution),
     AccountFacts(Box<LeaseAccountFacts>),
+    PinnedAccount(Option<ProviderAccountId>),
     Ok,
     Error(String),
 }
@@ -488,125 +511,167 @@ struct BrokerState {
 }
 
 impl BrokerState {
+    async fn access_token(
+        &mut self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+    ) -> Result<String, ProviderAccountError> {
+        let key = (provider, account_id.clone());
+        if let Some(access_token) = self.prepared.credentials.get(&key) {
+            return Ok(access_token.clone());
+        }
+        let account = self
+            .prepared
+            .store
+            .list_provider_accounts(Some(provider.as_str()))
+            .await?
+            .into_iter()
+            .find(|account| account.account_id == *account_id)
+            .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
+                provider,
+                accounts: format!("'{account_id}'"),
+            })?;
+        match crate::provider_account::prepare_account_access_token(provider, &account).await {
+            Ok(access_token) => {
+                self.prepared.credentials.insert(key, access_token.clone());
+                Ok(access_token)
+            }
+            Err(error) => {
+                self.prepared.unavailable_credentials.insert(key);
+                Err(error)
+            }
+        }
+    }
+
     async fn resolve(
         &mut self,
         provider: Provider,
         provider_session_id: Option<&str>,
     ) -> Result<LeaseResolution, ProviderAccountError> {
-        let grant = self.prepared.lease.grant(provider).ok_or_else(|| {
-            ProviderAccountError::Runtime(format!(
-                "{provider} is unavailable in this forwarded account lease"
-            ))
-        })?;
-        let restricted = self.prepared.restricted;
-        let viable = grant
-            .accounts
-            .iter()
-            .filter(|account_id| {
-                self.prepared
-                    .credentials
-                    .contains_key(&(provider, (*account_id).clone()))
-            })
+        let grant = self
+            .prepared
+            .lease
+            .grant(provider)
             .cloned()
-            .collect::<Vec<_>>();
-        if viable.is_empty() {
-            return Err(ProviderAccountError::NoAuthenticatedAccount {
-                provider,
-                accounts: grant
-                    .accounts
-                    .iter()
-                    .map(|account| format!("'{account}'"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            });
-        }
-        // Provider continuation: a resumed session stays on its recorded
-        // account when that account is still within the grant.
-        let resumed = match provider_session_id {
-            Some(session_id) => self
-                .prepared
-                .store
-                .provider_session_account(provider, session_id)
-                .await?
-                .filter(|account_id| viable.contains(account_id)),
-            None => None,
-        };
-        // A continuation already has an account. Do not reserve an unrelated
-        // preferred attempt while honoring that pin; the reservation belongs
-        // only to a new provider session that will actually use it.
-        let preferred = if resumed.is_none() {
-            let preferred = grant
+            .ok_or_else(|| {
+                ProviderAccountError::Runtime(format!(
+                    "{provider} is unavailable in this forwarded account lease"
+                ))
+            })?;
+        let restricted = self.prepared.restricted;
+        let mut requested_session = provider_session_id;
+        let mut last_credential_error = None;
+        loop {
+            let viable = grant
                 .accounts
                 .iter()
-                .take(grant.preferred)
-                .find(|preferred| {
-                    viable.contains(preferred)
-                        && !self
-                            .spent_preferences
-                            .contains(&(provider, (*preferred).clone()))
-                })
-                .cloned();
-            if let Some(account_id) = &preferred {
-                self.spent_preferences
-                    .insert((provider, account_id.clone()));
-            }
-            preferred
-        } else {
-            None
-        };
-        let fallback = if restricted {
-            viable.clone()
-        } else {
-            viable
-                .iter()
                 .filter(|account_id| {
-                    !grant
-                        .accounts
-                        .iter()
-                        .take(grant.preferred)
-                        .any(|id| id == *account_id)
+                    !self
+                        .prepared
+                        .unavailable_credentials
+                        .contains(&(provider, (*account_id).clone()))
                 })
                 .cloned()
-                .collect::<Vec<_>>()
-        };
-        let (selected, resume_requested_session) = if let Some(account_id) = resumed {
-            (account_id, true)
-        } else if let Some(preferred) = preferred {
-            (preferred, false)
-        } else {
-            (
-                self.prepared
-                    .store
-                    .select_provider_account(provider, &fallback, None)
-                    .await?
-                    .ok_or_else(|| ProviderAccountError::NoEligibleAccount {
+                .collect::<Vec<_>>();
+            if viable.is_empty() {
+                return Err(last_credential_error.unwrap_or_else(|| {
+                    ProviderAccountError::NoAuthenticatedAccount {
                         provider,
-                        accounts: fallback
+                        accounts: grant
+                            .accounts
                             .iter()
                             .map(|account| format!("'{account}'"))
                             .collect::<Vec<_>>()
                             .join(", "),
-                    })?
-                    .account
-                    .account_id,
-                false,
-            )
-        };
-        let access_token = self
-            .prepared
-            .credentials
-            .get(&(provider, selected.clone()))
-            .cloned()
-            .ok_or_else(|| {
-                ProviderAccountError::Runtime(format!(
-                    "forwarded grant has no credential for {provider}/{selected}"
-                ))
-            })?;
-        Ok(LeaseResolution {
-            account_id: selected,
-            access_token,
-            resume_requested_session,
-        })
+                    }
+                }));
+            }
+            let resumed = match requested_session {
+                Some(session_id) => self
+                    .prepared
+                    .store
+                    .provider_session_account(provider, session_id)
+                    .await?
+                    .filter(|account_id| viable.contains(account_id)),
+                None => None,
+            };
+            let preferred = if resumed.is_none() {
+                let preferred = grant
+                    .accounts
+                    .iter()
+                    .take(grant.preferred)
+                    .find(|preferred| {
+                        viable.contains(preferred)
+                            && !self
+                                .spent_preferences
+                                .contains(&(provider, (*preferred).clone()))
+                    })
+                    .cloned();
+                if let Some(account_id) = &preferred {
+                    self.spent_preferences
+                        .insert((provider, account_id.clone()));
+                }
+                preferred
+            } else {
+                None
+            };
+            let fallback = if restricted {
+                viable.clone()
+            } else {
+                viable
+                    .iter()
+                    .filter(|account_id| {
+                        !grant
+                            .accounts
+                            .iter()
+                            .take(grant.preferred)
+                            .any(|id| id == *account_id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            let (selected, resume_requested_session) = if let Some(account_id) = resumed {
+                (account_id, true)
+            } else if let Some(preferred) = preferred {
+                (preferred, false)
+            } else {
+                (
+                    self.prepared
+                        .store
+                        .select_provider_account(provider, &fallback, None)
+                        .await?
+                        .ok_or_else(|| ProviderAccountError::NoEligibleAccount {
+                            provider,
+                            accounts: fallback
+                                .iter()
+                                .map(|account| format!("'{account}'"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        })?
+                        .account
+                        .account_id,
+                    false,
+                )
+            };
+            match self.access_token(provider, &selected).await {
+                Ok(access_token) => {
+                    return Ok(LeaseResolution {
+                        account_id: selected,
+                        access_token,
+                        resume_requested_session,
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        provider = %provider,
+                        account = %selected,
+                        "forwarded account credential is unavailable; trying the next candidate: {error}"
+                    );
+                    last_credential_error = Some(error);
+                    requested_session = None;
+                }
+            }
+        }
     }
 
     async fn resolve_exact(
@@ -616,15 +681,7 @@ impl BrokerState {
         provider_session_id: Option<&str>,
     ) -> Result<LeaseResolution, ProviderAccountError> {
         self.grant_contains(provider, account_id)?;
-        let access_token = self
-            .prepared
-            .credentials
-            .get(&(provider, account_id.clone()))
-            .cloned()
-            .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
-                provider,
-                accounts: format!("'{account_id}'"),
-            })?;
+        let access_token = self.access_token(provider, account_id).await?;
         let resume_requested_session = match provider_session_id {
             Some(session_id) => self
                 .prepared
@@ -693,13 +750,24 @@ impl BrokerState {
                 account_id,
             } => {
                 self.grant_contains(provider, &account_id)?;
-                let account = self
+                let mut account = self
                     .prepared
                     .store
                     .list_provider_accounts(Some(provider.as_str()))
                     .await?
                     .into_iter()
                     .find(|account| account.account_id == account_id);
+                let credential_available = account.as_ref().is_some_and(|account| {
+                    account.home.is_some()
+                        && account.credential_state == crate::store::CredentialState::Connected
+                        && !self
+                            .prepared
+                            .unavailable_credentials
+                            .contains(&(provider, account_id.clone()))
+                });
+                if let Some(account) = &mut account {
+                    account.home = None;
+                }
                 let limits = self
                     .prepared
                     .store
@@ -709,13 +777,22 @@ impl BrokerState {
                     .filter(|limit| limit.account_id == account_id)
                     .collect();
                 Ok(BrokerResponse::AccountFacts(Box::new(LeaseAccountFacts {
+                    credential_available,
                     account,
                     limits,
-                    credential_available: self
-                        .prepared
-                        .credentials
-                        .contains_key(&(provider, account_id)),
                 })))
+            }
+            BrokerOperation::PinnedAccount {
+                provider,
+                provider_session_id,
+            } => {
+                let account_id = self
+                    .prepared
+                    .store
+                    .provider_session_account(provider, &provider_session_id)
+                    .await?
+                    .filter(|account_id| self.grant_contains(provider, account_id).is_ok());
+                Ok(BrokerResponse::PinnedAccount(account_id))
             }
             BrokerOperation::PinSession {
                 provider,
@@ -749,6 +826,29 @@ impl BrokerState {
                     "forwarded_stream",
                 )
                 .await?;
+                Ok(BrokerResponse::Ok)
+            }
+            BrokerOperation::RecordCredentialInvalidated {
+                provider,
+                account_id,
+                reason,
+            } => {
+                self.grant_contains(provider, &account_id)?;
+                self.prepared
+                    .store
+                    .record_provider_account_credential_invalidated(
+                        provider.as_str(),
+                        &account_id,
+                        &reason,
+                    )
+                    .await?;
+                self.prepared
+                    .credentials
+                    .remove(&(provider, account_id.clone()));
+                self.prepared
+                    .unavailable_credentials
+                    .insert((provider, account_id.clone()));
+                self.spent_preferences.insert((provider, account_id));
                 Ok(BrokerResponse::Ok)
             }
         }
@@ -977,6 +1077,7 @@ impl AccountLeaseClient {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn resolve(
         &self,
         provider: Provider,
@@ -1027,6 +1128,27 @@ impl AccountLeaseClient {
         }
     }
 
+    pub(crate) fn login_email(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+    ) -> Result<String, ProviderAccountError> {
+        let facts = self.account_facts(provider, account_id)?;
+        let account = facts.account.ok_or_else(|| {
+            ProviderAccountError::Runtime(format!(
+                "forwarded {provider} account has no catalog entry"
+            ))
+        })?;
+        account
+            .login_email
+            .map(|login| login.to_string())
+            .ok_or_else(|| {
+                ProviderAccountError::Runtime(format!(
+                    "forwarded {provider} account has no login email"
+                ))
+            })
+    }
+
     pub(crate) fn pin_session(
         &self,
         provider: Provider,
@@ -1039,6 +1161,22 @@ impl AccountLeaseClient {
             account_id: account_id.clone(),
         })? {
             BrokerResponse::Ok => Ok(()),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
+
+    pub(crate) fn pinned_account(
+        &self,
+        provider: Provider,
+        provider_session_id: &str,
+    ) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
+        match self.request(BrokerOperation::PinnedAccount {
+            provider,
+            provider_session_id: provider_session_id.to_string(),
+        })? {
+            BrokerResponse::PinnedAccount(account_id) => Ok(account_id),
             _ => Err(ProviderAccountError::Runtime(
                 "account lease broker returned the wrong response".to_string(),
             )),
@@ -1062,9 +1200,27 @@ impl AccountLeaseClient {
             )),
         }
     }
+
+    pub(crate) fn record_credential_invalidated(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+        reason: &str,
+    ) -> Result<(), ProviderAccountError> {
+        match self.request(BrokerOperation::RecordCredentialInvalidated {
+            provider,
+            account_id: account_id.clone(),
+            reason: reason.to_string(),
+        })? {
+            BrokerResponse::Ok => Ok(()),
+            _ => Err(ProviderAccountError::Runtime(
+                "account lease broker returned the wrong response".to_string(),
+            )),
+        }
+    }
 }
 
-pub(crate) fn account_lease_active() -> bool {
+pub fn account_lease_active() -> bool {
     std::env::var_os(ACCOUNT_LEASE_ENV).is_some_and(|value| !value.is_empty())
 }
 
@@ -1079,22 +1235,9 @@ pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
     Ok(())
 }
 
-pub fn validate_account_selection(
-    selection: &AccountSelection,
-) -> Result<(), ProviderAccountError> {
-    if !account_lease_active() || selection.is_default() {
-        return Ok(());
-    }
-    Err(ProviderAccountError::Runtime(
-        "account authority was fixed by an outer `lf` invocation; a nested `lf` cannot set \
-         --account/--only-account"
-            .to_string(),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::fs;
     use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
@@ -1102,14 +1245,16 @@ mod tests {
 
     use super::{
         account_lease_active, grants_for_selection, prepare_root_lease, probe_forwarded_authority,
-        resolve_selectors, validate_account_selection, AccountLease, AccountLeaseBroker,
-        AccountLeaseClient, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
-        ProviderAccountSelector, ProviderGrant, ResolvedSelector, ACCOUNT_LEASE_ENV,
+        resolve_selectors, AccountLease, AccountLeaseBroker, AccountLeaseClient,
+        AccountLeaseHandle, AccountSelection, PreparedAccountLease, ProviderAccountSelector,
+        ProviderGrant, ResolvedSelector, ACCOUNT_LEASE_ENV, ACCOUNT_SELECTION_ENV,
     };
     use crate::profile::{ProviderRoute, RouteScope};
     use crate::provider_account::{new_account, parse_account_id, RateLimitSignal};
     use crate::provider_auth::Provider;
-    use crate::store::{open_store, ProviderAccount, ProviderAccountId, StorageConfig};
+    use crate::store::{
+        open_store, CredentialState, ProviderAccount, ProviderAccountId, StorageConfig,
+    };
     use tempfile::tempdir;
     fn id(value: &str) -> ProviderAccountId {
         parse_account_id(value).unwrap()
@@ -1241,23 +1386,22 @@ mod tests {
             .contains("duplicates codex/engineering-one@"));
     }
     #[test]
-    fn nested_account_flags_are_rejected() {
+    fn forwarded_account_flags_round_trip_as_target_selection() {
         let _lock = crate::journal::test_env_lock();
         let _restore = RestoreEnv::capture(ACCOUNT_LEASE_ENV);
+        let _selection_restore = RestoreEnv::capture(ACCOUNT_SELECTION_ENV);
         let selection = selection_from("codex=reserve");
         std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
-        let error = validate_account_selection(&selection).unwrap_err();
-        assert!(error.to_string().contains("fixed by an outer `lf`"));
-        validate_account_selection(&AccountSelection::default()).unwrap();
+        std::env::set_var(ACCOUNT_SELECTION_ENV, selection.env_value().unwrap());
+        assert_eq!(AccountSelection::from_env().unwrap(), selection);
         std::env::remove_var(ACCOUNT_LEASE_ENV);
-        validate_account_selection(&selection).unwrap();
         std::env::set_var(ACCOUNT_LEASE_ENV, std::ffi::OsString::from_vec(vec![0xff]));
         assert!(account_lease_active());
         assert!(AccountLeaseClient::from_env().is_err());
     }
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn root_preparation_keeps_a_healthy_fallback_when_a_preference_has_no_credential() {
+    async fn root_preparation_is_lazy_and_falls_back_after_the_selected_credential_fails() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _home = RestoreEnv::capture("LF_HOME");
@@ -1307,16 +1451,7 @@ mod tests {
             vec![preferred.account_id.clone(), fallback.account_id.clone()]
         );
         assert_eq!(grant.preferred, 1);
-        assert!(!prepared
-            .credentials
-            .contains_key(&(Provider::Claude, preferred.account_id)));
-        assert_eq!(
-            prepared
-                .credentials
-                .get(&(Provider::Claude, fallback.account_id.clone()))
-                .map(String::as_str),
-            Some("fallback-secret")
-        );
+        assert!(prepared.credentials.is_empty());
 
         let broker = AccountLeaseBroker::start(prepared).unwrap();
         let client = AccountLeaseClient {
@@ -1327,7 +1462,215 @@ mod tests {
             fallback.account_id
         );
     }
-    /// Exercise the fixed grant across inheritance, fallback, resume, and cleanup.
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn target_selection_uses_one_merged_local_and_forwarded_catalog() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _home = RestoreEnv::capture("LF_HOME");
+        let _database = RestoreEnv::capture("LF_DB_PATH");
+        let _lease = RestoreEnv::capture(ACCOUNT_LEASE_ENV);
+        let _selection = RestoreEnv::capture(ACCOUNT_SELECTION_ENV);
+
+        let target_home = temp.path().join("target");
+        let target_database = target_home.join("loopflow.db");
+        std::env::set_var("LF_HOME", &target_home);
+        std::env::set_var("LF_DB_PATH", &target_database);
+        std::env::remove_var(ACCOUNT_LEASE_ENV);
+        std::env::remove_var(ACCOUNT_SELECTION_ENV);
+        let target_store = Arc::new(
+            open_store(&StorageConfig::sqlite(target_database))
+                .await
+                .unwrap(),
+        );
+        let mut local = account(Provider::Claude, "local", "local@example.com");
+        local.home = Some(target_home.join("accounts/claude/local"));
+        target_store.upsert_provider_account(&local).await.unwrap();
+        let mut shared = account(Provider::Claude, "shared", "shared@example.com");
+        shared.home = Some(target_home.join("accounts/claude/shared"));
+        target_store.upsert_provider_account(&shared).await.unwrap();
+        let mut missing = account(Provider::Claude, "missing", "missing@example.com");
+        missing.home = Some(target_home.join("accounts/claude/missing"));
+        missing.credential_state = CredentialState::Missing;
+        target_store
+            .upsert_provider_account(&missing)
+            .await
+            .unwrap();
+        let mut local_codex = account(Provider::Codex, "codex", "codex@example.com");
+        local_codex.home = Some(target_home.join("accounts/codex/codex"));
+        target_store
+            .upsert_provider_account(&local_codex)
+            .await
+            .unwrap();
+        target_store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Claude,
+                accounts: vec![local.account_id.clone()],
+                created_at: 1,
+                updated_at: 1,
+            })
+            .await
+            .unwrap();
+
+        let origin_store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("origin.db")))
+                .await
+                .unwrap(),
+        );
+        let mut forwarded = account(Provider::Claude, "forwarded", "forwarded@example.com");
+        forwarded.home = Some(temp.path().join("origin/accounts/claude/forwarded"));
+        origin_store
+            .upsert_provider_account(&forwarded)
+            .await
+            .unwrap();
+        let mut forwarded_shared = shared.clone();
+        forwarded_shared.home = Some(temp.path().join("origin/accounts/claude/shared"));
+        origin_store
+            .upsert_provider_account(&forwarded_shared)
+            .await
+            .unwrap();
+        let mut forwarded_codex = local_codex.clone();
+        forwarded_codex.home = Some(temp.path().join("origin/accounts/codex/codex"));
+        origin_store
+            .upsert_provider_account(&forwarded_codex)
+            .await
+            .unwrap();
+        let broker = AccountLeaseBroker::start(PreparedAccountLease {
+            lease: AccountLease {
+                grants: vec![ProviderGrant {
+                    provider: Provider::Claude,
+                    accounts: vec![shared.account_id.clone(), forwarded.account_id.clone()],
+                    preferred: 0,
+                }],
+                restricted: false,
+            },
+            credentials: HashMap::from([
+                (
+                    (Provider::Claude, forwarded.account_id.clone()),
+                    "forwarded-access-token".to_string(),
+                ),
+                (
+                    (Provider::Claude, shared.account_id.clone()),
+                    "shared-access-token".to_string(),
+                ),
+            ]),
+            unavailable_credentials: HashSet::new(),
+            store: Arc::clone(&origin_store),
+            restricted: false,
+        })
+        .unwrap();
+        std::env::set_var(ACCOUNT_LEASE_ENV, broker.local_env_value().unwrap());
+
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the target-local route should be available");
+        assert_eq!(route.account_id(), &local.account_id);
+        assert!(route.uses_native_home());
+
+        let codex_preference =
+            AccountSelection::from_flags(&["codex=codex@".to_string()], &[]).unwrap();
+        std::env::set_var(ACCOUNT_SELECTION_ENV, codex_preference.env_value().unwrap());
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("a Codex preference should leave the Claude route available");
+        assert_eq!(route.account_id(), &local.account_id);
+        assert!(route.uses_native_home());
+
+        let target_preference =
+            AccountSelection::from_flags(&["claude=forwarded@".to_string()], &[]).unwrap();
+        std::env::set_var(
+            ACCOUNT_SELECTION_ENV,
+            target_preference.env_value().unwrap(),
+        );
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the forwarded account should be selectable on the target");
+        assert_eq!(route.account_id(), &forwarded.account_id);
+        assert!(!route.uses_native_home());
+
+        let shared_preference =
+            AccountSelection::from_flags(&["claude=shared@".to_string()], &[]).unwrap();
+        std::env::set_var(
+            ACCOUNT_SELECTION_ENV,
+            shared_preference.env_value().unwrap(),
+        );
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the target-local copy should win for a shared identity");
+        assert_eq!(route.account_id(), &shared.account_id);
+        assert!(route.uses_native_home());
+
+        let missing_preference =
+            AccountSelection::from_flags(&["claude=missing@".to_string()], &[]).unwrap();
+        std::env::set_var(
+            ACCOUNT_SELECTION_ENV,
+            missing_preference.env_value().unwrap(),
+        );
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("a missing target preference should fall through to the local route");
+        assert_eq!(route.account_id(), &local.account_id);
+        assert!(route.uses_native_home());
+
+        let mut missing_route = local.clone();
+        missing_route.credential_state = CredentialState::Missing;
+        target_store
+            .upsert_provider_account(&missing_route)
+            .await
+            .unwrap();
+        std::env::remove_var(ACCOUNT_SELECTION_ENV);
+        let route = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("the local copy should precede the forwarded origin route");
+        assert_eq!(route.account_id(), &shared.account_id);
+        assert!(route.uses_native_home());
+
+        let client = AccountLeaseClient::from_env().unwrap().unwrap();
+        let facts = client
+            .account_facts(Provider::Claude, &forwarded.account_id)
+            .unwrap();
+        assert!(facts.account.is_some_and(|account| account.home.is_none()));
+
+        drop(client);
+        drop(broker);
+        let restricted_broker = AccountLeaseBroker::start(PreparedAccountLease {
+            lease: AccountLease {
+                grants: vec![ProviderGrant {
+                    provider: Provider::Codex,
+                    accounts: vec![forwarded_codex.account_id.clone()],
+                    preferred: 1,
+                }],
+                restricted: true,
+            },
+            credentials: HashMap::from([(
+                (Provider::Codex, forwarded_codex.account_id.clone()),
+                "codex-access-token".to_string(),
+            )]),
+            unavailable_credentials: HashSet::new(),
+            store: origin_store,
+            restricted: true,
+        })
+        .unwrap();
+        std::env::set_var(
+            ACCOUNT_LEASE_ENV,
+            restricted_broker.local_env_value().unwrap(),
+        );
+        std::env::remove_var(ACCOUNT_SELECTION_ENV);
+        let error = crate::provider_account::resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("excludes this provider"));
+    }
+
+    /// Exercise the bounded grant across inheritance, fallback, resume, and cleanup.
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn broker_serves_a_fixed_grant_and_fails_closed_on_drop() {
@@ -1358,7 +1701,10 @@ mod tests {
                     temp.path()
                         .join(grant.provider.as_str())
                         .join(account_id.as_str()),
-                    None,
+                    Some(
+                        crate::profile::EmailAddress::parse(&format!("{account_id}@example.com"))
+                            .unwrap(),
+                    ),
                 );
                 if grant.provider == Provider::Codex && account_id == &id("reserve") {
                     account.cooldown_until =
@@ -1371,12 +1717,16 @@ mod tests {
                 );
             }
         }
-        let lease = AccountLease { grants };
+        let lease = AccountLease {
+            grants,
+            restricted: false,
+        };
         let expected_lease = serde_json::to_vec(&lease).unwrap();
         let restricted_credentials = credentials.clone();
         let prepared = PreparedAccountLease {
             lease,
             credentials,
+            unavailable_credentials: HashSet::new(),
             store: Arc::clone(&store),
             restricted: false,
         };
@@ -1431,6 +1781,12 @@ mod tests {
                 .unwrap()
                 .credential_available
         );
+        assert_eq!(
+            client
+                .login_email(Provider::Claude, &id("personal"))
+                .unwrap(),
+            "personal@example.com"
+        );
         let facts = client
             .account_facts(Provider::Codex, &id("reserve"))
             .unwrap();
@@ -1478,8 +1834,10 @@ mod tests {
                     accounts: vec![id("reserve"), id("primary")],
                     preferred: 2,
                 }],
+                restricted: true,
             },
             credentials: restricted_credentials,
+            unavailable_credentials: HashSet::new(),
             store: Arc::clone(&store),
             restricted: true,
         })
@@ -1512,6 +1870,24 @@ mod tests {
                 .resolve(Provider::Codex, None)
                 .unwrap()
                 .account_id,
+            id("primary")
+        );
+        client
+            .record_credential_invalidated(Provider::Codex, &id("reserve"), "token_invalidated")
+            .unwrap();
+        let invalidated = client
+            .account_facts(Provider::Codex, &id("reserve"))
+            .unwrap();
+        assert!(!invalidated.credential_available);
+        assert!(invalidated.account.is_some_and(|account| {
+            account.credential_state == crate::store::CredentialState::Missing
+                && account.cooldown_reason.as_deref() == Some("token_invalidated")
+        }));
+        assert!(client
+            .resolve_exact(Provider::Codex, &id("reserve"), None)
+            .is_err());
+        assert_eq!(
+            client.resolve(Provider::Codex, None).unwrap().account_id,
             id("primary")
         );
         let _lock = crate::journal::test_env_lock();

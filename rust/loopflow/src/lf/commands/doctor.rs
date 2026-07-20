@@ -17,9 +17,7 @@ use anyhow::{anyhow, Result};
 use time::{Duration, OffsetDateTime};
 
 use crate::lf::output::Colors;
-use crate::receipt::{EvidenceKind, PrIdentity, PrReference, Receipt};
 use crate::store::RunEventRow;
-use crate::wave::journal::{fold_thread, journal_path, memory_facts, read_events};
 
 /// A node value the current binary understands. `step` is the pre-054 spelling
 /// of `skill`; rows carrying it are history the readers silently drop.
@@ -97,8 +95,6 @@ pub fn run(json: bool) -> Result<()> {
             let mut checks = audit(&events);
             checks.push(check_capture(&store, &events)?);
             checks.push(check_usage_coverage(&store)?);
-            let (facts, known) = gather_receipt_audit(&store, &events);
-            checks.push(check_receipts(&facts, &known));
             (events, checks)
         }
         Err(error) => {
@@ -253,12 +249,12 @@ fn check_capture(
     store: &crate::store::sqlite::SqliteStore,
     events: &[RunEventRow],
 ) -> Result<Check> {
-    let launches = store.agent_launches_since(0)?;
-    let launch_ids = launches
+    let invocations = store.agent_invocations_since(0)?;
+    let invocation_ids = invocations
         .iter()
-        .map(|launch| launch.id.clone())
+        .map(|invocation| invocation.id.clone())
         .collect::<Vec<_>>();
-    let turns = store.agent_turns_for_launches(&launch_ids)?;
+    let turns = store.agent_turns_for_invocations(&invocation_ids)?;
     let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
     let assets = store.context_assets_for_turns(&turn_ids)?;
 
@@ -267,62 +263,62 @@ fn check_capture(
     let mut pruned = 0;
     let mut interrupted = 0;
     let mut lost = 0;
-    for launch in &launches {
-        if launch.capture_status == "pruned" {
+    for invocation in &invocations {
+        if invocation.capture_status == "pruned" {
             // Tombstoned by `lf runs reconcile`: the artifact is known-absent
             // and the absence is acknowledged. Counted, never a failure — must
             // short-circuit before the file-resolution checks below, which would
             // otherwise flag the known-absent file as a fresh failure.
-            if launch
+            if invocation
                 .incomplete_reason
                 .as_deref()
                 .is_none_or(|reason| reason.trim().is_empty())
             {
-                failures.push(format!("{} is pruned without a reason", launch.id));
+                failures.push(format!("{} is pruned without a reason", invocation.id));
             }
             pruned += 1;
             continue;
         }
-        let artifact_dir = crate::trace::resolve_artifact(&launch.artifact_dir);
-        let conversation_path = crate::trace::resolve_artifact(&launch.conversation_path);
-        let provider_events_path = launch
+        let artifact_dir = crate::trace::resolve_artifact(&invocation.artifact_dir);
+        let conversation_path = crate::trace::resolve_artifact(&invocation.conversation_path);
+        let provider_events_path = invocation
             .provider_events_path
             .as_deref()
             .map(crate::trace::resolve_artifact)
             .transpose();
         if artifact_dir.is_err() || conversation_path.is_err() || provider_events_path.is_err() {
-            failures.push(format!("{} has an unsafe artifact path", launch.id));
+            failures.push(format!("{} has an unsafe artifact path", invocation.id));
         }
-        if launch.capture_status == "prompt_only" {
+        if invocation.capture_status == "prompt_only" {
             prompt_only += 1;
         }
-        if launch.capture_status == "partial" {
-            let reason = launch
+        if invocation.capture_status == "partial" {
+            let reason = invocation
                 .incomplete_reason
                 .as_deref()
                 .unwrap_or("reason unknown");
-            failures.push(format!("{} is partial: {reason}", launch.id));
+            failures.push(format!("{} is partial: {reason}", invocation.id));
         }
-        if matches!(launch.capture_status.as_str(), "interrupted" | "lost") {
-            if launch.capture_status == "interrupted" {
+        if matches!(invocation.capture_status.as_str(), "interrupted" | "lost") {
+            if invocation.capture_status == "interrupted" {
                 interrupted += 1;
-                if launch.outcome != "interrupted" {
+                if invocation.outcome != "interrupted" {
                     failures.push(format!(
-                        "{} is capture-interrupted but its launch outcome is {}",
-                        launch.id, launch.outcome
+                        "{} is capture-interrupted but its invocation outcome is {}",
+                        invocation.id, invocation.outcome
                     ));
                 }
             } else {
                 lost += 1;
             }
-            if launch
+            if invocation
                 .incomplete_reason
                 .as_deref()
                 .is_none_or(|reason| reason.trim().is_empty())
             {
                 failures.push(format!(
                     "{} is {} without a reason",
-                    launch.id, launch.capture_status
+                    invocation.id, invocation.capture_status
                 ));
             }
             if !artifact_dir.as_ref().is_ok_and(|path| path.is_dir())
@@ -333,32 +329,33 @@ fn check_capture(
             {
                 failures.push(format!(
                     "{} is {} but its retained capture is missing",
-                    launch.id, launch.capture_status
+                    invocation.id, invocation.capture_status
                 ));
             }
             if turns
                 .iter()
-                .any(|turn| turn.launch_id == launch.id && turn.status == "running")
+                .any(|turn| turn.invocation_id == invocation.id && turn.status == "running")
             {
                 failures.push(format!(
                     "{} is {} over a running turn",
-                    launch.id, launch.capture_status
+                    invocation.id, invocation.capture_status
                 ));
             }
         }
-        if launch.capture_status == "capturing"
+        if invocation.capture_status == "capturing"
             && events.iter().any(|event| {
-                event.process_id == launch.process_id
+                event.process_id == invocation.process_id
                     && event.node == "run"
                     && event.event != "started"
             })
         {
             failures.push(format!(
                 "{} stayed capturing after its process ended",
-                launch.id
+                invocation.id
             ));
         }
-        if launch.capture_status == "complete" {
+        if invocation.capture_status == "complete" {
+            let conversation_path = crate::trace::resolve_artifact(&invocation.conversation_path);
             let conversation_read = match &conversation_path {
                 Ok(path) => {
                     crate::trace::read_conversation_status(path).map_err(|error| error.to_string())
@@ -368,43 +365,43 @@ fn check_capture(
             match conversation_read {
                 Ok(read) => {
                     if read.incomplete_tail {
-                        failures.push(format!("{} has an unterminated event tail", launch.id));
+                        failures.push(format!("{} has an unterminated event tail", invocation.id));
                     }
                     if read
                         .events
                         .windows(2)
                         .any(|pair| pair[1].seq != pair[0].seq + 1)
                     {
-                        failures.push(format!("{} has non-monotonic events", launch.id));
+                        failures.push(format!("{} has non-monotonic events", invocation.id));
                     }
-                    if read.events.len() as i64 != launch.conversation_event_count {
-                        failures.push(format!("{} has a stale event count", launch.id));
+                    if read.events.len() as i64 != invocation.conversation_event_count {
+                        failures.push(format!("{} has a stale event count", invocation.id));
                     }
                 }
-                Err(error) => failures.push(format!("{}: {error}", launch.id)),
+                Err(error) => failures.push(format!("{}: {error}", invocation.id)),
             }
             if let Ok(path) = conversation_path {
                 if std::fs::metadata(path)
-                    .is_ok_and(|metadata| metadata.len() as i64 != launch.conversation_bytes)
+                    .is_ok_and(|metadata| metadata.len() as i64 != invocation.conversation_bytes)
                 {
-                    failures.push(format!("{} has a stale byte count", launch.id));
+                    failures.push(format!("{} has a stale byte count", invocation.id));
                 }
             }
             if !turns.iter().any(|turn| {
-                turn.launch_id == launch.id
+                turn.invocation_id == invocation.id
                     && matches!(turn.status.as_str(), "completed" | "failed" | "interrupted")
             }) {
-                failures.push(format!("{} has no terminal turn", launch.id));
+                failures.push(format!("{} has no terminal turn", invocation.id));
             }
         }
     }
-    let known_artifacts: HashSet<&str> = launches
+    let known_artifacts: HashSet<&str> = invocations
         .iter()
-        .map(|launch| launch.artifact_dir.as_str())
+        .map(|invocation| invocation.artifact_dir.as_str())
         .collect();
     let orphan_guard =
         OffsetDateTime::now_utc().unix_timestamp() - super::runs::RECONCILE_AGE_GUARD_HOURS * 3600;
-    for artifact in crate::trace::list_launch_artifact_dirs()? {
+    for artifact in crate::trace::list_invocation_artifact_dirs()? {
         if !known_artifacts.contains(artifact.as_str()) {
             let path = crate::trace::resolve_artifact(&artifact)?;
             let (_, modified) = super::runs::directory_size_and_mtime(&path);
@@ -470,13 +467,13 @@ fn check_capture(
         return Ok(Check::fail(
             "capture",
             format!(
-                "{} failure(s); {} launches, {} turns, {} bytes{terminal_clause}: {}",
+                "{} failure(s); {} invocations, {} turns, {} bytes{terminal_clause}: {}",
                 failures.len(),
-                launches.len(),
+                invocations.len(),
                 turns.len(),
-                launches
+                invocations
                     .iter()
-                    .map(|launch| launch.conversation_bytes)
+                    .map(|invocation| invocation.conversation_bytes)
                     .sum::<i64>(),
                 failures.into_iter().take(4).collect::<Vec<_>>().join("; ")
             ),
@@ -486,8 +483,8 @@ fn check_capture(
         return Ok(Check::warn(
             "capture",
             format!(
-                "{} launches and {} turns are consistent; {prompt_only} interactive launch(es) are prompt-only{terminal_clause}",
-                launches.len(),
+                "{} invocations and {} turns are consistent; {prompt_only} interactive invocation(es) are prompt-only{terminal_clause}",
+                invocations.len(),
                 turns.len()
             ),
         ));
@@ -495,13 +492,13 @@ fn check_capture(
     Ok(Check::ok(
         "capture",
         format!(
-            "{} launches, {} turns, {} assets, {} bytes{terminal_clause}",
-            launches.len(),
+            "{} invocations, {} turns, {} assets, {} bytes{terminal_clause}",
+            invocations.len(),
             turns.len(),
             assets.len(),
-            launches
+            invocations
                 .iter()
-                .map(|launch| launch.conversation_bytes)
+                .map(|invocation| invocation.conversation_bytes)
                 .sum::<i64>()
         ),
     ))
@@ -521,30 +518,30 @@ pub fn audit(events: &[RunEventRow]) -> Vec<Check> {
     ]
 }
 
-/// A launch that finished capturing and recorded no provider measurement is a
-/// launch whose cost is lost. Spend lives only on turns now, so absent usage is
+/// A invocation that finished capturing and recorded no provider measurement is a
+/// invocation whose cost is lost. Spend lives only on turns now, so absent usage is
 /// correctly `None` rather than a fictitious zero — which makes it invisible
 /// unless something counts it. This is that count.
 ///
-/// Scoped to `complete` launches: `capturing` has not finished, `prompt_only`
+/// Scoped to `complete` invocations: `capturing` has not finished, `prompt_only`
 /// never streamed, and `partial`/`pruned` already report themselves through
 /// `check_capture`. The breakdown names providers because that is the actionable
 /// unit — a provider reporting nothing is a mapping gap, not a quiet week.
 fn check_usage_coverage(store: &crate::store::sqlite::SqliteStore) -> Result<Check> {
-    let launches: Vec<_> = store
-        .agent_launches_since(0)?
+    let invocations: Vec<_> = store
+        .agent_invocations_since(0)?
         .into_iter()
-        .filter(|launch| launch.capture_status == "complete")
+        .filter(|invocation| invocation.capture_status == "complete")
         .collect();
-    if launches.is_empty() {
-        return Ok(Check::ok("usage", "no completed launches recorded"));
+    if invocations.is_empty() {
+        return Ok(Check::ok("usage", "no completed invocations recorded"));
     }
-    let launch_ids = launches
+    let invocation_ids = invocations
         .iter()
-        .map(|launch| launch.id.clone())
+        .map(|invocation| invocation.id.clone())
         .collect::<Vec<_>>();
     let measured: HashSet<String> = store
-        .agent_turns_for_launches(&launch_ids)?
+        .agent_turns_for_invocations(&invocation_ids)?
         .into_iter()
         .filter(|turn| {
             turn.provider_input_tokens.is_some()
@@ -552,28 +549,28 @@ fn check_usage_coverage(store: &crate::store::sqlite::SqliteStore) -> Result<Che
                 || turn.cache_read_tokens.is_some()
                 || turn.cost_usd.is_some()
         })
-        .map(|turn| turn.launch_id)
+        .map(|turn| turn.invocation_id)
         .collect();
 
     let mut missing_by_provider: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
-    for launch in &launches {
+    for invocation in &invocations {
         let entry = missing_by_provider
-            .entry(launch.provider.as_str())
+            .entry(invocation.provider.as_str())
             .or_default();
         entry.1 += 1;
-        if !measured.contains(&launch.id) {
+        if !measured.contains(&invocation.id) {
             entry.0 += 1;
         }
     }
-    let covered = launches
+    let covered = invocations
         .iter()
-        .filter(|launch| measured.contains(&launch.id))
+        .filter(|invocation| measured.contains(&invocation.id))
         .count();
-    let total = launches.len();
+    let total = invocations.len();
     if covered == total {
         return Ok(Check::ok(
             "usage",
-            format!("{total} completed launches all report provider usage"),
+            format!("{total} completed invocations all report provider usage"),
         ));
     }
     let breakdown = missing_by_provider
@@ -584,7 +581,9 @@ fn check_usage_coverage(store: &crate::store::sqlite::SqliteStore) -> Result<Che
         .join(", ");
     Ok(Check::warn(
         "usage",
-        format!("{covered}/{total} completed launches report provider usage; missing: {breakdown}"),
+        format!(
+            "{covered}/{total} completed invocations report provider usage; missing: {breakdown}"
+        ),
     ))
 }
 
@@ -756,226 +755,6 @@ fn check_lineage(events: &[RunEventRow]) -> Check {
     )
 }
 
-// ── Receipt sweep ───────────────────────────────────────────────────
-
-/// Known ids for each evidence kind — the resolution surface the receipt
-/// sweep checks against. Gathered from the store and wave journals; the check
-/// itself is pure over these sets.
-///
-/// `unavailable` records kinds whose backing store or journal could not be read
-/// this run. A receipt of an unavailable kind can't be judged resolved-or-orphaned
-/// — the sweep reports it as *inaccessible* rather than silently calling it
-/// orphaned, so a dropped read never masquerades as a missing record.
-#[derive(Debug, Default)]
-pub struct ReceiptKnownIds {
-    pub chat_turn_ids: HashSet<String>,
-    pub run_ids: HashSet<String>,
-    pub trace_turn_ids: HashSet<String>,
-    pub pm_ids: HashSet<String>,
-    pub prs: Vec<PrIdentity>,
-    pub unavailable: HashSet<EvidenceKind>,
-    pub errors: Vec<String>,
-}
-
-impl ReceiptKnownIds {
-    /// Record that an evidence kind's backing source could not be read, so its
-    /// receipts are reported inaccessible (not orphaned) and the reason is
-    /// surfaced in the check detail.
-    fn mark_unavailable(&mut self, kind: EvidenceKind, error: impl Into<String>) {
-        self.unavailable.insert(kind);
-        self.errors.push(error.into());
-    }
-}
-
-/// One memory fact paired with its claim wave, for the receipt sweep.
-#[derive(Debug, Clone)]
-pub struct ReceiptFact {
-    pub wave: String,
-    pub receipts: Vec<Receipt>,
-}
-
-/// Audit curated memory facts for receipt health: missing (zero receipts),
-/// orphaned (reference resolves to no known record), and cross-wave (receipt
-/// wave ≠ claim wave). Pure over the facts and known-id sets — testable
-/// without a store.
-///
-/// During the post-contract grace window all findings are `warn`, not `fail`,
-/// so pre-contract claims and cross-machine references don't break the gate.
-/// Cross-wave is always `warn` — legitimate for child→parent citation.
-/// How one receipt fared against the known-id sets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Resolution {
-    /// The reference resolves to a known record.
-    Resolved,
-    /// The reference resolves to no known record (a real dangling pointer).
-    Orphaned,
-    /// The reference's evidence kind could not be read this run, so we can't
-    /// judge it — surfaced, never silently counted as orphaned.
-    Inaccessible,
-}
-
-fn check_receipts(facts: &[ReceiptFact], known: &ReceiptKnownIds) -> Check {
-    if facts.is_empty() && known.errors.is_empty() {
-        return Check::ok("receipts", "no memory facts to audit");
-    }
-
-    let mut missing = 0;
-    let mut orphaned = 0;
-    let mut inaccessible = 0;
-    let mut cross_wave = 0;
-    let mut total_receipts = 0;
-
-    for fact in facts {
-        if fact.receipts.is_empty() {
-            missing += 1;
-            continue;
-        }
-        for receipt in &fact.receipts {
-            total_receipts += 1;
-            if receipt.wave != fact.wave {
-                cross_wave += 1;
-            }
-            match resolve_receipt(receipt, known) {
-                Resolution::Resolved => {}
-                Resolution::Orphaned => orphaned += 1,
-                Resolution::Inaccessible => inaccessible += 1,
-            }
-        }
-    }
-
-    let total_facts = facts.len();
-    let mut detail = format!(
-        "{total_facts} fact(s) with {total_receipts} receipt(s): \
-         {missing} missing, {orphaned} orphaned, {inaccessible} inaccessible, {cross_wave} cross-wave"
-    );
-    if !known.errors.is_empty() {
-        detail.push_str(&format!(
-            "; unreadable evidence: {}",
-            known.errors.join("; ")
-        ));
-    }
-
-    if missing > 0 || orphaned > 0 || inaccessible > 0 || cross_wave > 0 || !known.errors.is_empty()
-    {
-        Check::warn("receipts", detail)
-    } else {
-        Check::ok("receipts", detail)
-    }
-}
-
-fn resolve_receipt(receipt: &Receipt, known: &ReceiptKnownIds) -> Resolution {
-    if known.unavailable.contains(&receipt.kind) {
-        return Resolution::Inaccessible;
-    }
-    let resolved = match receipt.kind {
-        EvidenceKind::ChatTurn => known.chat_turn_ids.contains(&receipt.reference),
-        EvidenceKind::WorkerReport => known.run_ids.contains(&receipt.reference),
-        EvidenceKind::Trace => known.trace_turn_ids.contains(&receipt.reference),
-        EvidenceKind::Pm => known.pm_ids.contains(&receipt.reference),
-        EvidenceKind::Pr => PrReference::parse(&receipt.reference)
-            .is_some_and(|target| known.prs.iter().any(|id| target.matches(id))),
-    };
-    if resolved {
-        Resolution::Resolved
-    } else {
-        Resolution::Orphaned
-    }
-}
-
-/// Gather memory facts (with their claim wave) and the known-id sets for each
-/// evidence kind, from the store and every wave journal on this machine.
-fn gather_receipt_audit(
-    store: &crate::store::sqlite::SqliteStore,
-    events: &[RunEventRow],
-) -> (Vec<ReceiptFact>, ReceiptKnownIds) {
-    let mut known = ReceiptKnownIds::default();
-    let mut facts = Vec::new();
-
-    known.run_ids = events.iter().map(|e| e.run_id.clone()).collect();
-
-    // Trace turns: a failure to read launches or their turns leaves the set
-    // unknown, so mark the whole kind inaccessible rather than judging every
-    // trace receipt orphaned against an empty set.
-    match store.agent_launches_since(0) {
-        Ok(launches) => {
-            let launch_ids: Vec<String> = launches.iter().map(|l| l.id.clone()).collect();
-            match store.agent_turns_for_launches(&launch_ids) {
-                Ok(turns) => known.trace_turn_ids = turns.iter().map(|t| t.id.clone()).collect(),
-                Err(err) => {
-                    known.mark_unavailable(EvidenceKind::Trace, format!("trace turns: {err}"))
-                }
-            }
-        }
-        Err(err) => known.mark_unavailable(EvidenceKind::Trace, format!("agent launches: {err}")),
-    }
-
-    match store.all_task_prs() {
-        Ok(prs) => known.prs = prs.iter().filter_map(|pr| pr.pr_identity()).collect(),
-        Err(err) => known.mark_unavailable(EvidenceKind::Pr, format!("task PRs: {err}")),
-    }
-
-    let waves = match store.list_waves(None) {
-        Ok(waves) => waves,
-        Err(err) => {
-            // Without the wave list we can read neither journals (chat turns,
-            // facts) nor PM snapshots — the sweep is blind for those kinds.
-            known.mark_unavailable(EvidenceKind::ChatTurn, format!("wave list: {err}"));
-            known.mark_unavailable(EvidenceKind::Pm, format!("wave list: {err}"));
-            return (facts, known);
-        }
-    };
-
-    for wave in &waves {
-        let repo_root = Path::new(wave.repo());
-        let journal = journal_path(repo_root, wave.name());
-        if journal.exists() {
-            let journal_events = read_events(&journal);
-            for fact in memory_facts(&journal_events) {
-                facts.push(ReceiptFact {
-                    wave: wave.name().to_string(),
-                    receipts: fact.receipts,
-                });
-            }
-            let fold = fold_thread(&journal_events);
-            known
-                .chat_turn_ids
-                .extend(fold.turns.iter().map(|t| t.id.clone()));
-            known
-                .chat_turn_ids
-                .extend(fold.open.iter().map(|t| t.id.clone()));
-        }
-
-        match store.pm_snapshot(wave.repo(), wave.name()) {
-            Ok(Some(snapshot)) => {
-                match serde_json::from_str::<serde_json::Value>(&snapshot.payload) {
-                    Ok(payload) => {
-                        for key in ["items", "projects"] {
-                            if let Some(arr) = payload.get(key).and_then(|v| v.as_array()) {
-                                for entry in arr {
-                                    if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
-                                        known.pm_ids.insert(id.to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(err) => known.mark_unavailable(
-                        EvidenceKind::Pm,
-                        format!("PM snapshot for wave '{}': {err}", wave.name()),
-                    ),
-                }
-            }
-            Ok(None) => {}
-            Err(err) => known.mark_unavailable(
-                EvidenceKind::Pm,
-                format!("PM snapshot for wave '{}': {err}", wave.name()),
-            ),
-        }
-    }
-
-    (facts, known)
-}
-
 fn day_of(ts: i64) -> Option<time::Date> {
     OffsetDateTime::from_unix_timestamp(ts)
         .ok()
@@ -1055,17 +834,17 @@ mod tests {
         assert!(error.contains("latest known"), "{error}");
     }
 
-    /// Drive a real capture to `complete`, returning its launch id and the
+    /// Drive a real capture to `complete`, returning its invocation id and the
     /// conversation artifact on disk. Uses the production write path so the
     /// tombstone tests act on genuinely-shaped rows.
-    fn captured_launch(
+    fn captured_invocation(
         guard: &crate::journal::TestLedgerGuard,
         skill: &str,
     ) -> (String, std::path::PathBuf) {
-        captured_launch_with_outcome(guard, skill, "completed")
+        captured_invocation_with_outcome(guard, skill, "completed")
     }
 
-    fn captured_launch_with_outcome(
+    fn captured_invocation_with_outcome(
         guard: &crate::journal::TestLedgerGuard,
         skill: &str,
         outcome: &str,
@@ -1092,7 +871,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
-                control: None,
+                supervision: None,
             },
         )
         .unwrap();
@@ -1100,19 +879,19 @@ mod tests {
         capture.finish(outcome, false).unwrap();
 
         let store = crate::journal::open_ledger().unwrap();
-        let launch = store
-            .agent_launches_since(0)
+        let invocation = store
+            .agent_invocations_since(0)
             .unwrap()
             .into_iter()
-            .find(|launch| launch.skill.as_deref() == Some(skill))
+            .find(|invocation| invocation.skill.as_deref() == Some(skill))
             .expect("the capture we just drove must be in the ledger");
-        assert_eq!(launch.capture_status, "complete");
-        let conversation = crate::trace::resolve_artifact(&launch.conversation_path).unwrap();
+        assert_eq!(invocation.capture_status, "complete");
+        let conversation = crate::trace::resolve_artifact(&invocation.conversation_path).unwrap();
         assert!(conversation.is_file());
-        (launch.id, conversation)
+        (invocation.id, conversation)
     }
 
-    fn capturing_launch(guard: &crate::journal::TestLedgerGuard, skill: &str) -> String {
+    fn capturing_invocation(guard: &crate::journal::TestLedgerGuard, skill: &str) -> String {
         let capture = crate::trace::CaptureHandle::begin(
             crate::trace::TraceCaptureContext {
                 run_id: crate::id::TraceId::new(),
@@ -1135,18 +914,18 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
-                control: None,
+                supervision: None,
             },
         )
         .unwrap();
-        let launch_id = capture.launch_id().to_string();
+        let invocation_id = capture.invocation_id().to_string();
         drop(capture);
-        launch_id
+        invocation_id
     }
 
     /// The same production path, but with the provider reporting what it
-    /// measured — the shape a covered launch has.
-    fn captured_launch_with_usage(guard: &crate::journal::TestLedgerGuard, skill: &str) {
+    /// measured — the shape a covered invocation has.
+    fn captured_invocation_with_usage(guard: &crate::journal::TestLedgerGuard, skill: &str) {
         let capture = crate::trace::CaptureHandle::begin(
             crate::trace::TraceCaptureContext {
                 run_id: crate::id::TraceId::new(),
@@ -1169,7 +948,7 @@ mod tests {
                 render_ms: 2,
                 raw_provider: true,
                 basis: None,
-                control: None,
+                supervision: None,
             },
         )
         .unwrap();
@@ -1184,14 +963,14 @@ mod tests {
         capture.finish("completed", false).unwrap();
     }
 
-    /// Spend lives only on turns now, so a launch that reported nothing is
+    /// Spend lives only on turns now, so a invocation that reported nothing is
     /// correctly `None` everywhere — invisible unless this check counts it. The
     /// provider breakdown is the actionable part: it is how a harness that stops
     /// reporting usage announces itself instead of silently costing nothing.
     #[test]
-    fn a_completed_launch_that_reported_no_usage_is_a_coverage_warning() {
+    fn a_completed_invocation_that_reported_no_usage_is_a_coverage_warning() {
         let guard = crate::journal::TestLedgerGuard::new();
-        captured_launch(&guard, "kickoff");
+        captured_invocation(&guard, "kickoff");
         let store = crate::journal::open_ledger().unwrap();
 
         let check = check_usage_coverage(&store).unwrap();
@@ -1205,9 +984,9 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_whose_provider_measured_the_turn_is_covered() {
+    fn a_invocation_whose_provider_measured_the_turn_is_covered() {
         let guard = crate::journal::TestLedgerGuard::new();
-        captured_launch_with_usage(&guard, "implement");
+        captured_invocation_with_usage(&guard, "implement");
         let store = crate::journal::open_ledger().unwrap();
 
         let check = check_usage_coverage(&store).unwrap();
@@ -1219,19 +998,19 @@ mod tests {
     fn normal_terminal_outcomes_create_complete_resolvable_captures() {
         let guard = crate::journal::TestLedgerGuard::new();
         for outcome in ["completed", "failed", "interrupted"] {
-            captured_launch_with_outcome(&guard, outcome, outcome);
+            captured_invocation_with_outcome(&guard, outcome, outcome);
         }
         let store = crate::journal::open_ledger().unwrap();
 
-        let launches = store.agent_launches_since(0).unwrap();
-        assert_eq!(launches.len(), 3);
-        assert!(launches
+        let invocations = store.agent_invocations_since(0).unwrap();
+        assert_eq!(invocations.len(), 3);
+        assert!(invocations
             .iter()
-            .all(|launch| launch.capture_status == "complete"));
+            .all(|invocation| invocation.capture_status == "complete"));
         assert_eq!(
-            launches
+            invocations
                 .iter()
-                .map(|launch| launch.outcome.as_str())
+                .map(|invocation| invocation.outcome.as_str())
                 .collect::<std::collections::BTreeSet<_>>(),
             std::collections::BTreeSet::from(["completed", "failed", "interrupted"])
         );
@@ -1245,7 +1024,7 @@ mod tests {
         // and stays visible as a count, but the surface must remain sensitive
         // to a capture that goes missing afterwards.
         let guard = crate::journal::TestLedgerGuard::new();
-        let (historical, historical_file) = captured_launch(&guard, "kickoff");
+        let (historical, historical_file) = captured_invocation(&guard, "kickoff");
         let store = crate::journal::open_ledger().unwrap();
         assert_eq!(check_capture(&store, &[]).unwrap().status, Status::Ok);
 
@@ -1258,7 +1037,7 @@ mod tests {
 
         // Acknowledge it the way `lf runs reconcile --apply` does.
         store
-            .prune_launch_capture(
+            .prune_invocation_capture(
                 &historical,
                 "conversation artifact absent at reconcile",
                 500,
@@ -1270,7 +1049,7 @@ mod tests {
 
         // A *new* capture loss must still be a failure — un-acknowledged loss
         // is the actionable signal a red capture check is supposed to carry.
-        let (_, fresh_file) = captured_launch(&guard, "implement");
+        let (_, fresh_file) = captured_invocation(&guard, "implement");
         std::fs::remove_file(&fresh_file).unwrap();
         let check = check_capture(&store, &[]).unwrap();
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
@@ -1279,34 +1058,34 @@ mod tests {
     }
 
     #[test]
-    fn interrupting_an_intact_capture_closes_its_launch_and_turn_atomically() {
+    fn interrupting_an_intact_capture_closes_its_invocation_and_turn_atomically() {
         let guard = crate::journal::TestLedgerGuard::new();
-        let launch_id = capturing_launch(&guard, "implement");
+        let invocation_id = capturing_invocation(&guard, "implement");
         let store = crate::journal::open_ledger().unwrap();
 
         store
-            .interrupt_launch_capture(
-                &launch_id,
+            .interrupt_invocation_capture(
+                &invocation_id,
                 "capture interrupted; process ended without finalizing",
                 500,
             )
             .unwrap();
 
-        let launch = store
-            .agent_launches_since(0)
+        let invocation = store
+            .agent_invocations_since(0)
             .unwrap()
             .into_iter()
-            .find(|launch| launch.id == launch_id)
+            .find(|invocation| invocation.id == invocation_id)
             .unwrap();
-        assert_eq!(launch.capture_status, "interrupted");
-        assert_eq!(launch.outcome, "interrupted");
-        assert_eq!(launch.ended_at, Some(500));
-        assert!(launch
+        assert_eq!(invocation.capture_status, "interrupted");
+        assert_eq!(invocation.outcome, "interrupted");
+        assert_eq!(invocation.ended_at, Some(500));
+        assert!(invocation
             .incomplete_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("process ended")));
         let turns = store
-            .agent_turns_for_launches(std::slice::from_ref(&launch_id))
+            .agent_turns_for_invocations(std::slice::from_ref(&invocation_id))
             .unwrap();
         assert!(!turns.is_empty());
         assert!(turns
@@ -1321,15 +1100,15 @@ mod tests {
     #[test]
     fn acknowledged_write_loss_stays_distinct_and_validates_retained_evidence() {
         let guard = crate::journal::TestLedgerGuard::new();
-        let (launch_id, conversation) = captured_launch(&guard, "implement");
+        let (invocation_id, conversation) = captured_invocation(&guard, "implement");
         let store = crate::journal::open_ledger().unwrap();
         let connection = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
         connection
             .execute(
-                "UPDATE agent_launches
+                "UPDATE agent_invocations
                  SET capture_status = 'partial', incomplete_reason = 'ENOSPC while syncing'
                  WHERE id = ?1",
-                [&launch_id],
+                [&invocation_id],
             )
             .unwrap();
         drop(connection);
@@ -1342,17 +1121,17 @@ mod tests {
             check.detail
         );
 
-        store.lose_launch_capture(&launch_id, 500).unwrap();
-        let launch = store
-            .agent_launches_since(0)
+        store.lose_invocation_capture(&invocation_id, 500).unwrap();
+        let invocation = store
+            .agent_invocations_since(0)
             .unwrap()
             .into_iter()
-            .find(|launch| launch.id == launch_id)
+            .find(|invocation| invocation.id == invocation_id)
             .unwrap();
-        assert_eq!(launch.capture_status, "lost");
-        assert_eq!(launch.outcome, "completed");
+        assert_eq!(invocation.capture_status, "lost");
+        assert_eq!(invocation.outcome, "completed");
         assert_eq!(
-            launch.incomplete_reason.as_deref(),
+            invocation.incomplete_reason.as_deref(),
             Some("ENOSPC while syncing")
         );
         let check = check_capture(&store, &[]).unwrap();
@@ -1538,165 +1317,5 @@ mod tests {
         child.process_id = "child".to_string();
         child.parent_process_id = Some("parent".to_string());
         assert_eq!(status_of(&[parent, child], "lineage"), Status::Fail);
-    }
-
-    // ── receipt sweep tests (pure over facts + known-id sets) ─────────
-
-    use super::{check_receipts, ReceiptFact, ReceiptKnownIds};
-    use crate::receipt::{EvidenceKind, PrIdentity, Receipt};
-
-    fn receipt(kind: EvidenceKind, reference: &str, wave: &str) -> Receipt {
-        Receipt::new(kind, reference, wave)
-    }
-
-    fn known(turn_ids: &[&str], run_ids: &[&str]) -> ReceiptKnownIds {
-        ReceiptKnownIds {
-            chat_turn_ids: turn_ids.iter().map(|s| s.to_string()).collect(),
-            run_ids: run_ids.iter().map(|s| s.to_string()).collect(),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn no_facts_is_ok() {
-        let check = check_receipts(&[], &ReceiptKnownIds::default());
-        assert_eq!(check.status, Status::Ok);
-    }
-
-    #[test]
-    fn facts_with_resolving_receipts_are_ok() {
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![
-                receipt(EvidenceKind::ChatTurn, "turn-3", "ship"),
-                receipt(EvidenceKind::WorkerReport, "run-9", "ship"),
-            ],
-        }];
-        let known = known(&["turn-3"], &["run-9"]);
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Ok);
-        assert!(check.detail.contains("1 fact(s)"), "{}", check.detail);
-    }
-
-    #[test]
-    fn facts_with_zero_receipts_warn_during_grace() {
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![],
-        }];
-        let check = check_receipts(&facts, &ReceiptKnownIds::default());
-        assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("1 missing"), "{}", check.detail);
-    }
-
-    #[test]
-    fn orphaned_receipts_warn() {
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-99", "ship")],
-        }];
-        let known = known(&["turn-3"], &[]);
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
-    }
-
-    #[test]
-    fn cross_wave_receipts_warn() {
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![receipt(EvidenceKind::ChatTurn, "turn-3", "product")],
-        }];
-        let known = known(&["turn-3"], &[]);
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("1 cross-wave"), "{}", check.detail);
-    }
-
-    fn known_pr(repo: &str, number: u32, shas: &[&str]) -> ReceiptKnownIds {
-        ReceiptKnownIds {
-            prs: vec![PrIdentity {
-                repo: repo.to_string(),
-                number,
-                shas: shas.iter().map(|s| s.to_string()).collect(),
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn pr_receipt_resolves_by_repo_and_number() {
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![receipt(
-                EvidenceKind::Pr,
-                "loopflow/loopflow#912@abc123",
-                "ship",
-            )],
-        }];
-        let known = known_pr("loopflow/loopflow", 912, &["abc123"]);
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Ok);
-    }
-
-    #[test]
-    fn pr_receipt_with_matching_number_but_wrong_repo_is_orphaned() {
-        // A bare number scan would resolve this; matching repo + number rejects it.
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![receipt(EvidenceKind::Pr, "other/repo#912", "ship")],
-        }];
-        let known = known_pr("loopflow/loopflow", 912, &[]);
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
-    }
-
-    #[test]
-    fn pr_receipt_with_unknown_number_is_orphaned() {
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#999", "ship")],
-        }];
-        let known = known_pr("loopflow/loopflow", 912, &[]);
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("1 orphaned"), "{}", check.detail);
-    }
-
-    #[test]
-    fn inaccessible_evidence_is_surfaced_not_orphaned() {
-        // The store couldn't read task PRs, so a pr receipt is inaccessible —
-        // reported and explained, never silently counted orphaned.
-        let facts = vec![ReceiptFact {
-            wave: "ship".to_string(),
-            receipts: vec![receipt(EvidenceKind::Pr, "loopflow/loopflow#912", "ship")],
-        }];
-        let mut known = ReceiptKnownIds::default();
-        known.mark_unavailable(EvidenceKind::Pr, "task PRs: database is locked");
-        let check = check_receipts(&facts, &known);
-        assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("1 inaccessible"), "{}", check.detail);
-        assert!(check.detail.contains("0 orphaned"), "{}", check.detail);
-        assert!(
-            check.detail.contains("database is locked"),
-            "{}",
-            check.detail
-        );
-    }
-
-    #[test]
-    fn unreadable_evidence_warns_even_with_no_facts() {
-        // A wave-list failure yields zero facts; the sweep must still warn and
-        // surface the error rather than reporting a clean "nothing to audit".
-        let mut known = ReceiptKnownIds::default();
-        known.mark_unavailable(EvidenceKind::ChatTurn, "wave list: connection refused");
-        let check = check_receipts(&[], &known);
-        assert_eq!(check.status, Status::Warn);
-        assert!(
-            check.detail.contains("connection refused"),
-            "{}",
-            check.detail
-        );
     }
 }

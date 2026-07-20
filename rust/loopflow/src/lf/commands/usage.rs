@@ -24,7 +24,7 @@ const FRESH_SECS: i64 = 15 * 60;
 /// window observations have gone stale are polled live first.
 ///
 /// `--json` emits one row per *Turn* instead: what the provider measured for
-/// one exchange, attributed by the launch that ran it. That is the grain the
+/// one exchange, attributed by the invocation that ran it. That is the grain the
 /// dashboard groups by — skill, `provider:model`, repo — and consumers sum,
 /// never diff.
 pub fn run(json: bool, days: u32, refresh: bool, cached: bool) -> Result<()> {
@@ -64,9 +64,7 @@ struct AccountStatus {
 /// again when the poll fails. A revoked credential is reported as the fix
 /// (`lf auth connect`), never a blank row.
 async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStatus>> {
-    if crate::provider_account::lease::account_lease_active() {
-        anyhow::bail!("subscription usage is unavailable while account authority is fixed by an outer invocation");
-    }
+    let forwarded_client = crate::provider_account::lease::AccountLeaseClient::from_env()?;
     let store = open_account_store().await?;
     let accounts: Vec<ProviderAccount> = store
         .list_provider_accounts(None)
@@ -99,7 +97,11 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
         let stored_windows = windows_for(&stored, account);
         let mut status = AccountStatus {
             provider: account.provider.clone(),
-            label: account_label(account),
+            label: if forwarded_client.is_some() {
+                format!("{} (local)", account_label(account))
+            } else {
+                account_label(account)
+            },
             plan: None,
             windows: stored_windows
                 .iter()
@@ -155,6 +157,36 @@ async fn account_statuses(refresh: bool, cached: bool) -> Result<Vec<AccountStat
             });
         }
         statuses.push(status);
+    }
+    if let Some(client) = forwarded_client {
+        for grant in client.describe()?.grants {
+            for account_id in grant.accounts {
+                let facts = client.account_facts(grant.provider, &account_id)?;
+                let Some(account) = facts.account else {
+                    continue;
+                };
+                let observed_at = facts.limits.iter().map(|row| row.observed_at).max();
+                statuses.push(AccountStatus {
+                    provider: account.provider.clone(),
+                    label: format!("{} (forwarded)", account_label(&account)),
+                    plan: facts.limits.iter().find_map(|row| row.plan.clone()),
+                    windows: facts
+                        .limits
+                        .into_iter()
+                        .map(|row| AccountLimitWindow {
+                            window: row.window,
+                            used_percent: row.used_percent,
+                            resets_at: row.resets_at,
+                            plan: row.plan,
+                        })
+                        .collect(),
+                    observed_at,
+                    note: (refresh && !cached)
+                        .then(|| "forwarded · refresh on origin".to_string())
+                        .or_else(|| Some("forwarded · cached".to_string())),
+                });
+            }
+        }
     }
     Ok(statuses)
 }
@@ -303,7 +335,7 @@ fn format_share(total: u64, grand_total: u64) -> String {
 /// per-Turn rows emitted by `--json`: terminal-only SQL cannot assign a flow
 /// that uses Claude for one skill and Codex for another.
 ///
-/// Every Turn is reached through the launch that ran it, and a launch always
+/// Every Turn is reached through the invocation that ran it, and a invocation always
 /// names its repo and provider — so spend here is never unattributed.
 #[derive(Debug, PartialEq)]
 struct UsageRow {
@@ -433,15 +465,14 @@ fn short_repo(repo: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        account_label, account_statuses, aggregate_spend, format_share, format_window, short_repo,
-        Totals, UsageRow,
+        account_label, aggregate_spend, format_share, format_window, short_repo, Totals, UsageRow,
     };
     use crate::profile::EmailAddress;
     use crate::store::{
         sqlite::SqliteStore, AccountLimitWindow, CredentialState, ProviderAccount,
         ProviderAccountId, RoutingState, TurnSpendRow,
     };
-    use crate::trace::{AgentLaunchRow, AgentTurnRow};
+    use crate::trace::{AgentInvocationRow, AgentTurnRow};
 
     const TURN_SPEND_FIXTURE: &str =
         include_str!("../../../../../tests/fixtures/dto/turn_spend.json");
@@ -475,7 +506,7 @@ mod tests {
 
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].turn_id, "turn-1");
-        assert_eq!(turns[0].launch_id, "launch-1");
+        assert_eq!(turns[0].invocation_id, "invocation-1");
         assert_eq!(turns[1].input_tokens, None);
         assert_eq!(turns[1].output_tokens, Some(0));
         assert_eq!(turns[1].cache_read_tokens, Some(150));
@@ -487,10 +518,11 @@ mod tests {
         );
     }
 
-    fn launch(id: &str) -> AgentLaunchRow {
-        AgentLaunchRow {
-            id: format!("launch-{id}"),
+    fn invocation(id: &str) -> AgentInvocationRow {
+        AgentInvocationRow {
+            id: format!("invocation-{id}"),
             run_id: format!("trace-{id}"),
+            answer_ask_id: None,
             process_id: format!("exec-{id}"),
             started_at: 100,
             ended_at: Some(110),
@@ -507,25 +539,25 @@ mod tests {
             capture_status: "complete".to_string(),
             incomplete_reason: None,
             outcome: "completed".to_string(),
-            artifact_dir: "traces/launch".to_string(),
-            conversation_path: "traces/launch/conversation.jsonl".to_string(),
+            artifact_dir: "traces/invocation".to_string(),
+            conversation_path: "traces/invocation/conversation.jsonl".to_string(),
             provider_events_path: None,
             provider_session_id: None,
             provider_session_path: None,
             conversation_event_count: 1,
             conversation_bytes: 1,
-            control: None,
+            supervision: None,
         }
     }
 
     fn measured_turn(
-        launch: &AgentLaunchRow,
+        invocation: &AgentInvocationRow,
         output: Option<i64>,
         cache_read: Option<i64>,
     ) -> AgentTurnRow {
         AgentTurnRow {
-            id: launch.id.replacen("launch", "turn", 1),
-            launch_id: launch.id.clone(),
+            id: invocation.id.replacen("invocation", "turn", 1),
+            invocation_id: invocation.id.clone(),
             ordinal: 1,
             provider_turn_id: None,
             started_at: 100,
@@ -567,10 +599,10 @@ mod tests {
             ("zero", Some(0), None),
             ("cache", None, Some(150)),
         ] {
-            let launch = launch(id);
-            let turn = measured_turn(&launch, output, cache_read);
+            let invocation = invocation(id);
+            let turn = measured_turn(&invocation, output, cache_read);
             store
-                .insert_trace_capture(&launch, &turn, &[], &[])
+                .insert_trace_capture(&invocation, &turn, &[], &[])
                 .expect("insert capture");
         }
 
@@ -600,33 +632,6 @@ mod tests {
             output_tokens: 1,
             cache_read_tokens: 2,
         }
-    }
-
-    #[test]
-    fn fixed_account_authority_never_reads_ambient_account_usage() {
-        struct RestoreEnv(&'static str, Option<std::ffi::OsString>);
-
-        impl Drop for RestoreEnv {
-            fn drop(&mut self) {
-                if let Some(previous) = &self.1 {
-                    std::env::set_var(self.0, previous);
-                } else {
-                    std::env::remove_var(self.0);
-                }
-            }
-        }
-
-        let _lock = crate::journal::test_env_lock();
-        let name = crate::provider_account::lease::ACCOUNT_LEASE_ENV;
-        let _restore = RestoreEnv(name, std::env::var_os(name));
-        std::env::set_var(name, "forwarded");
-
-        let error = tokio::runtime::Runtime::new()
-            .expect("create test runtime")
-            .block_on(account_statuses(false, true))
-            .err()
-            .expect("fixed account authority must skip ambient account usage");
-        assert!(error.to_string().contains("fixed by an outer invocation"));
     }
 
     #[test]
@@ -691,7 +696,7 @@ mod tests {
     fn turn(process: &str, at: i64, provider: &str, input: i64) -> TurnSpendRow {
         TurnSpendRow {
             turn_id: format!("turn-{process}-{at}"),
-            launch_id: format!("launch-{process}"),
+            invocation_id: format!("invocation-{process}"),
             trace_id: "trace".to_string(),
             exec_id: process.to_string(),
             repo: "/src/loopflow".to_string(),

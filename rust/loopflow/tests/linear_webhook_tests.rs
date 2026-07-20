@@ -10,7 +10,7 @@ const VIEWER: &str = "user-loopflow";
 
 /// One verified webhook maps onto Task control through the durable substrate: an
 /// issue edit becomes a Steer (once), a user comment becomes another Steer
-/// (once), Loopflow's own change is skipped, and an issue with no Session is a
+/// (once), Loopflow's own change is skipped, and an issue with no registered Task is a
 /// no-op.
 #[test]
 fn verified_webhooks_drive_task_control_exactly_once() {
@@ -25,8 +25,8 @@ fn verified_webhooks_drive_task_control_exactly_once() {
     repo.commit("seed");
     repo.push_new_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
-    let issue_id = task.session.launch.issue.id.as_str().to_string();
-    let target = ChildRef::Task(task.session.id.clone());
+    let issue_id = task.task.plan.id.as_str().to_string();
+    let target = ChildRef::Task(task.task.id.clone());
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 

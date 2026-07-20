@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -21,8 +20,6 @@ pub struct Skill {
     pub action_style: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interactive: Option<bool>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub feedback: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -36,7 +33,6 @@ impl Skill {
             directions: Vec::new(),
             action_style: None,
             interactive: None,
-            feedback: false,
             content: None,
         }
     }
@@ -92,48 +88,6 @@ pub struct XorPath {
     pub description: String,
     #[serde(default)]
     pub direction: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FlowAction {
-    RunSkill { skill: ConcreteSkill },
-    RunOps { ops: ConcreteOp },
-    WaitFeedback { skill: ConcreteSkill },
-    DeferFeedback { skill: ConcreteSkill },
-    Xor { branch: ConcreteXor },
-    Complete,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InteractionPolicy {
-    Require,
-    Defer,
-}
-
-impl InteractionPolicy {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Require => "require",
-            Self::Defer => "defer",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid interaction policy: {0}")]
-pub struct InteractionPolicyParseError(String);
-
-impl FromStr for InteractionPolicy {
-    type Err = InteractionPolicyParseError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "require" => Ok(Self::Require),
-            "defer" => Ok(Self::Defer),
-            _ => Err(InteractionPolicyParseError(value.to_string())),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -192,35 +146,6 @@ pub struct Direction {
     pub name: String,
     pub content: String,
     pub source: PathBuf,
-}
-
-pub fn next_action(items: &[ConcreteStep], step_index: usize) -> FlowAction {
-    next_action_with_policy(items, step_index, InteractionPolicy::Require)
-}
-
-pub fn next_action_with_policy(
-    items: &[ConcreteStep],
-    step_index: usize,
-    policy: InteractionPolicy,
-) -> FlowAction {
-    let item = match items.get(step_index) {
-        Some(item) => item,
-        None => return FlowAction::Complete,
-    };
-    match item.clone() {
-        ConcreteStep::Skill(skill) => {
-            if skill.skill.feedback {
-                match policy {
-                    InteractionPolicy::Require => FlowAction::WaitFeedback { skill },
-                    InteractionPolicy::Defer => FlowAction::DeferFeedback { skill },
-                }
-            } else {
-                FlowAction::RunSkill { skill }
-            }
-        }
-        ConcreteStep::Op(ops) => FlowAction::RunOps { ops },
-        ConcreteStep::Xor(branch) => FlowAction::Xor { branch },
-    }
 }
 
 pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
@@ -361,7 +286,7 @@ pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
     }
 
     // Fall back to built-in skills — exact match, then unique bare-name match
-    // across namespaces (so `office-hours` resolves to `gstack/office-hours`).
+    // across namespaces.
     if let Some(key) = crate::engine::builtins::resolve_builtin_skill(name) {
         let content = crate::engine::builtins::get_builtin_skill(key)
             .expect("resolve_builtin_skill returned a known key");
@@ -409,7 +334,6 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
         directions: frontmatter.directions,
         action_style: frontmatter.action_style,
         interactive: frontmatter.interactive,
-        feedback: false,
         content: Some(body),
     })
 }
@@ -610,7 +534,7 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
 }
 
 fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // Namespaced skills: "gstack/office-hours" → <dir>/.lf/skills/gstack/office-hours.md
+    // Namespaced skills: "team/review" → <dir>/.lf/skills/team/review.md
     // Check repo first, then home (so users can override namespaced builtins).
     if let Some((prefix, skill_name)) = name.split_once('/') {
         let repo_ns = markdown_path(&repo.join(".lf/skills").join(prefix), skill_name);
@@ -829,10 +753,6 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
             let default_agent = parse_optional_string(map, "default_agent");
             let action_style = parse_optional_string(map, "action_style");
             let interactive = map.get(key("interactive")).and_then(|val| val.as_bool());
-            let feedback = map
-                .get(key("feedback"))
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false);
             let directions = parse_directions_field(map);
             Ok(Skill {
                 name,
@@ -841,7 +761,6 @@ fn parse_skill_value(value: &Value) -> Result<Skill, LoadError> {
                 directions,
                 action_style,
                 interactive,
-                feedback,
                 content: None,
             })
         }
@@ -1096,7 +1015,6 @@ fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Skill {
     if let Some(interactive) = skill.interactive {
         resolved.interactive = Some(interactive);
     }
-    resolved.feedback = skill.feedback;
 
     resolved
 }
@@ -1486,12 +1404,15 @@ Be careful.
     }
 
     #[test]
-    fn load_direction_finds_builtin_direction() {
+    fn load_direction_finds_repo_direction() {
         let tmp = TempDir::new().unwrap();
+        let directions = tmp.path().join(".lf/directions");
+        fs::create_dir_all(&directions).unwrap();
+        fs::write(directions.join("focus.md"), "Stay focused.").unwrap();
         let result = load_direction("focus", tmp.path());
         assert!(
             result.is_ok(),
-            "builtin direction should be found: {:?}",
+            "repo direction should be found: {:?}",
             result.err()
         );
     }
@@ -1548,111 +1469,6 @@ Be careful.
         let direction = load_direction("empathy", tmp.path()).unwrap();
         assert_eq!(direction.name, "empathy");
         assert!(direction.content.contains("Design with empathy."));
-    }
-
-    #[test]
-    fn next_action_marks_feedback_steps_as_wait() {
-        let flow = Flow {
-            name: "demo".to_string(),
-            items: vec![Step::Skill(Skill {
-                name: "design".to_string(),
-                agent: None,
-                default_agent: None,
-                directions: Vec::new(),
-                action_style: None,
-                interactive: None,
-                feedback: true,
-                content: None,
-            })],
-        };
-
-        let repo = TempDir::new().unwrap();
-        let items = expand_flow(&flow, repo.path()).unwrap();
-        let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::WaitFeedback { .. }));
-    }
-
-    #[test]
-    fn interaction_policy_defers_the_same_feedback_step() {
-        let flow = Flow {
-            name: "reviewed-code".to_string(),
-            items: vec![Step::Skill(Skill {
-                name: "demo".to_string(),
-                agent: None,
-                default_agent: None,
-                directions: Vec::new(),
-                action_style: None,
-                interactive: None,
-                feedback: true,
-                content: None,
-            })],
-        };
-
-        let repo = TempDir::new().unwrap();
-        let items = expand_flow(&flow, repo.path()).unwrap();
-
-        assert!(matches!(
-            next_action_with_policy(&items, 0, InteractionPolicy::Require),
-            FlowAction::WaitFeedback { .. }
-        ));
-        assert!(matches!(
-            next_action_with_policy(&items, 0, InteractionPolicy::Defer),
-            FlowAction::DeferFeedback { .. }
-        ));
-    }
-
-    #[test]
-    fn interaction_policy_does_not_skip_headless_steps() {
-        let items = vec![ConcreteStep::Skill(ConcreteSkill {
-            skill: Skill::named("implement"),
-            flow_parents: vec!["reviewed-code".to_string()],
-        })];
-
-        assert!(matches!(
-            next_action_with_policy(&items, 0, InteractionPolicy::Defer),
-            FlowAction::RunSkill { .. }
-        ));
-    }
-
-    #[test]
-    fn flow_feedback_does_not_leak_from_skill_frontmatter() {
-        let tmp = TempDir::new().unwrap();
-        let skills_dir = tmp.path().join(".lf/skills");
-        fs::create_dir_all(&skills_dir).unwrap();
-        fs::write(
-            skills_dir.join("my-design.md"),
-            "---\ninteractive: true\n---\nDesign it.",
-        )
-        .unwrap();
-
-        let flow = Flow {
-            name: "test-flow".to_string(),
-            items: vec![Step::Skill(Skill::named("my-design"))],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 1);
-        let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::RunSkill { .. }));
-    }
-
-    #[test]
-    fn builtin_skill_requires_explicit_flow_feedback() {
-        let tmp = TempDir::new().unwrap();
-        let flow = Flow {
-            name: "test-flow".to_string(),
-            items: vec![Step::Skill(Skill::named("design"))],
-        };
-        let items = expand_flow(&flow, tmp.path()).unwrap();
-        let design = items
-            .iter()
-            .find(|item| matches!(item, ConcreteStep::Skill(s) if s.skill.name == "design"));
-        assert!(
-            design.is_some(),
-            "expanded flow should contain a design skill"
-        );
-        if let Some(ConcreteStep::Skill(skill)) = design {
-            assert!(!skill.skill.feedback);
-        }
     }
 
     #[test]
@@ -1797,36 +1613,10 @@ Be careful.
     }
 
     #[test]
-    fn next_action_returns_ops_action() {
-        let items = vec![ConcreteStep::Op(ConcreteOp {
-            item: Op {
-                command: "rebase".to_string(),
-                args: Vec::new(),
-            },
-            flow_parents: vec!["ship".to_string()],
-        })];
-
-        let action = next_action(&items, 0);
-        assert!(
-            matches!(action, FlowAction::RunOps { .. }),
-            "expected RunOps action, got {action:?}"
-        );
-    }
-
-    #[test]
     fn expand_direction_names_passes_through_non_groups() {
         let tmp = TempDir::new().unwrap();
         let result = expand_direction_names(&["security".to_string()], tmp.path());
         assert_eq!(result, vec!["security"]);
-    }
-
-    #[test]
-    fn expand_direction_names_expands_ceo_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["ceo".to_string()], tmp.path());
-        assert!(result.contains(&"focus".to_string()));
-        assert!(result.contains(&"immediacy".to_string()));
-        assert!(result.contains(&"truth".to_string()));
     }
 
     #[test]
@@ -1842,7 +1632,7 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_user_group_overrides_builtin_group() {
+    fn expand_direction_names_accepts_retired_builtin_group_name() {
         let tmp = TempDir::new().unwrap();
         let group_dir = tmp.path().join(".lf/directions/craft");
         fs::create_dir_all(&group_dir).unwrap();
@@ -1865,39 +1655,21 @@ Be careful.
     }
 
     #[test]
-    fn expand_direction_names_expands_builtin_craft_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["craft".to_string()], tmp.path());
-        assert!(result.contains(&"care".to_string()));
-        assert!(result.contains(&"clarity".to_string()));
-        assert!(!result.contains(&"scale".to_string()));
-        assert!(result.contains(&"simplicity".to_string()));
-    }
-
-    #[test]
-    fn expand_direction_names_expands_builtin_creativity_group() {
-        let tmp = TempDir::new().unwrap();
-        let result = expand_direction_names(&["creativity".to_string()], tmp.path());
-        assert!(result.contains(&"alive".to_string()));
-        assert!(result.contains(&"musical".to_string()));
-    }
-
-    #[test]
     fn expand_direction_names_recursive_group() {
         let tmp = TempDir::new().unwrap();
         let group_dir = tmp.path().join(".lf/directions/quality");
+        let nested_group_dir = tmp.path().join(".lf/directions/craft");
         fs::create_dir_all(&group_dir).unwrap();
-        // "craft" is a builtin group — should expand recursively
+        fs::create_dir_all(&nested_group_dir).unwrap();
         fs::write(group_dir.join("craft.md"), "Craft direction").unwrap();
         fs::write(group_dir.join("extra.md"), "Extra direction").unwrap();
+        fs::write(nested_group_dir.join("care.md"), "Care direction").unwrap();
+        fs::write(nested_group_dir.join("clarity.md"), "Clarity direction").unwrap();
 
         let result = expand_direction_names(&["quality".to_string()], tmp.path());
-        // "craft" should NOT appear — it should expand to its members
         assert!(!result.contains(&"craft".to_string()));
-        // But its members should be present
         assert!(result.contains(&"care".to_string()));
         assert!(result.contains(&"clarity".to_string()));
-        // And the non-group member should be present
         assert!(result.contains(&"extra".to_string()));
     }
 
@@ -1910,19 +1682,6 @@ Be careful.
 
         let result = find_direction_path("nested", tmp.path());
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn next_action_marks_missing_skills_as_complete() {
-        let flow = Flow {
-            name: "demo".to_string(),
-            items: Vec::new(),
-        };
-
-        let repo = TempDir::new().unwrap();
-        let items = expand_flow(&flow, repo.path()).unwrap();
-        let action = next_action(&items, 0);
-        assert!(matches!(action, FlowAction::Complete));
     }
 
     #[test]
@@ -2072,9 +1831,7 @@ Be careful.
         description: "Adjust the chord"
         steps:
           - implement
-          - step:
-              name: review
-              feedback: true
+          - review
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -2088,7 +1845,6 @@ Be careful.
         assert_eq!(tune.steps.len(), 2);
         assert_eq!(tune.steps[0].name, "implement");
         assert_eq!(tune.steps[1].name, "review");
-        assert!(tune.steps[1].feedback);
     }
 
     #[test]
@@ -2143,34 +1899,6 @@ Be careful.
             assert_eq!(branch.paths.len(), 1);
             assert_eq!(branch.paths["fix"].description, "Fix it");
         }
-    }
-
-    #[test]
-    fn next_action_returns_xor_action() {
-        let items = vec![ConcreteStep::Xor(ConcreteXor {
-            router: None,
-            paths: {
-                let mut m = HashMap::new();
-                m.insert(
-                    "a".to_string(),
-                    XorPath {
-                        flow: Some("build".to_string()),
-                        skill: None,
-                        steps: Vec::new(),
-                        description: "Path A".to_string(),
-                        direction: Vec::new(),
-                    },
-                );
-                m
-            },
-            flow_parents: Vec::new(),
-        })];
-
-        let action = next_action(&items, 0);
-        assert!(
-            matches!(action, FlowAction::Xor { .. }),
-            "expected Xor action, got {action:?}"
-        );
     }
 
     #[test]
@@ -2290,7 +2018,7 @@ Be careful.
         let tmp = TempDir::new().unwrap();
         let flow = load_flow("code", tmp.path()).unwrap();
         let items = expand_flow(&flow, tmp.path()).unwrap();
-        assert_eq!(items.len(), 4); // implement, compress, lint, gate
+        assert_eq!(items.len(), 2); // implement, compress
     }
 
     #[test]

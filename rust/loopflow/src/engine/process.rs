@@ -43,6 +43,38 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
+pub(crate) fn resolve_lfd_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lfd") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let lf = resolve_lf_binary();
+    if let Some(parent) = lf.parent() {
+        let sibling = parent.join("lfd");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+    if let Ok(current) = std::env::current_exe() {
+        if current
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "lfd")
+        {
+            return current;
+        }
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join("lfd");
+            if sibling.exists() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("lfd")
+}
+
 fn select_binary_override(
     provenance: crate::build_info::BuildProvenance,
     control: Option<std::ffi::OsString>,
@@ -70,11 +102,11 @@ fn select_current_home_binary(ordinary: Option<std::ffi::OsString>) -> Option<Pa
         .map(PathBuf::from)
 }
 
-/// Resolve the `lf` a Session will be pinned to: an absolute path that exists.
+/// Resolve the `lf` a Work launch will use: an absolute path that exists.
 ///
 /// `resolve_lf_binary` may hand back the bare name `lf`, which a child resolves
 /// against the *login* shell's PATH inside tmux — a third binary, chosen by
-/// neither the Session nor its launcher. A Session that cannot name its own
+/// neither the Work nor its launcher. Work that cannot name its own
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     let candidate = resolve_lf_binary();
@@ -83,26 +115,36 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
             Ok(candidate)
         } else {
             Err(anyhow!(
-                "lf binary {} does not exist; set LF_BIN to the lf this Session should run",
+                "lf binary {} does not exist; set LF_BIN to the lf this Work should run",
                 candidate.display()
             ))
         };
     }
     which_on_path(&candidate).ok_or_else(|| {
         anyhow!(
-            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Session should run",
+            "cannot resolve an absolute path for `{}`; set LF_BIN to the lf this Work should run",
             candidate.display()
         )
     })
 }
 
+/// Pin one process generation to immutable executable bytes.
+///
+/// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
+/// may repoint it while a resident body is running, so the body carries the
+/// canonical target in `LF_CONTROL_BIN`. A later body launch deliberately
+/// resolves the current Home again and picks up the promoted binary.
+pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
+    std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
+}
+
 /// Capture the current process's control context — this process's `lf`, store,
 /// and `LF_HOME` — for propagating down to a vendored subprocess. In a release
-/// build this honors `LF_CONTROL_*`, so a running body hands its own session's
-/// context (not the machine's Home) to the provider CLI it spawns.
+/// build this honors `LF_CONTROL_*`, so a running body hands its own Run context
+/// (not the machine's Home) to the provider CLI it spawns.
 ///
 /// This is NOT the launch resolver. Use [`current_home_execution_context`] to
-/// launch or relaunch a Session: launching through the control context would
+/// launch or relaunch Work: launching through the control context would
 /// perpetuate the historical binary a legacy body was created with.
 pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionContext> {
     let db_path = crate::store::database_path_from_env()
@@ -174,10 +216,10 @@ fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
     })
 }
 
-/// Resolve the current Home execution context for launching a Session: the
+/// Resolve the current Home execution context for launching Work: the
 /// current Home `lf`, store, and `LF_HOME`, ignoring every `LF_CONTROL_*` pin.
 ///
-/// This is the launch/relaunch boundary resolver. A Session created under one
+/// This is the launch/relaunch boundary resolver. Work created under one
 /// binary and resumed under another launches through the current Home — its
 /// worktree, provider history, and directives are unaffected by which binary
 /// first created it.
@@ -206,8 +248,8 @@ pub(crate) fn shell_escape(value: &str) -> String {
 /// Whether this machine can look for tmux sessions at all.
 ///
 /// Ask PATH, not the binary. A generic `--version` probe reports tmux as absent
-/// on every machine — tmux only accepts `-V` — which silently downgrades Session
-/// liveness to "unknowable" and hides processes that are actually gone.
+/// on every machine — tmux only accepts `-V` — which silently downgrades Work
+/// process liveness to "unknowable" and hides processes that are actually gone.
 pub(crate) fn tmux_installed() -> bool {
     which_on_path(Path::new("tmux")).is_some()
 }
@@ -259,7 +301,6 @@ pub(crate) async fn start_lf_session_with_env(
     argv: &[String],
     env: &[(&str, &str)],
 ) -> Result<()> {
-    reject_detached_forwarded_account(crate::provider_account::lease::account_lease_active())?;
     let context = pinned_execution_context()?;
     let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
         .into_iter()
@@ -284,16 +325,38 @@ pub(crate) async fn start_lf_session_with_env(
     start_tmux_session(session, &cwd.display().to_string(), &shell_command).await
 }
 
-fn reject_detached_forwarded_account(forwarded: bool) -> Result<()> {
-    if forwarded {
+pub(crate) async fn start_tmux_window_with_env(
+    session: &str,
+    window: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let context = pinned_execution_context()?;
+    let mut child_env = env
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect::<Vec<_>>();
+    extend_session_control_context(&mut child_env, &context, crate::build_info::provenance());
+    let environment = child_env
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let shell_command = lf_session_shell_command(argv, &environment);
+    let status = tokio::process::Command::new("tmux")
+        .args(["new-window", "-d", "-t", session, "-n", window, "-c"])
+        .arg(cwd)
+        .args(["/bin/zsh", "-lc", &shell_command])
+        .status()
+        .await
+        .map_err(|error| anyhow!("tmux failed to spawn window: {error}"))?;
+    if !status.success() {
         return Err(anyhow!(
-            "cannot launch a detached session from an ephemeral forwarded provider account; \
-             keep the remote command in the foreground or authenticate on the remote host"
+            "tmux failed to launch window '{window}' in session '{session}'"
         ));
     }
     Ok(())
 }
-
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,
     context: &crate::child::ChildExecutionContext,
@@ -348,7 +411,7 @@ pub(crate) fn lf_session_shell_command(argv: &[String], env: &[(&str, &str)]) ->
         .map(|(key, value)| format!("{}={}", shell_escape(key), shell_escape(value)))
         .collect::<Vec<_>>()
         .join(" ");
-    let clear_context = "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH";
+    let clear_context = "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_RUN_CONTEXT LF_RUN_LEASE LF_AGENT_INVOCATION_ID LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION LF_FORWARDED_PM_TOKEN LF_FORWARDED_PM_PROVIDER LF_FORWARDED_SECRET_NAMES LF_SSH_TARGET LF_LINEAR_WEBHOOK_SECRET LF_LINEAR_VIEWER_ID LF_GITHUB_WEBHOOK_SECRET LF_GITHUB_WEBHOOK_URL LF_LFD_ALLOW_NON_LOOPBACK GH_TOKEN OPENCODE_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CODEX_ACCESS_TOKEN OPENAI_API_KEY";
     if env.is_empty() {
         format!("{clear_context}; exec {command}")
     } else {
@@ -361,7 +424,11 @@ pub(crate) async fn start_tmux_session(
     cwd: &str,
     shell_command: &str,
 ) -> Result<()> {
-    let status = tokio::process::Command::new("tmux")
+    let mut command = tokio::process::Command::new("tmux");
+    for name in forwarded_authority_env_names() {
+        command.env_remove(name);
+    }
+    let status = command
         .args([
             "new-session",
             "-d",
@@ -386,6 +453,32 @@ pub(crate) async fn start_tmux_session(
     Ok(())
 }
 
+fn forwarded_authority_env_names() -> Vec<String> {
+    let mut names = vec![
+        crate::provider_account::lease::ACCOUNT_LEASE_ENV.to_string(),
+        crate::provider_account::lease::ACCOUNT_SELECTION_ENV.to_string(),
+        "LF_FORWARDED_PM_TOKEN".to_string(),
+        "LF_FORWARDED_PM_PROVIDER".to_string(),
+        "LF_FORWARDED_SECRET_NAMES".to_string(),
+        crate::engine::machine::SSH_TARGET_ENV.to_string(),
+        "LF_LINEAR_WEBHOOK_SECRET".to_string(),
+        "LF_LINEAR_VIEWER_ID".to_string(),
+        "LF_GITHUB_WEBHOOK_SECRET".to_string(),
+        "LF_GITHUB_WEBHOOK_URL".to_string(),
+        "LF_LFD_ALLOW_NON_LOOPBACK".to_string(),
+        "GH_TOKEN".to_string(),
+        "OPENCODE_API_KEY".to_string(),
+        "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+        "ANTHROPIC_API_KEY".to_string(),
+        "CODEX_ACCESS_TOKEN".to_string(),
+        "OPENAI_API_KEY".to_string(),
+    ];
+    if let Ok(forwarded) = std::env::var("LF_FORWARDED_SECRET_NAMES") {
+        names.extend(forwarded.split_whitespace().map(str::to_string));
+    }
+    names
+}
+
 pub(crate) fn tmux_session_slug(value: &str) -> String {
     value
         .chars()
@@ -404,12 +497,33 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        extend_session_control_context, lf_session_shell_command,
-        reject_detached_forwarded_account, select_binary_override, select_current_home_binary,
-        tmux_installed,
+        extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
+        pin_control_binary, select_binary_override, select_current_home_binary, tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
+
+    #[test]
+    fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("lf-old");
+        let new = dir.path().join("lf-new");
+        let installed = dir.path().join("lf");
+        std::fs::write(&old, b"old").unwrap();
+        std::fs::write(&new, b"new").unwrap();
+        std::os::unix::fs::symlink(&old, &installed).unwrap();
+
+        let pinned = pin_control_binary(&installed);
+        assert_eq!(pinned, std::fs::canonicalize(&old).unwrap());
+        std::fs::remove_file(&installed).unwrap();
+        std::os::unix::fs::symlink(&new, &installed).unwrap();
+
+        assert_eq!(std::fs::read(&pinned).unwrap(), b"old");
+        assert_eq!(
+            std::fs::read(std::fs::canonicalize(&installed).unwrap()).unwrap(),
+            b"new"
+        );
+    }
 
     #[test]
     fn development_ignores_stale_control_binary_override() {
@@ -433,7 +547,7 @@ mod tests {
 
     /// The launch boundary must resolve the current Home lf (B), never the
     /// historical `LF_CONTROL_BIN` pin (A) — the regression behind stranded
-    /// legacy Sessions. Contrast the two selectors under release provenance:
+    /// legacy Work bodies. Contrast the two selectors under release provenance:
     /// the old override picks the control pin A, the current-Home selector
     /// picks B and has no way to reach A at all.
     #[test]
@@ -483,7 +597,7 @@ mod tests {
 
     /// The probe must agree with whether tmux can actually be run. The previous
     /// `--version` probe disagreed on every machine that has tmux, which pinned
-    /// Session liveness to "unknowable" and let gone processes read as running.
+    /// Work-process liveness to "unknowable" and let gone processes read as running.
     #[test]
     fn tmux_probe_agrees_with_running_tmux() {
         // Both sides of this comparison resolve through `PATH`.
@@ -511,10 +625,15 @@ mod tests {
             &[("LF_RUN_CONTEXT", "agent"), ("LF_WAVE_ID", "infra")],
         );
 
-        assert_eq!(
-            command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
-        );
+        assert!(command.starts_with(
+            "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
+        ));
+        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
+        assert!(command.ends_with(
+            "exec env 'LF_RUN_CONTEXT'='agent' 'LF_WAVE_ID'='infra' 'lf' '__work' 'task' 'tsk_123'"
+        ));
     }
 
     #[test]
@@ -523,10 +642,29 @@ mod tests {
 
         let command = lf_session_shell_command(&argv, &[]);
 
-        assert_eq!(
-            command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec 'lf' 'wave' 'child'"
-        );
+        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
+    }
+
+    #[test]
+    fn durable_session_scrubs_every_named_forwarded_secret() {
+        let _lock = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_FORWARDED_SECRET_NAMES");
+        std::env::set_var("LF_FORWARDED_SECRET_NAMES", "SENTRY_TOKEN STRIPE_KEY");
+
+        let names = forwarded_authority_env_names();
+
+        match previous {
+            Some(value) => std::env::set_var("LF_FORWARDED_SECRET_NAMES", value),
+            None => std::env::remove_var("LF_FORWARDED_SECRET_NAMES"),
+        }
+        assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
+        assert!(names.iter().any(|name| name == "GH_TOKEN"));
+        assert!(names.iter().any(|name| name == "LF_LINEAR_WEBHOOK_SECRET"));
+        assert!(names.iter().any(|name| name == "LF_LFD_ALLOW_NON_LOOPBACK"));
+        assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
+        assert!(names.iter().any(|name| name == "STRIPE_KEY"));
     }
 
     #[test]
@@ -547,18 +685,10 @@ mod tests {
             ],
         );
 
-        assert_eq!(
-            command,
-            "unset LF_TRACE_ID LF_PROCESS_ID LF_WAVE_ID LF_CHANNEL LF_RUN_CONTEXT LF_RUN_LEASE LF_BIN LF_HOME LF_DB_PATH LF_CONTROL_BIN LF_CONTROL_HOME LF_CONTROL_DB_PATH; exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
-        );
-    }
-
-    #[test]
-    fn detached_session_rejects_an_ephemeral_forwarded_account() {
-        assert!(reject_detached_forwarded_account(false).is_ok());
-        assert!(reject_detached_forwarded_account(true)
-            .unwrap_err()
-            .to_string()
-            .contains("cannot launch a detached session"));
+        assert!(command.contains("LF_AGENT_INVOCATION_ID"));
+        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.ends_with(
+            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_DB_PATH'='/tmp/current.db' 'LF_HOME'='/tmp/lf' 'lf' '__work' 'task' 'tsk_123'"
+        ));
     }
 }

@@ -17,7 +17,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Direction (judgment/intent) | `--direction NAME` | `direction: NAME` |
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
-| Interactive launch surface | `--tui` / `--ide` | `session.launch: tui` |
+| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
 
 ## Context Assembly
 
@@ -97,6 +97,53 @@ Flows are YAML files in `.lf/flows/`:
 - compress
 - gate
 ```
+
+---
+
+## Releases
+
+Keep the lifecycle in Loopflow and the repository-specific work in commands the
+repository owns:
+
+```yaml
+release:
+  targets:
+    cli:
+      area: [packages/cli/]
+      tag_prefix: cli/
+      manifests: [packages/cli/package.json]
+      verify:
+        - scripts/check-release cli
+      prepare:
+        - scripts/prepare-release cli {version}
+      workflow: .github/workflows/release-cli.yml
+      completion: github-release
+```
+
+`lf release run patch --target cli` selects changes from the exact
+`cli/v<previous>..HEAD` git range, prepares an isolated release PR, tags its
+merged commit, and waits for the configured completion evidence. `area` scopes
+the range. `manifests` use Loopflow's built-in semantic-version adapters;
+omit them to auto-detect supported manifests.
+
+`verify` runs during `lf release run`, after Loopflow resolves the version and
+exact change range but before it prepares release changes. `lf release check`
+only reads that evidence; it does not execute repository hooks. `prepare` runs
+after manifest bumps inside the isolated release worktree. Both hook types
+accept `{target}`, `{version}`, and `{previous_tag}` placeholders. Put
+compilation, signing, packaging, migration, registry upload, deployment, smoke
+tests, and secret use in these repo-owned commands or the workflow—not in
+built-in release policy.
+
+Completion is explicit:
+
+- `tag` — pushing the tag completes the release.
+- `workflow` — the configured GitHub Actions workflow must succeed.
+- `github-release` — a GitHub Release for the tag must exist.
+
+Without `completion`, targets with `workflow` use `workflow`; other targets use
+`tag`. The first release requires an explicit `X.Y.Z`; bump keywords require a
+previous target tag.
 
 ---
 
@@ -200,16 +247,16 @@ agent: codex          # harness default
 
 Harnesses: `claude`, `codex`, `gemini`, `opencode`. Use `harness:model` for specific models.
 
-Five built-in skills intentionally default to Claude: `kickoff`,
-`review-design`, `demo`, `code-review`, and `prompt`. Every other unconfigured
+Four built-in skills intentionally default to Claude: `kickoff`,
+`review-design`, `review-slice`, and `prompt`. Every other unconfigured
 built-in skill defaults to Codex. A CLI `-m` or authored `agent:` config remains
 an explicit override.
 
-Loopflow starts every Codex CLI and Session run on the standard service tier,
+Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
 TUI, run `/fast` to opt into Fast mode for that session.
 
-Gemini is supported for direct `lf` commands. Wave, Project, and Task Sessions
+Gemini is supported for direct `lf` commands. Wave, Project, and Tasks
 require `claude`, `codex`, or `opencode`.
 
 OpenCode model strings use `provider/model` form. Bare `opencode` resolves to
@@ -319,9 +366,10 @@ session:
   launch: tui          # tui | ide
 ```
 
-`tui` opens the vendor CLI/TUI in the current terminal. `ide` opens the Codex or
-Claude app by URL scheme and falls back to `tui` if no app handles the link.
-OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override this default.
+`tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
+Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
+link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
+this default.
 
 ### Summaries
 
@@ -338,83 +386,27 @@ summaries:
 
 ### Accounts and Profiles
 
-Connect providers once, then route each repository through managed accounts:
+Account state and repository routes are managed through CLI commands rather
+than `config.yaml`:
 
 ```bash
-lf auth status                   # GitHub / Claude / Codex / OpenCode Zen / Linear
-lf auth github                   # connect a provider in your browser
 lf auth connect claude primary@example.com --chrome-profile primary@example.com
-lf auth accounts claude          # list connected accounts
-
-lf profile create --chrome-profile primary@example.com --as primary
-lf auth access set claude primary@ --profile primary
 lf route set claude primary@ engineering@
-lf route show
+lf --account primary@ implement
 ```
 
-Each provider login keeps independent auth and session state under
-`~/.lf/accounts/`. Commands identify a login by its full email or an unambiguous
-email prefix; path-safe internal IDs remain private storage keys. Access profiles
-record the Chrome venues that can authenticate a login, and repository routes
-record the ordered logins a provider may use. A provider child stays pinned to
-its selected login for its lifetime. Shared logins are tried once and share one
-cooldown. Profiles, bindings, and repo routes live in the local database —
-Loopflow sends no account topology to a central service.
-
-`auth connect <provider> <email-prefix> --chrome-profile` opens the selected
-Chrome directory and binds the verified login. Codex
-verifies the login email from its ID token; Claude uses the selected Chrome
-profile email. `auth import` adopts an existing isolated credential — or the
-current macOS Keychain login when the account home is empty — without another
-OAuth flow.
-
-Routing controls per account:
-
-```bash
-lf auth set claude <email-prefix> --paid-through 2026-08-14
-lf auth set claude <email-prefix> --routing explicit-only
-lf auth reset claude <email-prefix>
-lf auth disconnect claude --email <email-prefix>
-```
-
-Once `paid-through` passes, automatic routing treats the account as
-`explicit-only` until cleared.
-
-Prefer accounts for one invocation, or restrict the process tree to exactly the
-selected accounts:
-
-```bash
-lf -m codex --account eng@example.com : "fix the tests"
-lf --account claude=jack@ --account codex=loopflow-eng@ implement
-lf --only-account codex=manabot-eng@ review
-```
-
-`--account` keeps the normal provider route as fallback; `--only-account`
-removes every unselected account and provider. Both accept repeatable
-`claude=<selector>` and `codex=<selector>` forms.
-
-`lf ssh <host> -- <cmd>` resolves the selected route locally and forwards an
-opaque handle to a foreground credential broker. It writes no managed provider
-credential files on the remote host. Detached remote sessions are rejected —
-their lease would vanish when SSH exits — so authenticate on the remote host
-for long-running work.
-
-`lf ssh <HomeId> -- <cmd>` resolves the Home's current SSH route from the
-durable store and makes the target prove that identity. Add `--remote-native`
-to forward no provider, GitHub, PM, or secret authority. Use that mode for Home
-lifecycle commands that rely on credentials installed on the remote machine
-and outlive the SSH process.
+See [Subscription Management](/docs/subscriptions) for identity storage,
+access profiles, routing, health, selectors, and remote development. See
+[Security](/docs/security) for credential forwarding and trust boundaries.
 
 ### External Skills
 
-Loopflow has two primary skill channels plus one compatibility shim. No config needed.
+Loopflow has one external skill channel plus one compatibility shim. No config needed.
 
-- **`gstack/<skill>`** — bundled in the binary. Upstream is [garrytan/gstack](https://github.com/garrytan/gstack). Maintainers run the `refresh-gstack` skill inside the loopflow repo to resync the bundled catalog; users just get the version their `lf` was built with.
 - **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
 - **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
 
 ```bash
-lf gstack/office-hours                # bundled
 lf npx/vercel-labs/deep-research      # live fetch, cached on first run
 lf rams/rams                          # legacy compatibility alias, if installed
 ```

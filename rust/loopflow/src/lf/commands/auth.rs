@@ -64,15 +64,14 @@ pub fn run(cmd: &AuthCommand) -> Result<()> {
 }
 
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
-    if crate::provider_account::lease::account_lease_active() {
-        return match cmd {
-            AuthCommand::Status { provider } | AuthCommand::Accounts { provider } => {
-                forwarded_accounts(provider.as_deref())
-            }
-            _ => Err(anyhow!(
-                "provider account authentication and account edits are unavailable while account authority is fixed by an outer invocation"
-            )),
+    if crate::provider_account::lease::account_lease_active()
+        && matches!(cmd, AuthCommand::Accounts { verify: false, .. })
+    {
+        let AuthCommand::Accounts { provider, .. } = cmd else {
+            unreachable!("the guarded command is accounts")
         };
+        accounts(provider.as_deref(), false).await?;
+        return forwarded_accounts(provider.as_deref());
     }
     match cmd {
         AuthCommand::Status { provider } => status(provider.as_deref()).await,
@@ -95,7 +94,7 @@ async fn run_async(cmd: &AuthCommand) -> Result<()> {
             chrome_profile,
         } => import_account(provider, email, chrome_profile.as_deref()).await,
         AuthCommand::Access { cmd } => access(cmd).await,
-        AuthCommand::Accounts { provider } => accounts(provider.as_deref()).await,
+        AuthCommand::Accounts { provider, verify } => accounts(provider.as_deref(), *verify).await,
         AuthCommand::Set {
             provider,
             email,
@@ -151,12 +150,8 @@ fn forwarded_accounts(raw_provider: Option<&str>) -> Result<()> {
             if position < grant.preferred {
                 labels.push("preferred");
             }
-            println!(
-                "{:<12} {} {}",
-                grant.provider,
-                account_id,
-                labels.join(" · ")
-            );
+            let account = client.login_email(grant.provider, account_id)?;
+            println!("{:<12} {} {}", grant.provider, account, labels.join(" · "));
         }
     }
     Ok(())
@@ -323,9 +318,7 @@ async fn connect_managed_account(
         .await?
         {
             Some(code) => code,
-            None => SecretString::new(rpassword::prompt_password(
-                "Browser handoff unavailable; paste the one-time code: ",
-            )?),
+            None => capture_claude_authorization_code_visibly().await?,
         };
         handle
             .submit_authorization_code(code.expose_secret())
@@ -570,6 +563,8 @@ async fn register_managed_account(
         account.login_email = Some(login_email);
     }
     account.credential_state = CredentialState::Connected;
+    account.cooldown_until = None;
+    account.cooldown_reason = None;
     account.updated_at = OffsetDateTime::now_utc().unix_timestamp();
     store.upsert_provider_account(&account).await?;
     Ok(())
@@ -734,22 +729,112 @@ fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
     if !chrome.is_file() {
         return Err(anyhow!("Google Chrome is not installed in /Applications"));
     }
-    let status = Command::new("open")
-        .args(["-n", "-a", "Google Chrome", "--args"])
+    Command::new(chrome)
         .arg(format!("--profile-directory={}", profile.directory))
         .arg("--new-window")
         .arg(url)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .context("open matching Chrome profile")?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn visible_claude_prompt_script(socket: &Path) -> String {
+    let socket = socket.to_string_lossy().replace('\'', "'\\''");
+    format!(
+        "#!/bin/zsh\n\
+         echo 'Claude authorization needs a visible handoff.'\n\
+         echo 'Approve the Chrome page, then paste its one-time code here.'\n\
+         read -r -s 'code?One-time code: '\n\
+         print\n\
+         if [[ -z \"$code\" ]]; then\n\
+           echo 'No code entered; close this window and rerun lf auth connect.'\n\
+           exit 1\n\
+         fi\n\
+         printf '%s' \"$code\" | /usr/bin/nc -U '{socket}'\n\
+         status=$?\n\
+         unset code\n\
+         if [[ $status -eq 0 ]]; then\n\
+           echo 'Authorization returned to Loopflow. This window can close.'\n\
+         else\n\
+           echo 'Loopflow stopped waiting; rerun lf auth connect.'\n\
+         fi\n\
+         exit $status\n"
+    )
+}
+
+#[cfg(all(target_os = "macos", not(test)))]
+async fn capture_claude_authorization_code_visibly() -> Result<SecretString> {
+    use std::io::{ErrorKind, Read};
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixListener;
+
+    let handoff = tempfile::tempdir().context("create private Claude handoff")?;
+    let socket = handoff.path().join("authorization.sock");
+    let listener = UnixListener::bind(&socket).context("open private Claude handoff")?;
+    listener
+        .set_nonblocking(true)
+        .context("make Claude handoff nonblocking")?;
+    let script = handoff.path().join("Claude Authorization.command");
+    fs::write(&script, visible_claude_prompt_script(&socket))
+        .context("write visible Claude handoff")?;
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
+        .context("protect visible Claude handoff")?;
+
+    let status = Command::new("open")
+        .args(["-a", "Terminal"])
+        .arg(&script)
+        .status()
+        .context("open visible Claude authorization handoff")?;
     if !status.success() {
         return Err(anyhow!(
-            "Google Chrome could not open profile '{}'",
-            profile.name
+            "could not open the visible Claude authorization handoff; rerun `lf auth connect claude <account>` in Terminal"
         ));
     }
-    Ok(())
+
+    let deadline = std::time::Instant::now() + AUTH_STATUS_POLL_TIMEOUT;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .context("bound Claude handoff read")?;
+                let mut code = String::new();
+                stream
+                    .take(4097)
+                    .read_to_string(&mut code)
+                    .context("read visible Claude handoff")?;
+                let code = code.trim();
+                if code.is_empty() || code.len() > 4096 {
+                    return Err(anyhow!("visible Claude handoff returned an invalid code"));
+                }
+                return Ok(SecretString::new(code.to_string()));
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(anyhow!(
+                        "timed out waiting for the visible Claude authorization handoff"
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => return Err(error).context("accept visible Claude handoff"),
+        }
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(test)))]
+async fn capture_claude_authorization_code_visibly() -> Result<SecretString> {
+    Ok(SecretString::new(rpassword::prompt_password(
+        "Browser handoff unavailable; paste the one-time code: ",
+    )?))
+}
+
+#[cfg(test)]
+async fn capture_claude_authorization_code_visibly() -> Result<SecretString> {
+    Ok(SecretString::new("test-code".to_string()))
 }
 
 #[cfg(all(not(target_os = "macos"), not(test)))]
@@ -913,7 +998,7 @@ async fn parse_existing_profile(store: &SharedStore, raw_profile: &str) -> Resul
     Ok(profile_id)
 }
 
-async fn accounts(raw_provider: Option<&str>) -> Result<()> {
+async fn accounts(raw_provider: Option<&str>, verify: bool) -> Result<()> {
     let provider = raw_provider.map(parse_managed_provider).transpose()?;
     let store = open_account_store().await?;
     let accounts = store
@@ -924,11 +1009,52 @@ async fn accounts(raw_provider: Option<&str>) -> Result<()> {
         .filter(|account| account.home.is_some())
         .collect();
     if accounts.is_empty() {
-        println!("No managed OAuth accounts");
+        if !crate::provider_account::lease::account_lease_active() {
+            println!("No managed OAuth accounts");
+        }
         return Ok(());
     }
-    for account in accounts {
-        println!("{}", format_account(&account));
+    for mut account in accounts {
+        let provenance = if crate::provider_account::lease::account_lease_active() {
+            "  local"
+        } else {
+            ""
+        };
+        println!("{}{provenance}", format_account(&account));
+        let cached = account.credential_state.as_str();
+        if verify {
+            match crate::subscription::poll_account(&account).await {
+                Ok(_) => {
+                    println!("  auth: cached {cached} · live active");
+                    if account.credential_state != CredentialState::Connected {
+                        account.credential_state = CredentialState::Connected;
+                        account.cooldown_until = None;
+                        account.cooldown_reason = None;
+                        store.upsert_provider_account(&account).await?;
+                    }
+                }
+                Err(crate::subscription::SubscriptionError::NeedsLogin(reason)) => {
+                    println!("  auth: cached {cached} · live needs re-login ({reason})");
+                    store
+                        .record_provider_account_credential_invalidated(
+                            &account.provider,
+                            &account.account_id,
+                            "token_invalidated",
+                        )
+                        .await?;
+                    println!(
+                        "  recover: lf auth connect {} {}",
+                        account.provider,
+                        account_login(&account)
+                    );
+                }
+                Err(crate::subscription::SubscriptionError::Unavailable(reason)) => {
+                    println!("  auth: cached {cached} · live unavailable ({reason})");
+                }
+            }
+        } else {
+            println!("  auth: cached {cached} · live not checked (use --verify)");
+        }
         let provider = account
             .provider
             .parse::<Provider>()
@@ -1293,6 +1419,15 @@ mod tests {
         parse_routing_state,
     };
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn visible_claude_handoff_neither_echoes_nor_embeds_the_code() {
+        let script = super::visible_claude_prompt_script(std::path::Path::new("/tmp/auth.sock"));
+        assert!(script.contains("read -r -s"));
+        assert!(script.contains("/usr/bin/nc -U '/tmp/auth.sock'"));
+        assert!(!script.contains("verification_uri"));
+    }
+
     #[test]
     fn format_account_shows_routing_state() {
         let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -1480,10 +1615,9 @@ mod account_first_tests {
     use base64::Engine;
 
     use super::{
-        connect_account, exhausted_access_profiles_error, run, verify_provider_login,
+        connect_account, exhausted_access_profiles_error, verify_provider_login,
         TEST_ACCESS_PROFILE_FAILURES, TEST_OPENED_CHROME_PROFILES,
     };
-    use crate::lf::AuthCommand;
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
     use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
     use crate::provider_account::{account_home_path, parse_account_id};
@@ -1513,21 +1647,6 @@ mod account_first_tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn fixed_account_authority_rejects_account_mutation() {
-        let _lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[ACCOUNT_LEASE_ENV]);
-        std::env::set_var(ACCOUNT_LEASE_ENV, "forwarded");
-
-        let error = run(&AuthCommand::Reset {
-            provider: "codex".to_string(),
-            email: "reserve@example.com".to_string(),
-        })
-        .unwrap_err();
-
-        assert!(error.to_string().contains("fixed by an outer invocation"));
     }
 
     fn configure_connect_test(temp: &Path, reported_login: &str, fail_first: bool) {

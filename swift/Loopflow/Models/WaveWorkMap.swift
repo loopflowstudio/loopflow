@@ -50,7 +50,20 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let name: String
     public let summary: String
     public let definition: String
+    public let flows: ProjectFlowPlanSnapshot
     public let krs: [PlanningKeyResult]
+}
+
+public struct ProjectFlowPlanSnapshot: Decodable, Sendable, Hashable {
+    public let first: String?
+    public let loopFlow: String?
+    public let finallyFlow: String?
+
+    enum CodingKeys: String, CodingKey {
+        case first
+        case loopFlow = "loop"
+        case finallyFlow = "finally"
+    }
 }
 
 public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
@@ -231,7 +244,6 @@ public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {
     case wave
     case project
     case task
-    case review
     case ci
     case external
 }
@@ -248,7 +260,8 @@ public enum TaskAttentionLevel: String, Decodable, Sendable, Hashable {
 /// The six lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
 public enum TaskAction: String, Decodable, Sendable, Hashable {
-    case recover, resume, review
+    case recover, resume
+    case openPr = "open_pr"
     case startNextPr = "start_next_pr"
     case complete
     case noAction = "no_action"
@@ -346,20 +359,37 @@ public struct PrSnapshot: Decodable, Sendable, Identifiable, Hashable {
 
 public struct PrPublicationSnapshot: Decodable, Sendable, Hashable {
     public let requestedAt: String
-    public let afterMerge: PrAfterMerge
-    public let nextSlug: String?
     public let github: GithubPrSnapshot?
+    public let merge: PrMergeRequestSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case github
+        case github, merge
         case requestedAt = "requested_at"
+    }
+}
+
+public enum PrMergeMode: String, Decodable, Sendable, Hashable {
+    case user, auto
+}
+
+public struct PrMergeRequestSnapshot: Decodable, Sendable, Hashable {
+    public let mode: PrMergeMode
+    public let requestedAt: String
+    public let headSha: String
+    public let afterMerge: PrAfterMerge
+    public let nextSlug: String?
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case requestedAt = "requested_at"
+        case headSha = "head_sha"
         case afterMerge = "after_merge"
         case nextSlug = "next_slug"
     }
 }
 
 public enum PrAfterMerge: String, Decodable, Sendable, Hashable {
-    case review
+    case continueTask = "continue_task"
     case completeTask = "complete_task"
 }
 

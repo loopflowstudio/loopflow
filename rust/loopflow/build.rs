@@ -10,7 +10,7 @@ use std::process::Command;
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
-const CORE_CATEGORIES: &[&str] = &["build", "govern", "ops"];
+const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
 fn main() {
     let manifest_dir =
@@ -26,7 +26,7 @@ fn main() {
         &builtins_dir,
         "skill",
         "md",
-        "BUILTIN_STEPS",
+        "BUILTIN_SKILLS",
         &out_dir.join("builtin_skills.rs"),
     );
 
@@ -56,7 +56,7 @@ fn main() {
         &builtins_dir,
         "skill",
         "md",
-        "BUILTIN_STEP_CATEGORIES",
+        "BUILTIN_SKILL_CATEGORIES",
         &out_dir.join("builtin_skill_categories.rs"),
     );
 
@@ -72,13 +72,6 @@ fn main() {
         &out_dir.join("builtin_direction_groups.rs"),
     );
 
-    generate_map(
-        &builtins_dir.join("ops/prompt"),
-        "md",
-        "BUILTIN_OPS_PROMPTS",
-        &out_dir.join("builtin_ops_prompts.rs"),
-    );
-
     // Re-run if any file in the builtins tree changes
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
     for entry in walkdir(&builtins_dir) {
@@ -87,6 +80,8 @@ fn main() {
 }
 
 fn emit_build_provenance(manifest_dir: &Path) {
+    let package_version =
+        env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION not set by Cargo");
     let git_root = manifest_dir
         .ancestors()
         .find(|ancestor| ancestor.join(".git").exists());
@@ -120,7 +115,7 @@ fn emit_build_provenance(manifest_dir: &Path) {
             "LOOPFLOW_MIGRATION_AUTHORITY must be `published` or `validation_only`, got `{migration_authority}`"
         );
     }
-    let mut source_revision = git_root
+    let source_revision = git_root
         .and_then(|root| {
             Command::new("git")
                 .args(["rev-parse", "HEAD"])
@@ -140,6 +135,28 @@ fn emit_build_provenance(manifest_dir: &Path) {
             .output()
             .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
     });
+    let version_tag = format!("v{package_version}");
+    let is_tagged_release = !dirty
+        && git_root.is_some_and(|root| {
+            Command::new("git")
+                .args(["tag", "--points-at", "HEAD", "--list", &version_tag])
+                .current_dir(root)
+                .output()
+                .is_ok_and(|output| {
+                    output.status.success()
+                        && String::from_utf8_lossy(&output.stdout)
+                            .lines()
+                            .any(|tag| tag == version_tag)
+                })
+        });
+    let build_version = if is_tagged_release || source_revision == "unknown" {
+        package_version
+    } else {
+        let short_revision = source_revision.get(..9).unwrap_or(&source_revision);
+        let dirty_suffix = if dirty { ".dirty" } else { "" };
+        format!("{package_version}+{short_revision}{dirty_suffix}")
+    };
+    let mut source_revision = source_revision;
     if dirty {
         source_revision.push_str("-dirty");
     }
@@ -147,10 +164,15 @@ fn emit_build_provenance(manifest_dir: &Path) {
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_ROOT={}", source_root);
     println!("cargo:rustc-env=LOOPFLOW_MIGRATION_AUTHORITY={migration_authority}");
     println!("cargo:rustc-env=LOOPFLOW_BUILD_SOURCE_REVISION={source_revision}");
+    println!("cargo:rustc-env=LOOPFLOW_BUILD_VERSION={build_version}");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_BUILD_PROVENANCE");
     println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_AUTHORITY");
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("src").display()
+    );
     if let Some(root) = git_root {
-        for git_path in ["HEAD", "refs/heads"] {
+        for git_path in ["HEAD", "refs/heads", "refs/tags", "packed-refs"] {
             if let Ok(output) = Command::new("git")
                 .args(["rev-parse", "--git-path", git_path])
                 .current_dir(root)
@@ -158,7 +180,13 @@ fn emit_build_provenance(manifest_dir: &Path) {
             {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout);
-                    println!("cargo:rerun-if-changed={}", path.trim());
+                    let path = Path::new(path.trim());
+                    let path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        root.join(path)
+                    };
+                    println!("cargo:rerun-if-changed={}", path.display());
                 }
             }
         }
@@ -172,9 +200,10 @@ fn generate_map(dir: &Path, extension: &str, map_name: &str, out_path: &Path) {
 }
 
 /// Collect files of the given extension from `<builtins_dir>/<cat>/<kind>/`
-/// for each top-level category directory. Core categories (build/govern/ops)
-/// share one flat namespace — duplicate stems across cores panic. Non-core
-/// categories get their name as a prefix: `gstack/office-hours`.
+/// for each top-level category directory. Core categories
+/// (task/project/wave/ops) share one flat namespace — duplicate stems across
+/// cores panic. Non-core categories get their name as a prefix:
+/// `vendor/review`.
 fn generate_kind_map(
     builtins_dir: &Path,
     kind: &str,
@@ -224,6 +253,17 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
         }
     }
 
+    if entries.is_empty() {
+        fs::write(
+            out_path,
+            format!(
+                "static {map_name}: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static str>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n"
+            ),
+        )
+        .unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+        return;
+    }
+
     let mut code = String::new();
     writeln!(
         code,
@@ -253,7 +293,7 @@ fn emit_map(entries: &mut [(String, PathBuf)], map_name: &str, out_path: &Path) 
 /// Generate a `<MAP_NAME>: &[(category, &[name])]` constant from
 /// `<builtins_dir>/<cat>/<kind>/*.<ext>`. Categories are title-cased. Names
 /// for core categories stay bare; names for non-core categories get the
-/// `<cat>/` prefix so they match the keys in BUILTIN_STEPS / BUILTIN_FLOWS.
+/// `<cat>/` prefix so they match the keys in BUILTIN_SKILLS / BUILTIN_FLOWS.
 fn generate_category_map(
     builtins_dir: &Path,
     kind: &str,
@@ -342,7 +382,7 @@ fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
     let Ok(entries) = fs::read_dir(directions_dir) else {
         fs::write(
             out_path,
-            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(|| std::collections::HashMap::new());\n",
+            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n",
         )
         .expect("write empty direction groups");
         return;
@@ -378,6 +418,15 @@ fn generate_direction_groups(directions_dir: &Path, out_path: &Path) {
         if !members.is_empty() {
             groups.insert(group_name, members);
         }
+    }
+
+    if groups.is_empty() {
+        fs::write(
+            out_path,
+            "static BUILTIN_DIRECTION_GROUPS: std::sync::LazyLock<std::collections::HashMap<&'static str, Vec<&'static str>>> = std::sync::LazyLock::new(std::collections::HashMap::new);\n",
+        )
+        .expect("write empty direction groups");
+        return;
     }
 
     let mut code = String::new();

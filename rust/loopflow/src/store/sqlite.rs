@@ -11,13 +11,12 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    AccountLimitRow, BusMessage, CredentialState, PmSnapshotRow, ProviderAccount,
-    ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
-    StoreResult, TurnSpendRow,
+    AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
+    ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult, TurnSpendRow,
 };
 use crate::trace::{
-    AgentLaunchRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow, ContextChannel,
-    ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
+    AgentInvocationRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow,
+    ContextChannel, ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
 };
 use crate::wave::Wave;
 
@@ -48,23 +47,6 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
         .collect()
-}
-
-/// How long a bus frame survives. The bus is a wire, not a log: long enough
-/// that a mind asleep between passes still catches its hands' reports, short
-/// enough that the table never becomes a record anyone is tempted to read.
-pub const BUS_WINDOW_SECS: i64 = 60 * 60;
-
-/// The newest bus id ever assigned. `bus_messages` is `AUTOINCREMENT`, so
-/// `sqlite_sequence` holds a mark the sweeper cannot erase — which is what lets
-/// a subscriber see the gap even when every frame it missed has been deleted.
-fn bus_high_water(conn: &Connection) -> StoreResult<i64> {
-    let high_water = conn.query_row(
-        "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'bus_messages'), 0)",
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(high_water)
 }
 
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
@@ -474,10 +456,10 @@ impl SqliteStore {
     fn read_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = if repo.is_some() {
-            "SELECT id, name, repo, created_at, parent_wave_id
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
              FROM waves WHERE repo = ?1 ORDER BY created_at DESC"
         } else {
-            "SELECT id, name, repo, created_at, parent_wave_id
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
              FROM waves ORDER BY created_at DESC"
         };
         let params: Vec<Box<dyn ToSql>> = if let Some(repo) = repo {
@@ -507,19 +489,21 @@ impl SqliteStore {
             .unwrap_or_else(now_unix);
 
         tx.execute(
-            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO waves (id, name, repo, created_at, parent_wave_id, promoted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
                repo = excluded.repo,
                created_at = excluded.created_at,
-               parent_wave_id = excluded.parent_wave_id",
+               parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
+               promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
             params![
                 wave.id(),
                 wave.name(),
                 wave.repo(),
                 created_at,
                 wave.parent_wave_id(),
+                wave.promoted_at().map(|at| at.unix_timestamp()),
             ],
         )?;
         durable::create_wave_spine(&tx, wave.id(), wave.name(), wave.repo(), created_at)?;
@@ -541,7 +525,7 @@ impl SqliteStore {
     pub fn health_check(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row("SELECT 1", [], |_| Ok(()))?;
-        Ok(())
+        super::migrations::validate_persisted_json(&conn)
     }
 
     pub fn schema_version(&self) -> StoreResult<String> {
@@ -776,6 +760,33 @@ impl SqliteStore {
         account_id: &ProviderAccountId,
     ) -> StoreResult<()> {
         self.record_provider_account_health(provider, account_id, None, None, None)
+    }
+
+    pub fn record_provider_account_credential_invalidated(
+        &self,
+        provider: &str,
+        account_id: &ProviderAccountId,
+        reason: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE provider_accounts
+             SET credential_state = 'missing',
+                 cooldown_until = NULL,
+                 cooldown_reason = ?3,
+                 updated_at = ?4
+             WHERE provider = ?1 AND account_id = ?2",
+            params![
+                provider,
+                account_id.as_str(),
+                reason,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     pub fn record_provider_account_health(
@@ -1213,7 +1224,7 @@ impl SqliteStore {
     pub fn list_child_waves(&self, parent: &WaveId) -> StoreResult<Vec<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
              FROM waves WHERE parent_wave_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![parent], |row| Ok(map_wave_row(row)))?;
@@ -1227,7 +1238,8 @@ impl SqliteStore {
     pub fn get_wave(&self, wave_id: &WaveId) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id FROM waves WHERE id = ?1",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+             FROM waves WHERE id = ?1",
         )?;
         let wave = stmt
             .query_row(params![wave_id], |row| Ok(map_wave_row(row)))
@@ -1238,7 +1250,8 @@ impl SqliteStore {
     pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo, created_at, parent_wave_id FROM waves WHERE name = ?1",
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+             FROM waves WHERE name = ?1",
         )?;
         let wave = stmt
             .query_row(params![name], |row| Ok(map_wave_row(row)))
@@ -1263,107 +1276,9 @@ impl SqliteStore {
         Ok(())
     }
 
-    // The agent bus (`bus_messages`): `lf radio pub` publishes, every subscriber
-    // polls forward from an id cursor. No process is in the path.
-
-    /// Publish one frame and sweep whatever aged out of the window. The sweep
-    /// rides the publish so the bus stays bounded with zero daemons: a bus
-    /// nobody writes to needs no cleaning.
-    pub fn publish_bus(
-        &self,
-        channel: &str,
-        byline: &str,
-        text: &str,
-        at: i64,
-    ) -> StoreResult<i64> {
-        self.sweep_bus(at - BUS_WINDOW_SECS)?;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO bus_messages (channel, byline, text, at) VALUES (?1, ?2, ?3, ?4)",
-            params![channel, byline, text, at],
-        )?;
-        Ok(conn.last_insert_rowid())
-    }
-
-    /// Drop every frame published before `cutoff` (unix seconds). Publishing
-    /// sweeps, and so does every read: a bus that went quiet must still
-    /// forget, or a lone expired report would sit there waiting to be
-    /// delivered an hour late.
-    pub fn sweep_bus(&self, cutoff: i64) -> StoreResult<usize> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute("DELETE FROM bus_messages WHERE at < ?1", params![cutoff])?)
-    }
-
-    /// Every surviving frame published after `cursor`, oldest first.
-    pub fn read_bus_after(&self, cursor: i64) -> StoreResult<Vec<BusMessage>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt = conn.prepare(
-            "SELECT id, channel, byline, text, at FROM bus_messages
-             WHERE id > ?1 ORDER BY id",
-        )?;
-        let rows = stmt.query_map(params![cursor], |row| {
-            Ok(BusMessage {
-                id: row.get(0)?,
-                channel: row.get(1)?,
-                byline: row.get(2)?,
-                text: row.get(3)?,
-                at: row.get(4)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
-    }
-
-    /// The high-water mark: the newest id ever published, `0` if none ever was.
-    /// Read from `sqlite_sequence` rather than `MAX(id)` so it survives the
-    /// sweep — a bus swept empty still remembers how far it got. Tuning in
-    /// means starting here: a subscriber hears what is said while it listens.
-    pub fn bus_head(&self) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        bus_high_water(&conn)
-    }
-
-    /// The oldest id a subscriber can still read: the oldest surviving frame,
-    /// or — on a bus swept empty — one past the high-water mark, because
-    /// everything ever published is gone. A durable cursor below `floor - 1`
-    /// means the sweeper reached frames this subscriber never read. `None`
-    /// only when nothing was ever published, which nobody can have missed.
-    pub fn bus_floor(&self) -> StoreResult<Option<i64>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let oldest: Option<i64> =
-            conn.query_row("SELECT MIN(id) FROM bus_messages", [], |row| row.get(0))?;
-        if oldest.is_some() {
-            return Ok(oldest);
-        }
-        let high_water = bus_high_water(&conn)?;
-        Ok((high_water > 0).then_some(high_water + 1))
-    }
-
-    pub fn bus_cursor(&self, subscriber: &str) -> StoreResult<Option<i64>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let cursor = conn
-            .query_row(
-                "SELECT cursor FROM bus_cursors WHERE subscriber = ?1",
-                params![subscriber],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(cursor)
-    }
-
-    pub fn set_bus_cursor(&self, subscriber: &str, cursor: i64) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO bus_cursors (subscriber, cursor) VALUES (?1, ?2)
-             ON CONFLICT(subscriber) DO UPDATE SET cursor = excluded.cursor",
-            params![subscriber, cursor],
-        )?;
-        Ok(())
-    }
-
     // Exec ledger (`run_events`): the machine-grain, append-only record of
     // every process written directly by `lf`. Read by `lf execs` / `lf trace`;
-    // `lf runs` joins it to agent launches for process lineage.
+    // `lf runs` joins it to agent invocations for process lineage.
 
     /// Cached line/token counts for a git blob. Content-addressed, so a hit is
     /// always correct and a miss only costs one tokenization.
@@ -1437,7 +1352,7 @@ impl SqliteStore {
                     l.provider, l.model, COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
                     t.provider_output_tokens, t.cache_read_tokens, t.cost_usd
              FROM agent_turns t
-             JOIN agent_launches l ON l.id = t.launch_id
+             JOIN agent_invocations l ON l.id = t.invocation_id
              WHERE COALESCE(t.ended_at, t.started_at) >= ?1
                AND (t.provider_input_tokens IS NOT NULL
                     OR t.provider_output_tokens IS NOT NULL
@@ -1448,7 +1363,7 @@ impl SqliteStore {
         let rows = stmt.query_map(params![since_unix], |row| {
             Ok(TurnSpendRow {
                 turn_id: row.get(0)?,
-                launch_id: row.get(1)?,
+                invocation_id: row.get(1)?,
                 trace_id: row.get(2)?,
                 exec_id: row.get(3)?,
                 repo: row.get(4)?,
@@ -1544,57 +1459,36 @@ impl SqliteStore {
 
     pub fn insert_trace_capture(
         &self,
-        launch: &AgentLaunchRow,
+        invocation: &AgentInvocationRow,
         turn: &AgentTurnRow,
         assets: &[ContextAssetRow],
         decisions: &[ContextDecisionRow],
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (
-            product_run_id,
-            home_id,
-            account_id,
-            containment_kind,
-            containment_id,
-            resume_token,
-            opaque_epoch_id,
-            opaque_basis_rev,
-        ) = launch
-            .control
+        let (supervising_run_id, account_id, resume_token) = invocation
+            .supervision
             .as_ref()
-            .map(|control| {
-                let (kind, id) = control.containment.parts();
+            .map(|supervision| {
                 (
-                    Some(control.run_id.as_str()),
-                    Some(control.home_id.as_str()),
-                    control.account_id.as_deref(),
-                    Some(kind),
-                    Some(id),
-                    control.resume_token.as_deref(),
-                    control
-                        .opaque_basis
-                        .as_ref()
-                        .map(|basis| basis.epoch_id.as_str()),
-                    control
-                        .opaque_basis
-                        .as_ref()
-                        .map(|basis| basis.revision as i64),
+                    Some(supervision.supervising_run_id.as_str()),
+                    supervision.account_id.as_deref(),
+                    supervision.resume_token.as_deref(),
                 )
             })
-            .unwrap_or((None, None, None, None, None, None, None, None));
-        let registered = product_run_id.is_some()
+            .unwrap_or((None, None, None));
+        let registered = supervising_run_id.is_some()
             && tx.query_row(
                 "SELECT EXISTS(
-                        SELECT 1 FROM agent_launches
-                        WHERE id=?1 AND product_run_id=?2
+                        SELECT 1 FROM agent_invocations
+                        WHERE id=?1 AND supervising_run_id=?2
                      )",
-                params![launch.id, product_run_id],
+                params![invocation.id, supervising_run_id],
                 |row| row.get::<_, bool>(0),
             )?;
         if registered {
             tx.execute(
-                "UPDATE agent_launches SET
+                "UPDATE agent_invocations SET
                     run_id=?2, process_id=?3, repo=?4, worktree=?5, wave=?6,
                     flow=?7, skill=?8, project=?9, task=?10, provider=?11,
                     model=?12, surface=?13, capture_status=?14,
@@ -1602,102 +1496,78 @@ impl SqliteStore {
                     conversation_path=?18, provider_events_path=?19,
                     provider_session_id=?20, provider_session_path=?21,
                     conversation_event_count=?22, conversation_bytes=?23
-                 WHERE id=?1 AND product_run_id=?24",
+                 WHERE id=?1 AND supervising_run_id=?24",
                 params![
-                    launch.id,
-                    launch.run_id,
-                    launch.process_id,
-                    launch.repo,
-                    launch.worktree,
-                    launch.wave,
-                    launch.flow,
-                    launch.skill,
-                    launch.project,
-                    launch.task,
-                    launch.provider,
-                    launch.model,
-                    launch.surface,
-                    launch.capture_status,
-                    launch.incomplete_reason,
-                    launch.outcome,
-                    launch.artifact_dir,
-                    launch.conversation_path,
-                    launch.provider_events_path,
-                    launch.provider_session_id,
-                    launch.provider_session_path,
-                    launch.conversation_event_count,
-                    launch.conversation_bytes,
-                    product_run_id,
+                    invocation.id,
+                    invocation.run_id,
+                    invocation.process_id,
+                    invocation.repo,
+                    invocation.worktree,
+                    invocation.wave,
+                    invocation.flow,
+                    invocation.skill,
+                    invocation.project,
+                    invocation.task,
+                    invocation.provider,
+                    invocation.model,
+                    invocation.surface,
+                    invocation.capture_status,
+                    invocation.incomplete_reason,
+                    invocation.outcome,
+                    invocation.artifact_dir,
+                    invocation.conversation_path,
+                    invocation.provider_events_path,
+                    invocation.provider_session_id,
+                    invocation.provider_session_path,
+                    invocation.conversation_event_count,
+                    invocation.conversation_bytes,
+                    supervising_run_id,
                 ],
             )?;
         } else {
             tx.execute(
-                "INSERT INTO agent_launches (
+                "INSERT INTO agent_invocations (
                     id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, product_run_id, home_id,
-                    account_id, launch_state, containment_kind, containment_id, resume_token,
-                    opaque_epoch_id, opaque_basis_rev
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                     ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25,
-                    ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
+                    ?26, ?27, ?28, ?29)",
                 params![
-                    launch.id,
-                    launch.run_id,
-                    launch.process_id,
-                    launch.started_at,
-                    launch.ended_at,
-                    launch.repo,
-                    launch.worktree,
-                    launch.wave,
-                    launch.flow,
-                    launch.skill,
-                    launch.project,
-                    launch.task,
-                    launch.provider,
-                    launch.model,
-                    launch.surface,
-                    launch.capture_status,
-                    launch.incomplete_reason,
-                    launch.outcome,
-                    launch.artifact_dir,
-                    launch.conversation_path,
-                    launch.provider_events_path,
-                    launch.provider_session_id,
-                    launch.provider_session_path,
-                    launch.conversation_event_count,
-                    launch.conversation_bytes,
-                    product_run_id,
-                    home_id,
+                    invocation.id,
+                    invocation.run_id,
+                    invocation.process_id,
+                    invocation.started_at,
+                    invocation.ended_at,
+                    invocation.repo,
+                    invocation.worktree,
+                    invocation.wave,
+                    invocation.flow,
+                    invocation.skill,
+                    invocation.project,
+                    invocation.task,
+                    invocation.provider,
+                    invocation.model,
+                    invocation.surface,
+                    invocation.capture_status,
+                    invocation.incomplete_reason,
+                    invocation.outcome,
+                    invocation.artifact_dir,
+                    invocation.conversation_path,
+                    invocation.provider_events_path,
+                    invocation.provider_session_id,
+                    invocation.provider_session_path,
+                    invocation.conversation_event_count,
+                    invocation.conversation_bytes,
+                    supervising_run_id,
                     account_id,
-                    product_run_id.map(|_| "live"),
-                    containment_kind,
-                    containment_id,
                     resume_token,
-                    opaque_epoch_id,
-                    opaque_basis_rev,
+                    invocation.answer_ask_id,
                 ],
             )?;
-        }
-        if let Some(run_id) = product_run_id.filter(|_| !registered) {
-            if tx.execute(
-                "UPDATE runs SET state='active' WHERE id=?1 AND state='reserved'",
-                [run_id],
-            )? == 0
-            {
-                let active: bool = tx.query_row(
-                    "SELECT state='active' FROM runs WHERE id=?1",
-                    [run_id],
-                    |row| row.get(0),
-                )?;
-                if !active {
-                    return Err(StoreError::InvalidAuthority(format!(
-                        "Run {run_id} cannot own a Launch"
-                    )));
-                }
-            }
         }
         insert_agent_turn(&tx, turn)?;
         insert_context_rows(&tx, assets, decisions)?;
@@ -1722,35 +1592,25 @@ impl SqliteStore {
     pub fn finish_agent_turn_capture(&self, turn: &AgentTurnRow) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let was_running = tx
-            .query_row(
-                "SELECT status='running' FROM agent_turns WHERE id=?1",
-                [&turn.id],
-                |row| row.get::<_, bool>(0),
-            )
-            .optional()?
-            .unwrap_or(false);
         update_agent_turn(&tx, turn)?;
-        if was_running && turn.status != "running" {
-            let turn_id = crate::durable::TurnId::parse(&turn.id)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-            durable::rearm_feedback_attention(&tx, &turn_id)?;
-        }
         tx.commit()?;
         Ok(())
     }
 
-    pub fn update_agent_launch_receipt(&self, launch: &AgentLaunchRow) -> StoreResult<()> {
+    pub fn update_agent_invocation_receipt(
+        &self,
+        invocation: &AgentInvocationRow,
+    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE agent_launches
+            "UPDATE agent_invocations
              SET provider_session_id = ?2, provider_session_path = ?3,
-                 resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?2 END
+                 resume_token=CASE WHEN supervising_run_id IS NULL THEN resume_token ELSE ?2 END
              WHERE id = ?1",
             params![
-                launch.id,
-                launch.provider_session_id,
-                launch.provider_session_path,
+                invocation.id,
+                invocation.provider_session_id,
+                invocation.provider_session_path,
             ],
         )?;
         Ok(())
@@ -1758,37 +1618,34 @@ impl SqliteStore {
 
     pub fn finish_trace_capture(
         &self,
-        launch: &AgentLaunchRow,
+        invocation: &AgentInvocationRow,
         turn: &AgentTurnRow,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
-            "UPDATE agent_launches SET
+            "UPDATE agent_invocations SET
                 ended_at = ?2, capture_status = ?3, incomplete_reason = ?4, outcome = ?5,
                 conversation_event_count = ?6, conversation_bytes = ?7,
                 provider_session_id = ?8, provider_session_path = ?9,
-                launch_state=CASE WHEN product_run_id IS NULL THEN launch_state ELSE 'ended' END,
                 handback_state=CASE
-                    WHEN product_run_id IS NULL THEN handback_state
+                    WHEN supervising_run_id IS NULL THEN handback_state
                     WHEN ?5='completed' THEN 'succeeded'
                     WHEN ?5='interrupted' THEN 'interrupted'
                     ELSE 'failed'
                 END,
-                attention_kind=NULL, attention_work_kind=NULL,
-                attention_work_id=NULL, attention_at=NULL,
-                resume_token=CASE WHEN product_run_id IS NULL THEN resume_token ELSE ?8 END
+                resume_token=CASE WHEN supervising_run_id IS NULL THEN resume_token ELSE ?8 END
              WHERE id = ?1",
             params![
-                launch.id,
-                launch.ended_at,
-                launch.capture_status,
-                launch.incomplete_reason,
-                launch.outcome,
-                launch.conversation_event_count,
-                launch.conversation_bytes,
-                launch.provider_session_id,
-                launch.provider_session_path,
+                invocation.id,
+                invocation.ended_at,
+                invocation.capture_status,
+                invocation.incomplete_reason,
+                invocation.outcome,
+                invocation.conversation_event_count,
+                invocation.conversation_bytes,
+                invocation.provider_session_id,
+                invocation.provider_session_path,
             ],
         )?;
         update_agent_turn(&tx, turn)?;
@@ -1796,84 +1653,66 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record that a launch's referenced conversation artifact is known absent.
-    /// If capture loss also exposed an unclosed owner, close the launch and its
+    /// Record that an invocation's referenced conversation artifact is known absent.
+    /// If capture loss also exposed an unclosed owner, close the invocation and its
     /// running Turns in the same transaction.
-    pub fn prune_launch_capture(
+    pub fn prune_invocation_capture(
         &self,
-        launch_id: &str,
+        invocation_id: &str,
         incomplete_reason: &str,
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
-            "UPDATE agent_launches
+            "UPDATE agent_invocations
              SET capture_status = 'pruned', incomplete_reason = ?2,
                  ended_at = COALESCE(ended_at, ?3),
-                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END,
-                 launch_state = CASE
-                     WHEN product_run_id IS NULL THEN launch_state ELSE 'ended'
-                 END,
-                 handback_state = CASE
-                     WHEN product_run_id IS NULL THEN handback_state
-                     WHEN outcome = 'running' THEN 'interrupted'
-                     ELSE handback_state
-                 END,
-                 attention_kind = NULL, attention_work_kind = NULL,
-                 attention_work_id = NULL, attention_at = NULL
+                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END
              WHERE id = ?1 AND capture_status != 'pruned'",
-            params![launch_id, incomplete_reason, ended_at_fallback],
+            params![invocation_id, incomplete_reason, ended_at_fallback],
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidData(format!(
-                "capture {launch_id} is already pruned or missing"
+                "capture {invocation_id} is already pruned or missing"
             )));
         }
         tx.execute(
             "UPDATE agent_turns
              SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
-             WHERE launch_id = ?1 AND status = 'running'",
-            params![launch_id, ended_at_fallback],
+             WHERE invocation_id = ?1 AND status = 'running'",
+            params![invocation_id, ended_at_fallback],
         )?;
         tx.commit()?;
         Ok(())
     }
 
     /// Close an intact capture whose owner ended before capture finalization.
-    pub fn interrupt_launch_capture(
+    pub fn interrupt_invocation_capture(
         &self,
-        launch_id: &str,
+        invocation_id: &str,
         incomplete_reason: &str,
         ended_at_fallback: i64,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
-            "UPDATE agent_launches
+            "UPDATE agent_invocations
              SET capture_status = 'interrupted', incomplete_reason = ?2,
-                 ended_at = COALESCE(ended_at, ?3), outcome = 'interrupted',
-                 launch_state = CASE
-                     WHEN product_run_id IS NULL THEN launch_state ELSE 'ended'
-                 END,
-                 handback_state = CASE
-                     WHEN product_run_id IS NULL THEN handback_state ELSE 'interrupted'
-                 END,
-                 attention_kind = NULL, attention_work_kind = NULL,
-                 attention_work_id = NULL, attention_at = NULL
+                 ended_at = COALESCE(ended_at, ?3), outcome = 'interrupted'
              WHERE id = ?1 AND capture_status = 'capturing'",
-            params![launch_id, incomplete_reason, ended_at_fallback],
+            params![invocation_id, incomplete_reason, ended_at_fallback],
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidData(format!(
-                "capture {launch_id} is no longer capturing"
+                "capture {invocation_id} is no longer capturing"
             )));
         }
         tx.execute(
             "UPDATE agent_turns
              SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
-             WHERE launch_id = ?1 AND status = 'running'",
-            params![launch_id, ended_at_fallback],
+             WHERE invocation_id = ?1 AND status = 'running'",
+            params![invocation_id, ended_at_fallback],
         )?;
         tx.commit()?;
         Ok(())
@@ -1881,83 +1720,76 @@ impl SqliteStore {
 
     /// Acknowledge an aged intact capture write loss without discarding its
     /// original `incomplete_reason` or artifact references.
-    pub fn lose_launch_capture(&self, launch_id: &str, ended_at_fallback: i64) -> StoreResult<()> {
+    pub fn lose_invocation_capture(
+        &self,
+        invocation_id: &str,
+        ended_at_fallback: i64,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
-            "UPDATE agent_launches
+            "UPDATE agent_invocations
              SET capture_status = 'lost', ended_at = COALESCE(ended_at, ?2),
-                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END,
-                 launch_state = CASE
-                     WHEN product_run_id IS NULL THEN launch_state ELSE 'ended'
-                 END,
-                 handback_state = CASE
-                     WHEN product_run_id IS NULL THEN handback_state
-                     WHEN outcome = 'running' THEN 'interrupted'
-                     ELSE handback_state
-                 END,
-                 attention_kind = NULL, attention_work_kind = NULL,
-                 attention_work_id = NULL, attention_at = NULL
+                 outcome = CASE WHEN outcome = 'running' THEN 'interrupted' ELSE outcome END
              WHERE id = ?1 AND capture_status = 'partial'",
-            params![launch_id, ended_at_fallback],
+            params![invocation_id, ended_at_fallback],
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidData(format!(
-                "capture {launch_id} is no longer partial"
+                "capture {invocation_id} is no longer partial"
             )));
         }
         tx.execute(
             "UPDATE agent_turns
              SET status = 'interrupted', ended_at = COALESCE(ended_at, ?2)
-             WHERE launch_id = ?1 AND status = 'running'",
-            params![launch_id, ended_at_fallback],
+             WHERE invocation_id = ?1 AND status = 'running'",
+            params![invocation_id, ended_at_fallback],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn agent_launches_matching(&self, run_id: &str) -> StoreResult<Vec<AgentLaunchRow>> {
+    pub fn agent_invocations_matching(&self, run_id: &str) -> StoreResult<Vec<AgentInvocationRow>> {
         let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
-        // Launch timestamps use ledger-second precision. rowid preserves the
+        // Invocation timestamps use ledger-second precision. rowid preserves the
         // append order when a fast flow starts several agents in one second.
-        self.query_agent_launches(
+        self.query_agent_invocations(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, product_run_id, home_id,
-                    account_id, launch_state, containment_kind, containment_id, resume_token,
-                    opaque_epoch_id, opaque_basis_rev
-             FROM agent_launches WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
+             FROM agent_invocations WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
             params![prefix],
         )
     }
 
-    pub fn agent_launches_since(&self, since: i64) -> StoreResult<Vec<AgentLaunchRow>> {
-        self.query_agent_launches(
+    pub fn agent_invocations_since(&self, since: i64) -> StoreResult<Vec<AgentInvocationRow>> {
+        self.query_agent_invocations(
             "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
-                    conversation_event_count, conversation_bytes, product_run_id, home_id,
-                    account_id, launch_state, containment_kind, containment_id, resume_token,
-                    opaque_epoch_id, opaque_basis_rev
-             FROM agent_launches WHERE started_at >= ?1 ORDER BY started_at, rowid",
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
+             FROM agent_invocations WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
         )
     }
 
-    fn query_agent_launches(
+    fn query_agent_invocations(
         &self,
         sql: &str,
         params: impl rusqlite::Params,
-    ) -> StoreResult<Vec<AgentLaunchRow>> {
+    ) -> StoreResult<Vec<AgentInvocationRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query_map(params, |row| {
-            Ok(AgentLaunchRow {
+            Ok(AgentInvocationRow {
                 id: row.get(0)?,
                 run_id: row.get(1)?,
+                answer_ask_id: row.get(28)?,
                 process_id: row.get(2)?,
                 started_at: row.get(3)?,
                 ended_at: row.get(4)?,
@@ -1981,67 +1813,40 @@ impl SqliteStore {
                 provider_session_path: row.get(22)?,
                 conversation_event_count: row.get(23)?,
                 conversation_bytes: row.get(24)?,
-                control: match (
-                    row.get::<_, Option<String>>(25)?,
-                    row.get::<_, Option<String>>(26)?,
-                    row.get::<_, Option<String>>(29)?,
-                    row.get::<_, Option<String>>(30)?,
-                    row.get::<_, Option<String>>(31)?,
-                ) {
-                    (Some(run_id), Some(home_id), Some(kind), Some(id), resume_token) => {
-                        let opaque_epoch_id = row.get::<_, Option<String>>(32)?;
-                        let opaque_basis_rev = row.get::<_, Option<i64>>(33)?;
-                        let opaque_basis = match (opaque_epoch_id, opaque_basis_rev) {
-                            (Some(epoch_id), Some(revision)) => Some(crate::durable::Basis {
-                                epoch_id: crate::durable::EpochId::parse(&epoch_id)
-                                    .map_err(to_sqlite_conversion_error)?,
-                                revision: revision as u64,
-                            }),
-                            (None, None) => None,
-                            _ => {
-                                return Err(to_sqlite_conversion_error(
-                                    "stored opaque Launch Basis is incomplete",
-                                ))
-                            }
-                        };
-                        Some(crate::trace::ControlLaunch {
-                            run_id: crate::durable::RunId::parse(&run_id)
+                supervision: row
+                    .get::<_, Option<String>>(25)?
+                    .map(|run_id| {
+                        Ok::<_, rusqlite::Error>(crate::trace::SupervisedInvocation {
+                            invocation_id: crate::durable::AgentInvocationId::parse(
+                                &row.get::<_, String>(0)?,
+                            )
+                            .map_err(to_sqlite_conversion_error)?,
+                            supervising_run_id: crate::durable::RunId::parse(&run_id)
                                 .map_err(to_sqlite_conversion_error)?,
-                            home_id: crate::durable::HomeId::parse(&home_id)
-                                .map_err(to_sqlite_conversion_error)?,
-                            account_id: row.get(27)?,
-                            containment: crate::durable::Containment::parse(&kind, id)
-                                .map_err(to_sqlite_conversion_error)?,
-                            resume_token,
-                            opaque_basis,
+                            account_id: row.get(26)?,
+                            resume_token: row.get(27)?,
                         })
-                    }
-                    (None, None, None, None, None) => None,
-                    _ => {
-                        return Err(to_sqlite_conversion_error(
-                            "stored control Launch metadata is incomplete",
-                        ))
-                    }
-                },
+                    })
+                    .transpose()?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
     }
 
-    pub fn agent_turns_for_launches(
+    pub fn agent_turns_for_invocations(
         &self,
-        launch_ids: &[String],
+        invocation_ids: &[String],
     ) -> StoreResult<Vec<AgentTurnRow>> {
-        if launch_ids.is_empty() {
+        if invocation_ids.is_empty() {
             return Ok(Vec::new());
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut turns = Vec::new();
-        for launch_ids in launch_ids.chunks(500) {
-            let placeholders = in_placeholders(launch_ids.len());
+        for invocation_ids in invocation_ids.chunks(500) {
+            let placeholders = in_placeholders(invocation_ids.len());
             let sql = format!(
-                "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
+                "SELECT id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status,
                     input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
                     system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
@@ -2049,22 +1854,54 @@ impl SqliteStore {
                     cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
                     context_persist_ms, first_event_seq, last_event_seq, root_output,
                     epoch_id, basis_rev
-             FROM agent_turns WHERE launch_id IN ({placeholders})
+             FROM agent_turns WHERE invocation_id IN ({placeholders})
              ORDER BY started_at, rowid, ordinal"
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(launch_ids), map_agent_turn)?;
+            let rows =
+                stmt.query_map(rusqlite::params_from_iter(invocation_ids), map_agent_turn)?;
             turns.extend(rows.collect::<Result<Vec<_>, _>>()?);
         }
         turns.sort_by_key(|turn| (turn.started_at, turn.ordinal));
         Ok(turns)
     }
 
-    /// One agent turn by its UUID — the trace receipt drill target.
+    pub fn ask_exchanges_for_turns(
+        &self,
+        turn_ids: &[String],
+    ) -> StoreResult<Vec<crate::durable::AskExchange>> {
+        if turn_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut asks = Vec::new();
+        for turn_ids in turn_ids.chunks(500) {
+            let placeholders = in_placeholders(turn_ids.len());
+            let sql = format!(
+                "SELECT id FROM ask_exchanges WHERE turn_id IN ({placeholders})
+                 ORDER BY asked_at, rowid"
+            );
+            let mut statement = conn.prepare(&sql)?;
+            let ids = statement
+                .query_map(rusqlite::params_from_iter(turn_ids), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for id in ids {
+                let id = crate::durable::AskId::parse(&id)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                asks.push(durable::ask_by_id_in(&conn, &id)?);
+            }
+        }
+        asks.sort_by_key(|ask| ask.asked_at);
+        Ok(asks)
+    }
+
+    /// One agent turn by its UUID.
     pub fn agent_turn(&self, id: &str) -> StoreResult<Option<AgentTurnRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status,
+            "SELECT id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status,
                     input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
                     system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
                     provider_total_input_tokens, peak_input_tokens, context_window_tokens,
@@ -2233,7 +2070,7 @@ fn in_placeholders(count: usize) -> String {
 fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> StoreResult<()> {
     tx.execute(
         "INSERT INTO agent_turns (
-            id, launch_id, ordinal, provider_turn_id, started_at, ended_at, status, input_op,
+            id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status, input_op,
             context_coverage, tokenizer, system_prompt_path, task_prompt_path, system_tokens,
             task_tokens, supplied_context_tokens, provider_input_tokens,
             provider_total_input_tokens, peak_input_tokens, context_window_tokens,
@@ -2245,7 +2082,7 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             ?28, ?29, ?30, ?31, ?32)",
         params![
             turn.id,
-            turn.launch_id,
+            turn.invocation_id,
             turn.ordinal,
             turn.provider_turn_id,
             turn.started_at,
@@ -2374,7 +2211,7 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
 fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
     Ok(AgentTurnRow {
         id: row.get(0)?,
-        launch_id: row.get(1)?,
+        invocation_id: row.get(1)?,
         ordinal: row.get(2)?,
         provider_turn_id: row.get(3)?,
         started_at: row.get(4)?,

@@ -1,4 +1,5 @@
 mod abandon;
+mod ask_comments;
 mod child;
 mod commit;
 pub mod cron;
@@ -23,6 +24,7 @@ pub mod trace;
 pub(crate) mod util;
 
 pub use abandon::{abandon_branch, AbandonOptions};
+pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::{ambient_run_lease, required_run_lease};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub use cron::{
@@ -43,8 +45,9 @@ pub use rebase::{
     RebaseClass, RebaseOptions, RebasePlan, RebaseRecovery, RebaseStrategy, RebaseVerification,
 };
 pub use release::{
-    bump_version, generate_release, release_bump, release_check, release_notes, release_run,
-    release_status, release_tag, MergedPr, ReleaseRunResult, ReleaseStatusResult,
+    bump_version, generate_release, release_bump, release_check, release_notes, release_publish,
+    release_run, release_status, release_tag, MergedPr, ReleaseReceipt, ReleaseRunOutcome,
+    ReleaseStatusResult,
 };
 pub(crate) use run::{launch_in_run, RunLaunch};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

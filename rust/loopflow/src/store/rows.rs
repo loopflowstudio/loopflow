@@ -9,13 +9,14 @@ pub fn now_unix() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
-/// SELECT id, name, repo, created_at, parent_wave_id
+/// SELECT id, name, repo, created_at, parent_wave_id, promoted_at
 pub fn map_wave_row(row: &rusqlite::Row<'_>) -> StoreResult<Wave> {
-    Ok(Wave {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        repo: row.get(2)?,
-        created_at: Some(unix_to_datetime(row.get(3)?)),
-        parent_wave_id: row.get(4)?,
-    })
+    Ok(Wave::from_stored_parts(
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        unix_to_datetime(row.get(3)?),
+        row.get(4)?,
+        row.get::<_, Option<i64>>(5)?.map(unix_to_datetime),
+    ))
 }

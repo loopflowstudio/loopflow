@@ -10,6 +10,9 @@ use crate::id::WaveId;
 /// The one opaque capability inherited by every command inside an active Run.
 pub const RUN_LEASE_ENV: &str = "LF_RUN_LEASE";
 
+/// The exact core invocation started for an in-Run agent entrypoint.
+pub const AGENT_INVOCATION_ENV: &str = "LF_AGENT_INVOCATION_ID";
+
 /// Marks a process as an in-Run agent entrypoint even if its capability was
 /// accidentally stripped. That case must fail closed rather than become User.
 pub const RUN_CONTEXT_ENV: &str = "LF_RUN_CONTEXT";
@@ -71,8 +74,8 @@ pub enum DurableDataError {
     InvalidSendState(String),
     #[error("invalid run state: {0}")]
     InvalidRunState(String),
-    #[error("invalid launch state: {0}")]
-    InvalidLaunchState(String),
+    #[error("invalid invocation state: {0}")]
+    InvalidInvocationState(String),
     #[error("invalid boundary state: {0}")]
     InvalidBoundaryState(String),
 }
@@ -81,8 +84,9 @@ durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 durable_id!(EpochId, "epoch_");
 durable_id!(RunId, "run_");
-durable_id!(LaunchId, "launch_");
+durable_id!(AgentInvocationId, "invocation_");
 durable_id!(TurnId, "turn_");
+durable_id!(AskId, "ask_");
 durable_id!(WaitId, "wait_");
 durable_id!(HomeId, "home_");
 durable_id!(SteerId, "steer_");
@@ -190,6 +194,7 @@ impl RunState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RunTrigger {
+    Migration,
     Input {
         basis: Basis,
     },
@@ -221,8 +226,12 @@ pub struct Run {
     pub state: RunState,
     pub trigger: RunTrigger,
     pub retry_of: Option<RunId>,
+    pub containment: Option<Containment>,
+    pub cwd: Option<PathBuf>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub started_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339::option")]
     pub ended_at: Option<OffsetDateTime>,
 }
@@ -300,7 +309,7 @@ pub struct Wait {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LaunchRoute {
+pub struct InvocationRoute {
     pub provider: String,
     pub model: Option<String>,
     pub account_id: Option<String>,
@@ -327,50 +336,25 @@ impl Containment {
                 .parse()
                 .map(|id| Self::ProcessGroup { id })
                 .map_err(|error| {
-                    DurableDataError::InvalidLaunchState(format!(
+                    DurableDataError::InvalidRunState(format!(
                         "invalid process group {id:?}: {error}"
                     ))
                 }),
             "tmux" => Ok(Self::Tmux { name: id }),
-            value => Err(DurableDataError::InvalidLaunchState(format!(
+            value => Err(DurableDataError::InvalidRunState(format!(
                 "invalid containment kind: {value}"
             ))),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LaunchState {
-    Starting,
-    Live,
-    Stopping,
-    Ended,
-}
-
-impl LaunchState {
-    pub(crate) fn parse(value: &str) -> Result<Self, DurableDataError> {
-        match value {
-            "starting" => Ok(Self::Starting),
-            "live" => Ok(Self::Live),
-            "stopping" => Ok(Self::Stopping),
-            "ended" => Ok(Self::Ended),
-            value => Err(DurableDataError::InvalidLaunchState(value.to_string())),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Launch {
-    pub id: LaunchId,
-    pub run_id: RunId,
-    pub home_id: HomeId,
-    pub route: LaunchRoute,
-    pub cwd: PathBuf,
+pub struct AgentInvocation {
+    pub id: AgentInvocationId,
+    pub supervising_run_id: Option<RunId>,
+    pub answer_ask_id: Option<AskId>,
+    pub route: InvocationRoute,
     pub surface: String,
-    pub state: LaunchState,
-    pub containment: Containment,
-    pub opaque_basis: Option<Basis>,
     pub resume_token: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub started_at: OffsetDateTime,
@@ -403,13 +387,13 @@ impl BoundaryState {
             "failed" => Ok(Self::Failed),
             "interrupted" => Ok(Self::Interrupted),
             "unknown" => Ok(Self::Unknown),
-            value => Err(DurableDataError::InvalidLaunchState(format!(
-                "invalid Launch handback state: {value}"
+            value => Err(DurableDataError::InvalidInvocationState(format!(
+                "invalid Invocation handback state: {value}"
             ))),
         }
     }
 
-    pub(crate) fn as_launch_outcome(self) -> &'static str {
+    pub(crate) fn as_invocation_outcome(self) -> &'static str {
         match self {
             Self::Starting | Self::Active => "running",
             Self::Succeeded => "completed",
@@ -443,7 +427,7 @@ impl BoundaryState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Turn {
     pub id: TurnId,
-    pub launch_id: LaunchId,
+    pub invocation_id: AgentInvocationId,
     pub basis: Basis,
     pub state: BoundaryState,
     pub provider_turn_id: Option<String>,
@@ -454,25 +438,65 @@ pub struct Turn {
     pub ended_at: Option<OffsetDateTime>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "work", rename_all = "snake_case")]
+pub enum AnswerRoute {
+    User,
+    Parent(WorkRef),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Answer {
+    pub ask_id: AskId,
+    pub author: Author,
+    pub text: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub answered_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskExchange {
+    pub id: AskId,
+    pub turn_id: TurnId,
+    pub route: AnswerRoute,
+    pub question: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub asked_at: OffsetDateTime,
+    pub answer: Option<Answer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerContext {
+    pub ask: AskExchange,
+    pub child: WorkRef,
+    pub epoch_id: EpochId,
+    pub prior_exchanges: Vec<AskExchange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnswerAttemptHistory {
+    pub failed_attempts: u32,
+    pub last_failed_at: Option<OffsetDateTime>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunAdvance {
-    LaunchStarting {
-        route: LaunchRoute,
+    RunStarting {
         containment: Containment,
         cwd: PathBuf,
+    },
+    InvocationStarting {
+        route: InvocationRoute,
         surface: String,
-        opaque: bool,
         resume_token: Option<String>,
+        answer_ask_id: Option<AskId>,
     },
-    LaunchLive {
-        launch_id: LaunchId,
-    },
-    LaunchEnded {
-        launch_id: LaunchId,
+    InvocationEnded {
+        invocation_id: AgentInvocationId,
         outcome: BoundaryState,
     },
     TurnStarting {
-        launch_id: LaunchId,
+        invocation_id: AgentInvocationId,
     },
     TurnActive {
         turn_id: TurnId,
@@ -490,7 +514,7 @@ pub enum RunAdvance {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdvanceReceipt {
     Run(Run),
-    Launch(Launch),
+    Invocation(AgentInvocation),
     Turn(Turn),
     Wait(Wait),
 }
@@ -645,7 +669,7 @@ pub struct RunLease {
 
 /// Direct lifecycle control observed by the exact active Run.
 ///
-/// This is a projection over Run, Epoch, Launch, and Turn state. It is not a
+/// This is a projection over Run, Epoch, AgentInvocation, and Turn state. It is not a
 /// stored inbox: the mutation already landed on the authority it controls.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunControl {
@@ -735,83 +759,19 @@ pub struct FlowPosition {
     pub step: String,
     pub step_index: u32,
     pub iteration: u32,
-    pub feedback: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "work", rename_all = "snake_case")]
-pub enum AttentionRoute {
-    User,
-    Parent(WorkRef),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Feedback {
-    pub work: WorkRef,
-    pub launch_id: LaunchId,
-    pub basis: Basis,
-    pub position: FlowPosition,
-    /// Stable route for the entire Feedback step.
-    pub attention: AttentionRoute,
-    #[serde(with = "time::serde::rfc3339")]
-    pub opened_at: OffsetDateTime,
-    /// The current unanswered child Turn; absent while the child is acting.
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub attention_at: Option<OffsetDateTime>,
-}
-
-/// Oldest-first parent control input reconstructed from durable child facts.
-///
-/// This is a query result, not an inbox row. If delivery races a boundary the
-/// parent can render the same projection again from the child Feedback.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ChildFeedback {
-    pub feedback: Feedback,
-    pub latest_output: Option<String>,
-    pub evidence: serde_json::Value,
-}
-
-/// User-facing Feedback reconstructed from current durable Work facts.
-///
-/// This is a query result, not a second lifecycle model or a queue row.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UserFeedback {
-    pub feedback: Feedback,
-    pub surface: LaunchSurface,
-    pub latest_output: Option<String>,
-    pub evidence: serde_json::Value,
-}
-
-impl ChildFeedback {
-    pub fn render(&self) -> String {
-        let kind = self.feedback.work.kind();
-        let id = self.feedback.work.id();
-        let facts =
-            serde_json::to_string_pretty(self).expect("Child Feedback facts must serialize");
-        format!(
-            "<lf:child-feedback work-kind=\"{kind}\" work-id=\"{id}\" basis=\"{}:{}\">\n\
-             Service this child before background parent work. Use \
-             `lf work steer {kind} {id} \"<response>\"` to continue or \
-             `lf work continue {kind} {id}` to continue the flow. Delivery alone does not clear attention.\n\n\
-             Durable child output and current evidence:\n{facts}\n</lf:child-feedback>",
-            self.feedback.basis.epoch_id, self.feedback.basis.revision,
-        )
-    }
-}
-
-/// The generic surface for reopening an opaque or provider-backed Launch.
+/// The generic surface for reopening an opaque or provider-backed Invocation.
 /// Attach is a route projection; it does not create identity or liveness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LaunchSurface {
-    pub launch: Launch,
+pub struct InvocationSurface {
+    pub invocation: AgentInvocation,
+    pub run: Run,
     pub work: WorkRef,
     pub wave_id: WaveId,
     pub home_route: String,
-    pub attention: Option<AttentionRoute>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub attention_at: Option<OffsetDateTime>,
     pub handback: Option<BoundaryState>,
     pub attach_argv: Option<Vec<String>>,
 }
@@ -842,8 +802,7 @@ pub struct StopReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterruptReceipt {
     pub run_id: RunId,
-    pub launch_id: Option<LaunchId>,
-    pub turn_id: Option<TurnId>,
+    pub turn_ids: Vec<TurnId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -859,7 +818,7 @@ pub enum ControlCtx<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Basis, BoundarySeed, EpochId, LaunchSurface, Steer, WaitOn, WorkStatus};
+    use super::{Basis, BoundarySeed, EpochId, InvocationSurface, Steer, WaitOn, WorkStatus};
     use crate::durable::{Author, ProjectId, SteerId, WorkRef};
 
     #[test]
@@ -895,19 +854,14 @@ mod tests {
     }
 
     #[test]
-    fn launch_surface_fixture_round_trips() {
-        let fixture = include_str!("../../../tests/fixtures/dto/launch_surface.json");
-        let surface: LaunchSurface = serde_json::from_str(fixture).unwrap();
-        assert_eq!(surface.launch.route.provider, "opaque");
+    fn invocation_surface_fixture_round_trips() {
+        let fixture = include_str!("../../../tests/fixtures/dto/invocation_surface.json");
+        let surface: InvocationSurface = serde_json::from_str(fixture).unwrap();
+        assert_eq!(surface.invocation.route.provider, "opaque");
         assert_eq!(surface.work.kind(), "task");
-        assert!(matches!(
-            surface.attention,
-            Some(super::AttentionRoute::User)
-        ));
-        assert!(surface.attention_at.is_some());
 
         let encoded = serde_json::to_string(&surface).unwrap();
-        let decoded: LaunchSurface = serde_json::from_str(&encoded).unwrap();
+        let decoded: InvocationSurface = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, surface);
     }
 

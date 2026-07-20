@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx, Launch,
+    AgentInvocation, AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx,
     RunState, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
@@ -13,8 +13,8 @@ use crate::engine::process::{
     resolve_lf_binary, start_lf_session, tmux_session_exists, tmux_session_slug,
 };
 use crate::id::WaveId;
-use crate::launch_context::{LinearProjectId, LinearProjectSnapshot, ProjectLaunchReceipt};
 use crate::ops::{OpsError, OpsResult};
+use crate::planning::{LinearProjectId, ProjectPlan};
 use crate::project::{Project, ProjectId};
 use crate::store::{open_existing_store, SharedStore, Store};
 use crate::task::Task;
@@ -35,7 +35,7 @@ pub struct ProjectSnapshot {
     pub provider: String,
     pub provider_session_id: Option<String>,
     pub process_alive: bool,
-    pub launch: Option<Launch>,
+    pub invocation: Option<AgentInvocation>,
     pub latest_event: Option<crate::project::ProjectEvent>,
     pub created_at: time::OffsetDateTime,
     pub updated_at: time::OffsetDateTime,
@@ -70,12 +70,12 @@ async fn project_store() -> OpsResult<SharedStore> {
     })
 }
 
-async fn owning_wave(store: &SharedStore, session: &Project) -> OpsResult<Wave> {
+async fn owning_wave(store: &SharedStore, project: &Project) -> OpsResult<Wave> {
     store
-        .get_wave(&session.wave_id)
+        .get_wave(&project.wave_id)
         .await
         .map_err(|error| project_error(format!("failed to read owning Wave: {error}")))?
-        .ok_or_else(|| project_error(format!("owning Wave {} is not registered", session.wave_id)))
+        .ok_or_else(|| project_error(format!("owning Wave {} is not registered", project.wave_id)))
 }
 
 async fn project_work_status(store: &Store, project: &Project) -> OpsResult<WorkStatus> {
@@ -124,7 +124,7 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
         if directive.is_some() {
             return Err(project_error(format!(
                 "Project {} already exists; use `lf project steer {} <new-direction>`",
-                existing.launch.project.slug, existing.launch.project.slug,
+                existing.plan.slug, existing.plan.slug,
             )));
         }
         Ok(Some((existing, status)))
@@ -145,17 +145,17 @@ pub fn project_run(repo: &Path, project_id: &str, directive: Option<String>) -> 
 
     let resolved =
         crate::ops::task_pm::resolve_project(&repo, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    let mut session = reserve_project(&repo, resolved, directive)?;
+    let mut project = reserve_project(&repo, resolved, directive)?;
     block_on_project(async move {
         let store = project_store().await?;
         if matches!(
-            project_work_status(&store, &session).await?,
+            project_work_status(&store, &project).await?,
             WorkStatus::Running { .. }
         ) {
-            return Ok(session);
+            return Ok(project);
         }
-        launch_project_process(&store, &mut session).await?;
-        wait_until_project_running(&store, &session.id).await
+        launch_project_process(&store, &mut project).await?;
+        wait_until_project_running(&store, &project.id).await
     })
 }
 
@@ -200,19 +200,17 @@ pub(crate) fn reserve_project(
             })?;
         let now = time::OffsetDateTime::now_utc();
         let context = crate::ops::task::project_context(&resolved.project);
-        let session = Project {
+        let project = Project {
             id: predecessor
                 .as_ref()
                 .map(|project| project.id.clone())
                 .unwrap_or_else(ProjectId::new),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new(resolved.project.id.clone())
-                        .map_err(|error| project_error(error.to_string()))?,
-                    slug: resolved.project.slug,
-                    name: resolved.project.name,
-                    prompt_context: context,
-                },
+            plan: ProjectPlan {
+                id: LinearProjectId::new(resolved.project.id.clone())
+                    .map_err(|error| project_error(error.to_string()))?,
+                slug: resolved.project.slug,
+                name: resolved.project.name,
+                prompt_context: context,
                 pm_snapshot_synced_at: resolved.snapshot.synced_at,
             },
             wave_id: wave.id().clone(),
@@ -230,16 +228,16 @@ pub(crate) fn reserve_project(
         };
         let reserved = if predecessor.is_some() {
             store
-                .reopen_project(&session, Author::User, &directive)
+                .reopen_project(&project, Author::User, &directive)
                 .await
         } else {
             store
-                .create_project_with_steer(&session, Author::User, &directive)
+                .create_project_with_steer(&project, Author::User, &directive)
                 .await
         };
         if let Err(error) = reserved {
             if let Some(existing) = store
-                .get_project_by_project(session.launch.project.id.as_str())
+                .get_project_by_project(project.plan.id.as_str())
                 .await
                 .map_err(|read_error| project_error(read_error.to_string()))?
             {
@@ -252,7 +250,7 @@ pub(crate) fn reserve_project(
             }
             return Err(project_error(format!("failed to reserve Project: {error}")));
         }
-        Ok(session)
+        Ok(project)
     })
 }
 
@@ -260,8 +258,8 @@ pub(crate) fn ensure_project_for_task(
     repo: &Path,
     resolved: crate::ops::task_pm::ResolvedProject,
 ) -> OpsResult<Project> {
-    let session = reserve_project(repo, resolved, None)?;
-    Ok(session)
+    let project = reserve_project(repo, resolved, None)?;
+    Ok(project)
 }
 
 fn normalize_directive(directive: Option<String>) -> OpsResult<Option<String>> {
@@ -336,14 +334,14 @@ pub fn project_start(
 
 pub(crate) async fn launch_project_process(
     store: &SharedStore,
-    session: &mut Project,
+    project: &mut Project,
 ) -> OpsResult<()> {
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
-    let wave = owning_wave(store, session).await?;
+    let wave = owning_wave(store, project).await?;
     ensure_clean_main(Path::new(wave.repo()), "Project turn")?;
     let work = store
-        .work_for_child(&ChildRef::Project(session.id.clone()))
+        .work_for_child(&ChildRef::Project(project.id.clone()))
         .await
         .map_err(|error| project_error(error.to_string()))?;
     if store
@@ -365,25 +363,25 @@ pub(crate) async fn launch_project_process(
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
     let tmux_name = format!(
         "lf-project-{}-{}-{}",
-        tmux_session_slug(&session.launch.project.slug),
-        &session.id.as_str()[3..11],
+        tmux_session_slug(&project.plan.slug),
+        &project.id.as_str()[3..11],
         &run.id.as_str()[4..12]
     );
     store
-        .update_project_for_run(session, &lease)
+        .update_project_for_run(project, &lease)
         .await
         .map_err(|error| project_error(error.to_string()))?;
     crate::ops::launch_in_run(
         store,
         &lease,
         crate::ops::RunLaunch {
-            work: crate::durable::WorkRef::Project(session.id.clone()),
-            wave_id: session.wave_id.clone(),
+            work: crate::durable::WorkRef::Project(project.id.clone()),
+            wave_id: project.wave_id.clone(),
             cwd: Path::new(wave.repo()).to_path_buf(),
             tmux_name,
-            agent: session.agent.clone(),
+            agent: project.agent.clone(),
             account_id: None,
-            resume_token: session.provider_session_id.clone(),
+            resume_token: project.provider_session_id.clone(),
         },
     )
     .await
@@ -393,21 +391,21 @@ pub(crate) async fn launch_project_process(
 
 async fn wait_until_project_running(
     store: &SharedStore,
-    session_id: &ProjectId,
+    project_id: &ProjectId,
 ) -> OpsResult<Project> {
     let deadline = tokio::time::Instant::now() + super::child::CHILD_STARTUP_GRACE;
     loop {
-        let session = store
-            .get_project(session_id)
+        let project = store
+            .get_project(project_id)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project disappeared during startup"))?;
-        match project_work_status(store, &session).await? {
-            WorkStatus::Running { .. } => return Ok(session),
+        match project_work_status(store, &project).await? {
+            WorkStatus::Running { .. } => return Ok(project),
             WorkStatus::Done | WorkStatus::Abandoned => {
                 return Err(project_error(format!(
                     "Project {} ended during startup",
-                    session.launch.project.slug
+                    project.plan.slug
                 )))
             }
             WorkStatus::Ready | WorkStatus::Waiting { .. } => {}
@@ -415,16 +413,16 @@ async fn wait_until_project_running(
         if tokio::time::Instant::now() >= deadline {
             return Err(project_error(format!(
                 "Project {} did not become running within 10s",
-                session.launch.project.slug
+                project.plan.slug
             )));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-async fn reconcile_project_liveness(store: &SharedStore, session: &mut Project) -> OpsResult<()> {
+async fn reconcile_project_liveness(store: &SharedStore, project: &mut Project) -> OpsResult<()> {
     let work = store
-        .work_for_child(&ChildRef::Project(session.id.clone()))
+        .work_for_child(&ChildRef::Project(project.id.clone()))
         .await
         .map_err(|error| project_error(error.to_string()))?;
     let Some(run) = store
@@ -434,19 +432,15 @@ async fn reconcile_project_liveness(store: &SharedStore, session: &mut Project) 
     else {
         return Ok(());
     };
-    let launch = store
-        .current_launch_for_run(&run.id)
-        .await
-        .map_err(|error| project_error(error.to_string()))?;
-    if run.state == RunState::Reserved && launch.is_none() {
+    if run.state == RunState::Reserved {
         let still_starting =
             run.created_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc();
         if still_starting {
             return Ok(());
         }
     }
-    if let Some(launch) = &launch {
-        let alive = match &launch.containment {
+    if let Some(containment) = &run.containment {
+        let alive = match containment {
             Containment::Tmux { name } => tmux_session_exists(name)
                 .await
                 .map_err(|error| project_error(error.to_string()))?,
@@ -455,18 +449,14 @@ async fn reconcile_project_liveness(store: &SharedStore, session: &mut Project) 
         if alive {
             return Ok(());
         }
-        if launch.state == crate::durable::LaunchState::Starting
-            && launch.started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
-        {
+        if run.started_at.is_some_and(|started_at| {
+            started_at + time::Duration::seconds(10) > time::OffsetDateTime::now_utc()
+        }) {
             return Ok(());
         }
     }
     store
-        .recover_run(
-            &run.id,
-            launch.as_ref().map(|launch| &launch.id),
-            ContainmentObservation::Absent,
-        )
+        .recover_run(&run.id, ContainmentObservation::Absent)
         .await
         .map_err(|error| project_error(error.to_string()))?;
     Ok(())
@@ -475,37 +465,37 @@ async fn reconcile_project_liveness(store: &SharedStore, session: &mut Project) 
 pub fn project_status(project: &str) -> OpsResult<Project> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut session = store
+        let mut project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut session).await?;
-        Ok(session)
+        reconcile_project_liveness(&store, &mut project).await?;
+        Ok(project)
     })
 }
 
-pub fn project_snapshot(session: &Project) -> OpsResult<ProjectSnapshot> {
-    let session = session.clone();
+pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
+    let project = project.clone();
     block_on_project(async move {
         let store = project_store().await?;
-        let wave = owning_wave(&store, &session).await?;
+        let wave = owning_wave(&store, &project).await?;
         let work = store
-            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .work_for_child(&ChildRef::Project(project.id.clone()))
             .await
             .map_err(|error| project_error(error.to_string()))?;
-        let launch = match store
+        let run = store
             .current_run(&work)
             .await
-            .map_err(|error| project_error(error.to_string()))?
-        {
+            .map_err(|error| project_error(error.to_string()))?;
+        let invocation = match &run {
             Some(run) => store
-                .current_launch_for_run(&run.id)
+                .open_invocation_for_run(&run.id)
                 .await
                 .map_err(|error| project_error(error.to_string()))?,
             None => None,
         };
-        let process_alive = match launch.as_ref().map(|launch| &launch.containment) {
+        let process_alive = match run.as_ref().and_then(|run| run.containment.as_ref()) {
             Some(Containment::Tmux { name }) => tmux_session_exists(name)
                 .await
                 .map_err(|error| project_error(error.to_string()))?,
@@ -513,13 +503,13 @@ pub fn project_snapshot(session: &Project) -> OpsResult<ProjectSnapshot> {
             None => false,
         };
         let latest_event = store
-            .project_events_after(&session.id, 0)
+            .project_events_after(&project.id, 0)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .into_iter()
             .last();
         let pending_observations = store
-            .pending_project_observations(&session.id)
+            .pending_project_observations(&project.id)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .len() as u32;
@@ -528,23 +518,23 @@ pub fn project_snapshot(session: &Project) -> OpsResult<ProjectSnapshot> {
             .await
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectSnapshot {
-            id: session.id.to_string(),
-            external_project_id: session.launch.project.id.as_str().to_string(),
-            project_slug: session.launch.project.slug,
-            project_name: session.launch.project.name,
+            id: project.id.to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
+            project_slug: project.plan.slug,
+            project_name: project.plan.name,
             wave: wave.name().to_string(),
             status,
-            iteration: session.iteration,
-            observation_cursor: session.observation_cursor,
+            iteration: project.iteration,
+            observation_cursor: project.observation_cursor,
             pending_observations,
-            agent: session.agent,
-            provider: session.provider,
-            provider_session_id: session.provider_session_id,
+            agent: project.agent,
+            provider: project.provider,
+            provider_session_id: project.provider_session_id,
             process_alive,
-            launch,
+            invocation,
             latest_event,
-            created_at: session.created_at,
-            updated_at: session.updated_at,
+            created_at: project.created_at,
+            updated_at: project.updated_at,
         })
     })
 }
@@ -552,24 +542,24 @@ pub fn project_snapshot(session: &Project) -> OpsResult<ProjectSnapshot> {
 fn queue_project_steer(project: &str, message: String) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut session = store
+        let mut project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut session).await?;
+        reconcile_project_liveness(&store, &mut project).await?;
         let receipt =
-            super::child::append_steer(&store, ChildRef::Project(session.id.clone()), &message)
+            super::child::append_steer(&store, ChildRef::Project(project.id.clone()), &message)
                 .await?;
         if !matches!(
-            project_work_status(&store, &session).await?,
+            project_work_status(&store, &project).await?,
             WorkStatus::Running { .. }
         ) {
-            launch_project_process(&store, &mut session).await?;
+            launch_project_process(&store, &mut project).await?;
         }
         Ok(ProjectControlResult {
-            id: session.id.to_string(),
-            external_project_id: session.launch.project.id.as_str().to_string(),
+            id: project.id.to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
             receipt: super::child::WorkControlReceipt::Steer { receipt },
         })
     })
@@ -582,14 +572,14 @@ pub fn project_steer(project: &str, message: String) -> OpsResult<ProjectControl
 pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut session = store
+        let mut project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut session).await?;
+        reconcile_project_liveness(&store, &mut project).await?;
         let work = store
-            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .work_for_child(&ChildRef::Project(project.id.clone()))
             .await
             .map_err(|error| project_error(error.to_string()))?;
         let run = store
@@ -603,8 +593,8 @@ pub fn project_interrupt(project: &str) -> OpsResult<ProjectControlResult> {
             .await
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectControlResult {
-            id: session.id.to_string(),
-            external_project_id: session.launch.project.id.as_str().to_string(),
+            id: project.id.to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
             receipt: super::child::WorkControlReceipt::Interrupt { receipt },
         })
     })
@@ -617,17 +607,17 @@ pub fn project_resume(
 ) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut session = store
+        let mut project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut session).await?;
-        let external_project_id = session.launch.project.id.as_str().to_string();
-        let id = session.id.to_string();
+        reconcile_project_liveness(&store, &mut project).await?;
+        let external_project_id = project.plan.id.as_str().to_string();
+        let id = project.id.to_string();
         let run = super::child::resume_child(
             &store,
-            super::child::Child::Project(Box::new(session)),
+            super::child::Child::Project(Box::new(project)),
             model,
             reason,
         )
@@ -643,14 +633,14 @@ pub fn project_resume(
 pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectControlResult> {
     block_on_project(async move {
         let store = project_store().await?;
-        let mut session = store
+        let mut project = store
             .get_project_by_project(project)
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error(format!("no Project exists for {project:?}")))?;
-        reconcile_project_liveness(&store, &mut session).await?;
+        reconcile_project_liveness(&store, &mut project).await?;
         let work = store
-            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .work_for_child(&ChildRef::Project(project.id.clone()))
             .await
             .map_err(|error| project_error(error.to_string()))?;
         let basis = store
@@ -663,8 +653,8 @@ pub fn project_abandon(project: &str, reason: String) -> OpsResult<ProjectContro
             .await
             .map_err(|error| project_error(error.to_string()))?;
         Ok(ProjectControlResult {
-            id: session.id.to_string(),
-            external_project_id: session.launch.project.id.as_str().to_string(),
+            id: project.id.to_string(),
+            external_project_id: project.plan.id.as_str().to_string(),
             receipt: super::child::WorkControlReceipt::Abandon { receipt },
         })
     })
@@ -677,10 +667,10 @@ pub fn project_wait(
 ) -> OpsResult<Project> {
     let start = Instant::now();
     loop {
-        let session = project_status(project)?;
+        let project = project_status(project)?;
         let status = block_on_project(async {
             let store = project_store().await?;
-            project_work_status(&store, &session).await
+            project_work_status(&store, &project).await
         })?;
         let done = match until {
             ProjectWaitUntil::Waiting => !matches!(status, WorkStatus::Running { .. }),
@@ -689,32 +679,32 @@ pub fn project_wait(
             }
         };
         if done {
-            return Ok(session);
+            return Ok(project);
         }
         if timeout.is_some_and(|timeout| start.elapsed() >= timeout) {
-            return Ok(session);
+            return Ok(project);
         }
         std::thread::sleep(Duration::from_millis(200));
     }
 }
 
 pub fn project_attach(project: &str) -> OpsResult<()> {
-    let session = project_status(project)?;
+    let project = project_status(project)?;
     let status = block_on_project(async {
         let store = project_store().await?;
-        project_work_status(&store, &session).await
+        project_work_status(&store, &project).await
     })?;
     if !matches!(status, WorkStatus::Running { .. }) {
         return Err(project_error(format!(
             "Project {} is not running; run `lf project resume {}` first",
-            session.launch.project.slug,
-            session.launch.project.id.as_str()
+            project.plan.slug,
+            project.plan.id.as_str()
         )));
     }
-    let launch = block_on_project(async {
+    let run = block_on_project(async {
         let store = project_store().await?;
         let work = store
-            .work_for_child(&ChildRef::Project(session.id.clone()))
+            .work_for_child(&ChildRef::Project(project.id.clone()))
             .await
             .map_err(|error| project_error(error.to_string()))?;
         let run = store
@@ -722,17 +712,13 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
             .await
             .map_err(|error| project_error(error.to_string()))?
             .ok_or_else(|| project_error("Project has no active Run"))?;
-        store
-            .current_launch_for_run(&run.id)
-            .await
-            .map_err(|error| project_error(error.to_string()))?
-            .ok_or_else(|| project_error("Project Run has no active Launch"))
+        Ok(run)
     })?;
-    let Containment::Tmux { name } = launch.containment else {
-        return Err(project_error("Project Launch is not attachable"));
+    let Some(Containment::Tmux { name }) = run.containment else {
+        return Err(project_error("Project Run is not attachable"));
     };
     let status = std::process::Command::new("tmux")
-        .args(["attach-session", "-t", &name])
+        .args(["attach-project", "-t", &name])
         .status()
         .map_err(|error| project_error(format!("failed to attach Project: {error}")))?;
     if !status.success() {
@@ -741,25 +727,25 @@ pub fn project_attach(project: &str) -> OpsResult<()> {
     Ok(())
 }
 
-pub(crate) async fn wake_project(session_id: &ProjectId) -> OpsResult<()> {
+pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
     let store = project_store().await?;
-    let mut session = store
-        .get_project(session_id)
+    let mut project = store
+        .get_project(project_id)
         .await
         .map_err(|error| project_error(error.to_string()))?
-        .ok_or_else(|| project_error(format!("Project {session_id} not found")))?;
+        .ok_or_else(|| project_error(format!("Project {project_id} not found")))?;
     // A wake is a supervisor restart: a Task observation arrived and the Project
     // may want to judge it. That is never a reason to revive a Project whose end
     // was already decided.
-    if let Some(bar) = session.supervisor_restart_bar() {
-        tracing::info!(project = %session_id, "not waking Project: {bar}");
+    if let Some(bar) = project.supervisor_restart_bar() {
+        tracing::info!(project = %project_id, "not waking Project: {bar}");
         return Ok(());
     }
     if !matches!(
-        project_work_status(&store, &session).await?,
+        project_work_status(&store, &project).await?,
         WorkStatus::Running { .. }
     ) {
-        launch_project_process(&store, &mut session).await?;
+        launch_project_process(&store, &mut project).await?;
     }
     Ok(())
 }
@@ -767,8 +753,8 @@ pub(crate) async fn wake_project(session_id: &ProjectId) -> OpsResult<()> {
 pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsResult<()> {
     wake_project(&task.project_id).await
 }
-/// Complete the mechanical half of an authored project-promotion flow: pin
-/// the registry ancestry, start the child residency, and wait for its endpoint.
+/// Complete the mechanical half of an authored project-promotion flow: record
+/// the promotion and ancestry, start the child residency, and wait for its endpoint.
 pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<String> {
     let origin = crate::engine::wave_context::wave_origin(repo);
     let goal = origin.join("wave").join(child).join("GOAL.md");
@@ -788,7 +774,7 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
                     .to_string(),
             )
         })?;
-        link_parent(&store, &origin, parent, child).await?;
+        record_promotion(&store, &origin, parent, child).await?;
 
         if crate::wave::server::live_endpoint(&origin, child)
             .await
@@ -797,11 +783,8 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
             launch_residency(&origin, child).await?;
         }
         for _ in 0..100 {
-            if crate::wave::server::live_endpoint(&origin, child)
-                .await
-                .is_some()
-            {
-                wake_child(&origin, child).await?;
+            if let Some(endpoint) = crate::wave::server::live_endpoint(&origin, child).await {
+                wake_child_observer(&endpoint, parent, child).await;
                 return Ok(promotion_session_name(&origin, child));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -812,32 +795,29 @@ pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<S
     })
 }
 
-/// Wake the promoted child through its thread door, not the bus: a fresh
-/// mind's bus cursor attaches at the head, so a row published during boot
-/// could land before the ear exists. The thread door is synchronous with the
-/// live listener — no race. The message is the steward's own voice, so it is
-/// unattributed like every human turn.
-async fn wake_child(repo: &Path, wave: &str) -> OpsResult<()> {
-    let status = tokio::process::Command::new(resolve_lf_binary())
-        .args([
-            "chat",
-            "--wave",
+/// Nudge the existing typed observer after the durable promotion is visible.
+async fn wake_child_observer(endpoint: &str, parent: &str, wave: &str) {
+    let response = reqwest::Client::new()
+        .post(format!("http://{endpoint}/observations"))
+        .json(&serde_json::json!({ "promotion": { "parent": parent } }))
+        .send()
+        .await;
+    match response {
+        Ok(response) if response.status() == reqwest::StatusCode::NO_CONTENT => {}
+        Ok(response) => tracing::warn!(
             wave,
-            "Promotion complete. Run the first child-wave pass, report what you now own in this thread, then publish the same concise report to the parent with `lf radio pub --parent`.",
-        ])
-        .current_dir(repo)
-        .status()
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to wake promoted wave: {err}")))?;
-    if !status.success() {
-        return Err(OpsError::Message(format!(
-            "promoted wave '{wave}' started, but its bootstrap message failed"
-        )));
+            status = %response.status(),
+            "promoted Wave is resident, but its immediate observer nudge was refused; heartbeat remains available"
+        ),
+        Err(error) => tracing::warn!(
+            wave,
+            %error,
+            "promoted Wave is resident, but its immediate observer nudge failed; heartbeat remains available"
+        ),
     }
-    Ok(())
 }
 
-async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
+async fn record_promotion(store: &Store, repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
     let parent = store
         .get_wave_by_name(parent)
         .await
@@ -851,15 +831,9 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
         Some(wave) => wave,
         None => Wave::new(WaveId::new(), child.to_string(), repo.display().to_string()),
     };
-    if child_wave
-        .parent_wave_id()
-        .is_some_and(|current| current != parent.id())
-    {
-        return Err(OpsError::Message(format!(
-            "child wave '{child}' already belongs to another parent"
-        )));
-    }
-    child_wave.parent_wave_id = Some(parent.id().clone());
+    child_wave
+        .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
+        .map_err(OpsError::Message)?;
     if store
         .get_wave(child_wave.id())
         .await
@@ -869,12 +843,22 @@ async fn link_parent(store: &Store, repo: &Path, parent: &str, child: &str) -> O
         store
             .update_wave(&child_wave)
             .await
-            .map_err(|err| OpsError::Message(format!("failed to link child wave: {err}")))?;
+            .map_err(|err| OpsError::Message(format!("failed to record child promotion: {err}")))?;
     } else {
         store
             .create_wave(&child_wave)
             .await
             .map_err(|err| OpsError::Message(format!("failed to register child wave: {err}")))?;
+    }
+    let recorded = store
+        .get_wave(child_wave.id())
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to verify child promotion: {err}")))?
+        .ok_or_else(|| OpsError::Message("promoted child wave disappeared".to_string()))?;
+    if recorded.parent_wave_id() != Some(parent.id()) || recorded.promoted_at().is_none() {
+        return Err(OpsError::Message(format!(
+            "child wave '{child}' promotion did not persist atomically"
+        )));
     }
     Ok(())
 }
@@ -972,6 +956,15 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn promotion_observer_nudge_is_best_effort() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind dead endpoint");
+        let endpoint = listener.local_addr().expect("endpoint").to_string();
+        drop(listener);
+
+        wake_child_observer(&endpoint, "platform", "ship").await;
+    }
+
     /// The launch resolver for Projects ignores `LF_CONTROL_BIN`. It
     /// names a real, existing binary (the historical pin) while the current
     /// Home `LF_BIN` is gone; the launch fails at binary resolution, proving the
@@ -1011,15 +1004,13 @@ mod tests {
                 .unwrap(),
         );
         let now = time::OffsetDateTime::now_utc();
-        let mut session = Project {
+        let mut project = Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: LinearProjectSnapshot {
-                    id: LinearProjectId::new("project-no-pin").unwrap(),
-                    slug: "no-pin".to_string(),
-                    name: "No pin".to_string(),
-                    prompt_context: String::new(),
-                },
+            plan: ProjectPlan {
+                id: LinearProjectId::new("project-no-pin").unwrap(),
+                slug: "no-pin".to_string(),
+                name: "No pin".to_string(),
+                prompt_context: String::new(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             wave_id: WaveId::new(),
@@ -1035,19 +1026,19 @@ mod tests {
         };
         store
             .create_wave(&Wave::new(
-                session.wave_id.clone(),
+                project.wave_id.clone(),
                 "no-pin".to_string(),
                 repo.path().display().to_string(),
             ))
             .await
             .unwrap();
-        store.create_project(&session).await.unwrap();
+        store.create_project(&project).await.unwrap();
 
         let previous_control_bin = std::env::var_os("LF_CONTROL_BIN");
         let previous_lf_bin = std::env::var_os("LF_BIN");
         std::env::set_var("LF_CONTROL_BIN", "/bin/sh");
         std::env::set_var("LF_BIN", "/loopflow-test/does-not-exist/lf");
-        let result = super::launch_project_process(&store, &mut session).await;
+        let result = super::launch_project_process(&store, &mut project).await;
         match previous_lf_bin {
             Some(value) => std::env::set_var("LF_BIN", value),
             None => std::env::remove_var("LF_BIN"),
@@ -1067,7 +1058,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_parent_registers_the_promoted_wave_as_a_child() {
+    async fn record_promotion_persists_occurrence_and_ancestry() {
         let tmp = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
             .await
@@ -1079,7 +1070,7 @@ mod tests {
         );
         store.create_wave(&parent).await.unwrap();
 
-        link_parent(&store, tmp.path(), "platform", "release-stability")
+        record_promotion(&store, tmp.path(), "platform", "release-stability")
             .await
             .unwrap();
 
@@ -1089,6 +1080,27 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(child.parent_wave_id(), Some(parent.id()));
+        let promoted_at = child.promoted_at().expect("promotion occurrence");
         assert_eq!(child.repo(), tmp.path().display().to_string());
+
+        record_promotion(&store, tmp.path(), "platform", "release-stability")
+            .await
+            .unwrap();
+        let replayed = store
+            .get_wave_by_name("release-stability")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed.promoted_at(), Some(promoted_at));
+
+        let stale = replayed.with_parent(WaveId::new());
+        store.update_wave(&stale).await.unwrap();
+        let preserved = store
+            .get_wave_by_name("release-stability")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(preserved.parent_wave_id(), Some(parent.id()));
+        assert_eq!(preserved.promoted_at(), Some(promoted_at));
     }
 }

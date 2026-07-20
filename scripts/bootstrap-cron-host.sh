@@ -2,7 +2,7 @@
 #
 # Bootstrap a maintained lf cron host.
 #
-# Probes reachability + auth (bounded `lf ssh`), verifies lf and Doppler are
+# Probes reachability + auth over bounded SSH, verifies lf and Doppler are
 # present, syncs the wave's repo-owned schedules onto the host, and lists the
 # result. Idempotent and secret-free — re-run any time to reconcile.
 #
@@ -20,15 +20,19 @@ step() { printf '\n== %s ==\n' "$1"; }
 
 step "reachability + auth ($host)"
 # Bounded lf ssh: an unreachable host fails in ~10s instead of hanging.
-lf ssh "$host" -- lf --version
+lf ssh "$host" --version
 
 step "host prerequisites"
-lf ssh "$host" -- doppler --version
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" doppler --version
+
+step "release publisher preflight"
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" \
+  doppler run -- uv run python scripts/publish_release.py check
 
 step "sync repo-owned schedules (wave: $wave)"
-lf ssh "$host" -- lf cron sync --wave "$wave"
+lf ssh "$host" cron sync --wave "$wave"
 
 step "installed schedules"
-lf ssh "$host" -- lf cron list
+lf ssh "$host" cron list
 
 printf '\nbootstrap complete: %s runs wave %s schedules via launchd\n' "$host" "$wave"

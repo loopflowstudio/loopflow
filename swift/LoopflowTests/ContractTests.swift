@@ -36,7 +36,6 @@ struct ContractTests {
         #expect(turn.status == .running)
         #expect(turn.isInProgress)
         #expect(turn.createdAtDate != nil)
-        #expect(turn.from == "worker")
         #expect(turn.items.count == 6)
 
         guard case let .command(id, command, cwd, status, output, exitCode, durationMs) = turn.items[0] else {
@@ -96,15 +95,6 @@ struct ContractTests {
         let roundTripped = try JSONDecoder().decode(ChatTurn.self, from: reencoded)
         #expect(roundTripped == turn)
 
-        // `from` is explicitly Optional: a payload without the key decodes as
-        // nil — no default masking (mirrored in Rust's dto_fixtures).
-        var json = try #require(
-            JSONSerialization.jsonObject(with: data) as? [String: Any]
-        )
-        json.removeValue(forKey: "from")
-        let stripped = try JSONSerialization.data(withJSONObject: json)
-        let unattributed = try JSONDecoder().decode(ChatTurn.self, from: stripped)
-        #expect(unattributed.from == nil)
     }
 
     @Test("turn_delta.json decodes and grows a turn through absorbing")
@@ -125,7 +115,7 @@ struct ContractTests {
         // stream message concatenates into text, never into items.
         let opened = try ChatTurn(
             id: "turn-3", role: .assistant, text: "so ", status: .running, items: [],
-            createdAt: "2026-07-03T18:30:00Z", from: nil, body: nil, activity: nil
+            createdAt: "2026-07-03T18:30:00Z", body: nil, activity: nil
         )
         let grown = try opened.absorbing(delta.item)
         #expect(grown.text == "so the parser handles the edge case now.")
@@ -141,7 +131,7 @@ struct ContractTests {
     func absorbingKeepsCommentaryAsItem() throws {
         let opened = try ChatTurn(
             id: "turn-10", role: .assistant, text: "", status: .running, items: [],
-            createdAt: "2026-07-10T17:52:05Z", from: nil, body: nil, activity: nil
+            createdAt: "2026-07-10T17:52:05Z", body: nil, activity: nil
         )
         // Operational narration the provider tagged `commentary` must survive as
         // a discrete item so `turnPresentation` can fold it behind a disclosure;
@@ -178,7 +168,6 @@ struct ContractTests {
             "status": "completed",
             "items": [],
             "created_at": "2026-07-13T20:00:00Z",
-            "from": "Task INF-123",
             "body": NSNull(),
             "activity": activity,
         ]
@@ -199,7 +188,6 @@ struct ContractTests {
         #expect(turn.id == "turn-4")
         #expect(turn.role == .user)
         #expect(turn.status == .completed)
-        #expect(turn.from == nil, "explicit null decodes as absent")
         #expect(turn.items.isEmpty)
         #expect(WaveLoopState(rawValue: posted.state) == .turning)
 

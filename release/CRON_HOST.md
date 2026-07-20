@@ -1,8 +1,9 @@
 # Maintained cron host
 
-A maintained cron host runs `lf` on a schedule so the daily health check happens
-whether or not anyone is at a keyboard. The runtime is explicit: **launchd invokes
-top-level `lf` commands** — no daemon, no resident wave listener required.
+A maintained cron host runs `lf` on a schedule so health checks and patch
+releases happen whether or not anyone is at a keyboard. The runtime is explicit:
+**launchd invokes top-level `lf` commands** — no daemon, no resident wave
+listener required.
 
 ## The host
 
@@ -10,7 +11,7 @@ top-level `lf` commands** — no daemon, no resident wave listener required.
 |------|---------|------|
 | `mini-heart` | `100.96.227.95` (`*.tail0eda02.ts.net`), macOS | First maintained `lf cron` host |
 
-Reach it over Tailscale: `lf ssh mini-heart -- lf --version`. First contact needs
+Reach it over Tailscale: `lf ssh mini-heart --version`. First contact needs
 the host key trusted and Tailscale up on both ends. `lf ssh` is bounded
 (`ConnectTimeout=10`, `BatchMode=yes`), so an unreachable host fails in seconds
 instead of hanging.
@@ -24,6 +25,13 @@ the repo, not by opening the Tailscale console.
 - Doppler configured for the release project so secrets resolve without ever
   printing a value: `doppler setup` once, out of band. `lf cron sync` never reads
   or forwards secrets; scheduled `lf` runs resolve their own via Doppler.
+- GitHub CLI auth able to create release PRs/tags, download workflow artifacts,
+  and publish releases; an app-scoped Fly deploy token; crates.io, R2,
+  notarization, and signing credentials available through Doppler.
+- An Apple Silicon Mac with the Developer ID signing identity installed, plus
+  `cargo`, `flyctl`, `gh`, `security`, `swift`, `uv`, and `xcrun` on `PATH`.
+- An agent provider available for the `release` flow. Release-note generation
+  has a deterministic fallback, but the flow itself is agent-owned.
 - A checkout of this repo; run `lf cron sync` from inside it.
 
 ## Repo-owned schedules
@@ -35,6 +43,8 @@ read by both the resident wave listener and the launchd host:
 crons:
   - flow: telemetry-daily      # runs `op: doctor`; exits non-zero on any red check
     schedule: "0 0 9 * * *"    # 6-field cron expr: 09:00 daily
+  - flow: release-run          # runs `lf release run patch`
+    schedule: "0 0 10 * * *"   # after telemetry, host-local
 ```
 
 Install / update them on the host in one idempotent command:
@@ -54,17 +64,18 @@ flow is no longer declared, and reports any schedule launchd can't run. Edit
 scripts/bootstrap-cron-host.sh mini-heart infrastructure
 ```
 
-Probes reachability and auth (bounded `lf ssh`), checks `lf` and Doppler are
-present, syncs the repo-owned schedules, and lists the result. Idempotent and
-secret-free; re-run it any time to reconcile.
+Probes reachability and host-native auth over bounded SSH,
+runs the release publisher's read-only credential/tool preflight, syncs the
+repo-owned schedules, and lists the result. Idempotent and secret-free; re-run
+it any time to reconcile.
 
 ## Failure surfacing (v0)
 
 launchd writes each job's stdout+stderr to
-`<repo>/.lf/logs/cron.<wave>.<flow>.log`; `lf doctor` (via `telemetry-daily`) exits
-non-zero on a failed check. A red run leaves a non-zero exit and a log line. Turning
-a red cron log into an attention item or a focused fix PR is the wave's separate
-"release feedback loop" work, not part of bringing the host up.
+`<repo>/.lf/logs/cron.<wave>.<flow>.log`; the release publisher additionally
+writes redacted JSON receipts under `<repo>/.lf/logs/`. `lf doctor` (via
+`telemetry-daily`) exits non-zero on a failed check. A red run leaves a non-zero
+exit and a named stage in the log. No-change release runs exit successfully.
 
 ## Known limitations (v0)
 

@@ -927,6 +927,7 @@ impl CodexHarness {
         #[cfg(unix)]
         command.process_group(0);
         super::configure_vendor_tokio_env(&mut command)?;
+        super::configure_agent_authority(&mut command, launch.authority);
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;

@@ -14,7 +14,7 @@
           "steps": [
             { "name": "implement", "kind": "skill" },
             { "name": "compress", "kind": "skill" },
-            { "name": "lint", "kind": "skill" },
+            { "name": "compress", "kind": "skill" },
             { "name": "gate", "kind": "skill" }
           ],
           "cursor": 1,
@@ -35,7 +35,7 @@
       "next": {
         "invocation_id": "inv-code-1",
         "flow": "code",
-        "step": "lint",
+        "step": "compress",
         "kind": "skill",
         "index": 2,
         "total": 4,

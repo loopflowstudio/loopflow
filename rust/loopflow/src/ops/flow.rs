@@ -9,8 +9,8 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_run, release_status, release_tag, submit, AbandonOptions,
-    CommitOptions, LandOptions, PrOptions, RebaseOptions,
+    release_check, release_notes, release_publish, release_run, release_status, release_tag,
+    submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
@@ -72,12 +72,6 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
         Some(Commands::Release { cmd }) => execute_release(repo, cmd, progress),
         Some(Commands::Doctor { json }) => crate::lf::commands::doctor::run(json)
             .map_err(|error| OpsError::Message(error.to_string())),
-        Some(Commands::Receipt { cmd }) => match cmd {
-            crate::lf::ReceiptCommand::Show { token, wave, json } => {
-                crate::lf::commands::receipt::run(&token, wave.as_deref(), json)
-                    .map_err(|error| OpsError::Message(error.to_string()))
-            }
-        },
         _ => Err(unsupported()),
     }
 }
@@ -212,6 +206,12 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
             release_tag(repo, &version, target.as_deref())?;
             Ok(())
         }
+        ReleaseCommand::Publish {
+            tag,
+            notes,
+            assets,
+            finalize,
+        } => release_publish(repo, &tag, notes.as_deref(), &assets, finalize),
         ReleaseCommand::Status { target } => {
             release_status(repo, target.as_deref())?;
             Ok(())
@@ -226,4 +226,22 @@ fn unsupported() -> OpsError {
         "op item must be one of pr open, pr submit, pr land, pr abandon, rebase, commit, release, or doctor"
             .to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ops::NullProgress;
+
+    #[test]
+    fn authored_flow_cannot_dispatch_evidence_receipt_command() {
+        let item = Op {
+            command: "receipt".to_string(),
+            args: vec!["show".to_string(), "chat_turn:turn-3".to_string()],
+        };
+
+        let error = execute_flow_ops(Path::new("."), &item, &NullProgress)
+            .expect_err("removed evidence command must not dispatch");
+        assert!(error.to_string().contains("op item must be one of"));
+    }
 }

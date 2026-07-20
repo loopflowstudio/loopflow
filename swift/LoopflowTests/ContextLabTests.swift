@@ -18,8 +18,8 @@ struct ContextLabTests {
         #expect(route.query.waves == ["product"])
         #expect(route.query.startedAfter == 408_000)
         #expect(route.query.startedBefore == 3_000_000)
-        #expect(route.selectedNodeId == "session-set")
-        #expect(route.focusNodeId == "session-set")
+        #expect(route.selectedNodeId == "invocation-set")
+        #expect(route.focusNodeId == "invocation-set")
         #expect(route.mode == .aggregate)
         #expect(route.isWaveScoped)
 
@@ -36,7 +36,7 @@ struct ContextLabTests {
     @Test("Saved visualization modes use semantic values")
     func contextLabModesPersistIndependentlyFromLabels() {
         #expect(ContextLabMode.allCases.map(\.rawValue) == ["aggregate", "lanes", "sources"])
-        #expect(ContextLabMode.allCases.map(\.title) == ["Initial prompts", "Agent sessions", "Sources"])
+        #expect(ContextLabMode.allCases.map(\.title) == ["Initial prompts", "Invocations", "Sources"])
     }
 
     @Test("Source refinement stays inside the selected canonical repo")
@@ -48,9 +48,9 @@ struct ContextLabTests {
         ).query
 
         #expect(contextRelativeSourcePath(
-            "/src/loopflow/rust/loopflow/src/engine/builtins/build/skill/refine.md",
+            "/src/loopflow/rust/loopflow/src/engine/builtins/task/skill/refine.md",
             repoPath: query.repoPaths[0]
-        ) == "rust/loopflow/src/engine/builtins/build/skill/refine.md")
+        ) == "rust/loopflow/src/engine/builtins/task/skill/refine.md")
         #expect(contextRelativeSourcePath(
             "/src/loopflow-other/refine.md",
             repoPath: query.repoPaths[0]
@@ -66,7 +66,7 @@ struct ContextLabTests {
     }
 
     @Test("Selected-source sorting uses share rather than raw token load")
-    func selectedSourceShareUsesTheSessionDenominator() {
+    func selectedSourceShareUsesTheLaunchDenominator() {
         let heavierSlice = contextSelectedSourceShare(
             selectedTokens: 600,
             contextTokens: 2_000
@@ -82,12 +82,12 @@ struct ContextLabTests {
 
     @Test("Revision comparison waits for enough similarly captured evidence")
     func revisionComparisonRequiresComparablePopulations() {
-        let fiveCodex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedLaunches: 5)]
-        let tenCodex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedLaunches: 10)]
+        let fiveCodex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedInvocations: 5)]
+        let tenCodex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedInvocations: 10)]
         #expect(contextRevisionComparisonBlocker(
-            earlierLaunches: 2,
+            earlierInvocations: 2,
             earlierCompleteCaptures: 2,
-            laterLaunches: 3,
+            laterInvocations: 3,
             laterCompleteCaptures: 3,
             earlierProviderModels: [],
             laterProviderModels: [],
@@ -97,9 +97,9 @@ struct ContextLabTests {
             laterLastSeen: nil
         ) != nil)
         #expect(contextRevisionComparisonBlocker(
-            earlierLaunches: 10,
+            earlierInvocations: 10,
             earlierCompleteCaptures: 10,
-            laterLaunches: 10,
+            laterInvocations: 10,
             laterCompleteCaptures: 8,
             earlierProviderModels: tenCodex,
             laterProviderModels: tenCodex,
@@ -109,9 +109,9 @@ struct ContextLabTests {
             laterLastSeen: 400
         ) != nil)
         #expect(contextRevisionComparisonBlocker(
-            earlierLaunches: 5,
+            earlierInvocations: 5,
             earlierCompleteCaptures: 4,
-            laterLaunches: 10,
+            laterInvocations: 10,
             laterCompleteCaptures: 7,
             earlierProviderModels: fiveCodex,
             laterProviderModels: tenCodex,
@@ -124,12 +124,12 @@ struct ContextLabTests {
 
     @Test("Revision comparison balances provider mix and observation spans")
     func revisionComparisonRejectsConfoundedPopulations() {
-        let codex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedLaunches: 10)]
-        let claude = [ProviderModelExposure(provider: "claude", model: nil, exposedLaunches: 10)]
+        let codex = [ProviderModelExposure(provider: "codex", model: "gpt-5", exposedInvocations: 10)]
+        let claude = [ProviderModelExposure(provider: "claude", model: nil, exposedInvocations: 10)]
         #expect(contextRevisionComparisonBlocker(
-            earlierLaunches: 10,
+            earlierInvocations: 10,
             earlierCompleteCaptures: 9,
-            laterLaunches: 10,
+            laterInvocations: 10,
             laterCompleteCaptures: 9,
             earlierProviderModels: codex,
             laterProviderModels: claude,
@@ -139,9 +139,9 @@ struct ContextLabTests {
             laterLastSeen: 400
         )?.contains("provider/model mix") == true)
         #expect(contextRevisionComparisonBlocker(
-            earlierLaunches: 10,
+            earlierInvocations: 10,
             earlierCompleteCaptures: 9,
-            laterLaunches: 10,
+            laterInvocations: 10,
             laterCompleteCaptures: 9,
             earlierProviderModels: codex,
             laterProviderModels: codex,
@@ -151,9 +151,9 @@ struct ContextLabTests {
             laterLastSeen: 550
         )?.contains("observation spans") == true)
         #expect(contextRevisionComparisonBlocker(
-            earlierLaunches: 10,
+            earlierInvocations: 10,
             earlierCompleteCaptures: 9,
-            laterLaunches: 10,
+            laterInvocations: 10,
             laterCompleteCaptures: 9,
             earlierProviderModels: [],
             laterProviderModels: codex,
@@ -166,7 +166,7 @@ struct ContextLabTests {
 
     @Test("Task workspace backlinks retain the exact research selection")
     func contextBacklinkRoundTrips() throws {
-        let query = SessionSetQuery(
+        let query = InvocationSetQuery(
             repoPaths: ["/src/loopflow"],
             startedAfter: 10,
             startedBefore: 20,

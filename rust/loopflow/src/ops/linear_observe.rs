@@ -44,19 +44,13 @@ pub(crate) fn linear_follow_up_text(body: &str) -> String {
 /// Read one Linear observation into durable, exactly-once Task direction.
 pub async fn reconcile_linear_observation(
     store: &Store,
-    session: &Task,
+    task: &Task,
     observation: IssueObservation,
     viewer_id: &str,
     observed_at: OffsetDateTime,
 ) -> StoreResult<LinearObservationOutcome> {
-    let cursor = store.task_linear_observation(&session.id).await?;
-    let apply = plan_apply(
-        session,
-        observation,
-        viewer_id,
-        observed_at,
-        cursor.as_ref(),
-    );
+    let cursor = store.task_linear_observation(&task.id).await?;
+    let apply = plan_apply(task, observation, viewer_id, observed_at, cursor.as_ref());
     store.apply_linear_observation(apply).await
 }
 
@@ -65,7 +59,7 @@ pub async fn reconcile_linear_observation(
 /// content changed; every user comment rides as a candidate Steer, and the
 /// store drops the ones already seen.
 pub(crate) fn plan_apply(
-    session: &Task,
+    task: &Task,
     observation: IssueObservation,
     viewer_id: &str,
     observed_at: OffsetDateTime,
@@ -93,7 +87,7 @@ pub(crate) fn plan_apply(
         })
         .collect();
     LinearObservationApply {
-        task_id: session.id.clone(),
+        task_id: task.id.clone(),
         revision: observation.revision,
         title: observation.title,
         description: observation.description,
@@ -106,7 +100,7 @@ pub(crate) fn plan_apply(
 #[cfg(test)]
 mod tests {
     use super::{is_human_comment, plan_apply};
-    use crate::launch_context::{LinearIssueId, LinearIssueSnapshot, LinearProjectSnapshot};
+    use crate::planning::{LinearIssueId, TaskPlan};
     use crate::pm::{IssueComment, IssueObservation};
     use crate::task::{Task, TaskId, TaskLinearObservation};
 
@@ -133,23 +127,15 @@ mod tests {
         }
     }
 
-    fn session() -> Task {
+    fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
             id: TaskId::from_raw("ts_plan"),
-            launch: crate::launch_context::TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new("issue-1").unwrap(),
-                    identifier: "INF-123".to_string(),
-                    title: "Old title".to_string(),
-                    description: "Old body".to_string(),
-                },
-                project: LinearProjectSnapshot {
-                    id: crate::launch_context::LinearProjectId::new("project-1").unwrap(),
-                    slug: "runtime".to_string(),
-                    name: "Runtime".to_string(),
-                    prompt_context: "Definition".to_string(),
-                },
+            plan: TaskPlan {
+                id: LinearIssueId::new("issue-1").unwrap(),
+                identifier: "INF-123".to_string(),
+                title: "Old title".to_string(),
+                description: "Old body".to_string(),
                 pm_snapshot_synced_at: 1,
             },
             pm_writeback: crate::task::PmWritebackState::Current,
@@ -157,8 +143,8 @@ mod tests {
             project_id: crate::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            lifecycle: crate::task::TaskLifecyclePlan::defaults(),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,
             phase_iteration: 0,
@@ -212,13 +198,7 @@ mod tests {
                 comment("c-2", "PR: x", Some(VIEWER)),
             ],
         );
-        let apply = plan_apply(
-            &session(),
-            obs,
-            VIEWER,
-            time::OffsetDateTime::now_utc(),
-            None,
-        );
+        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
         assert!(apply.content_steer.is_none());
         assert_eq!(apply.follow_ups.len(), 1);
         assert_eq!(apply.follow_ups[0].comment_id, "c-1");
@@ -228,7 +208,7 @@ mod tests {
     fn a_content_edit_becomes_one_steer() {
         let obs = observation("New title", "New body", vec![]);
         let apply = plan_apply(
-            &session(),
+            &task(),
             obs,
             VIEWER,
             time::OffsetDateTime::now_utc(),
@@ -243,7 +223,7 @@ mod tests {
     fn an_unchanged_issue_emits_no_steer() {
         let obs = observation("Old title", "Old body", vec![]);
         let apply = plan_apply(
-            &session(),
+            &task(),
             obs,
             VIEWER,
             time::OffsetDateTime::now_utc(),

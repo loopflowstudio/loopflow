@@ -5,6 +5,11 @@ use std::time::Duration;
 
 use loopflow::engine::agent::{launch_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use loopflow::engine::error::CoreError;
+use loopflow::profile::{ProviderRoute, RouteScope};
+use loopflow::provider_auth::Provider;
+use loopflow::store::{
+    open_store, CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
+};
 use support::EnvGuard;
 use tempfile::TempDir;
 
@@ -86,6 +91,88 @@ fn launch_nonzero_exit() {
     )
     .expect("launch");
     assert_eq!(result.exit_code, 7);
+}
+
+#[test]
+fn release_acceptance_recovers_from_a_revoked_selected_account() {
+    let home = TempDir::new().expect("lf home");
+    let codex = r#"#!/bin/sh
+case "$CODEX_HOME" in
+  */revoked)
+    echo '{"type":"turn.failed","error":{"message":"Your authentication token has been invalidated. Please sign in again.","code":"token_invalidated"}}'
+    exit 1;;
+  */fallback)
+    echo '{"type":"result","subtype":"completed","result":"fallback account completed"}'
+    exit 0;;
+  *) echo "unexpected CODEX_HOME" >&2; exit 9;;
+esac
+"#;
+    let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
+    let revoked_home = home.path().join("accounts/codex/revoked");
+    let fallback_home = home.path().join("accounts/codex/fallback");
+    std::fs::create_dir_all(&revoked_home).expect("revoked home");
+    std::fs::create_dir_all(&fallback_home).expect("fallback home");
+    let revoked_id = ProviderAccountId::parse("revoked").expect("revoked id");
+    let fallback_id = ProviderAccountId::parse("fallback").expect("fallback id");
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let account = |account_id: ProviderAccountId, path: std::path::PathBuf| ProviderAccount {
+        provider: "codex".to_string(),
+        account_id,
+        home: Some(path),
+        login_email: None,
+        credential_state: CredentialState::Connected,
+        routing_state: RoutingState::Automatic,
+        plan: None,
+        paid_through: None,
+        utilization_percent: None,
+        cooldown_until: None,
+        cooldown_reason: None,
+        last_selected_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+    let runtime = tokio::runtime::Runtime::new().expect("store runtime");
+    let store = runtime
+        .block_on(open_store(&StorageConfig::sqlite(
+            home.path().join("loopflow.db"),
+        )))
+        .expect("account store");
+    runtime
+        .block_on(store.upsert_provider_account(&account(revoked_id.clone(), revoked_home)))
+        .expect("revoked account");
+    runtime
+        .block_on(store.upsert_provider_account(&account(fallback_id.clone(), fallback_home)))
+        .expect("fallback account");
+    runtime
+        .block_on(store.set_provider_route(&ProviderRoute {
+            scope: RouteScope::Default,
+            provider: Provider::Codex,
+            accounts: vec![revoked_id.clone(), fallback_id],
+            created_at: now,
+            updated_at: now,
+        }))
+        .expect("codex route");
+
+    let launch = AgentConfig {
+        task_prompt: "finish the operation".to_string(),
+        agent: Some("codex".to_string()),
+        skip_permissions: true,
+        ..Default::default()
+    };
+    let result = launch_agent(&launch, &base_process(), &AgentCapabilities::default())
+        .expect("route failover");
+
+    assert_eq!(result.exit_code, 0);
+    assert!(result.stdout.contains("fallback account completed"));
+    let revoked = runtime
+        .block_on(store.get_provider_account("codex", &revoked_id))
+        .expect("read revoked account")
+        .expect("revoked account remains recorded");
+    assert_eq!(revoked.credential_state, CredentialState::Missing);
+    assert_eq!(
+        revoked.cooldown_reason.as_deref(),
+        Some("token_invalidated")
+    );
 }
 
 #[test]

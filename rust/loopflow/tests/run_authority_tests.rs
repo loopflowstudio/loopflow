@@ -5,7 +5,7 @@
 //! but means an agent body that has lost its Run lease would silently inherit
 //! full User rights unless something positively marks it as a body.
 //!
-//! That marker used to be the legacy Session env vars, so deleting them was a
+//! That marker used to be the legacy child-control env vars, so deleting them was a
 //! privilege escalation hiding inside a cleanup. `LF_RUN_CONTEXT` now carries
 //! the signal alone, and these tests pin the behavior so the deletion cannot
 //! quietly restore the fallback.

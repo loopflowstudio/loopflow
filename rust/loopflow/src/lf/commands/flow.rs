@@ -20,7 +20,7 @@ pub fn run(flow: &Flow, message: Option<&str>, cli: &Cli, repo: &Path) -> Result
 }
 
 /// Run exactly one expanded top-level step. The resident owns the cursor and
-/// invokes this hidden primitive once per body, so a session boundary maps to
+/// invokes this hidden primitive once per body, so a body boundary maps to
 /// a product step instead of an entire flow.
 pub fn run_step(flow: &str, index: usize, message: &str, cli: &Cli, repo: &Path) -> Result<()> {
     let definition = crate::engine::load_flow(flow, repo)?;

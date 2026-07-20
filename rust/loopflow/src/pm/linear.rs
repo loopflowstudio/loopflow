@@ -5,10 +5,12 @@ use serde_json::{json, Value};
 use tokio::time::sleep;
 use tracing::warn;
 
+#[cfg(test)]
+use crate::pm::PmKr;
 use crate::pm::{
     parse_project_content, project_slug, render_project_content, IssueComment, IssueObservation,
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmResult, PmWave, TeamBinding,
-    RATE_LIMIT_RETRIES,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmResult, PmWave, ProjectContent,
+    TeamBinding, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -285,6 +287,21 @@ const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $c
         user {
           id
         }
+      }
+    }
+  }
+}"#;
+
+const ISSUE_COMMENTS_QUERY: &str = r#"query IssueComments($id: String!, $comments: Int!, $after: String) {
+  issue(id: $id) {
+    comments(first: $comments, after: $after, orderBy: createdAt) {
+      nodes {
+        id
+        body
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -574,8 +591,7 @@ impl LinearClient {
         initiative_id: &str,
         name: &str,
         summary: &str,
-        definition: &str,
-        krs: &[PmKr],
+        content: &ProjectContent,
     ) -> PmResult<String> {
         let team_id = self.resolve_team_id().await?;
         let response: ProjectCreateData = self
@@ -584,7 +600,7 @@ impl LinearClient {
                 json!({
                     "name": name,
                     "description": linear_description(summary),
-                    "content": render_project_content(definition, krs),
+                    "content": render_project_content(content),
                     "teamId": team_id,
                 }),
             )
@@ -607,8 +623,7 @@ impl LinearClient {
         project_id: &str,
         name: &str,
         summary: &str,
-        definition: &str,
-        krs: &[PmKr],
+        content: &ProjectContent,
     ) -> PmResult<()> {
         let _: Value = self
             .graphql(
@@ -617,7 +632,7 @@ impl LinearClient {
                     "id": project_id,
                     "name": name,
                     "description": linear_description(summary),
-                    "content": render_project_content(definition, krs),
+                    "content": render_project_content(content),
                 }),
             )
             .await?;
@@ -763,7 +778,7 @@ impl LinearClient {
     }
 
     /// Move an issue into another team and return its **new** identifier. The
-    /// issue UUID is preserved (Session/PR/comment ownership survives); only the
+    /// issue UUID is preserved (Task/PR/comment ownership survives); only the
     /// number changes, and Linear assigns it at move time, so we read it back.
     pub async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
         let response: IssueUpdateIdentifierData = self
@@ -859,6 +874,52 @@ impl LinearClient {
             )
             .await?;
         Ok(response.comment_create.comment.id)
+    }
+
+    /// Find a previously-created comment by its stable body marker.
+    ///
+    /// Ask publication records an attempt before calling Linear. If that call
+    /// succeeds but the local process dies before recording the returned id, a
+    /// retry scans the issue's comments and adopts the existing one rather than
+    /// creating a duplicate.
+    pub async fn find_comment_with_marker(
+        &self,
+        issue_id: &str,
+        marker: &str,
+    ) -> PmResult<Option<String>> {
+        let mut after = None;
+        loop {
+            let response: IssueCommentsData = self
+                .graphql(
+                    ISSUE_COMMENTS_QUERY,
+                    json!({
+                        "id": issue_id,
+                        "comments": OBSERVATION_COMMENT_PAGE,
+                        "after": after,
+                    }),
+                )
+                .await?;
+            let issue = response
+                .issue
+                .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
+            if let Some(comment) = issue
+                .comments
+                .nodes
+                .into_iter()
+                .find(|comment| comment.body.contains(marker))
+            {
+                return Ok(Some(comment.id));
+            }
+            if !issue.comments.page_info.has_next_page {
+                return Ok(None);
+            }
+            after = issue.comments.page_info.end_cursor;
+            if after.is_none() {
+                return Err(PmError::Message(format!(
+                    "Linear comments for issue {issue_id} have another page without a cursor"
+                )));
+            }
+        }
     }
 
     pub async fn update_comment(&self, comment_id: &str, body: &str) -> PmResult<()> {
@@ -1133,6 +1194,23 @@ struct IssueObservationNode {
 }
 
 #[derive(Deserialize)]
+struct IssueCommentsData {
+    issue: Option<IssueCommentsNode>,
+}
+
+#[derive(Deserialize)]
+struct IssueCommentsNode {
+    comments: PagedCommentConnection,
+}
+
+#[derive(Deserialize)]
+struct PagedCommentConnection {
+    nodes: Vec<CommentNode>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Deserialize)]
 struct CommentConnection {
     nodes: Vec<CommentNode>,
 }
@@ -1284,14 +1362,15 @@ struct ProjectNode {
 
 impl ProjectNode {
     fn into_pm_project(self) -> PmProject {
-        let (definition, krs) = parse_project_content(self.content.as_deref().unwrap_or_default());
+        let content = parse_project_content(self.content.as_deref().unwrap_or_default());
         PmProject {
             id: self.id,
             slug: project_slug(&self.name),
             name: self.name,
             summary: self.description.unwrap_or_default(),
-            definition,
-            krs,
+            definition: content.definition,
+            flows: Some(content.flows),
+            krs: content.krs,
             initiative_ids: self
                 .initiatives
                 .nodes
@@ -1736,11 +1815,14 @@ mod tests {
                 "initiative-1",
                 "Wave Chat",
                 "Conversation stays in flow.",
-                "Conversation stays in flow.",
-                &[PmKr {
-                    text: "Replies stream".to_string(),
-                    holds: false,
-                }],
+                &ProjectContent {
+                    definition: "Conversation stays in flow.".to_string(),
+                    flows: crate::pm::ProjectFlowPlan::empty(),
+                    krs: vec![PmKr {
+                        text: "Replies stream".to_string(),
+                        holds: false,
+                    }],
+                },
             )
             .await
             .expect("create project");
@@ -1776,11 +1858,18 @@ mod tests {
                 "project-1",
                 "Wave Chat",
                 "Conversation stays in flow.",
-                "Conversation stays in flow.",
-                &[PmKr {
-                    text: "Replies survive every restart boundary".to_string(),
-                    holds: false,
-                }],
+                &ProjectContent {
+                    definition: "Conversation stays in flow.".to_string(),
+                    flows: crate::pm::ProjectFlowPlan {
+                        first: Some("incident".to_string()),
+                        loop_: Some("ship-5whys".to_string()),
+                        finally: Some("ship".to_string()),
+                    },
+                    krs: vec![PmKr {
+                        text: "Replies survive every restart boundary".to_string(),
+                        holds: false,
+                    }],
+                },
             )
             .await
             .expect("update project");
@@ -1792,6 +1881,10 @@ mod tests {
             .as_str()
             .expect("content")
             .contains("Replies survive every restart boundary"));
+        assert!(update["variables"]["content"]
+            .as_str()
+            .expect("content")
+            .contains("loop: ship-5whys"));
     }
 
     #[tokio::test]

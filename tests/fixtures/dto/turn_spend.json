@@ -1,7 +1,7 @@
 [
   {
     "turn_id": "turn-1",
-    "launch_id": "launch-1",
+    "invocation_id": "invocation-1",
     "trace_id": "trace-1",
     "exec_id": "exec-1",
     "repo": "/src/loopflow",
@@ -18,7 +18,7 @@
   },
   {
     "turn_id": "turn-2",
-    "launch_id": "launch-2",
+    "invocation_id": "invocation-2",
     "trace_id": "trace-2",
     "exec_id": "exec-2",
     "repo": "/src/loopflow",

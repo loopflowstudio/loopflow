@@ -15,7 +15,6 @@ private func turn(
     text: String = "",
     status: Lifecycle = .completed,
     items: [ConversationItem] = [],
-    from: String? = nil,
     body: BodyProvenance? = nil,
     activity: ChildControlActivity? = nil
 ) throws -> ChatTurn {
@@ -26,7 +25,6 @@ private func turn(
         status: status,
         items: items,
         createdAt: "2026-07-14T09:00:00Z",
-        from: from,
         body: body,
         activity: activity
     )
@@ -76,7 +74,7 @@ private func childActivity(_ kind: ChildActivityKind) -> ChildControlActivity {
         id: "act-\(kind.rawValue)",
         subject: .project,
         subjectId: "wave-chat",
-        sessionId: "ps_1",
+        workId: "ps_1",
         kind: kind,
         title: "Wave chat",
         summary: "…"
@@ -230,9 +228,9 @@ struct WaveChatTranscriptTests {
             ),
             // An empty span at a step boundary: nothing said, nothing done.
             try turn(id: "turn-3", body: provenance(step: "task_pursue")),
-            try turn(id: "turn-4", role: .user, status: .completed, from: "project wave-chat",
+            try turn(id: "turn-4", role: .user, status: .completed,
                      activity: childActivity(.stateChanged)),
-            try turn(id: "turn-5", role: .user, status: .completed, from: "project wave-chat",
+            try turn(id: "turn-5", role: .user, status: .completed,
                      activity: childActivity(.prOpened)),
             try turn(
                 id: "turn-6",

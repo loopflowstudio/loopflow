@@ -5,8 +5,8 @@ use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
 use crate::engine::worktrees::{
     create_from_placement_plan, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
-    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, WorktreePrunePolicy,
-    WorktreeSegment,
+    sibling_worktree_name, sibling_worktree_name_with_main, PlacementStrategy, PullRequestState,
+    WorktreePrunePolicy, WorktreeSegment,
 };
 use crate::engine::{
     prepare_launch_prompt, sync_skills, ContextSourceOverrides, LaunchPromptInput,
@@ -23,9 +23,9 @@ use crate::ops::{
     abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
     create_or_update_pr, current_pr, finish_land_after_rebase, finish_submit_after_rebase, land,
     plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
-    release_bump, release_check, release_notes, release_run, release_status, release_tag,
-    start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec, LandOptions,
-    PrOptions, Progress, RebaseOptions, SystemLaunchctl,
+    release_bump, release_check, release_notes, release_publish, release_run, release_status,
+    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronSpec,
+    LandOptions, PrOptions, Progress, RebaseOptions, SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -136,6 +136,24 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
             release_bump_cmd(version, target.as_deref(), &progress)
         }
         ReleaseCommand::Tag { version, target } => release_tag_cmd(version, target.as_deref()),
+        ReleaseCommand::Publish {
+            tag,
+            notes,
+            assets,
+            finalize,
+        } => {
+            let repo_root = find_repo_root()?;
+            release_publish(&repo_root, tag, notes.as_deref(), assets, *finalize)?;
+            println!(
+                "GitHub Release {tag}: {}",
+                if *finalize {
+                    "published"
+                } else {
+                    "draft staged"
+                }
+            );
+            Ok(())
+        }
         ReleaseCommand::Status { target } => release_status_cmd(target.as_deref()),
     }
 }
@@ -313,7 +331,7 @@ fn resolve_rebase_conflict(
     );
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
-        launch_skill_agent(repo_root, "rebase", Some(&context), Some(env))
+        launch_skill_agent(repo_root, "rebase-conflicts", Some(&context), Some(env))
             .map_err(|error| OpsError::Message(error.to_string()))
     })?)
 }
@@ -742,18 +760,24 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             }
         },
         PmCommand::Project { cmd } => {
-            let (wave, project, title, definition, krs) = match cmd {
+            let (wave, project, title, definition, krs, first, loop_, finally) = match cmd {
                 PmProjectCommand::Create {
                     wave,
                     title,
                     definition,
                     krs,
+                    first,
+                    loop_,
+                    finally,
                 } => (
                     wave.clone(),
                     None,
                     Some(title.clone()),
-                    definition.clone(),
+                    Some(definition.clone()),
                     krs.clone(),
+                    first.clone(),
+                    loop_.clone(),
+                    finally.clone(),
                 ),
                 PmProjectCommand::Update {
                     wave,
@@ -761,12 +785,18 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     title,
                     definition,
                     krs,
+                    first,
+                    loop_,
+                    finally,
                 } => (
                     wave.clone(),
                     Some(project.clone()),
                     title.clone(),
                     definition.clone(),
                     krs.clone(),
+                    first.clone(),
+                    loop_.clone(),
+                    finally.clone(),
                 ),
                 PmProjectCommand::Archive { wave, project } => {
                     let result = crate::ops::pm::pm_project_archive(
@@ -792,6 +822,9 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     title,
                     definition,
                     krs,
+                    first,
+                    loop_,
+                    finally,
                 },
                 progress,
             )?;
@@ -1168,24 +1201,32 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
 
 fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let prs = release_check(&repo_root, target_name)?;
+    let changes = release_check(&repo_root, target_name)?;
 
-    if prs.is_empty() {
-        eprintln!("No PRs merged since last tag.");
+    if changes.commits.is_empty() {
+        eprintln!("No commits in the target area since the last tag.");
         std::process::exit(1);
     }
 
     let is_tty = std::io::stdout().is_terminal();
     if is_tty {
-        for pr in &prs {
+        for commit in &changes.commits {
+            let short_sha = commit.sha.get(..7).unwrap_or(&commit.sha);
+            println!("{short_sha} {}", commit.title);
+        }
+        for pr in &changes.merged_prs {
             println!(
                 "#{:<6} {} (+{} -{}, {} files)",
                 pr.number, pr.title, pr.additions, pr.deletions, pr.changed_files
             );
         }
-        println!("\n{} PR(s) merged since last tag.", prs.len());
+        println!(
+            "\n{} commit(s), {} merged PR(s) in the release range.",
+            changes.commits.len(),
+            changes.merged_prs.len()
+        );
     } else {
-        let json = serde_json::to_string_pretty(&prs)?;
+        let json = serde_json::to_string_pretty(&changes)?;
         println!("{}", json);
     }
 
@@ -1199,17 +1240,31 @@ fn release_run_cmd(
 ) -> Result<()> {
     let repo_root = find_repo_root()?;
     let input = version_input.unwrap_or("patch");
-    let result = release_run(&repo_root, input, target_name, progress)?;
+    match release_run(&repo_root, input, target_name, progress)? {
+        crate::ops::ReleaseRunOutcome::NoChanges { target, latest_tag } => {
+            let latest = latest_tag.as_deref().unwrap_or("(none)");
+            println!("No release ({target}): no merged PRs since {latest}");
+        }
+        crate::ops::ReleaseRunOutcome::Released(receipt) => {
+            print_release_receipt("Released", &receipt);
+        }
+        crate::ops::ReleaseRunOutcome::Resumed(receipt) => {
+            print_release_receipt("Resumed", &receipt);
+        }
+    }
+    Ok(())
+}
 
-    println!("Released {} ({})", result.tag, result.target);
-    if let Some(url) = result.workflow_url.as_deref() {
+fn print_release_receipt(action: &str, receipt: &crate::ops::ReleaseReceipt) {
+    println!("{action} {} ({})", receipt.tag, receipt.target);
+    println!("Commit: {}", receipt.commit);
+    if let Some(url) = receipt.workflow_url.as_deref() {
         println!("Workflow URL: {url}");
     }
     println!(
         "GitHub Release: {}",
-        if result.release_exists { "yes" } else { "no" }
+        if receipt.release_exists { "yes" } else { "no" }
     );
-    Ok(())
 }
 
 fn release_notes_cmd(
@@ -1436,6 +1491,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
         fresh: bool,
         dirty: bool,
         remote_gone: bool,
+        pull_request: Option<PullRequestState>,
         diff_stat: String,
     }
 
@@ -1476,6 +1532,7 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
                 fresh: wt.fresh,
                 dirty: wt.dirty,
                 remote_gone: wt.remote_gone,
+                pull_request: wt.pull_request,
                 diff_stat,
             }
         })
@@ -1508,6 +1565,10 @@ fn wt_list(format: Option<&str>, sync: bool) -> Result<()> {
             ("squash-merged", c.green)
         } else if row.remote_gone {
             ("remote-gone", c.yellow)
+        } else if row.pull_request == Some(PullRequestState::Closed) {
+            ("closed-pr", c.yellow)
+        } else if row.pull_request == Some(PullRequestState::Open) {
+            ("open-pr", c.cyan)
         } else {
             ("active", c.cyan)
         };
@@ -1687,14 +1748,12 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
         Ok(store) => {
-            let sessions = runtime.block_on(store.list_tasks(None)).map_err(|error| {
+            let tasks = runtime.block_on(store.list_tasks(None)).map_err(|error| {
                 anyhow!("cannot verify Task worktree ownership before pruning: {error}")
             })?;
-            for session in sessions {
+            for task in tasks {
                 let work = runtime
-                    .block_on(
-                        store.work_for_child(&crate::child::ChildRef::Task(session.id.clone())),
-                    )
+                    .block_on(store.work_for_child(&crate::child::ChildRef::Task(task.id.clone())))
                     .map_err(|error| anyhow!("cannot resolve Task Work: {error}"))?;
                 let status = runtime
                     .block_on(store.work_status(&work))
@@ -1703,7 +1762,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(session.worktree);
+                    protected.insert(task.worktree);
                 }
             }
         }
@@ -1964,7 +2023,7 @@ fn launch_skill_agent(
             render_ms: 0,
             raw_provider: true,
             basis: None,
-            control: None,
+            supervision: None,
         },
     )?;
 

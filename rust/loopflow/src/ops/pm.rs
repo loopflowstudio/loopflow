@@ -19,7 +19,7 @@ use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
-    TeamBinding,
+    ProjectContent, ProjectFlowPlan, TeamBinding,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
@@ -220,8 +220,11 @@ pub struct PmProjectWriteOptions {
     pub wave: Option<String>,
     pub project: Option<String>,
     pub title: Option<String>,
-    pub definition: String,
+    pub definition: Option<String>,
     pub krs: Vec<String>,
+    pub first: Option<String>,
+    pub loop_: Option<String>,
+    pub finally: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,12 +295,21 @@ async fn pm_create_project_async(
         name: title.to_string(),
         summary: title.to_string(),
         definition: title.to_string(),
+        flows: ProjectFlowPlan::empty(),
         krs: Vec::new(),
     };
     let linear_name = linear_project_name(&wave, &seed.name);
     let id = match ctx
         .client
-        .create_project(&ctx.initiative, &linear_name, &seed.definition, &seed.krs)
+        .create_project(
+            &ctx.initiative,
+            &linear_name,
+            &ProjectContent {
+                definition: seed.definition.clone(),
+                flows: seed.flows.clone(),
+                krs: seed.krs.clone(),
+            },
+        )
         .await
     {
         Ok(id) => id,
@@ -317,6 +329,7 @@ async fn pm_create_project_async(
             name: seed.name,
             summary: seed.summary,
             definition: seed.definition,
+            flows: Some(seed.flows),
             krs: seed.krs,
             initiative_ids: vec![ctx.initiative],
             // The create result is transient — the next sync resolves the
@@ -338,6 +351,7 @@ struct LocalProject {
     name: String,
     summary: String,
     definition: String,
+    flows: ProjectFlowPlan,
     krs: Vec<PmKr>,
 }
 
@@ -390,8 +404,7 @@ impl PmClient {
         &self,
         initiative_id: &str,
         name: &str,
-        definition: &str,
-        krs: &[PmKr],
+        content: &ProjectContent,
     ) -> PmResult<String> {
         match self {
             Self::Linear(client) => {
@@ -399,9 +412,8 @@ impl PmClient {
                     .create_project(
                         initiative_id,
                         name,
-                        &first_paragraph(definition),
-                        definition,
-                        krs,
+                        &first_paragraph(&content.definition),
+                        content,
                     )
                     .await
             }
@@ -412,8 +424,7 @@ impl PmClient {
         &self,
         project_id: &str,
         name: &str,
-        definition: &str,
-        krs: &[PmKr],
+        content: &ProjectContent,
     ) -> PmResult<()> {
         match self {
             Self::Linear(client) => {
@@ -421,9 +432,8 @@ impl PmClient {
                     .update_project(
                         project_id,
                         name,
-                        &first_paragraph(definition),
-                        definition,
-                        krs,
+                        &first_paragraph(&content.definition),
+                        content,
                     )
                     .await
             }
@@ -1187,6 +1197,7 @@ pub fn pm_create_task_idempotent(
     wave: &str,
     project_slug: &str,
     title: &str,
+    description: &str,
     marker: &str,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
@@ -1195,6 +1206,7 @@ pub fn pm_create_task_idempotent(
         wave,
         project_slug,
         title,
+        description,
         marker,
         progress,
     ))
@@ -1205,6 +1217,7 @@ async fn pm_create_task_idempotent_async(
     wave: &str,
     project_slug: &str,
     title: &str,
+    description: &str,
     marker: &str,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
@@ -1238,7 +1251,7 @@ async fn pm_create_task_idempotent_async(
     ));
     let item = PmItemCreate {
         name: title.to_string(),
-        description: marker.to_string(),
+        description: task_description_with_marker(description, marker),
     };
     match ctx.client.create_item(&project.id, &item).await {
         Ok(id) => Ok(PmUpdateResult {
@@ -1269,6 +1282,10 @@ async fn pm_create_task_idempotent_async(
             Err(pm_to_ops(create_error))
         }
     }
+}
+
+fn task_description_with_marker(description: &str, marker: &str) -> String {
+    format!("{}\n\n{}", description.trim(), marker)
 }
 
 pub(crate) async fn pm_update_async(
@@ -2272,7 +2289,7 @@ async fn pm_project_write_async(
         require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
     }
     let ctx = resolve_context(repo, &wave).await?;
-    let krs = options
+    let requested_krs = options
         .krs
         .iter()
         .map(|value| {
@@ -2290,7 +2307,7 @@ async fn pm_project_write_async(
         })
         .filter(|kr| !kr.text.is_empty())
         .collect::<Vec<_>>();
-    if krs.is_empty() {
+    if options.project.is_none() && requested_krs.is_empty() {
         return Err(OpsError::Message(
             "at least one `--kr` is required".to_string(),
         ));
@@ -2314,8 +2331,35 @@ async fn pm_project_write_async(
         }
         progress.status(&format!("updating Linear Project `{}`", project.name));
         let linear_name = linear_project_name(&wave, &name);
+        let content = ProjectContent {
+            definition: options
+                .definition
+                .clone()
+                .unwrap_or_else(|| project.definition.clone()),
+            flows: ProjectFlowPlan {
+                first: options
+                    .first
+                    .clone()
+                    .or_else(|| project.flows.as_ref().and_then(|flows| flows.first.clone())),
+                loop_: options
+                    .loop_
+                    .clone()
+                    .or_else(|| project.flows.as_ref().and_then(|flows| flows.loop_.clone())),
+                finally: options.finally.clone().or_else(|| {
+                    project
+                        .flows
+                        .as_ref()
+                        .and_then(|flows| flows.finally.clone())
+                }),
+            },
+            krs: if options.krs.is_empty() {
+                project.krs.clone()
+            } else {
+                requested_krs.clone()
+            },
+        };
         ctx.client
-            .update_project(&project.id, &linear_name, &options.definition, &krs)
+            .update_project(&project.id, &linear_name, &content)
             .await
             .map_err(pm_to_ops)?;
         (project.id.clone(), new_slug, false)
@@ -2331,9 +2375,20 @@ async fn pm_project_write_async(
         }
         progress.status(&format!("creating Linear Project `{name}`"));
         let linear_name = linear_project_name(&wave, &name);
+        let content = ProjectContent {
+            definition: options.definition.clone().ok_or_else(|| {
+                OpsError::Message("`lf pm project create --definition` is required".to_string())
+            })?,
+            flows: ProjectFlowPlan {
+                first: options.first.clone(),
+                loop_: options.loop_.clone(),
+                finally: options.finally.clone(),
+            },
+            krs: requested_krs.clone(),
+        };
         let id = ctx
             .client
-            .create_project(&ctx.initiative, &linear_name, &options.definition, &krs)
+            .create_project(&ctx.initiative, &linear_name, &content)
             .await
             .map_err(pm_to_ops)?;
         (id, slug, true)
@@ -2620,22 +2675,33 @@ fn pm_to_ops(err: PmError) -> OpsError {
 mod tests {
     use super::*;
     use crate::id::WaveId;
-    use crate::launch_context::{
-        LinearIssueId, LinearIssueSnapshot, LinearProjectId, LinearProjectSnapshot,
-        ProjectLaunchReceipt, TaskLaunchReceipt,
-    };
     use crate::ops::NullProgress;
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::test_server::{self, json_response, QueuedResponse};
     use crate::project::{Project, ProjectId};
     use crate::task::{
         Observation, PmWritebackState, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
         TaskPrId,
     };
+
     use crate::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
     use std::path::PathBuf;
     use time::OffsetDateTime;
+
+    #[test]
+    fn idempotent_task_description_preserves_the_report() {
+        let description = task_description_with_marker(
+            "failure heading\n\nfull stack trace",
+            "<!-- loopflow-task-start:abc -->",
+        );
+
+        assert_eq!(
+            description,
+            "failure heading\n\nfull stack trace\n\n<!-- loopflow-task-start:abc -->"
+        );
+    }
 
     fn linear_test_ctx(base_url: String, initiative: &str) -> PmContext {
         PmContext {
@@ -2783,18 +2849,16 @@ mod tests {
             "/repo".to_string(),
         );
         store.create_wave(&wave).await.expect("create wave");
-        let project_snapshot = LinearProjectSnapshot {
+        let project_definition = ProjectPlan {
             id: LinearProjectId::new("project-uuid").expect("project id"),
             slug: "developer-efficiency".to_string(),
             name: "Developer Efficiency".to_string(),
             prompt_context: "Keep development fast.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
         };
         let project = Project {
             id: ProjectId::new(),
-            launch: ProjectLaunchReceipt {
-                project: project_snapshot.clone(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
+            plan: project_definition,
             wave_id: wave.id().clone(),
             iteration: 1,
             observation_cursor: 0,
@@ -2809,19 +2873,16 @@ mod tests {
         store
             .create_project(&project)
             .await
-            .expect("create project session");
+            .expect("create Project Work");
 
-        let session_id = TaskId::new();
-        let session = Task {
-            id: session_id.clone(),
-            launch: TaskLaunchReceipt {
-                issue: LinearIssueSnapshot {
-                    id: LinearIssueId::new(issue_id).expect("issue id"),
-                    identifier: identifier.to_string(),
-                    title: format!("Task {identifier}"),
-                    description: String::new(),
-                },
-                project: project_snapshot,
+        let task_id = TaskId::new();
+        let task = Task {
+            id: task_id.clone(),
+            plan: TaskPlan {
+                id: LinearIssueId::new(issue_id).expect("issue id"),
+                identifier: identifier.to_string(),
+                title: format!("Task {identifier}"),
+                description: String::new(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
             },
             pm_writeback: PmWritebackState::Current,
@@ -2829,8 +2890,8 @@ mod tests {
             project_id: project.id,
             worktree: PathBuf::from(format!("/repo.{identifier}")),
             workspace_slug: identifier.to_ascii_lowercase(),
-            lifecycle: TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: TaskLifecyclePhase::Iterate,
+            lifecycle: TaskLifecyclePlan::defaults(),
+            lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,
             phase_iteration: 0,
@@ -2846,10 +2907,10 @@ mod tests {
         };
         let pr = TaskPr {
             id: TaskPrId::new(),
-            task_id: session.id.clone(),
+            task_id: task.id.clone(),
             sequence: 1,
-            slug: session.workspace_slug.clone(),
-            branch: format!("jack/{}", session.workspace_slug),
+            slug: task.workspace_slug.clone(),
+            branch: format!("jack/{}", task.workspace_slug),
             base_commit: "deadbeef".to_string(),
             parent_pr_id: None,
             publication: None,
@@ -2864,10 +2925,10 @@ mod tests {
             updated_at: now,
         };
         store
-            .create_task(&session, &pr)
+            .create_task(&task, &pr)
             .await
-            .expect("create task session");
-        session_id
+            .expect("create Task Work");
+        task_id
     }
 
     #[test]
@@ -3184,6 +3245,7 @@ mod tests {
             name: name.to_string(),
             summary: String::new(),
             definition: String::new(),
+            flows: Some(ProjectFlowPlan::empty()),
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: team_ids.map(|ids| ids.into_iter().map(str::to_string).collect()),
@@ -3341,14 +3403,14 @@ mod tests {
     #[tokio::test]
     async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
-        let session = store
-            .get_task(&session_id)
+        let task_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
+        let task = store
+            .get_task(&task_id)
             .await
-            .expect("read session")
-            .expect("session exists");
+            .expect("read task")
+            .expect("task exists");
         let work = store
-            .work_for_child(&crate::child::ChildRef::Task(session.id.clone()))
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
             .await
             .expect("resolve Task Work");
         store
@@ -3393,7 +3455,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_retry_reuses_pre_move_comment_then_moves_and_rebinds() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
+        let task_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
         let initial_project = || {
             reteam_project_node(
                 "project-1",
@@ -3430,12 +3492,11 @@ mod tests {
         assert!(error.to_string().contains("issue move failed"));
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
-                .launch
-                .issue
+                .expect("read task")
+                .expect("task exists")
+                .plan
                 .identifier,
             "W2-9"
         );
@@ -3472,12 +3533,11 @@ mod tests {
         assert_eq!(result.task_updates, 1);
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
-                .launch
-                .issue
+                .expect("read task")
+                .expect("task exists")
+                .plan
                 .identifier,
             "PRD-9"
         );
@@ -3503,7 +3563,7 @@ mod tests {
     #[tokio::test]
     async fn reteam_already_moved_issue_only_rebinds_a_stale_task() {
         let (_directory, store) = reteam_test_store().await;
-        let session_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
+        let task_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([reteam_project_node(
                 "project-1",
@@ -3545,12 +3605,11 @@ mod tests {
         assert!(result.moves.is_empty());
         assert_eq!(
             store
-                .get_task(&session_id)
+                .get_task(&task_id)
                 .await
-                .expect("read session")
-                .expect("session exists")
-                .launch
-                .issue
+                .expect("read task")
+                .expect("task exists")
+                .plan
                 .identifier,
             "PRD-10"
         );
@@ -3609,6 +3668,7 @@ mod tests {
             name: name.to_string(),
             summary: String::new(),
             definition: String::new(),
+            flows: Some(ProjectFlowPlan::empty()),
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
             team_ids: None,
@@ -3634,6 +3694,11 @@ mod tests {
                 name: "Wave Chat".to_string(),
                 summary: "Stay in flow.".to_string(),
                 definition: "Conversation stays in flow.".to_string(),
+                flows: Some(ProjectFlowPlan {
+                    first: Some("task-design".to_string()),
+                    loop_: Some("slice".to_string()),
+                    finally: Some("ship".to_string()),
+                }),
                 krs: vec![PmKr {
                     text: "Replies survive restarts.".to_string(),
                     holds: true,
@@ -3651,6 +3716,7 @@ mod tests {
             value["projects"][0]["definition"],
             "Conversation stays in flow."
         );
+        assert_eq!(value["projects"][0]["flows"]["loop"], "slice");
         assert_eq!(value["projects"][0]["krs"][0]["holds"], true);
         assert_eq!(value["items"], serde_json::json!([]));
     }
@@ -3918,7 +3984,7 @@ mod tests {
 
         let outcome = link_pr_with_client(
             &client,
-            &link_request("Open · in review"),
+            &link_request("Open · published"),
             &PrLinkageIds::default(),
         )
         .await;
@@ -4002,7 +4068,7 @@ mod tests {
 
         let degraded = link_pr_with_client(
             &client,
-            &link_request("Open · in review"),
+            &link_request("Open · published"),
             &PrLinkageIds::default(),
         )
         .await;
@@ -4022,7 +4088,7 @@ mod tests {
         let client = linear_test_ctx(base_url, "initiative-1").client;
 
         let healed =
-            link_pr_with_client(&client, &link_request("Open · in review"), &degraded.ids).await;
+            link_pr_with_client(&client, &link_request("Open · published"), &degraded.ids).await;
 
         assert!(healed.error.is_none());
         assert_eq!(healed.ids.attachment_id.as_deref(), Some("att-1"));

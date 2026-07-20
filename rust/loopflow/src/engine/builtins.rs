@@ -4,7 +4,7 @@
 //! subdirectory and build.rs generates the HashMap entries.
 
 /// Bundled LOOPFLOW.md - the one loopflow operating document every launched
-/// agent receives, including the speech vocabulary (`lf chat`, `lf memory`).
+/// agent receives, including the speech vocabulary (`lf chat`).
 pub const LOOPFLOW_DOC: &str = include_str!("builtins/LOOPFLOW.md");
 
 /// Headless preamble — the only surface that needs one (no user is present).
@@ -12,7 +12,7 @@ pub const SURFACE_HEADLESS: &str = include_str!("builtins/surfaces/headless.md")
 
 /// Returns the content of a built-in skill, if it exists.
 pub fn get_builtin_skill(name: &str) -> Option<&'static str> {
-    BUILTIN_STEPS.get(name).copied()
+    BUILTIN_SKILLS.get(name).copied()
 }
 
 /// One-line description for a built-in skill. Prefers the `description:` frontmatter
@@ -113,10 +113,10 @@ pub fn get_builtin_goal(name: &str) -> Option<&'static str> {
 /// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
 /// that key. Returns `None` for no match or ambiguous matches.
 pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
-    if let Some((key, _)) = BUILTIN_STEPS.get_key_value(name) {
+    if let Some((key, _)) = BUILTIN_SKILLS.get_key_value(name) {
         return Some(key);
     }
-    resolve_bare_in_map(name, &BUILTIN_STEPS)
+    resolve_bare_in_map(name, &BUILTIN_SKILLS)
 }
 
 /// Resolve a bare name to its builtin flow key. Returns the exact match if one
@@ -159,14 +159,9 @@ pub fn get_builtin_direction(name: &str) -> Option<&'static str> {
     BUILTIN_DIRECTIONS.get(name).copied()
 }
 
-/// Returns the content of a built-in ops prompt, if it exists.
-pub fn get_builtin_ops_prompt(name: &str) -> Option<&'static str> {
-    BUILTIN_OPS_PROMPTS.get(name).copied()
-}
-
 /// List of all built-in skill names.
 pub fn builtin_skill_names() -> Vec<&'static str> {
-    BUILTIN_STEPS.keys().copied().collect()
+    BUILTIN_SKILLS.keys().copied().collect()
 }
 
 /// List of all built-in flow names.
@@ -202,7 +197,6 @@ include!(concat!(env!("OUT_DIR"), "/builtin_flow_categories.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_skill_categories.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_directions.rs"));
 include!(concat!(env!("OUT_DIR"), "/builtin_direction_groups.rs"));
-include!(concat!(env!("OUT_DIR"), "/builtin_ops_prompts.rs"));
 
 #[cfg(test)]
 mod tests {
@@ -215,7 +209,6 @@ mod tests {
         let update_wave = get_builtin_skill("update-wave").expect("update-wave prompt");
         let design = get_builtin_skill("design").expect("design prompt");
         let scan_waves = get_builtin_skill("scan").expect("scan prompt");
-        let split_wave = get_builtin_skill("split-wave").expect("split-wave prompt");
 
         // The roadmap lives in Linear, reached via `lf pm` — no local N-*.md files.
         assert!(update_wave.contains("lf pm"));
@@ -225,7 +218,6 @@ mod tests {
         assert!(design.contains("GOAL.md"));
         assert!(!design.contains("1-*.md"));
         assert!(scan_waves.contains("lf pm show"));
-        assert!(split_wave.contains("lf pm"));
         assert!(WAVES_DOC.contains("GOAL.md"));
         assert!(WAVES_DOC.contains("Linear"));
         assert!(!WAVES_DOC.contains("1-fix-crash-loop.md"));
@@ -235,10 +227,8 @@ mod tests {
     }
 
     #[test]
-    fn interactive_skills_support_human_and_parent_feedback() {
+    fn interactive_skills_include_the_shared_runtime_contract() {
         for name in [
-            "code-review",
-            "demo",
             "design",
             "explore",
             "refine",
@@ -266,19 +256,56 @@ mod tests {
             );
         }
 
-        let demo = get_builtin_skill("demo").expect("demo skill");
+        let review_slice = get_builtin_skill("review-slice").expect("review-slice skill");
         for evidence in [
-            "every Done When",
-            "product",
-            "code",
-            "admin state",
-            "logs",
-            "stats",
-            "metrics",
-            "real sign-in/login path",
+            "interactive: false",
+            "production-like path",
+            "Done when",
+            "Implemented behavior",
+            "complete diff",
+            "lf pr publish",
         ] {
-            assert!(demo.contains(evidence), "demo omits {evidence:?} evidence");
+            assert!(
+                review_slice.contains(evidence),
+                "review-slice omits {evidence:?} evidence"
+            );
         }
+        let demo = get_builtin_skill("demo").expect("demo skill");
+        for contract in [
+            "interactive: true",
+            "User explicitly confirms",
+            "run `lf ask`",
+            "closing, detaching, provider exit, or lack of response",
+        ] {
+            assert!(demo.contains(contract), "demo omits {contract:?}");
+        }
+        assert!(get_builtin_skill("code-review").is_none());
+    }
+
+    #[test]
+    fn init_connects_the_distributed_system_before_customizing_skills() {
+        let init = get_builtin_skill("init").expect("init skill");
+
+        for command in [
+            "lf auth status",
+            "lf route show",
+            "lf home id --json",
+            "lf ls --json",
+            "lf status <wave> --json",
+            "lf roadmap --wave <wave> --json",
+            "lf task run <ISSUE-ID>",
+            "lf home observe <home-id>",
+            "lf home probe <wave> --json",
+        ] {
+            assert!(init.contains(command), "init omits {command:?}");
+        }
+
+        assert!(init.contains("Loopflow is not primarily a prompt launcher"));
+        assert!(init.contains("Installed harnesses are a capability of this Home"));
+        assert!(init.contains("team-wide repo configuration"));
+        assert!(init.contains("`MEMORY.md`; the Wave runtime owns compiled memory"));
+        assert!(!init.contains("git remote -v"));
+        assert!(!init.contains("lf doctor --json"));
     }
 
     #[test]
@@ -299,7 +326,7 @@ mod tests {
         let task = get_builtin_skill("task_pursue").expect("task pursue");
         assert!(task.contains("second Task"));
         assert!(task.contains("lf pr land"));
-        assert!(task.contains("lf task complete"));
+        assert!(task.contains("pinned final flow"));
         assert!(!task.contains("lf pm task done"));
         assert!(task.contains("lf pm task create"));
 
@@ -309,7 +336,6 @@ mod tests {
                 "project",
                 ["project_clarify", "project_pursue", "project_mutate"],
             ),
-            ("task", ["task_clarify", "task_pursue", "task_mutate"]),
         ] {
             let flow = get_builtin_flow(flow).expect("tier flow");
             for step in steps {
@@ -317,6 +343,17 @@ mod tests {
             }
             assert!(!flow.contains("loop:"));
         }
+
+        assert!(get_builtin_flow("task").is_none());
+        assert!(get_builtin_flow("task-design")
+            .expect("Task first flow")
+            .contains("- kickoff"));
+        assert!(get_builtin_flow("slice")
+            .expect("Task loop flow")
+            .contains("- review-slice"));
+        assert!(get_builtin_flow("ship")
+            .expect("Task final flow")
+            .contains("- op: pr land -c"));
     }
 
     #[test]
@@ -337,7 +374,7 @@ mod tests {
             "lf project request-decision",
         ];
 
-        for (name, skill) in BUILTIN_STEPS.iter() {
+        for (name, skill) in BUILTIN_SKILLS.iter() {
             for command in retired {
                 assert!(
                     !skill.contains(command),
@@ -390,19 +427,20 @@ mod tests {
     #[test]
     fn build_is_one_bounded_pass_without_delivery() {
         let flow = get_builtin_flow("build").expect("build flow");
-        for step in ["kickoff", "implement", "compress", "lint", "gate"] {
-            assert!(flow.contains(&format!("- {step}")));
-        }
-        assert!(flow.contains("name: review-design"));
-        assert!(flow.contains("feedback: true"));
+        assert!(flow.contains("- kickoff"));
+        assert!(flow.contains("flow: code"));
+        assert!(flow.contains("- demo"));
+        assert!(!flow.contains("name: review-design"));
+        assert!(!flow.contains("feedback:"));
         assert!(!flow.contains("loop:"));
+        assert!(!flow.contains("- gate"));
         assert!(!flow.contains("deploy"));
         assert!(!flow.contains("pr land"));
     }
 
     #[test]
     fn generic_execution_skills_never_infer_a_wave_or_require_pm() {
-        for name in ["implement", "gate", "qa", "research", "rebase"] {
+        for name in ["implement", "gate", "qa", "research", "rebase-conflicts"] {
             let skill = get_builtin_skill(name).expect("generic skill");
             assert!(skill.contains("seed names the exact wave"), "{name}");
             assert!(!skill.contains("matches this work"), "{name}");
@@ -420,17 +458,8 @@ mod tests {
     }
 
     #[test]
-    fn export_memory_skill_is_registered() {
-        let skill = get_builtin_skill("export-memory").expect("export-memory skill");
-
-        assert!(skill.contains("lf memory show --wave <wave>"));
-        assert!(skill.contains("lf memory log --wave <wave>"));
-        assert!(skill.contains("lf memory update --wave <wave>"));
-        assert!(skill.contains("lf commit -m \"export-memory: compile MEMORY.md\""));
-        assert!(skill.contains("write `wave/<wave>/MEMORY.md` directly"));
-        // Typed blocks: a starting vocabulary the agent owns, not an enforced schema.
-        assert!(skill.contains("Organize into typed blocks"));
-        assert!(skill.contains("starting vocabulary, not a schema"));
+    fn retired_export_memory_skill_is_not_registered() {
+        assert!(get_builtin_skill("export-memory").is_none());
     }
 
     #[test]
@@ -442,6 +471,6 @@ mod tests {
         assert!(skill.contains("lf pm show --wave <parent> --project <slug> --json"));
         assert!(skill.contains("parent_wave_id"));
         assert!(skill.contains("lf pm show"));
-        assert!(skill.contains("lf radio pub --parent"));
+        assert!(skill.contains("typed Wave and Project relationship"));
     }
 }

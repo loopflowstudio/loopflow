@@ -39,6 +39,7 @@ pub struct CandidateIdentity {
     pub source_identity: String,
     pub authority: MigrationAuthority,
     pub package_version: String,
+    pub build_version: Option<String>,
     pub latest_known_migration: String,
 }
 
@@ -49,8 +50,15 @@ impl CandidateIdentity {
             source_identity: build_info::source_identity(),
             authority: build_info::migration_authority(),
             package_version: env!("CARGO_PKG_VERSION").to_string(),
+            build_version: Some(build_info::BUILD_VERSION.to_string()),
             latest_known_migration: migrations::latest_known_version(),
         }
+    }
+
+    fn display_version(&self) -> &str {
+        self.build_version
+            .as_deref()
+            .unwrap_or(&self.package_version)
     }
 }
 
@@ -138,7 +146,10 @@ pub fn decide(
         },
     }
 
-    if !active_runs.is_empty() {
+    // Exact-frontier promotion only repoints the installed CLI. It never
+    // writes the shared store, and every resident body is pinned to immutable
+    // executable bytes. Active Runs therefore fence only a frontier advance.
+    if migrate && !active_runs.is_empty() {
         let named = active_runs
             .iter()
             .map(|run| {
@@ -150,7 +161,7 @@ pub fn decide(
             .collect::<Vec<_>>()
             .join(", ");
         reasons.push(format!(
-            "{} active Run(s) make a global replacement unsafe; stop them first: {named}",
+            "{} active Run(s) block a migration-bearing promotion; stop them before advancing the shared store: {named}",
             active_runs.len()
         ));
     }
@@ -205,6 +216,14 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
 /// Every non-ended Run. A stopping Run remains active until containment is
 /// positively absent, so unreadable or unprovable cleanup evidence fails closed.
 fn read_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveRun>> {
+    let has_runs = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runs')",
+        [],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !has_runs {
+        return read_legacy_active_runs(conn);
+    }
     let mut statement = conn.prepare(
         "SELECT id, source_kind, source_id, state
          FROM runs WHERE state != 'ended' ORDER BY created_at, id",
@@ -220,6 +239,37 @@ fn read_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveR
         })?
         .collect();
     runs
+}
+
+/// Promotion from the last Session-based release must prove the same drain
+/// that the `durable_input_spine` migration itself requires. The `runs` table
+/// does not exist yet at that frontier, so preflight reads the legacy leases
+/// until the one-way migration replaces them.
+fn read_legacy_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveRun>> {
+    let mut active = Vec::new();
+    for (work_kind, table, work_column) in [
+        ("project", "project_sessions", "project_id"),
+        ("task", "task_sessions", "issue_identifier"),
+    ] {
+        let sql = format!(
+            "SELECT id, {work_column}, process_lease_state
+             FROM {table}
+             WHERE process_lease_state IN ('reserved', 'active', 'revoked')
+             ORDER BY created_at, id"
+        );
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement.query_map([], |row| {
+            let session_id = row.get::<_, String>(0)?;
+            Ok(ActiveRun {
+                run_id: format!("legacy-{session_id}"),
+                work_kind: work_kind.to_string(),
+                work_id: row.get(1)?,
+                state: row.get(2)?,
+            })
+        })?;
+        active.extend(rows.collect::<Result<Vec<_>, _>>()?);
+    }
+    Ok(active)
 }
 
 /// Read the shared store's promotion evidence: how the candidate's registry
@@ -294,7 +344,7 @@ fn render_human(preview: &PromotionPreview) {
     let candidate = &preview.candidate;
     println!(
         "Promotion preflight (candidate {}, {})",
-        build_info::short_revision(&candidate.source_revision),
+        candidate.display_version(),
         serde_authority(candidate.authority),
     );
     println!("  shared store   {}", preview.database_path);
@@ -327,6 +377,9 @@ fn render_human(preview: &PromotionPreview) {
         }
     }
     match &preview.verdict {
+        Verdict::Promote if !preview.active_runs.is_empty() => {
+            println!("  VERDICT: promote (exact frontier; CLI repair writes no shared store)")
+        }
         Verdict::Promote => println!("  VERDICT: promote (no migration to apply)"),
         Verdict::PromoteAndMigrate => println!("  VERDICT: promote and apply pending migration"),
         Verdict::Reject { reasons } => {
@@ -432,30 +485,28 @@ mod tests {
     }
 
     #[test]
-    fn any_active_run_blocks_promotion_even_at_the_exact_frontier() {
-        let runs = [run("task", "task-a56be8a6")];
-        let Verdict::Reject { reasons } = decide(Published, &exact(), &runs) else {
-            panic!("an active Run must block replacement");
-        };
-        assert!(reasons
-            .iter()
-            .any(|reason| reason.contains("task-a56be8a6")));
+    fn an_exact_frontier_repairs_the_cli_with_thirty_live_runs() {
+        let runs = (0..30)
+            .map(|index| run("project", &format!("project-{index:02}")))
+            .collect::<Vec<_>>();
+        assert_eq!(decide(Published, &exact(), &runs), Verdict::Promote);
+        assert_eq!(decide(ValidationOnly, &exact(), &runs), Verdict::Promote);
     }
 
     #[test]
-    fn an_active_run_and_an_incompatible_store_are_reported_together() {
-        let incompatible = Compatibility::Incompatible {
-            reason: "unknown migration".to_string(),
+    fn thirty_live_runs_still_block_a_frontier_advance() {
+        let runs = (0..30)
+            .map(|index| run("project", &format!("project-{index:02}")))
+            .collect::<Vec<_>>();
+        let Verdict::Reject { reasons } = decide(Published, &ahead(), &runs) else {
+            panic!("a migration-bearing promotion must wait for live Runs");
         };
-        let runs = [run("project", "project-1db1324d")];
-        let Verdict::Reject { reasons } = decide(ValidationOnly, &incompatible, &runs) else {
-            panic!("both blockers reject");
-        };
-        assert_eq!(reasons.len(), 2, "one preflight names every blocker");
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("30 active Run(s)"));
     }
 
     #[test]
-    fn a_reserved_run_with_no_process_still_counts_as_active() {
+    fn a_reserved_run_with_no_process_still_fences_a_migration() {
         let reserved = ActiveRun {
             run_id: "run-reserved".to_string(),
             work_kind: "task".to_string(),
@@ -463,7 +514,7 @@ mod tests {
             state: "reserved".to_string(),
         };
         assert!(matches!(
-            decide(Published, &exact(), &[reserved]),
+            decide(Published, &ahead(), &[reserved]),
             Verdict::Reject { .. }
         ));
     }
@@ -538,6 +589,30 @@ mod tests {
         assert_eq!(ids, vec!["run-active", "run-stopping"]);
         assert_eq!(active[0].work_kind, "task");
         assert_eq!(active[1].work_kind, "project");
+    }
+
+    #[test]
+    fn the_pre_run_frontier_reads_legacy_active_leases_for_the_drain() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE project_sessions (
+                 id TEXT, project_id TEXT, process_lease_state TEXT, created_at INTEGER
+             );
+             CREATE TABLE task_sessions (
+                 id TEXT, issue_identifier TEXT, process_lease_state TEXT, created_at INTEGER
+             );
+             INSERT INTO project_sessions VALUES
+                 ('project-live', 'ENG', 'active', 1),
+                 ('project-done', 'DONE', 'finished', 2);
+             INSERT INTO task_sessions VALUES
+                 ('task-revoked', 'ENG-9', 'revoked', 3);",
+        )
+        .unwrap();
+
+        let active = read_active_runs(&conn).unwrap();
+        assert_eq!(active.len(), 2);
+        assert_eq!(active[0].work_id, "ENG");
+        assert_eq!(active[1].work_id, "ENG-9");
     }
 }
 
@@ -1050,7 +1125,12 @@ pub fn promote(
         },
     )?;
 
-    println!("promoted: {} -> {}", cli_target.display(), dest.display());
+    println!(
+        "promoted {}: {} -> {}",
+        preview.candidate.display_version(),
+        cli_target.display(),
+        dest.display()
+    );
     match rollback {
         Some(prior) => render_retained_prior(&prior, cli_target),
         None => println!("no prior binary retained (target did not exist)"),
@@ -1122,6 +1202,31 @@ mod promote_tests {
         fs::create_dir_all(&helpers).unwrap();
         write_preflight_binary(&helpers.join("lf"), candidate, verdict);
         fs::write(root.join("new-app"), b"new").unwrap();
+    }
+
+    #[test]
+    fn promotion_identity_carries_the_displayed_build_version() {
+        let identity = CandidateIdentity::current();
+
+        assert_eq!(
+            identity.build_version.as_deref(),
+            Some(crate::build_info::BUILD_VERSION)
+        );
+    }
+
+    #[test]
+    fn retained_pre_build_identity_binaries_still_parse_for_rollback() {
+        let identity: CandidateIdentity = serde_json::from_value(serde_json::json!({
+            "source_revision": "0123456789abcdef",
+            "source_identity": "release",
+            "authority": "published",
+            "package_version": "0.12.1",
+            "latest_known_migration": "0.11.035_drop_child_commands"
+        }))
+        .unwrap();
+
+        assert_eq!(identity.build_version, None);
+        assert_eq!(identity.display_version(), "0.12.1");
     }
 
     #[test]

@@ -53,22 +53,22 @@ pub(crate) enum Child {
 impl Child {
     fn target(&self) -> ChildRef {
         match self {
-            Self::Project(session) => ChildRef::Project(session.id.clone()),
-            Self::Task(session) => ChildRef::Task(session.id.clone()),
+            Self::Project(project) => ChildRef::Project(project.id.clone()),
+            Self::Task(task) => ChildRef::Task(task.id.clone()),
         }
     }
 
     fn label(&self) -> String {
         match self {
-            Self::Project(session) => format!("Project {}", session.launch.project.slug),
-            Self::Task(session) => format!("Task {}", session.launch.issue.identifier),
+            Self::Project(project) => format!("Project {}", project.plan.slug),
+            Self::Task(task) => format!("Task {}", task.plan.identifier),
         }
     }
 
     fn agent(&self) -> &str {
         match self {
-            Self::Project(session) => &session.agent,
-            Self::Task(session) => &session.agent,
+            Self::Project(project) => &project.agent,
+            Self::Task(task) => &task.agent,
         }
     }
 
@@ -78,15 +78,15 @@ impl Child {
         request: &ChildBodyHandoffRequest,
     ) -> OpsResult<()> {
         *self = match self {
-            Self::Project(session) => Self::Project(Box::new(
+            Self::Project(project) => Self::Project(Box::new(
                 store
-                    .handoff_project_body(&session.id, request)
+                    .handoff_project_body(&project.id, request)
                     .await
                     .map_err(child_error)?,
             )),
-            Self::Task(session) => Self::Task(Box::new(
+            Self::Task(task) => Self::Task(Box::new(
                 store
-                    .handoff_task_body(&session.id, request)
+                    .handoff_task_body(&task.id, request)
                     .await
                     .map_err(child_error)?,
             )),
@@ -96,8 +96,8 @@ impl Child {
 
     fn abandon_intent_reason(&self) -> Option<String> {
         let intent = match self {
-            Self::Project(session) => session.abandon_intent.as_ref(),
-            Self::Task(session) => session.abandon_intent.as_ref(),
+            Self::Project(project) => project.abandon_intent.as_ref(),
+            Self::Task(task) => task.abandon_intent.as_ref(),
         };
         intent.map(|intent| {
             format!(
@@ -113,8 +113,8 @@ impl Child {
             return Err(child_error(bar));
         }
         match self {
-            Self::Project(session) => super::project::launch_project_process(store, session).await,
-            Self::Task(session) => super::task::relaunch_inactive_process(store, session).await,
+            Self::Project(project) => super::project::launch_project_process(store, project).await,
+            Self::Task(task) => super::task::relaunch_inactive_process(store, task).await,
         }
     }
 }
@@ -187,7 +187,7 @@ pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLeas
     // authority is the ambient fallback: `AuthenticatedRequest::cli()` treats
     // local shell presence as the user, which is right for a local-first
     // product but means a body that lost its lease would otherwise inherit
-    // full User rights. Every Launch sets this var, so its presence without a
+    // full User rights. Every Run body sets this var, so its presence without a
     // resolvable lease is a fenced or stale writer and must fail closed.
     //
     // This deliberately does not consult the deleted Task/Project executor env
@@ -218,7 +218,7 @@ fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHand
             (provider, Some(model_name))
         });
     let provider = crate::harness::canonical_harness(provider)
-        .ok_or_else(|| child_error(format!("unsupported session harness: {provider}")))?;
+        .ok_or_else(|| child_error(format!("unsupported provider harness: {provider}")))?;
     let agent = match model_name {
         Some(model_name) if model_name.trim().is_empty() => {
             return Err(child_error("handoff model name cannot be empty"));

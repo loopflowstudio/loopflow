@@ -13,27 +13,20 @@
 //! and listens on its own wave's `/events?inbox=true` subscription. The
 //! listener holds every pen; the resident holds the vendor.
 //!
-//! The server serves the wave's CHANNEL FAMILY (see [`crate::wave::channel`]):
-//! the primary channel is the wave's name and the only journaled one — the
-//! served mind. Work-line channels (`goals.148e0e02`) are live bus topics: no
-//! journal, no worktree binding. Doors are name-addressed.
-//!
 //! Wire contract (snake_case, stable — a Loopflow worker builds against it):
 //! - `GET /health` → `{status, loop_state, wave, turns, paused, uptime_seconds}`;
-//!   `status` is CHANNEL liveness — always `serving` while this process
+//!   `status` is listener liveness — always `serving` while this process
 //!   answers; `loop_state` is the resident's state (`idle | turning | interrupting
-//!   | failed`), or null before any resident has attached; a served channel whose resident died reads
+//!   | failed`), or null before any resident has attached; a listener whose resident died reads
 //!   `status: "serving", loop_state: "failed"`.
 //! - `GET /conversation` → `{turns: [Turn]}`; includes the open turn (status
 //!   `running`), if one is in progress, after the finalized thread. Optional
 //!   `?limit=N` tails the last N turns (open turn included) — `wave_context`
-//!   passes 12; absent means the whole thread. Primary channel only.
+//!   passes 12; absent means the whole thread.
 //! - `GET /events` → SSE, the served mind's thread. Human subscriptions replay
 //!   the most recent 12 turns by default; optional `?limit=N` overrides that
 //!   tail while every subsequent turn still streams live. Resident inbox
-//!   subscriptions remain complete. It carries the PRIMARY channel and
-//!   nothing else: agent-to-agent traffic is the bus, a table in the shared
-//!   store that no server sits in front of (`crate::wave::bus`).
+//!   subscriptions remain complete.
 //!   Event names:
 //!   - `state`: data is the loop-state name (`idle | turning | interrupting |
 //!     failed`), sent once on subscribe (before the turn replay) and again on
@@ -43,17 +36,12 @@
 //!     is re-sent whole as it grows and finalization sends the terminal turn
 //!     under the same id — each frame replaces the client's previous state
 //!     for that id (upsert, never append-if-seen).
-//!   - `memory`: data is the `MemoryUpdated` summary string, fired on every
-//!     curation. Live-only, no replay — MEMORY.md itself is the durable
-//!     state. Primary channel only (memory is wave identity; work lines have
-//!     none).
-//!   - `memory-add`: data is the full added fact. Replays on connect for the
-//!     facts since the last curation, then streams live. Primary channel only.
 //!   - `inbox` (only with `?inbox=true`, the resident's subscription): data
-//!     is an [`InboxFrame`] — a resident-directed message, typed Task
-//!     observation, or control op. The pending queue (journaled inputs not yet named in any `answers`) replays on
+//!     is an [`InboxFrame`] — a resident-directed human message, typed Task or
+//!     Project observation, promotion wake, or control op. The pending queue
+//!     (journaled inputs not yet named in any `answers`) replays on
 //!     connect, then live ops stream; a bare interrupt rides live-only with
-//!     `id: null` (nothing journaled). Primary channel only. The default
+//!     `id: null` (nothing journaled). The default
 //!     stream is byte-identical to the pre-resident wire.
 //! - The resident door (token-gated via the `x-lf-resident-token` header —
 //!   401 without this boot's token):
@@ -72,30 +60,19 @@
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success). `text` may be empty only for `interrupt` (400
-//!   otherwise). The thread is human and unattributed: `say` and `from` are
-//!   rejected. Machine speech uses `lf radio pub`, an INSERT on the bus that this
-//!   server later reads back. `turn` is the appended user `Turn`,
+//!   otherwise). `turn` is the appended user `Turn`,
 //!   or null for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
-//! - `POST /observations` drains the Wave's authoritative child-observation
-//!   outbox, journals each pending Project/Task event idempotently, and wakes
-//!   or queues the resident with typed inbox items. Loopback-only internal
-//!   door; child sessions never write the Wave journal.
+//! - `POST /observations` optionally accepts a promotion latency nudge, verifies
+//!   it against the durable occurrence and registry parentage, drains the same
+//!   durable promotion through polling when the request is lost, and journals
+//!   it plus authoritative child observations idempotently before waking or
+//!   queueing the resident.
+//!   Loopback-only internal door; child Work never writes the Wave journal.
 //! - `POST /stop` → 202 and requests graceful listener shutdown. The listener
 //!   remains the sole owner of resident, registry, and discovery-file cleanup.
-//! - `GET /memory` → `{content}` — the wave's MEMORY.md, read from the
-//!   origin repo. Wave-level only: memory is wave identity, channels don't
-//!   have it.
-//! - `GET /memory/log` → `{facts}` — add-stream facts since the last
-//!   curation, oldest first. Wave-level only.
-//! - `POST /memory {op, content, summary, receipts}` → `{summary}`. `op` is `"update"`
-//!   (full replacement) or `"add"` (publish one fact; `content` must be
-//!   non-empty). `summary` is explicitly Optional — null falls back to the
-//!   content's first non-empty line. The server is the sole writer of the
-//!   origin repo's `wave/<name>/MEMORY.md` and journals `MemoryUpdated`;
-//!   add-only facts journal `MemoryAdded` and broadcast `memory-add`.
 //!
 //! `Turn` is [`crate::chat::turns::ChatTurn`].
 
@@ -118,10 +95,9 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::chat::turns::ChatTurn;
-use crate::receipt::Receipt;
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
-use crate::wave::registry::{process_alive, StoreObserver};
+use crate::wave::registry::{process_alive, ObserverSlot, StoreObserver};
 use crate::wave::runtime::{InboxItem, TurnBroadcast, TurnDeltaFrame, TurnFrame, WaveRuntime};
 use crate::wave::state::LoopState;
 use crate::wave::supervisor::SupervisorHandle;
@@ -239,11 +215,11 @@ impl Default for ShutdownDoor {
 
 #[derive(Debug, Serialize)]
 struct HealthBody {
-    /// Channel liveness: always `"serving"` while this process answers. The
-    /// resident's condition is `loop_state` — a served channel whose resident
+    /// Listener liveness: always `"serving"` while this process answers. The
+    /// resident's condition is `loop_state` — a listener whose resident
     /// died is `status: "serving", loop_state: "failed"`.
     status: String,
-    /// Resident loop state name, or null for a channel with no resident
+    /// Resident loop state name, or null for a listener with no resident
     /// (before any resident attaches).
     loop_state: Option<String>,
     wave: String,
@@ -266,15 +242,24 @@ struct ConversationQuery {
     limit: Option<usize>,
 }
 
-/// `POST /messages` request body. `op` is required — explicit, never inferred
-/// (no serde default; an op-less body is a 422). `from` is accepted only so a
-/// byline can be rejected with a 400 that names the bus, rather than silently
-/// dropped as an unknown field.
+/// `POST /messages` request body. `op` is required — explicit, never inferred.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PostMessage {
     op: MessageOp,
     text: String,
-    from: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObservationRequest {
+    promotion: Option<PromotionRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PromotionRequest {
+    parent: String,
 }
 
 /// `GET /events` query. `inbox` is explicitly Optional: `true` adds the
@@ -289,44 +274,6 @@ struct EventsQuery {
 
 pub(crate) const HUMAN_THREAD_REPLAY_LIMIT: usize = 12;
 
-/// `GET /memory` response.
-#[derive(Debug, Serialize)]
-struct MemoryBody {
-    content: String,
-}
-
-/// `GET /memory/log` response.
-#[derive(Debug, Serialize)]
-struct MemoryLogBody {
-    facts: Vec<String>,
-}
-
-/// `POST /memory` op — full replacement or one published fact.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum MemoryOp {
-    Update,
-    Add,
-}
-
-/// `POST /memory` request body. `summary` is explicitly Optional — null falls
-/// back to the content's first non-empty line. `receipts` are the parsed
-/// evidence bindings for an `add`; the client stamps each with its wave and
-/// always sends the list (empty for `update`), so no serde default is needed.
-#[derive(Debug, Deserialize)]
-struct PostMemory {
-    op: MemoryOp,
-    content: String,
-    summary: Option<String>,
-    receipts: Vec<Receipt>,
-}
-
-/// `POST /memory` response: the summary that was journaled.
-#[derive(Debug, Serialize)]
-struct PostMemoryResponse {
-    summary: String,
-}
-
 /// `POST /messages` response. `turn` is the appended user turn; null for a
 /// bare interrupt, which appends nothing. `state` is the loop-state name at
 /// acceptance time.
@@ -336,31 +283,43 @@ struct PostMessageResponse {
     state: String,
 }
 
-/// Server state: the runtime, the resident door, the store observer (for the
+/// Server state: the runtime, the resident door, the shared observer slot (for the
 /// context door's freshness poll), the supervisor handle (to signal an
 /// attach), and when the server started (for uptime).
 #[derive(Clone)]
 struct ServerState {
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
-    observer: Option<Arc<StoreObserver>>,
+    observer: Arc<ObserverSlot>,
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
     started_at: OffsetDateTime,
 }
 
-/// Build the router over a running [`WaveRuntime`]. `observer` is the store
-/// poller when this server is registered — `GET /resident/context` freshens
-/// it before serving. `supervisor` lets the attach door stand the respawn
-/// ladder down (`None` in tests without a supervisor).
 /// Request-body ceiling for the wave routes. Loopback + token gate this, but
 /// an unbounded body is a needless same-user allocation.
 const MAX_BODY_BYTES: usize = 1_048_576;
 
+/// Build the router over a running [`WaveRuntime`].
+///
+/// `observer` seeds the late-installable store poller. `GET /resident/context`
+/// freshens it before serving. `supervisor` lets the attach door stand the
+/// respawn ladder down (`None` in tests without a supervisor).
 pub fn router(
     runtime: Arc<WaveRuntime>,
     resident: ResidentDoor,
     observer: Option<Arc<StoreObserver>>,
+    supervisor: Option<SupervisorHandle>,
+    shutdown: ShutdownDoor,
+) -> Router {
+    let observer = Arc::new(ObserverSlot::new(runtime.clone(), observer));
+    router_with_observer(runtime, resident, observer, supervisor, shutdown)
+}
+
+pub(crate) fn router_with_observer(
+    runtime: Arc<WaveRuntime>,
+    resident: ResidentDoor,
+    observer: Arc<ObserverSlot>,
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
 ) -> Router {
@@ -380,8 +339,6 @@ pub fn router(
         .route("/events", get(events_handler))
         .route("/messages", post(messages_handler))
         .route("/observations", post(observations_handler))
-        .route("/memory", get(memory_handler).post(memory_write_handler))
-        .route("/memory/log", get(memory_log_handler))
         .route("/resident/attach", post(resident_attach_handler))
         .route("/resident/deltas", post(resident_deltas_handler))
         .route("/resident/context", get(resident_context_handler))
@@ -391,13 +348,25 @@ pub fn router(
 
 async fn observations_handler(
     State(state): State<ServerState>,
+    request: Option<Json<ObservationRequest>>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let observer = state.observer.as_ref().ok_or_else(|| {
+    let observer = state.observer.acquire().await.ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
             "child observations require the shared Loopflow registry".to_string(),
         )
     })?;
+    if let Some(promotion) = request.and_then(|Json(request)| request.promotion) {
+        observer
+            .deliver_promotion(&promotion.parent)
+            .await
+            .map_err(|error| {
+                (
+                    StatusCode::CONFLICT,
+                    format!("promotion wake does not match registry truth: {error}"),
+                )
+            })?;
+    }
     observer.poll_once().await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -419,7 +388,7 @@ async fn playhead_handler(
 
 async fn health_handler(State(state): State<ServerState>) -> Json<HealthBody> {
     // `loop_state` is null until a resident has ever been spawned or attached —
-    // A listener-only test channel has no Loop to report on.
+    // A listener with no resident has no Loop to report on.
     let loop_state = state
         .runtime
         .resident_expected()
@@ -501,9 +470,7 @@ async fn resident_context_handler(
 ) -> Result<Json<ContextResponse>, (StatusCode, String)> {
     state.resident.authorize(&headers)?;
     // Drain child observations before the resident captures its next turn.
-    if let Some(observer) = &state.observer {
-        observer.poll_once().await;
-    }
+    state.observer.poll_once().await;
     let playhead = state
         .runtime
         .ensure_playhead()
@@ -526,7 +493,7 @@ async fn conversation_handler(
 }
 
 /// The door is opaque on resident ops: this handler validates SHAPE only —
-/// `from` rides `say` and nothing else; `text` may be empty only for
+/// `text` may be empty only for
 /// `interrupt` — then hands the op to the runtime uninterpreted
 /// ([`WaveRuntime::try_deliver`]). What steer or interrupt *means* lives with the
 /// resident, not the ear. Honest partial: the `{turn, state}` echo still
@@ -536,24 +503,6 @@ async fn messages_handler(
     State(state): State<ServerState>,
     Json(body): Json<PostMessage>,
 ) -> Result<Json<PostMessageResponse>, (StatusCode, String)> {
-    // The thread door is the human's: unattributed message/steer/interrupt.
-    // `say` is the journal's vocabulary for folded bus reports — nothing
-    // posts it; agents publish with `lf radio pub` and the listener's bus sweep
-    // records the attributed copy. Rejecting both here is what makes "agents
-    // don't use chat" a wire property instead of doctrine.
-    if matches!(body.op, MessageOp::Say) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "`say` is not a wire op: machine speech rides the bus (`lf radio pub`)".to_string(),
-        ));
-    }
-    if body.from.is_some() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "the thread is unattributed: bylines belong to the bus (`lf radio pub --from`)"
-                .to_string(),
-        ));
-    }
     if body.text.trim().is_empty() && !matches!(body.op, MessageOp::Interrupt) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -575,71 +524,18 @@ async fn messages_handler(
     }))
 }
 
-async fn memory_handler(State(state): State<ServerState>) -> Json<MemoryBody> {
-    Json(MemoryBody {
-        content: state.runtime.memory().read(),
-    })
-}
-
-async fn memory_log_handler(State(state): State<ServerState>) -> Json<MemoryLogBody> {
-    Json(MemoryLogBody {
-        facts: state.runtime.memory_adds(),
-    })
-}
-
-async fn memory_write_handler(
-    State(state): State<ServerState>,
-    Json(body): Json<PostMemory>,
-) -> Result<Json<PostMemoryResponse>, (StatusCode, String)> {
-    let summary = body
-        .summary
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| first_line(&body.content))
-        .unwrap_or_else(|| "memory cleared".to_string());
-    let result = match body.op {
-        MemoryOp::Update => state.runtime.update_memory(&body.content, &summary),
-        MemoryOp::Add => {
-            let fact = body.content.trim();
-            if fact.is_empty() {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "content is required for the add op".to_string(),
-                ));
-            }
-            state.runtime.append_memory(fact, body.receipts.clone())
-        }
-    };
-    match result {
-        Ok(()) => Ok(Json(PostMemoryResponse { summary })),
-        Err(err) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("memory write failed: {err}"),
-        )),
-    }
-}
-
-fn first_line(content: &str) -> Option<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(str::to_string)
-}
-
 /// The served mind's thread as SSE: the loop state, the thread on connect
 /// (open turn included, status `running`), then live frames — `state` on every
 /// transition; `turn` (whole turn, replace-by-id) when a turn opens or
 /// finalizes, with `turn-delta` (one increment, absorb-by-id) for in-turn
 /// growth so a per-token turn does not re-serialize whole each frame; `resync`
 /// when the turn broadcast lagged (the client reconnects for a fresh atomic
-/// snapshot); `memory` on every curation (live-only; the file is the durable
-/// state); and `memory-add` for replayable facts. Snapshot and subscription are
-/// atomic in the runtime (broadcasts share the append lock), so no live frame is
+/// snapshot). Snapshot and subscription are atomic in the runtime (broadcasts
+/// share the append lock), so no live frame is
 /// ever older than the replayed snapshot, and the client's delta reconstruction
 /// picks up exactly where the snapshot's open turn left off.
 ///
-/// There is no channel scoping. Agent-to-agent broadcast is the bus — a table,
-/// polled from a cursor, with no server in the path (`crate::wave::bus`).
+/// There is no secondary routing scope inside a Wave listener.
 async fn events_handler(
     State(state): State<ServerState>,
     Query(query): Query<EventsQuery>,
@@ -667,6 +563,11 @@ async fn events_handler(
                     InboxFrame::Project {
                         observation: observation.clone(),
                     }
+                } else if let Some(wake) = sub.promotions.get(&message.id) {
+                    InboxFrame::Promotion {
+                        parent_wave_id: wake.parent_wave_id.clone(),
+                        parent: wake.parent.clone(),
+                    }
                 } else {
                     pending_inbox_frame(message)
                 };
@@ -680,11 +581,6 @@ async fn events_handler(
         std::iter::once(Ok(state_event(&sub.state)))
             .chain(sub.playhead.into_iter().map(|p| Ok(playhead_event(&p))))
             .chain(sub.turns.into_iter().map(|t| Ok(turn_event(&t))))
-            .chain(
-                sub.memory_adds
-                    .into_iter()
-                    .map(|fact| Ok(memory_add_event(&fact))),
-            )
             .chain(inbox_replay),
     );
     // Whole turns ride `turn` frames, in-turn growth rides `turn-delta` frames,
@@ -695,16 +591,9 @@ async fn events_handler(
     // Lagged: fine — the next transition carries the current state.
     let live_states = live_stream(sub.state_rx, |s| state_event(&s));
     let live_playhead = live_stream(sub.playhead_rx, |p| playhead_event(&p));
-    // Lagged: reconnect gets a fresh add snapshot.
-    let live_memory_adds = live_stream(sub.memory_add_rx, |fact| memory_add_event(&fact));
-    // Lagged: fine — MEMORY.md itself is the durable state.
-    let live_memory = live_stream(sub.memory_rx, |summary| memory_event(&summary));
     let mut live: BoxedEventStream = Box::pin(stream::select(
         live_turns,
-        stream::select(
-            stream::select(live_states, live_playhead),
-            stream::select(live_memory, live_memory_adds),
-        ),
+        stream::select(live_states, live_playhead),
     ));
     if include_inbox {
         // Lagged: the pending fold is the durable queue; a resident that
@@ -810,14 +699,6 @@ fn state_event(state: &LoopState) -> Event {
     Event::default().event("state").data(state.name())
 }
 
-fn memory_event(summary: &str) -> Event {
-    Event::default().event("memory").data(summary)
-}
-
-fn memory_add_event(fact: &str) -> Event {
-    Event::default().event("memory-add").data(fact)
-}
-
 fn inbox_event(frame: &InboxFrame) -> Event {
     Event::default()
         .event("inbox")
@@ -829,7 +710,6 @@ fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
         id: message.id.0.clone(),
         op: message.op,
         text: message.text.clone(),
-        from: message.from.clone(),
     }
 }
 
@@ -841,6 +721,13 @@ fn inbox_item_frame(item: &InboxItem) -> InboxFrame {
         },
         InboxItem::Project(observation) => InboxFrame::Project {
             observation: observation.clone(),
+        },
+        InboxItem::Promotion {
+            parent_wave_id,
+            parent,
+        } => InboxFrame::Promotion {
+            parent_wave_id: parent_wave_id.clone(),
+            parent: parent.clone(),
         },
         InboxItem::Interrupt => InboxFrame::Interrupt,
         InboxItem::Skip => InboxFrame::Skip,
@@ -955,7 +842,10 @@ pub fn remove_resident_token(repo_root: &Path, wave: &str, own_token: &str) {
 mod tests {
     use super::*;
     use crate::chat::turns::ChatTurn;
+    use crate::id::WaveId;
+    use crate::store::{open_store, SharedStore};
     use crate::wave::journal::{journal_path, read_events, EventKind, JournalAppendStage};
+    use crate::wave::Wave;
 
     fn whole_broadcast(id: &str) -> TurnBroadcast {
         let turn = ChatTurn::user(id.to_string(), "hi".to_string());
@@ -1058,7 +948,14 @@ mod tests {
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
         let shutdown = ShutdownDoor::new();
         let requested = shutdown.clone();
-        let app = router(runtime, ResidentDoor::new("resident"), None, None, shutdown);
+        let observer = Arc::new(ObserverSlot::new(runtime.clone(), None));
+        let app = router_with_observer(
+            runtime,
+            ResidentDoor::new("resident"),
+            observer,
+            None,
+            shutdown,
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -1079,10 +976,10 @@ mod tests {
     async fn message_write_failures_are_not_accepted_and_can_be_retried() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-        let app = router(
+        let app = router_with_observer(
             runtime.clone(),
             ResidentDoor::new("resident"),
-            None,
+            Arc::new(ObserverSlot::new(runtime.clone(), None)),
             None,
             ShutdownDoor::new(),
         );
@@ -1155,13 +1052,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observation_nudge_fails_loudly_without_the_shared_registry() {
+    #[allow(clippy::await_holding_lock)] // the env guard serializes the shared registry path
+    async fn observation_nudge_acquires_registry_that_appears_after_server_start() {
+        let _env = crate::journal::TestLedgerGuard::new();
         let tmp = tempfile::tempdir().expect("tempdir");
         let runtime = WaveRuntime::open("ship".into(), tmp.path().to_path_buf()).expect("open");
-        let app = router(
-            runtime,
+        let observer = Arc::new(ObserverSlot::new(runtime.clone(), None));
+        let app = router_with_observer(
+            runtime.clone(),
             ResidentDoor::new("resident"),
-            None,
+            observer,
             None,
             ShutdownDoor::new(),
         );
@@ -1178,6 +1078,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+
+        let store: SharedStore = Arc::new(
+            open_store(&crate::store::storage_config_from_env().expect("store config"))
+                .await
+                .expect("create registry"),
+        );
+        let parent = Wave::new(
+            WaveId::new(),
+            "platform".to_string(),
+            tmp.path().display().to_string(),
+        );
+        let mut child = Wave::new(
+            WaveId::new(),
+            "ship".to_string(),
+            tmp.path().display().to_string(),
+        );
+        child
+            .record_promotion(parent.id(), OffsetDateTime::now_utc())
+            .expect("record promotion");
+        store.create_wave(&parent).await.expect("store parent");
+        store.create_wave(&child).await.expect("store child");
+
+        for _ in 0..2 {
+            let response = reqwest::Client::new()
+                .post(format!("http://{addr}/observations"))
+                .json(&serde_json::json!({"promotion": {"parent": "platform"}}))
+                .send()
+                .await
+                .expect("promotion nudge");
+            assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+        }
+        assert_eq!(runtime.pending_messages().len(), 1);
+        assert_eq!(
+            read_events(&journal_path(tmp.path(), "ship"))
+                .iter()
+                .filter(|event| matches!(&event.kind, EventKind::PromotionObserved { .. }))
+                .count(),
+            1
+        );
         server.abort();
     }
 

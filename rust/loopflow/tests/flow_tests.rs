@@ -88,7 +88,6 @@ fn flow_parsing_parity() {
 - implement
 - step:
     name: review
-    feedback: true
     direction: [ux, security]
 "#,
     );
@@ -105,7 +104,6 @@ fn flow_parsing_parity() {
             directions: vec![],
             action_style: None,
             interactive: None,
-            feedback: false,
             content: None,
         })
     );
@@ -118,19 +116,18 @@ fn flow_parsing_parity() {
             directions: vec!["ux".to_string(), "security".to_string()],
             action_style: None,
             interactive: None,
-            feedback: true,
             content: None,
         })
     );
 }
 
 #[test]
-fn code_flow_records_each_agent_launch_in_one_trace() {
+fn code_flow_records_each_agent_invocation_in_one_trace() {
     let repo = TempDir::new().unwrap();
     run_git(repo.path(), &["init", "-b", "main"]);
     run_git(repo.path(), &["config", "user.email", "test@example.com"]);
     run_git(repo.path(), &["config", "user.name", "Test"]);
-    for skill in ["implement", "compress", "lint", "gate"] {
+    for skill in ["implement", "compress"] {
         write_skill(repo.path(), skill, &format!("Run the {skill} step."));
     }
     run_git(repo.path(), &["add", "."]);
@@ -163,48 +160,50 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
         .find(|event| event.node == "run" && event.event == "started")
         .map(|event| event.run_id.as_str())
         .expect("flow run event");
-    let launches = store.agent_launches_matching(run_id).unwrap();
+    let invocations = store.agent_invocations_matching(run_id).unwrap();
 
-    assert_eq!(launches.len(), 4);
-    assert!(launches.iter().all(|launch| launch.run_id == run_id));
-    assert!(launches
+    assert_eq!(invocations.len(), 2);
+    assert!(invocations
         .iter()
-        .all(|launch| launch.process_id == launches[0].process_id));
-    assert!(launches
+        .all(|invocation| invocation.run_id == run_id));
+    assert!(invocations
         .iter()
-        .all(|launch| launch.capture_status == "complete"));
+        .all(|invocation| invocation.process_id == invocations[0].process_id));
+    assert!(invocations
+        .iter()
+        .all(|invocation| invocation.capture_status == "complete"));
     assert_eq!(
-        launches
+        invocations
             .iter()
-            .map(|launch| launch.skill.as_deref().unwrap())
+            .map(|invocation| invocation.skill.as_deref().unwrap())
             .collect::<Vec<_>>(),
-        ["implement", "compress", "lint", "gate"]
+        ["implement", "compress"]
     );
     assert_eq!(
-        launches
+        invocations
             .iter()
-            .map(|launch| launch.id.as_str())
+            .map(|invocation| invocation.id.as_str())
             .collect::<std::collections::HashSet<_>>()
             .len(),
-        4
+        2
     );
     assert_eq!(
         store
-            .agent_turns_for_launches(
-                &launches
+            .agent_turns_for_invocations(
+                &invocations
                     .iter()
-                    .map(|launch| launch.id.clone())
+                    .map(|invocation| invocation.id.clone())
                     .collect::<Vec<_>>(),
             )
             .unwrap()
             .len(),
-        4
+        2
     );
 
     let trace = run_lf(
         repo.path(),
         home.path(),
-        &["trace", &launches[0].process_id, "--json"],
+        &["trace", &invocations[0].process_id, "--json"],
         None,
     );
     assert!(
@@ -214,13 +213,13 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
     );
     let trace: serde_json::Value = serde_json::from_slice(&trace.stdout).unwrap();
     assert_eq!(
-        trace["launches"]
+        trace["invocations"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|launch| launch["skill"].as_str().unwrap())
+            .map(|invocation| invocation["skill"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["implement", "compress", "lint", "gate"]
+        ["implement", "compress"]
     );
 
     let doctor = run_lf(repo.path(), home.path(), &["doctor", "--json"], None);

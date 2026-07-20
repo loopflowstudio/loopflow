@@ -49,14 +49,14 @@ struct WaveLensTests {
         #expect(WaveLensColor(.unknown) == .unknown)
     }
 
-    @Test("a User Feedback is blue and wins over a live Project body")
+    @Test("a User Ask is blue and wins over a live Project body")
     func projectBlueWinsOverLiveBody() throws {
         let lens = WaveLens.forProject(
             runtime: try makeRuntime(alive: true, reason: "implementing"),
-            tasks: [try makeTask(level: "blue", reason: "Waiting for your feedback")]
+            tasks: [try makeTask(level: "blue", reason: "Waiting for your answer")]
         )
         #expect(lens.color == .blue)
-        #expect(lens.reason == "Waiting for your feedback")
+        #expect(lens.reason == "Waiting for your answer")
     }
 
     @Test("unknown is a lit lens, distinct from the off black")
@@ -70,10 +70,10 @@ struct WaveLensTests {
 
     @Test("task lens is the shared level and reason, verbatim")
     func taskLensIsVerbatim() throws {
-        let attention = try makeAttention(level: "red", reason: "checks passed; awaiting review")
+        let attention = try makeAttention(level: "red", reason: "merge head abc1234 on GitHub")
         let lens = WaveLens.forTask(attention)
         #expect(lens.color == .red)
-        #expect(lens.reason == "checks passed; awaiting review")
+        #expect(lens.reason == "merge head abc1234 on GitHub")
     }
 
     @Test("unavailable task evidence stays unknown with its reason, never black")

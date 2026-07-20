@@ -69,7 +69,7 @@ guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf task run <issue-id>                       # durable Task Session, own worktree
+lf task run <issue-id>                       # durable Task Work, own worktree
 lf task steer <issue-id> "smaller approach"  # redirect its active turn
 lf task status <issue-id> --json             # inspect durable state
 lf task wait <issue-id> --until terminal
@@ -100,15 +100,17 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 ```bash
 lf home id                                      # this machine's HomeId
 lf work place wave <wave-id> <home-id>          # only while no Run is live
-lf start <wave>                                 # route to its placed Home
-lf stop <wave>                                  # leave the Home keeper and siblings running
-lf ssh <home-id> --remote-native -- lf status <wave> --json
+lf start <wave>                                 # start it on this machine
+lf stop <wave>                                  # stop it on this machine
+lf ssh <home-id> status <wave> --json           # inspect it on that Home
+lf ssh <home-id> start <wave>                   # start it on that Home
 ```
 
-Use `--remote-native` for durable remote lifecycle. It forwards no provider,
-GitHub, PM, or secret authority; the remote Home uses its installed authority.
-Use ordinary `lf ssh <host> -- <command>` only for foreground work that should
-borrow the origin's short-lived credential lease.
+`lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
+are implicit. Foreground commands can choose from origin-forwarded and
+target-local subscription accounts. Durable processes scrub forwarded provider,
+GitHub, PM, and secret authority before detaching and use credentials installed
+on their machine.
 
 ## Speak
 
@@ -119,12 +121,13 @@ one:
 
 ```bash
 lf radio pub --channel <channel> "landed PR #91, tests green"
-lf memory add "<durable learning>" --receipt pr:owner/repo#42
 ```
 
-Outside any wave, a publish prints a drop note and exits 0, so these verbs
-are safe in every prompt. `wave/<name>/MEMORY.md` is server-owned — write
-through `lf memory add`, never the file.
+Outside any wave, a publish prints a drop note and exits 0. When the active
+skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md` through
+the ordinary repository workflow. Keep it curated rather than appending a
+transcript. `update-wave` owns deliberate end-of-work memory curation; no live
+Wave is required.
 
 ## Where To Write
 

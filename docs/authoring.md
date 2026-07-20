@@ -52,21 +52,13 @@ flow — with commits between them:
 ```yaml
 # .lf/flows/ship-api.yaml
 - implement
-- lint
+- compress
 - gate
 ```
 
-Declare conversation on the flow step that owns it:
-
-```yaml
-- kickoff
-- step:
-    name: review-design
-    feedback: true
-- implement
-```
-
-The skill itself does not make every flow that references it wait for Feedback.
+Skills that need judgment run `lf ask "<question>"`. The command records the
+exchange under the current Turn, waits for its routed Answer, then returns that
+Answer to the same skill process. Flow YAML needs no interaction flag.
 
 Mechanical git/PR operations ride along as `op:` steps:
 
@@ -168,14 +160,19 @@ when to design first, what never to touch.
 
 | Field | What it does |
 |-------|-------------|
+| `owner` | Optional OS user allowed to start the Wave automatically |
+| `home` | Optional HomeId, hostname, or IP allowed to start the Wave automatically |
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules, fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
 | `pm.linear_team` | Linear team id owning the Wave's Project and Task prefixes |
 
-Execution placement is durable runtime state, not authored goal intent. Use
-`lf work place wave <wave-id> <home-id>`; do not put a hostname or Home in
-`GOAL.md`.
+`owner` and `home` say where automatic startup is wanted. Both are optional and
+independent. They are policy, not authorization or observed runtime state.
+Execution placement remains durable state: use
+`lf work place wave <wave-id> <home-id>`. Bare `lf start` and `lfd` require both
+the authored policy and recorded placement to match; named `lf start <wave>` is
+an explicit local override.
 
 ### Writing KRs
 
@@ -218,8 +215,9 @@ hand.
 lf design: plan infrastructure hardening for the runtime
 ```
 
-Don't author `MEMORY.md` beyond a seed: it is server-owned, written by the
-wave as it works. Curate it through `lf memory add --receipt`, not the file.
+Seed `MEMORY.md` with the load-bearing context a first run needs. After that,
+agents edit the same reviewed file through the ordinary repository workflow;
+`update-wave` owns deliberate end-of-work curation.
 
 ## Adaptation
 

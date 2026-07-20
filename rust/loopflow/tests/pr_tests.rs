@@ -1,13 +1,16 @@
 mod support;
 
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{task_complete, task_status};
+use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
-    create_or_update_pr, current_pr, present_pr_review, NullProgress, OpsError, PrOptions,
+    commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
+    NullProgress, OpsError, PrOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrPhase, PrPublication};
+use loopflow::task::{AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
 
@@ -71,11 +74,65 @@ exit 0
 "#
 }
 
+fn gh_changed_head_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+echo "$@" >> "{log_path}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  echo '{{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"new-head"}}}}'
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'true'
+  exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
+fn gh_open_auto_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+echo "$@" >> "{log_path}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  head="$(git rev-parse HEAD)"
+  printf '{{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
+  exit 0
+fi
+if [ "$1 $2" = "pr view" ]; then
+  echo 'true'
+  exit 0
+fi
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+  exit 0
+fi
+exit 0
+"#
+    )
+}
+
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
         .args(["push", "-u", "origin", name])
         .current_dir(repo.path())
         .status();
+}
+
+fn create_changed_branch(repo: &TestRepo, name: &str) {
+    repo.create_branch(name);
+    repo.create_file("feature.txt", name);
+    repo.stage_all();
+    repo.commit("feature work");
 }
 
 fn point_origin_at_github(repo: &TestRepo) {
@@ -93,6 +150,36 @@ fn point_origin_at_github(repo: &TestRepo) {
 }
 
 #[test]
+fn task_snapshot_reads_its_current_parent_project() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let mut project = runtime
+        .block_on(task.store.get_project(&task.task.project_id))
+        .expect("read parent Project")
+        .expect("parent Project exists");
+    project.plan.slug = "current-project".to_string();
+    project.plan.pm_snapshot_synced_at += 1;
+    runtime
+        .block_on(task.store.update_project(&project))
+        .expect("update parent Project");
+
+    let snapshot = task_snapshot(&task.task).expect("snapshot Task");
+
+    assert_eq!(snapshot.project, "current-project");
+    assert_eq!(snapshot.external_project_id, project.plan.id.as_str());
+    assert_eq!(
+        snapshot.pm_snapshot_synced_at,
+        task.task.plan.pm_snapshot_synced_at
+    );
+}
+
+#[test]
 fn pr_create_calls_gh() {
     let gh_script = write_gh_script("[]", None);
     let home = tempfile::TempDir::new().expect("temp home");
@@ -105,7 +192,7 @@ fn pr_create_calls_gh() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -140,7 +227,7 @@ fn publish_makes_no_presentation_attempt() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -255,17 +342,17 @@ fn github_failure_leaves_publication_intent_observable() {
 
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
     let pr = runtime
-        .block_on(task.store.active_task_pr(&task.session.id))
+        .block_on(task.store.active_task_pr(&task.task.id))
         .expect("read active PR")
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
     let publication = pr.publication.expect("durable publication request");
-    assert_eq!(publication.after_merge, AfterMerge::Review);
     assert!(publication.github.is_none());
+    assert!(publication.merge.is_none());
 }
 
 #[test]
-fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
+fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();
@@ -277,48 +364,266 @@ fn manually_merged_github_pr_is_adopted_without_completing_the_task() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::Review,
-        next_slug: None,
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
             head_sha: None,
         }),
+        merge: None,
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as published");
 
-    let session = task_status("INF-123").expect("reconcile Task PR");
-    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    let persisted_task = task_status("INF-123").expect("reconcile Task PR");
+    let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
     assert!(!matches!(snapshot.status, WorkStatus::Done));
     assert!(
         matches!(
-            session.observation,
+            persisted_task.observation,
             loopflow::task::Observation::Fresh { .. }
         ),
-        "manual merge reconciliation should use the bounded REST observation: {session:?}"
+        "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
     );
 
     let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
+        .block_on(task.store.task_prs(&task.task.id))
         .expect("read Task PRs");
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
     let publication = prs[0].publication.as_ref().expect("adopted publication");
-    assert_eq!(publication.after_merge, AfterMerge::Review);
+    assert_eq!(prs[0].after_merge(), AfterMerge::ContinueTask);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
     let work = runtime
         .block_on(
             task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
         )
         .expect("resolve reconciled Task Work");
     assert!(!matches!(
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
     ));
+
+    let restore = Command::new("git")
+        .current_dir(repo.path())
+        .args([
+            "remote",
+            "set-url",
+            "origin",
+            repo.bare_path().to_str().expect("bare origin path"),
+        ])
+        .status()
+        .expect("restore local origin");
+    assert!(restore.success());
+
+    let next = pr_next(repo.path(), None).expect("rotate merged continuation");
+    assert_eq!(next.sequence, 2);
+    assert_eq!(next.phase(), PrPhase::Working);
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.task.id))
+        .expect("read rotated PR chain");
+    assert_eq!(prs.len(), 2);
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+    assert_eq!(prs[1].id, next.id);
+    assert_eq!(prs[1].sequence, next.sequence);
+    assert_eq!(prs[1].branch, next.branch);
+    assert_eq!(prs[1].phase(), PrPhase::Working);
+
+    let current_branch = Command::new("git")
+        .current_dir(repo.path())
+        .args(["branch", "--show-current"])
+        .output()
+        .expect("read rotated branch");
+    assert!(current_branch.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&current_branch.stdout).trim(),
+        next.branch
+    );
+
+    let durable_task = runtime
+        .block_on(task.store.get_task(&task.task.id))
+        .expect("read rotated Task")
+        .expect("Task remains present");
+    assert!(durable_task.gate_proposal.is_none());
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
+}
+
+#[test]
+fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("gh.log");
+    let script = gh_changed_head_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some("old-head".to_string()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: "old-head".to_string(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store auto-merge request");
+
+    task_status("INF-123").expect("reconcile changed head");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert_eq!(persisted.head_sha(), Some("new-head"));
+    assert!(persisted.merge_request().is_none());
+    assert_eq!(persisted.after_merge(), AfterMerge::ContinueTask);
+    let log = std::fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("pr merge 912 --disable"));
+}
+
+#[test]
+fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("gh.log");
+    let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", script.as_str()), ("tmux", noop_script())],
+        home.path(),
+    );
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-resume-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let now = time::OffsetDateTime::now_utc();
+    let head = repo.head_sha();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store auto merge request");
+
+    task_resume("INF-123", None, None).expect("resume Task authored work");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(persisted.merge_request().is_none());
+    let log = std::fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("pr merge 912 --disable"));
+}
+
+#[test]
+fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("push.log");
+    let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-commit-push";
+    repo.create_branch(branch);
+    repo.create_file("feature.txt", "first head");
+    repo.stage_all();
+    repo.commit("first head");
+    push_branch(&repo, branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(repo.head_sha()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: now,
+            head_sha: repo.head_sha(),
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("store Auto request");
+
+    let hook = repo.bare_path().join("hooks/pre-receive");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
+            log_path.display()
+        ),
+    )
+    .expect("write push hook");
+    let mut permissions = fs::metadata(&hook).expect("hook metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("make hook executable");
+
+    repo.create_file("follow-up.txt", "new head");
+    commit_workflow(
+        repo.path(),
+        &CommitOptions {
+            add: true,
+            push: true,
+            create_draft_pr: false,
+            task: "commit".to_string(),
+            flow_parents: Vec::new(),
+            message: Some("new Task head".to_string()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .expect("commit and push new head");
+
+    let persisted = runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR");
+    assert!(persisted.merge_request().is_none());
+    let log = fs::read_to_string(log_path).expect("read operation log");
+    let disable = log.find("pr merge 912 --disable").expect("Auto is revoked");
+    let push = log.find("git-push").expect("new head is pushed");
+    assert!(disable < push, "Auto must be revoked before push:\n{log}");
 }
 
 #[test]
@@ -331,15 +636,22 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
     repo.create_branch(branch);
     point_origin_at_github(&repo);
     let task = register_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let now = time::OffsetDateTime::now_utc();
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
-        requested_at: time::OffsetDateTime::now_utc(),
-        after_merge: AfterMerge::CompleteTask,
-        next_slug: None,
+        requested_at: now,
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
-            head_sha: None,
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
@@ -347,18 +659,18 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .block_on(task.store.update_task_pr(&pr))
         .expect("mark PR as completing");
 
-    let session = task_status("INF-123").expect("reconcile completing PR");
+    let persisted_task = task_status("INF-123").expect("reconcile completing PR");
     assert!(
         matches!(
-            session.observation,
+            persisted_task.observation,
             loopflow::task::Observation::Fresh { .. }
         ),
-        "completion should use the bounded REST observation: {session:?}"
+        "completion should use the bounded REST observation: {persisted_task:?}"
     );
-    let snapshot = loopflow::ops::task::task_snapshot(&session).expect("snapshot Task");
+    let snapshot = loopflow::ops::task::task_snapshot(&persisted_task).expect("snapshot Task");
     assert!(matches!(snapshot.status, WorkStatus::Done));
     let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
+        .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
@@ -388,12 +700,12 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
         "expected a gate refusal naming the unpublished PR, got: {message}"
     );
 
-    // The Session and PR are unchanged: no premature completion, no deleted PR.
+    // The Task and PR are unchanged: no premature completion, no deleted PR.
     let runtime = tokio::runtime::Runtime::new().expect("read runtime");
     let work = runtime
         .block_on(
             task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.session.id.clone())),
+                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
         )
         .expect("resolve Task Work");
     assert!(!matches!(
@@ -401,7 +713,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
         WorkStatus::Done
     ));
     let prs = runtime
-        .block_on(task.store.task_prs(&task.session.id))
+        .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs");
     assert_eq!(prs.len(), 1, "working PR must survive the refusal");
 }
@@ -429,6 +741,44 @@ fn canonical_checkout_refuses_pr_before_committing_or_pushing() {
 }
 
 #[test]
+fn empty_non_task_range_refuses_before_copy_or_github_mutation() {
+    let markers = tempfile::TempDir::new().expect("markers");
+    let agent_marker = markers.path().join("agent");
+    let github_marker = markers.path().join("github");
+    let codex = format!(
+        "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
+        agent_marker.display()
+    );
+    let gh = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\ncase \"$1 $2\" in\n  'pr create'|'pr edit'|'pr ready') printf called > '{}';;\nesac\nif [ \"$1 $2\" = \"pr list\" ]; then echo '[]'; fi\nexit 0\n",
+        github_marker.display()
+    );
+    let _env = EnvGuard::new(&[("gh", gh.as_str()), ("codex", codex.as_str())]);
+    let repo = TestRepo::new();
+    repo.create_branch("already-landed");
+    push_branch(&repo, "already-landed");
+
+    let result = create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+            agent: Some("codex".to_string()),
+        },
+        &NullProgress,
+    );
+
+    assert!(matches!(
+        result,
+        Err(OpsError::Message(message))
+            if message.contains("no changes")
+                && message.contains("before PR copy generation or GitHub mutation")
+    ));
+    assert!(!agent_marker.exists(), "PR-copy agent must not launch");
+    assert!(!github_marker.exists(), "GitHub must not mutate");
+}
+
+#[test]
 fn pr_update_refreshes_body() {
     let gh_script = write_gh_script(
         r#"[{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1}]"#,
@@ -444,7 +794,7 @@ fn pr_update_refreshes_body() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -474,7 +824,7 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -520,7 +870,7 @@ fn pr_auto_generates_title_when_missing() {
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(
@@ -560,7 +910,7 @@ Body:
         Some(home.path()),
     );
     let repo = TestRepo::new();
-    repo.create_branch("feature");
+    create_changed_branch(&repo, "feature");
     push_branch(&repo, "feature");
 
     let result = create_or_update_pr(

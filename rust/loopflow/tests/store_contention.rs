@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
-/// At least as large as the fleet whose contention killed the Session bodies.
+/// At least as large as the fleet whose contention killed the provider bodies.
 const FLEET: usize = 51;
 const EVENTS_PER_WRITER: usize = 20;
 

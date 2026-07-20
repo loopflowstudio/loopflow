@@ -92,7 +92,7 @@ enum LocalWaveAgentLauncher {
     }
 
     /// Start a filed Task through the same durable lifecycle command as the CLI.
-    /// `lf task run` owns Project-Session creation, worktree placement, and the
+    /// `lf task run` owns Project Work startup, worktree placement, and the
     /// Task process; the app does not reproduce any of those decisions.
     static func runTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
@@ -137,12 +137,6 @@ enum LocalWaveAgentLauncher {
         try runChecked(taskInterruptCommand(lfPath: lfPath, issue: issue), cwd: origin)
     }
 
-    static func resolvedTaskFeedbackCommand(repoPath: String, taskId: String) throws -> [String] {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
-        return taskFeedbackCommand(lfPath: lfPath, taskId: taskId)
-    }
-
     /// Open the branch's PR for human review from `worktree`. This delegates to
     /// `lf pr open` — the single presentation boundary — instead of building a
     /// GitHub URL and opening it here, so any later review-surface preference is
@@ -169,8 +163,7 @@ enum LocalWaveAgentLauncher {
         directive: String
     ) -> [String] {
         [
-            lfPath, "task", "start", title,
-            "--project", project,
+            lfPath, "task", "start", project, title,
             "--directive", directive,
             "--json",
         ]
@@ -194,10 +187,6 @@ enum LocalWaveAgentLauncher {
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
         [lfPath, "task", "interrupt", issue]
-    }
-
-    static func taskFeedbackCommand(lfPath: String, taskId: String) -> [String] {
-        [lfPath, "work", "feedback", "task", taskId, "--continue-on-exit"]
     }
 
     /// Why a launch must not happen, or nil when the way is clear. `endpoint`
@@ -231,9 +220,9 @@ enum LocalWaveAgentLauncher {
     /// The `wave` a server at `endpoint` reports on `GET /health`, or nil when
     /// nothing answers within 2s (mirrors Rust `ENDPOINT_PROBE_TIMEOUT`).
     /// Probe contract: the guard keys on the `wave` field only. `/health`'s
-    /// `status` is channel liveness (`serving`) and `loop_state` is the resident's
+    /// `status` is listener liveness (`serving`) and `loop_state` is the resident's
     /// state — a wave whose loop failed still answers here and still blocks a
-    /// second launch, which is correct: the channel is live.
+    /// second launch, which is correct: the listener is live.
     static func healthWaveName(endpoint: String) -> String? {
         guard let url = URL(string: "http://\(endpoint)/health") else { return nil }
         var request = URLRequest(url: url)

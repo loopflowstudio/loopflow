@@ -23,7 +23,7 @@ use crate::store::{CredentialState, RoutingState};
 
 const DEFAULT_COOLDOWN_SECS: i64 = 15 * 60;
 const RESET_GRACE_SECS: i64 = 5;
-const STRAINED_UTILIZATION_PERCENT: u8 = 75;
+const STRAINED_UTILIZATION_PERCENT: u8 = 95;
 const PROVIDER_CREDENTIAL_ENV_VARS: [&str; 6] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -110,7 +110,7 @@ pub enum ProviderAccountError {
         provider: Provider,
         accounts: String,
     },
-    #[error("configured {provider} route has no eligible account: {accounts}")]
+    #[error("no eligible managed {provider} account: {accounts}")]
     NoEligibleAccount {
         provider: Provider,
         accounts: String,
@@ -684,13 +684,22 @@ pub(crate) async fn provider_route_account_ids(
         }
         None => None,
     };
-    Ok(match route {
-        Some(route) => Some(route.accounts),
-        None => store
-            .provider_route(&RouteScope::Default, provider)
-            .await?
-            .map(|route| route.accounts),
-    })
+    if let Some(route) = route {
+        return Ok(Some(route.accounts));
+    }
+    if let Some(route) = store.provider_route(&RouteScope::Default, provider).await? {
+        return Ok(Some(route.accounts));
+    }
+
+    let today = time::OffsetDateTime::now_utc().date();
+    let accounts = store
+        .list_provider_accounts(Some(provider.as_str()))
+        .await?
+        .into_iter()
+        .filter(|account| account.eligible_for_automatic_routing(today))
+        .map(|account| account.account_id)
+        .collect::<Vec<_>>();
+    Ok((!accounts.is_empty()).then_some(accounts))
 }
 
 pub(crate) fn resolve_provider_account_blocking(
@@ -1294,7 +1303,7 @@ mod account_first_tests {
                 &second.account_id,
                 &[crate::store::AccountLimitWindow {
                     window: "weekly".to_string(),
-                    used_percent: 80,
+                    used_percent: 95,
                     resets_at: Some(now_unix() + 3600),
                     plan: None,
                 }],
@@ -1343,7 +1352,7 @@ mod account_first_tests {
             .upsert_provider_account_limits(
                 Provider::Codex.as_str(),
                 &first.account_id,
-                &[window(80, Some(now_unix() + 3600))],
+                &[window(95, Some(now_unix() + 3600))],
                 "poll",
             )
             .await
@@ -1373,9 +1382,9 @@ mod account_first_tests {
 
         // Under the bar, already reset, or never resetting: declared order stands.
         for window in [
-            window(STRAINED_UTILIZATION_PERCENT - 1, Some(now_unix() + 3600)),
-            window(80, Some(now_unix() - 1)),
-            window(80, None),
+            window(94, Some(now_unix() + 3600)),
+            window(95, Some(now_unix() - 1)),
+            window(95, None),
         ] {
             store
                 .upsert_provider_account_limits(
@@ -1442,7 +1451,43 @@ mod account_first_tests {
                 .await
                 .unwrap_err()
                 .to_string(),
-            "configured claude route has no eligible account: 'missing@example.com' credential is missing"
+            "no eligible managed claude account: 'missing@example.com' credential is missing"
         );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn accounts_form_an_implicit_route_when_no_route_is_configured() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+                .await
+                .unwrap(),
+        );
+        let limited = account(Provider::Claude, "a-limited", temp.path());
+        let healthy = account(Provider::Claude, "z-healthy", temp.path());
+        store.upsert_provider_account(&limited).await.unwrap();
+        store.upsert_provider_account(&healthy).await.unwrap();
+        store
+            .record_provider_account_health(
+                Provider::Claude.as_str(),
+                &limited.account_id,
+                Some(100),
+                Some(now_unix() + 300),
+                Some("subscription usage limit"),
+            )
+            .await
+            .unwrap();
+
+        let route = resolve_provider_account(Provider::Claude, None)
+            .await
+            .unwrap()
+            .expect("a healthy managed account should be selected");
+
+        assert_eq!(route.account_id(), &healthy.account_id);
     }
 }

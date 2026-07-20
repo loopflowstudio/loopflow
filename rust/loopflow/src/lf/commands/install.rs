@@ -39,6 +39,7 @@ pub struct CandidateIdentity {
     pub source_identity: String,
     pub authority: MigrationAuthority,
     pub package_version: String,
+    pub build_version: Option<String>,
     pub latest_known_migration: String,
 }
 
@@ -49,8 +50,15 @@ impl CandidateIdentity {
             source_identity: build_info::source_identity(),
             authority: build_info::migration_authority(),
             package_version: env!("CARGO_PKG_VERSION").to_string(),
+            build_version: Some(build_info::BUILD_VERSION.to_string()),
             latest_known_migration: migrations::latest_known_version(),
         }
+    }
+
+    fn display_version(&self) -> &str {
+        self.build_version
+            .as_deref()
+            .unwrap_or(&self.package_version)
     }
 }
 
@@ -336,7 +344,7 @@ fn render_human(preview: &PromotionPreview) {
     let candidate = &preview.candidate;
     println!(
         "Promotion preflight (candidate {}, {})",
-        build_info::short_revision(&candidate.source_revision),
+        candidate.display_version(),
         serde_authority(candidate.authority),
     );
     println!("  shared store   {}", preview.database_path);
@@ -1117,7 +1125,12 @@ pub fn promote(
         },
     )?;
 
-    println!("promoted: {} -> {}", cli_target.display(), dest.display());
+    println!(
+        "promoted {}: {} -> {}",
+        preview.candidate.display_version(),
+        cli_target.display(),
+        dest.display()
+    );
     match rollback {
         Some(prior) => render_retained_prior(&prior, cli_target),
         None => println!("no prior binary retained (target did not exist)"),
@@ -1189,6 +1202,31 @@ mod promote_tests {
         fs::create_dir_all(&helpers).unwrap();
         write_preflight_binary(&helpers.join("lf"), candidate, verdict);
         fs::write(root.join("new-app"), b"new").unwrap();
+    }
+
+    #[test]
+    fn promotion_identity_carries_the_displayed_build_version() {
+        let identity = CandidateIdentity::current();
+
+        assert_eq!(
+            identity.build_version.as_deref(),
+            Some(crate::build_info::BUILD_VERSION)
+        );
+    }
+
+    #[test]
+    fn retained_pre_build_identity_binaries_still_parse_for_rollback() {
+        let identity: CandidateIdentity = serde_json::from_value(serde_json::json!({
+            "source_revision": "0123456789abcdef",
+            "source_identity": "release",
+            "authority": "published",
+            "package_version": "0.12.1",
+            "latest_known_migration": "0.11.035_drop_child_commands"
+        }))
+        .unwrap();
+
+        assert_eq!(identity.build_version, None);
+        assert_eq!(identity.display_version(), "0.12.1");
     }
 
     #[test]

@@ -46,11 +46,11 @@ pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
 // Built-in skill metadata for formatted listing
 // =============================================================================
 
-pub use crate::engine::builtins::BUILTIN_STEP_CATEGORIES;
+pub use crate::engine::builtins::BUILTIN_SKILL_CATEGORIES;
 
-/// All builtin skill names (from BUILTIN_STEP_CATEGORIES).
+/// All builtin skill names (from BUILTIN_SKILL_CATEGORIES).
 pub fn builtin_skills() -> HashSet<String> {
-    BUILTIN_STEP_CATEGORIES
+    BUILTIN_SKILL_CATEGORIES
         .iter()
         .flat_map(|(_, skills)| skills.iter().map(|s| (*s).to_string()))
         .collect()
@@ -876,13 +876,5 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let err = discover_skill(tmp.path(), "gstack:office-hours").unwrap_err();
         assert!(err.to_string().contains("not found"));
-    }
-
-    #[test]
-    fn list_directions_includes_imported_builtin_directions() {
-        let directions = list_directions(None);
-
-        assert!(directions.contains(&"gstack".to_string()));
-        assert!(directions.contains(&"openclaw".to_string()));
     }
 }

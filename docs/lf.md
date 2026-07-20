@@ -21,7 +21,7 @@ lf                                 # open or focus Loopflow.app
 lf desktop                         # explicit alias
 lf <skill>                        # run a skill file
 lf <skill>: args                  # run with arguments
-lf <namespace>/<skill>            # run a namespaced skill (e.g. gstack/office-hours)
+lf <namespace>/<skill>            # run a repo-local or installed namespaced skill
 lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
 lf : "inline prompt"             # no skill file, just prompt
 lf --list                        # show all available skills
@@ -32,8 +32,7 @@ lf --list                        # show all available skills
 ```bash
 lf gate                           # run the gate skill
 lf implement: add auth            # pass arguments after colon
-lf gstack/office-hours            # run a built-in gstack skill
-lf office-hours                   # bare name works when unambiguous
+lf team/review                    # run .lf/skills/team/review.md
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
@@ -48,11 +47,10 @@ Names resolve in this order:
 1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
-4. Core built-in skills — `build/`, `govern/`, `ops/` (run `lf --list` for the full catalog)
-5. Namespaced built-in skills — e.g. `gstack/<skill>`. Bare names (without `<ns>/`) resolve here only when exactly one namespace owns the name.
-6. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
+4. Core built-in skills — `task/`, `project/`, `wave/`, `ops/` (run `lf --list` for the full catalog)
+5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
-Namespaced skills and flows use `/`, not `:`. Run `gstack/office-hours`, not `gstack:office-hours`.
+Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
 
 ### Skill Arguments
 
@@ -64,23 +62,18 @@ Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
 ### Builtin Catalog
 
-Skills and flows are organized into three categories by agency: **build**
-(manual work you drive), **govern** (autonomous coordination the system
-drives), **ops** (side-channel utilities). Run `lf --list` for the live
-catalog.
+Skills and flows are organized by the thing they act on: **task**, **project**,
+**wave**, and **ops**. The categories share one flat command namespace. Run
+`lf --list` for the live catalog.
 
-Build skills — you invoke these, often interactively:
+Task skills — concrete implementation, investigation, review, and delivery:
 
 | Skill | What it does |
 |------|--------------|
 | `kickoff` | Elaborate design — alternatives, research, imagine success/failure |
 | `research` | Map the territory — architecture, complexity, quality, potential |
-| `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
 | `iterate` | Read research, write design to address it |
 | `refresh-plan` | Reconcile scratch/ with the branch after rebasing |
-| `reduce` | Find simplification opportunities |
-| `polish` | Find polish priorities |
-| `expand` | Find expansion opportunities |
 | `5whys` | Root cause analysis on a bug fix |
 | `implement` | Build from a design doc |
 | `compress` | Simplify touched code |
@@ -92,13 +85,19 @@ Build skills — you invoke these, often interactively:
 | `triage` | Assess QA findings, separate blocking from polish |
 | `design` | Interactive design session |
 | `explore` | Investigate the codebase |
-| `demo` | Experience-first walkthrough of observable changes |
-| `code-review` | Walk through structural and architectural decisions |
+| `review-slice` | Autonomously demonstrate behavior, audit implementation against plan, and publish the slice |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
-| `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
+Project skills — shape and pursue measured bets inside a Wave:
 
-Govern skills — crons and waves-watching-waves drive these:
+| Skill | What it does |
+|------|--------------|
+| `project_clarify` / `project_pursue` / `project_mutate` | Clarify, advance, and judge a Project |
+| `project-promote` | Promote a Project into a resident child Wave |
+| `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
+| `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
+
+Wave skills — maintain the durable operating context and its portfolio:
 
 | Skill | What it does |
 |------|--------------|
@@ -107,27 +106,29 @@ Govern skills — crons and waves-watching-waves drive these:
 | `wave-report` | Read health signals across all waves |
 | `mutate` | Compose and apply coordinated mutations across member waves |
 | `review` | Review mutations, amend or revert if needed |
+| `wave_clarify` / `wave_pursue` / `wave_mutate` | Clarify, direct, and evolve a Wave |
+| `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
+| `update-wave` / `split-wave` | Maintain Wave structure and memory |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |
 | `s3-scan` / `s3-assess` | Control: live health, velocity, CI, retries, worker-pool size |
 | `s4-scan` / `s4-assess` | Intelligence: dependencies, advisories, upstream APIs, what they imply |
 | `s5-scan` / `s5-assess` | Identity: wave roster, policy, boundary and autonomy drift |
 
-Ops skills — wrappers around git, PR, release, and wave state:
+Ops skills — raw prompt logic around mechanical git, PR, and release commands:
 
 | Skill | What it does |
 |------|--------------|
-| `init` | Set up loopflow in this repo |
-| `commit` | Commit with generated message |
-| `rebase` | Rebase onto main |
-| `pr` | Generate PR title/body and call `lf pr publish --title --body` |
-| `land` | Land the PR and prune its merged worker worktree |
-| `lint` | Run linter, fix issues |
-| `update-wave` | Create, update, or delete wave state |
-| `split-wave` | Split a wave into smaller independent waves |
-| `release` | Run the full release workflow (notes, PR, tag, status) |
+| `init` | Connect the repo to Homes, accounts, Waves, and task execution |
+| `loopflow-validate` | Validate flows, skills, and directions |
+| `commit-message` | Generate a commit message without committing |
+| `rebase-conflicts` | Resolve conflicts after the mechanical rebase stops |
+| `pr-message` | Generate a PR title and body without publishing |
+| `pr-publish` | Generate PR copy and call `lf pr publish` |
+| `pr-submit` | Prepare a PR for a human to land |
+| `pr-land` | Prepare and land a PR through Loopflow's git machinery |
+| `release-run` | Run the full release workflow (notes, PR, tag, status) |
 | `release-notes` | Write narrative `RELEASE_NOTES.md` from release context |
 | `token-compress` | Compress text into a token budget without silently dropping information |
-| `validate` | Validate flows, skills, and directions |
 
 ## Context Flags
 
@@ -189,7 +190,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 
 | Flag | Description |
 |------|-------------|
-| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
+| `--tui` / `--ide` | Hand off Claude, Codex, or OpenCode to the terminal, or Claude/Codex to their app; overrides `session.launch` |
 
 ## Browser Automation
 
@@ -211,7 +212,7 @@ lf ship -w feature-branch
 | `--docs PATH[,PATH...]` | Prefetch docs into context—files, globs, or dirs (default: none) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
 | `-m, --model MODEL` | Model to use |
-| `--tui` / `--ide` | Hand off to an interactive vendor session (terminal or vendor app); overrides `session.launch` |
+| `--tui` / `--ide` | Hand off Claude, Codex, or OpenCode to the terminal, or Claude/Codex to their app; overrides `session.launch` |
 
 Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
@@ -219,20 +220,22 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 
 | Flow | Steps |
 |------|-------|
-| `build` | kickoff → review-design → implement → compress → lint → xor(demo, code-review) → gate |
-| `code` | implement → compress → lint → gate |
+| `build` | kickoff → review-design → code → review-slice |
+| `code` | implement → compress |
 | `pair` | design → code |
-| `ship` | refresh-plan → implement → gate → op: pr publish → op: pr land |
+| `task-design` | kickoff → review-design |
+| `slice` | code → review-slice → publish/refresh Task PR |
+| `ship` | task-gate → record-learnings → op: pr land -c |
 | `deploy` | gate → op: pr land --create-pr |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
-| `incident` | debug → 5whys → code → deploy |
+| `incident` | restore → 5whys |
+| `ship-5whys` | implement the next open prevention from the 5 Whys |
 | `queue` | compress → update-wave → gate |
 | `garden` | scan → assess → xor(garden-act, silence) |
 | `govern-coordination` | s2-scan → s2-assess → mutate |
 | `govern-control` | s3-scan → s3-assess → mutate |
 | `govern-intelligence` | s4-scan → s4-assess → mutate |
 | `govern-identity` | s5-scan → s5-assess → mutate |
-| `release` | op: release run patch |
 | `sync` | rebase → integrate-upstream |
 
 `sync` rebases the current branch and refreshes the default branch. The
@@ -252,7 +255,8 @@ lf start designer                                  # serve it from its placed Ho
 lf wave designer                                   # foreground development mode
 lf stop designer                                   # stop it; leave the Home keeper running
 lf project run <linear-project-id>                  # durable Project Session
-lf task start "fix the flaky chord-timeout test" --project <linear-project-id>
+lf task start <linear-project-id> "fix the flaky chord-timeout test"
+pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-125 --headless                       # route Feedback to the Project
 lf task run DES-124 --stack-on DES-123
@@ -285,11 +289,13 @@ Its provider process and transcript are replaceable execution state: plain
 Work, durable Steers, worktree, and PR chain while selecting another provider.
 The Session remains resumable through serial PRs, review, and explicit
 completion.
-Every Task runs `kickoff → iterate N → gate`. A flow step declares
+Every Task runs `first → loop N → finally`. Its Project supplies those three
+flows; Task launch pins their resolved names. `--first`, `--loop`, and
+`--finally` override them only while creating the Task. A flow step declares
 `feedback: true`; the active Launch routes that Feedback to the User or the
 immediate parent Run.
-Standard Tasks route kickoff and gate to the human, while the owning Project
-conducts interactive iteration steps. `--headless` routes all three to the
+Standard Tasks route first and finally Feedback to the human, while the owning
+Project conducts interactive loop steps. `--headless` routes all three to the
 Project without skipping their skills.
 
 Feedback is the current flow step plus its live Launch and route; there is no
@@ -463,9 +469,15 @@ a missing credential continues through the healthy fallback route.
 selected provider accounts. Both flags are repeatable and accept
 `claude=<selector>` or `codex=<selector>`. They cannot be combined.
 
-Use the flags for interactive vendor sessions too (`--tui`): logging into a
-managed login with a bare `codex login` creates a second session and evicts
-the managed one ("needs re-login"); entering through lf shares one session.
+Use the flags for Claude and Codex terminal sessions too (`--tui`): logging
+into a managed login with a bare `codex login` creates a second session and
+evicts the managed one ("needs re-login"); entering through lf shares one
+session.
+
+Without an account flag, managed Claude and Codex launches use the repository
+route, then the default route. If neither exists, all automatic managed logins
+are eligible and Loopflow skips known cooling or limited accounts. If no
+managed login exists, the provider CLI uses its ambient default credentials.
 
 `lf usage` leads with each managed account's subscription state — provider-
 reported plan, session and weekly windows as percent *used*, reset times —
@@ -592,7 +604,7 @@ mechanical git/PR operations. Tier skills add scoped delegation. Use
 lf debug -c    # include current clipboard text in the prompt
 ```
 
-### Launch an interactive vendor session
+### Launch Claude, Codex, or OpenCode interactively
 
 ```bash
 lf design                 # interactive skill → uses session.launch (default: tui)
@@ -600,8 +612,9 @@ lf gate --tui             # force a terminal handoff for a normally-headless ski
 lf : "fix the bug" --ide -m codex   # force the Codex app instead
 ```
 
-`--tui` and `--ide` override the repo default. Set `session.launch: ide` in
-`.lf/config.yaml` to make the vendor app the default for interactive skills.
+`--tui` opens Claude, Codex, or OpenCode in the terminal. `--ide` opens Claude
+or Codex in its app. Both override the repo default. Set `session.launch: ide`
+in `.lf/config.yaml` to make the app the default for interactive skills.
 
 ### External skills
 
@@ -610,7 +623,7 @@ lf npx/vercel-labs/deep-research   # fetch + run from the npx skills catalog
 lf npx/explain-code                # already-cached skill (no network)
 ```
 
-`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The bundled `gstack/` namespace and core `build/` / `govern/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
+`npx/` uses `.agents/skills/` in the current repo as a cache. Use `npx/<owner>/<repo>` when you know the package name; cached or searchable skills can often be run as `npx/<name>`. On a cache miss, Loopflow runs `npx skills add` first, then falls back to `npx skills find` when it needs a package hint. The core `task/` / `project/` / `wave/` / `ops/` catalogs are always available, and the legacy `rams/rams` alias still works when `~/.claude/commands/rams.md` is installed.
 
 ## PR Operations
 
@@ -751,9 +764,9 @@ in `GOAL.md` frontmatter are separate — the resident fires those; see
 [Waves](waves.md#crons).)
 
 ```bash
-lf cron add --wave memory --flow export-memory --schedule daily
+lf cron add --wave coordination --flow govern-coordination --schedule daily
 lf cron list
-lf cron remove --wave memory --flow export-memory
+lf cron remove --wave coordination --flow govern-coordination
 ```
 
 `add` writes `~/Library/LaunchAgents/loopflow.cron.<wave>.<flow>.plist` and
@@ -774,8 +787,10 @@ lf pm sync --plan                           # report drift without writing
 lf pm show --wave designer                  # read; refresh when stale
 lf pm show --wave designer --no-sync        # cache-only agent/app read
 lf pm show --wave designer --project ui     # filter to one project
-lf pm project create --wave designer --title "..." --definition "..." --kr "..."
-lf pm project update --wave designer --project ui --definition "..." --kr "..."
+lf pm project create --wave designer --title "..." --definition "..." \
+  --first task-design --loop slice --finally ship --kr "..."
+lf pm project update --wave designer --project ui --first incident \
+  --loop ship-5whys --finally ship
 lf pm project archive --wave designer --project retired-bet
 lf pm task create --wave designer --project ui --title "Dark mode"
 lf pm task update --id 1207... --title "Refine dark mode"
@@ -818,12 +833,21 @@ Mechanical release subcommands; `lf release run` is the full workflow.
 
 ```bash
 lf release run patch          # full release workflow
-lf release check              # PRs merged since last tag?
-lf release notes 1.2.3        # narrative RELEASE_NOTES.md from decisions + PRs
+lf release check              # exact commits in the target range
+lf release notes 1.2.3        # narrative notes from decisions + commits + PRs
 lf release bump 1.2.3         # bump manifests
 lf release tag 1.2.3          # create + push git tag
+lf release publish v1.2.3 --notes RELEASE_NOTES.md --asset dist/lf.tar.gz
+lf release publish v1.2.3 --finalize
 lf release status             # workflow + GitHub Release status
 ```
+
+`release.targets.<name>.publisher` is an argv list for the credentialed host
+publisher. `lf release run` appends `check` before changing release state, then
+downloads the successful hosted build and invokes it with `publish --tag ...
+--artifacts ...` from an exact-tag worktree. No merged changes is a successful
+no-op. An incomplete latest tag resumes; it never cuts a newer tag around a
+failed publication.
 
 | Path | What it holds |
 |------|--------------|
@@ -835,10 +859,13 @@ lf release status             # workflow + GitHub Release status
 Interactive runs append durable product and process decisions to the
 unreleased ledger; headless runs do not. The release workflow promotes
 `release/unreleased/` to `release/v<version>/`, uses `DECISIONS.md` as the
-intent source and merged PRs as the shipped-behavior source, and archives
-the generated notes. If the ledger is absent, notes fall back to merged PR
-history. Headless release automation needs no runner-local agent CLI — if no
-harness can start, Loopflow writes deterministic notes from the same context.
+intent source, the exact git range as shipped-behavior truth, and merged PRs as
+narrative context, then archives the generated notes. If the ledger is absent,
+notes fall back to commits and PR history. Headless release automation needs no
+runner-local agent CLI — if no harness can start, Loopflow writes deterministic
+notes from the same context. Configure repository-specific verification,
+preparation, and completion evidence under `release.targets`; see
+[Configuration](config.md).
 
 ## See Also
 

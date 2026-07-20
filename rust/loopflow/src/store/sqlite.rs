@@ -541,7 +541,7 @@ impl SqliteStore {
     pub fn health_check(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row("SELECT 1", [], |_| Ok(()))?;
-        Ok(())
+        super::migrations::validate_persisted_json(&conn)
     }
 
     pub fn schema_version(&self) -> StoreResult<String> {

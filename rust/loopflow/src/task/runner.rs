@@ -195,7 +195,7 @@ async fn run_task_with(
     }
     let mut state_fingerprint = task_state_fingerprint(&session)?;
     let mut iteration_start_head = pr_head_for_task(&store, &session).await?;
-    let mut gate_fingerprint = if session.lifecycle_phase == TaskLifecyclePhase::Gate {
+    let mut gate_fingerprint = if session.lifecycle_phase == TaskLifecyclePhase::Finally {
         Some(task_gate_fingerprint(&session)?)
     } else {
         None
@@ -498,6 +498,23 @@ async fn run_task_with(
                         } else {
                             false
                         };
+                        let mut finally_ops_ran = false;
+                        if !flow_iteration_completed
+                            && ci_fix_wake.is_none()
+                            && flow.current().is_some_and(|step| step.kind == StepKind::Op)
+                        {
+                            let current_fingerprint = task_gate_fingerprint(&session)?;
+                            if gate_fingerprint.as_ref() == Some(&current_fingerprint) {
+                                flow_iteration_completed =
+                                    run_task_flow_ops(&session, &mut flow).await?;
+                                finally_ops_ran = true;
+                            } else {
+                                // Mechanical finish is the side-effect boundary. A final-flow
+                                // skill that changed material work must return through Loop and
+                                // be reviewed before any op may publish or land it.
+                                flow_iteration_completed = true;
+                            }
+                        }
                         if flow_turn_active || feedback_body_completed {
                             let latest = store
                                 .get_task(&session.id)
@@ -550,9 +567,9 @@ async fn run_task_with(
                         }
                         flow_turn_active = false;
                         if flow_iteration_completed
-                                && session.lifecycle_phase == TaskLifecyclePhase::Kickoff
+                                && session.lifecycle_phase == TaskLifecyclePhase::First
                             {
-                                session.enter_iterate()?;
+                                session.enter_loop()?;
                                 store.update_task_for_run(&session, lease).await?;
                                 flow = resume_task_phase(&session)?;
                                 flow_iteration_completed = false;
@@ -583,13 +600,15 @@ async fn run_task_with(
                                 continue 'runner;
                             }
                             let approved_gate = if flow_iteration_completed
-                                && session.lifecycle_phase == TaskLifecyclePhase::Gate
+                                && session.lifecycle_phase == TaskLifecyclePhase::Finally
                             {
                                 let next_gate_fingerprint = task_gate_fingerprint(&session)?;
-                                if gate_fingerprint.as_ref() != Some(&next_gate_fingerprint) {
+                                if !finally_ops_ran
+                                    && gate_fingerprint.as_ref() != Some(&next_gate_fingerprint)
+                                {
                                     state_fingerprint = task_state_fingerprint(&session)?;
                                     gate_fingerprint = None;
-                                    session.enter_iterate()?;
+                                    session.enter_loop()?;
                                     store.update_task_for_run(&session, lease).await?;
                                     let started = start_resumed_task_phase(
                                         &store,
@@ -815,13 +834,13 @@ async fn run_task_with(
                                     "Task flow completed without a PR or any worktree change; another automatic iteration would spin".to_string(),
                                 )
                             };
-                            if session.lifecycle_phase == TaskLifecyclePhase::Iterate
+                            if session.lifecycle_phase == TaskLifecyclePhase::Loop
                                 && status != Lifecycle::Interrupted
                             {
                                 let waiting_for_ci = observed_pr.as_ref().is_some_and(|pr| {
                                     pr.phase() == PrPhase::Open && !pr.review_ready()
                                 });
-                                session.enter_gate(TaskGateProposal {
+                                session.enter_finally(TaskGateProposal {
                                     done: stopped_done,
                                     reason: stopped_reason,
                                 })?;
@@ -1131,6 +1150,54 @@ fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool>
     Ok(events
         .iter()
         .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
+}
+
+async fn run_task_flow_ops(session: &Task, flow: &mut Playhead) -> Result<bool> {
+    if session.lifecycle_phase != TaskLifecyclePhase::Finally {
+        anyhow::bail!(
+            "Task {} {} flow reached an op; only finally flows may run mechanical ops",
+            session.id,
+            session.lifecycle_phase.as_str()
+        );
+    }
+    while let Some(step) = flow.current() {
+        if step.kind != StepKind::Op {
+            return Ok(false);
+        }
+        let definition = crate::engine::load_flow(&step.flow, &session.worktree)?;
+        let items = crate::engine::expand_flow(&definition, &session.worktree)?;
+        let op = match items.get(step.index as usize) {
+            Some(crate::engine::ConcreteStep::Op(op)) => op.clone(),
+            Some(item) => {
+                anyhow::bail!(
+                    "Task flow step {} was planned as an op but expanded to {item:?}",
+                    step.step
+                )
+            }
+            None => anyhow::bail!("Task flow op {} is outside its expanded flow", step.step),
+        };
+        let body = BodyProvenance::for_step(&step, &session.worktree);
+        let body_id = body.body_id.clone();
+        flow.start_body(body)?;
+        let worktree = session.worktree.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            crate::ops::execute_flow_ops(&worktree, &op.item, &crate::ops::NullProgress)
+        })
+        .await
+        .map_err(|error| anyhow!("Task flow op worker failed: {error}"))?;
+        if let Err(error) = result {
+            flow.finish_body(&body_id, StepOutcome::Failed, &error.to_string())?;
+            return Err(anyhow!(error.to_string()));
+        }
+        let events = flow.finish_body(&body_id, StepOutcome::Completed, "completed")?;
+        if events
+            .iter()
+            .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. }))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(true)
 }
 
 /// End a parked body while Work stays open. The caller supplies
@@ -1836,7 +1903,7 @@ fn task_seed(
         })
         .unwrap_or_else(|| "Gate proposal: none".to_string());
     format!(
-        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. Bare `lf pr land --next <slug>` ships it and keeps the Task open; `lf pr land -c` proposes completing the Task after merge. `lf pr abandon` discards only this PR. `lf task complete {identifier} --summary \"...\"` proposes completion for clean work that needs no PR. Gate approves settlement or returns the same Task to iteration. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
+        "Advance Linear task {identifier}: {title}\n\n{description}\n\nLinear Project: {project} ({project_id})\n{project_context}\n\n{direction}\n\nPM snapshot synced at: {snapshot_synced_at}\nWave: {wave}\nTask: {session_id}\nLifecycle phase: {lifecycle_phase} (epoch {phase_epoch}, gate cycle {gate_cycle})\nInteraction policy: {interaction_policy}\n{gate_proposal}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}\n\nThis PR owns one serial branch. The pinned finally flow owns landing and Task completion. `lf pr abandon` discards only this PR. If this PR already merged out of band and follow-up work remains, `lf pr next [slug]` rotates to the next serial PR, carrying committed and uncommitted follow-up forward. The runner owns branch rotation between PRs.",
         identifier = session.launch.issue.identifier,
         title = session.launch.issue.title,
         description = session.launch.issue.description,

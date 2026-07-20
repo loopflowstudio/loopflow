@@ -9,8 +9,8 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::{
     abandon_branch, commit_workflow, create_or_update_pr, land, rebase_with_recovery, release_bump,
-    release_check, release_notes, release_run, release_status, release_tag, submit, AbandonOptions,
-    CommitOptions, LandOptions, PrOptions, RebaseOptions,
+    release_check, release_notes, release_publish, release_run, release_status, release_tag,
+    submit, AbandonOptions, CommitOptions, LandOptions, PrOptions, RebaseOptions,
 };
 
 pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> OpsResult<()> {
@@ -212,6 +212,12 @@ fn execute_release(repo: &Path, cmd: ReleaseCommand, progress: &impl Progress) -
             release_tag(repo, &version, target.as_deref())?;
             Ok(())
         }
+        ReleaseCommand::Publish {
+            tag,
+            notes,
+            assets,
+            finalize,
+        } => release_publish(repo, &tag, notes.as_deref(), &assets, finalize),
         ReleaseCommand::Status { target } => {
             release_status(repo, target.as_deref())?;
             Ok(())

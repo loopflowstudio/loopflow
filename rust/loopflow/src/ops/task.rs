@@ -45,12 +45,25 @@ pub enum TaskWaitUntil {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskFlowOverrides {
+    pub first: Option<String>,
+    pub loop_: Option<String>,
+    pub finally: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskLaunchOptions {
     pub name: Option<String>,
-    pub flow: Option<String>,
+    pub flows: TaskFlowOverrides,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
     pub headless: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskStartInput {
+    pub title: String,
+    pub report: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -340,7 +353,7 @@ fn _refuse_current_user_feedback(session: &Task, feedback: Option<&Feedback>) ->
 pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResult<Task> {
     let TaskLaunchOptions {
         name,
-        flow,
+        flows,
         stack_on,
         directive,
         headless,
@@ -381,15 +394,27 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     )));
                 }
             }
-            if let Some(requested) = flow.as_deref() {
-                let requested = resolve_task_flow(&session.worktree, Some(requested))?;
-                if requested != session.lifecycle.iterate.flow {
-                    return Err(task_error(format!(
-                        "Task {} already uses flow {:?}",
-                        session.launch.issue.identifier, session.lifecycle.iterate.flow
-                    )));
-                }
-            }
+            ensure_task_flow_override(
+                &session.worktree,
+                &session.launch.issue.identifier,
+                "first",
+                flows.first.as_deref(),
+                &session.lifecycle.first.flow,
+            )?;
+            ensure_task_flow_override(
+                &session.worktree,
+                &session.launch.issue.identifier,
+                "loop",
+                flows.loop_.as_deref(),
+                &session.lifecycle.loop_.flow,
+            )?;
+            ensure_task_flow_override(
+                &session.worktree,
+                &session.launch.issue.identifier,
+                "finally",
+                flows.finally.as_deref(),
+                &session.lifecycle.finally.flow,
+            )?;
             if let Some(requested) = stack_on.as_deref() {
                 let active = store
                     .active_task_pr(&session.id)
@@ -458,9 +483,14 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
-    let resolved_flow = resolve_task_flow(&main_repo, flow.as_deref())?;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
+    let project_flows = resolved
+        .project
+        .flows
+        .clone()
+        .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
+    let lifecycle = resolve_task_lifecycle(&main_repo, &project_flows, &flows, headless)?;
     let segment = match name.as_deref() {
         Some(name) => parse_workspace_slug(name)?,
         None => match &terminal_predecessor_id {
@@ -621,12 +651,8 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             pm_writeback: PmWritebackState::Current,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
-            lifecycle: if headless {
-                crate::task::TaskLifecyclePlan::headless(resolved_flow)
-            } else {
-                crate::task::TaskLifecyclePlan::standard(resolved_flow)
-            },
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Kickoff,
+            lifecycle,
+            lifecycle_phase: crate::task::TaskLifecyclePhase::First,
             phase_epoch: 1,
             phase_cursor: 0,
             phase_iteration: 0,
@@ -732,6 +758,22 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
 
 pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
     let mut context = format!("Definition:\n{}", project.definition.trim());
+    if let Some(flows) = project
+        .flows
+        .as_ref()
+        .filter(|flows| **flows != crate::pm::ProjectFlowPlan::empty())
+    {
+        context.push_str("\n\nProject Task flows:");
+        if let Some(first) = &flows.first {
+            context.push_str(&format!("\n- first: {first}"));
+        }
+        if let Some(loop_flow) = &flows.loop_ {
+            context.push_str(&format!("\n- loop: {loop_flow}"));
+        }
+        if let Some(finally) = &flows.finally {
+            context.push_str(&format!("\n- finally: {finally}"));
+        }
+    }
     if !project.krs.is_empty() {
         context.push_str("\n\nKRs:");
         for kr in &project.krs {
@@ -744,34 +786,132 @@ pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
 
 pub fn task_start(
     repo: &Path,
-    title: String,
     project_id: &str,
+    title: Option<String>,
+    report: Option<String>,
     options: TaskLaunchOptions,
 ) -> OpsResult<Task> {
+    let input = resolve_task_start_input(title.as_deref(), report.as_deref())?;
     let main = crate::ops::project::ensure_clean_main(repo, "Task start")
         .map_err(|error| task_error(error.to_string()))?;
     let project =
         crate::ops::task_pm::resolve_project(&main, project_id, crate::ops::pm::PmRefresh::Auto)?;
     crate::ops::project::require_registered_wave(&project.snapshot.wave)
         .map_err(|error| task_error(error.to_string()))?;
+    let project_flows = project
+        .project
+        .flows
+        .clone()
+        .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
+    resolve_task_lifecycle(&main, &project_flows, &options.flows, options.headless)?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
-            format!("{}\0{}", project.project.id, title).as_bytes()
+            format!("{}\0{}\0{}", project.project.id, input.title, input.report).as_bytes()
         ))
     );
     let created = crate::ops::task_pm::create_and_load_task(
         &main,
         &project.snapshot.wave,
         &project.project.slug,
-        &title,
+        &input.title,
+        &input.report,
         &marker,
     )?;
     task_run(&main, &created.item.id, options)
 }
 
-fn resolve_task_flow(repo: &Path, requested: Option<&str>) -> OpsResult<String> {
-    let requested = requested.unwrap_or("task");
+pub fn resolve_task_start_input(
+    explicit_title: Option<&str>,
+    piped_report: Option<&str>,
+) -> OpsResult<TaskStartInput> {
+    let report = piped_report
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let title = explicit_title
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let title = match (title, report) {
+        (Some(title), _) => title.to_string(),
+        (None, Some(report)) => {
+            let first_line = report
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .expect("non-empty report has a meaningful line");
+            truncate_task_title(first_line, 100)
+        }
+        (None, None) => {
+            return Err(task_error(
+                "Task title or piped report is required: `pbpaste | lf task start <project>`",
+            ))
+        }
+    };
+    let report = report.unwrap_or(&title).to_string();
+    Ok(TaskStartInput { title, report })
+}
+
+fn truncate_task_title(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut title = value.chars().take(max_chars - 1).collect::<String>();
+    title.push('…');
+    title
+}
+
+fn ensure_task_flow_override(
+    repo: &Path,
+    issue_identifier: &str,
+    phase: &str,
+    requested: Option<&str>,
+    pinned: &str,
+) -> OpsResult<()> {
+    let Some(requested) = requested else {
+        return Ok(());
+    };
+    let requested = resolve_task_flow(repo, requested, phase == "finally")?;
+    if requested != pinned {
+        return Err(task_error(format!(
+            "Task {} already pins {phase} flow {:?}",
+            issue_identifier, pinned
+        )));
+    }
+    Ok(())
+}
+
+fn resolve_task_lifecycle(
+    repo: &Path,
+    project: &crate::pm::ProjectFlowPlan,
+    overrides: &TaskFlowOverrides,
+    headless: bool,
+) -> OpsResult<crate::task::TaskLifecyclePlan> {
+    let first = overrides
+        .first
+        .as_deref()
+        .or(project.first.as_deref())
+        .unwrap_or("task-design");
+    let loop_flow = overrides
+        .loop_
+        .as_deref()
+        .or(project.loop_.as_deref())
+        .unwrap_or("slice");
+    let finally = overrides
+        .finally
+        .as_deref()
+        .or(project.finally.as_deref())
+        .unwrap_or("ship");
+    let first = resolve_task_flow(repo, first, false)?;
+    let loop_flow = resolve_task_flow(repo, loop_flow, false)?;
+    let finally = resolve_task_flow(repo, finally, true)?;
+    Ok(if headless {
+        crate::task::TaskLifecyclePlan::headless(first, loop_flow, finally)
+    } else {
+        crate::task::TaskLifecyclePlan::standard(first, loop_flow, finally)
+    })
+}
+
+fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
     let definition = load_flow(requested, repo)
         .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
     let steps = expand_flow(&definition, repo).map_err(|error| {
@@ -780,12 +920,28 @@ fn resolve_task_flow(repo: &Path, requested: Option<&str>) -> OpsResult<String> 
     if steps.is_empty() {
         return Err(task_error(format!("Task flow {requested:?} has no steps")));
     }
-    if let Some(step) = steps
-        .iter()
-        .find(|step| !matches!(step, ConcreteStep::Skill(_)))
-    {
+    if allow_ops {
+        let first_op = steps
+            .iter()
+            .position(|step| matches!(step, ConcreteStep::Op(_)));
+        if matches!(first_op, Some(0))
+            || first_op.is_some_and(|index| {
+                steps[index..]
+                    .iter()
+                    .any(|step| !matches!(step, ConcreteStep::Op(_)))
+            })
+        {
+            return Err(task_error(format!(
+                "Task finally flow {requested:?} must run one or more skills followed by optional ops"
+            )));
+        }
+    }
+    if let Some(step) = steps.iter().find(|step| {
+        !(matches!(step, ConcreteStep::Skill(_))
+            || allow_ops && matches!(step, ConcreteStep::Op(_)))
+    }) {
         return Err(task_error(format!(
-            "Task flow {requested:?} contains {step:?}; durable Task flows currently require skills"
+            "Task flow {requested:?} contains {step:?}; first/loop require skills and finally permits skills or ops"
         )));
     }
     Ok(definition.name)
@@ -2073,7 +2229,7 @@ pub(crate) async fn reconcile_project_tasks(
                 continue;
             };
             if pr.review_ready()
-                && task.lifecycle_phase == crate::task::TaskLifecyclePhase::Gate
+                && task.lifecycle_phase == crate::task::TaskLifecyclePhase::Finally
                 && task.phase_cursor == 0
                 && task.phase_iteration == 0
             {
@@ -2548,20 +2704,20 @@ async fn reconcile_task_pr_with_authority(
                         ),
                     };
                     match session.lifecycle_phase {
-                        crate::task::TaskLifecyclePhase::Kickoff => {
+                        crate::task::TaskLifecyclePhase::First => {
                             session
-                                .enter_iterate()
+                                .enter_loop()
                                 .map_err(|error| task_error(error.to_string()))?;
                             session
-                                .enter_gate(proposal)
-                                .map_err(|error| task_error(error.to_string()))?;
-                        }
-                        crate::task::TaskLifecyclePhase::Iterate => {
-                            session
-                                .enter_gate(proposal)
+                                .enter_finally(proposal)
                                 .map_err(|error| task_error(error.to_string()))?;
                         }
-                        crate::task::TaskLifecyclePhase::Gate => {
+                        crate::task::TaskLifecyclePhase::Loop => {
+                            session
+                                .enter_finally(proposal)
+                                .map_err(|error| task_error(error.to_string()))?;
+                        }
+                        crate::task::TaskLifecyclePhase::Finally => {
                             session.gate_proposal = Some(proposal);
                             session.updated_at = now;
                         }
@@ -3489,20 +3645,20 @@ fn propose_task_done(session: &mut Task, summary: String) -> OpsResult<()> {
         reason: summary,
     };
     match session.lifecycle_phase {
-        crate::task::TaskLifecyclePhase::Kickoff => {
+        crate::task::TaskLifecyclePhase::First => {
             session
-                .enter_iterate()
+                .enter_loop()
                 .map_err(|error| task_error(error.to_string()))?;
             session
-                .enter_gate(proposal)
-                .map_err(|error| task_error(error.to_string()))?;
-        }
-        crate::task::TaskLifecyclePhase::Iterate => {
-            session
-                .enter_gate(proposal)
+                .enter_finally(proposal)
                 .map_err(|error| task_error(error.to_string()))?;
         }
-        crate::task::TaskLifecyclePhase::Gate => {
+        crate::task::TaskLifecyclePhase::Loop => {
+            session
+                .enter_finally(proposal)
+                .map_err(|error| task_error(error.to_string()))?;
+        }
+        crate::task::TaskLifecyclePhase::Finally => {
             session.gate_proposal = Some(proposal);
             session.updated_at = time::OffsetDateTime::now_utc();
         }
@@ -4417,7 +4573,7 @@ async fn _recover_abandoned_task(
     let now = time::OffsetDateTime::now_utc();
     let _reason = reason;
     let mut task = predecessor;
-    task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
+    task.lifecycle_phase = crate::task::TaskLifecyclePhase::First;
     task.phase_epoch += 1;
     task.phase_cursor = 0;
     task.phase_iteration = 0;
@@ -4550,5 +4706,87 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
             return Ok(session);
         }
         std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ensure_task_flow_override, resolve_task_lifecycle, resolve_task_start_input,
+        TaskFlowOverrides,
+    };
+    use crate::pm::ProjectFlowPlan;
+
+    #[test]
+    fn piped_report_supplies_title_and_preserves_full_description() {
+        let report = "\n  lf status rejects stored timestamp  \n\nstack trace\nmore evidence\n";
+        let input = resolve_task_start_input(None, Some(report)).expect("resolve piped report");
+
+        assert_eq!(input.title, "lf status rejects stored timestamp");
+        assert_eq!(
+            input.report,
+            "lf status rejects stored timestamp  \n\nstack trace\nmore evidence"
+        );
+    }
+
+    #[test]
+    fn project_flows_resolve_once_with_per_task_overrides() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let project = ProjectFlowPlan {
+            first: Some("incident".to_string()),
+            loop_: Some("ship-5whys".to_string()),
+            finally: Some("ship".to_string()),
+        };
+        let overrides = TaskFlowOverrides {
+            loop_: Some("slice".to_string()),
+            ..TaskFlowOverrides::default()
+        };
+
+        let plan = resolve_task_lifecycle(repo.path(), &project, &overrides, false)
+            .expect("resolve lifecycle");
+
+        assert_eq!(plan.first.flow, "incident");
+        assert_eq!(plan.loop_.flow, "slice");
+        assert_eq!(plan.finally.flow, "ship");
+    }
+
+    #[test]
+    fn finally_flow_rejects_ops_before_agent_work() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let flows = repo.path().join(".lf/flows");
+        std::fs::create_dir_all(&flows).expect("create flow directory");
+        std::fs::write(
+            flows.join("unsafe-finally.yaml"),
+            "- op: pr land -c\n- gate\n",
+        )
+        .expect("write flow");
+        let project = ProjectFlowPlan {
+            first: None,
+            loop_: None,
+            finally: Some("unsafe-finally".to_string()),
+        };
+
+        let error =
+            resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default(), false)
+                .expect_err("reject unsafe finally flow");
+
+        assert!(error
+            .to_string()
+            .contains("one or more skills followed by optional ops"));
+    }
+
+    #[test]
+    fn started_task_rejects_a_different_flow_override() {
+        let repo = tempfile::tempdir().expect("temp repo");
+
+        ensure_task_flow_override(repo.path(), "INF-123", "loop", Some("slice"), "slice")
+            .expect("same pinned flow is idempotent");
+        let error =
+            ensure_task_flow_override(repo.path(), "INF-123", "loop", Some("ship-5whys"), "slice")
+                .expect_err("different flow must be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("Task INF-123 already pins loop flow \"slice\""));
     }
 }

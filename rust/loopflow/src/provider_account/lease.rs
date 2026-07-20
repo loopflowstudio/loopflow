@@ -81,7 +81,7 @@ impl ProviderAccountSelector {
         let account = account.trim();
         if account.is_empty() {
             return Err(ProviderAccountError::Runtime(format!(
-                "{provider}= requires an account id or login email"
+                "{provider}= requires a login email or prefix"
             )));
         }
         Ok(Self {
@@ -1052,6 +1052,27 @@ impl AccountLeaseClient {
         }
     }
 
+    pub(crate) fn login_email(
+        &self,
+        provider: Provider,
+        account_id: &ProviderAccountId,
+    ) -> Result<String, ProviderAccountError> {
+        let facts = self.account_facts(provider, account_id)?;
+        let account = facts.account.ok_or_else(|| {
+            ProviderAccountError::Runtime(format!(
+                "forwarded {provider} account has no catalog entry"
+            ))
+        })?;
+        account
+            .login_email
+            .map(|login| login.to_string())
+            .ok_or_else(|| {
+                ProviderAccountError::Runtime(format!(
+                    "forwarded {provider} account has no login email"
+                ))
+            })
+    }
+
     pub(crate) fn pin_session(
         &self,
         provider: Provider,
@@ -1401,7 +1422,10 @@ mod tests {
                     temp.path()
                         .join(grant.provider.as_str())
                         .join(account_id.as_str()),
-                    None,
+                    Some(
+                        crate::profile::EmailAddress::parse(&format!("{account_id}@example.com"))
+                            .unwrap(),
+                    ),
                 );
                 if grant.provider == Provider::Codex && account_id == &id("reserve") {
                     account.cooldown_until =
@@ -1473,6 +1497,12 @@ mod tests {
                 .account_facts(Provider::Claude, &id("personal"))
                 .unwrap()
                 .credential_available
+        );
+        assert_eq!(
+            client
+                .login_email(Provider::Claude, &id("personal"))
+                .unwrap(),
+            "personal@example.com"
         );
         let facts = client
             .account_facts(Provider::Codex, &id("reserve"))

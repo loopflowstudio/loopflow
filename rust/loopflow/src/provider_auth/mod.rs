@@ -2837,7 +2837,7 @@ fn opencode_auth_path(home_dir: &Path) -> PathBuf {
     home_dir.join(".local/share/opencode/auth.json")
 }
 
-fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
+pub(crate) fn extract_opencode_zen_token(home_dir: &Path) -> Option<ProviderToken> {
     let (access_token, login, expires_at) = if let Some(key) = read_nonempty_env("OPENCODE_API_KEY")
     {
         (key, None, None)
@@ -3588,7 +3588,10 @@ pub fn env_var_for_token(token: &ProviderToken) -> Option<(String, String)> {
 pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, String)> {
     let tokens = match store.list_provider_tokens().await {
         Ok(tokens) => tokens,
-        Err(_) => return Vec::new(),
+        Err(error) => {
+            warn!(%error, "stored provider credentials are unavailable");
+            return Vec::new();
+        }
     };
     let mut vars = Vec::new();
     for token in tokens {
@@ -3597,6 +3600,65 @@ pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, Stri
         }
     }
     vars
+}
+
+/// Apply stored provider credentials that are valid for this executable.
+///
+/// Agent launch is synchronous, while the credential store is async. Keep the
+/// runtime on a short-lived worker so callers remain safe inside Tokio too.
+pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::process::Command) {
+    for env_name in api_key_env_names() {
+        if !api_key_env_allowed_for_program(program, env_name) {
+            command.env_remove(env_name);
+        }
+    }
+
+    let program = program.to_string();
+    let worker = match std::thread::Builder::new()
+        .name("lf-provider-env".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    warn!(%error, "could not start stored provider credential lookup");
+                    return Vec::new();
+                }
+            };
+            runtime.block_on(async {
+                let store = match crate::store::open_registry_for_authority().await {
+                    Ok(store) => store,
+                    Err(crate::store::RegistryUnavailable::MissingFile { .. }) => {
+                        return Vec::new();
+                    }
+                    Err(error) => {
+                        warn!(?error, "stored provider credential registry is unavailable");
+                        return Vec::new();
+                    }
+                };
+                provider_env_vars(&store).await
+            })
+        }) {
+        Ok(worker) => worker,
+        Err(error) => {
+            warn!(%error, "could not start stored provider credential lookup");
+            return;
+        }
+    };
+    let env_vars = match worker.join() {
+        Ok(env_vars) => env_vars,
+        Err(_) => {
+            warn!("stored provider credential lookup panicked");
+            return;
+        }
+    };
+    for (name, value) in env_vars {
+        if provider_env_allowed_for_program(&program, &name) {
+            command.env(name, value);
+        }
+    }
 }
 
 #[cfg(test)]

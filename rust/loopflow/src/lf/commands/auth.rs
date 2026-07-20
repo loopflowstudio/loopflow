@@ -155,12 +155,8 @@ fn forwarded_accounts(raw_provider: Option<&str>) -> Result<()> {
             if position < grant.preferred {
                 labels.push("preferred");
             }
-            println!(
-                "{:<12} {} {}",
-                grant.provider,
-                account_id,
-                labels.join(" · ")
-            );
+            let account = client.login_email(grant.provider, account_id)?;
+            println!("{:<12} {} {}", grant.provider, account, labels.join(" · "));
         }
     }
     Ok(())

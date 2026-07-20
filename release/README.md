@@ -8,9 +8,14 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
+lf cron sync --wave infrastructure   # daily patch release on the maintained host
+lf cron list
+```
+
+```bash
 uv run python scripts/install.py local --use   # full build: lf + Loopflow.app -> local-bin/, make active
 uv run python scripts/install.py refresh       # CLI refresh: pull default branch, rebuild/install lf
-cat release/SCHEDULE.md      # shared loopflow + cadenza release cadence
+cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
 `install.py` is the local entry point. `local --use` builds this worktree's
@@ -18,7 +23,14 @@ cat release/SCHEDULE.md      # shared loopflow + cadenza release cadence
 `refresh` is the fast CLI-only path: pull the default branch, rebuild `lf`, and
 install it into the local bin dir.
 
-Use `release/` to keep the rationale and notes for each shipped version close to the code.
+Use `release/` to keep the rationale and notes for each shipped version close
+to the code.
+
+`lf release run` owns the portable lifecycle: exact change evidence, version
+intent, an isolated release PR, the tag, and observed completion. This
+repository owns migration checks and preparation in `.lf/config.yaml`, plus
+package builds, signing, notarization, uploads, deployment, smoke tests, and
+secrets in its workflows and scripts.
 
 | Path | What it does |
 |------|--------------|
@@ -47,15 +59,33 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
-| Weekly | `Release (weekly)` | Runs nightly package verification, bumps patch when commits landed since the last tag, tags, and dispatches `Release` | Yes |
-| Release | `Release` (on tag) | Builds the native tarballs **and** the signed, notarized `Loopflow.dmg`; uploads the DMG to R2 and attaches it to the GitHub Release alongside `lf` | Yes |
+| Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
+| Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local --use` | Build this worktree's `lf` and `Loopflow.app` into `local-bin/`, then promote it active | Local only |
 | Local | `scripts/install.py refresh` | Pull, release-build `lf`, and atomically copy it into the local bin dir | Local only |
 
-Nightly packages prove release artifacts while keeping deployment out of the loop. Weekly release reuses that package gate before publishing.
+GitHub owns credential-free compilation. The maintained Loopflow host owns the
+credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
+and the GitHub Release. It deploys the website from the exact tag and requires
+`/healthz` to report that tag. If the proof fails it restores the previous Fly
+image and leaves the release incomplete. Publishing the non-draft GitHub
+Release is the final completion marker.
+
+The daily run is idempotent. No merged changes is success. If a tag's hosted
+build succeeded but publishing stopped, the next run downloads that run's
+artifacts and resumes the same tag instead of cutting another patch.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 
-Interactive runs may append those decisions as they happen. Headless runs do not. If `release/unreleased/` exists, `lf release run` promotes it to `release/v<version>/`, uses `DECISIONS.md` to shape the narrative notes, and writes the final notes to both `RELEASE_NOTES.md` and `release/v<version>/NOTES.md`. If the directory is absent, the workflow still runs and falls back to merged PR history.
+Interactive runs may append those decisions as they happen. Headless runs do
+not. If `release/unreleased/` exists, `lf release run` promotes it to
+`release/v<version>/`, uses `DECISIONS.md` to shape the narrative notes, and
+writes the final notes to both `RELEASE_NOTES.md` and
+`release/v<version>/NOTES.md`. The exact first-parent commit range is always
+the shipped-behavior ledger; matching PRs add narrative context. If the
+decisions directory is absent, the same commit evidence still produces notes.
 
-Scheduled releases prefer the same agent-backed `release-notes` step. When the runner has no Claude, Codex, or OpenCode CLI, `lf release run` writes deterministic notes from the collected PRs and archived decisions instead of blocking the patch release.
+Scheduled releases prefer the same agent-backed `release-notes` skill. When
+the runner has no Claude, Codex, or OpenCode CLI, `lf release run` writes
+deterministic notes from the exact commits, matching PRs, and archived
+decisions instead of blocking the patch release.

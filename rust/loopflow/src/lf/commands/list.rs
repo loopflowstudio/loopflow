@@ -2,7 +2,7 @@ use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{
     builtin_flow_descriptions, builtin_flows, builtin_skill_description, builtin_skills,
     is_skill_interactive, list_all_skills, list_user_flows, BUILTIN_FLOW_CATEGORIES,
-    BUILTIN_STEP_CATEGORIES,
+    BUILTIN_SKILL_CATEGORIES,
 };
 
 use crate::lf::output::Colors;
@@ -129,7 +129,7 @@ pub fn show_all() -> Result<()> {
     );
     println!();
 
-    for (category, skill_names) in BUILTIN_STEP_CATEGORIES {
+    for (category, skill_names) in BUILTIN_SKILL_CATEGORIES {
         let category_skills: Vec<_> = skill_names
             .iter()
             .filter(|t| all_known_skills.contains(**t))

@@ -161,6 +161,7 @@ Linear Project content — not in a repo file, a status table, or its own memory
 ```bash
 lf pm project create --wave infra --title "Technical Architecture" \
   --definition "Loopflow's architecture is legible from the top down." \
+  --first task-design --loop slice --finally ship \
   --kr "Top-down architecture documentation is complete and published."
 ```
 
@@ -190,17 +191,19 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Session in its own stable sibling worktree:
 
 ```bash
-lf task start "add retry to token refresh" --project <linear-project-id>
+lf task start <linear-project-id> "add retry to token refresh"
+pbpaste | lf task start incident-management
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
 ```
 
-A Task Session advances through zero or more serial PRs to `main`. It runs
-kickoff once, repeats its selected inner flow, then gates the proposed
-outcome; gate repairs return the same Session to another iteration. After a
-merge or abandonment, Loopflow rotates the worktree onto the next branch. The
-Task inherits the wave's `GOAL.md` and `MEMORY.md` plus its Project definition
-and KRs.
+A Task Session advances through zero or more serial PRs to `main`. Its Project
+configures `first`, `loop`, and `finally` flows; Task launch resolves all three
+and pins them for the lifetime of the Task. `--first`, `--loop`, and `--finally`
+override one Task at launch. The first flow runs once, the loop repeats, and the
+finally flow gates, records learnings, and lands. After a merge or abandonment,
+Loopflow rotates the worktree onto the next branch. The Task inherits the wave's
+`GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
 
 The wave stays steerable while several independent tasks run — task events
 enter its inbox as typed observations and wake it once. Steering, receipts,

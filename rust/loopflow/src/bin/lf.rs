@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -872,7 +873,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Run {
             issue,
             name,
-            flow,
+            first,
+            loop_,
+            finally,
             stack_on,
             directive,
             headless,
@@ -883,7 +886,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flow: flow.clone(),
+                    flows: loopflow::ops::task::TaskFlowOverrides {
+                        first: first.clone(),
+                        loop_: loop_.clone(),
+                        finally: finally.clone(),
+                    },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                     headless: *headless,
@@ -892,10 +899,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             print_task(&session, *json)
         }
         TaskCommand::Start {
-            title,
             project_id,
+            title,
             name,
-            flow,
+            first,
+            loop_,
+            finally,
             stack_on,
             directive,
             headless,
@@ -903,11 +912,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         } => {
             let session = loopflow::ops::task::task_start(
                 repo,
-                title.clone(),
                 project_id,
+                title.clone(),
+                piped_task_report()?,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flow: flow.clone(),
+                    flows: loopflow::ops::task::TaskFlowOverrides {
+                        first: first.clone(),
+                        loop_: loop_.clone(),
+                        finally: finally.clone(),
+                    },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                     headless: *headless,
@@ -1032,6 +1046,15 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             print_task_control(&result, *json)
         }
     }
+}
+
+fn piped_task_report() -> anyhow::Result<Option<String>> {
+    if std::io::stdin().is_terminal() {
+        return Ok(None);
+    }
+    let mut report = String::new();
+    std::io::stdin().read_to_string(&mut report)?;
+    Ok((!report.trim().is_empty()).then_some(report))
 }
 
 fn main() -> anyhow::Result<()> {

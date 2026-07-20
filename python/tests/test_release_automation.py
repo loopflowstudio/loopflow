@@ -183,51 +183,79 @@ chmod +x "$repo/target/release/lf"
     assert "scripts/install.py refresh" in (ROOT / "scripts/pull-local-bin.sh").read_text()
 
 
-def test_weekly_release_verifies_packages_before_publish():
-    weekly = yaml.load(
-        (ROOT / ".github/workflows/weekly-release.yml").read_text(), Loader=yaml.BaseLoader
-    )
-    assert weekly["jobs"]["package-test"]["uses"] == "./.github/workflows/nightly-packages.yml"
-    assert weekly["jobs"]["release"]["needs"] == ["tag-check", "package-test"]
-    assert weekly["jobs"]["release"]["permissions"]["actions"] == "write"
-    assert weekly["jobs"]["release"]["permissions"]["pull-requests"] == "write"
-
-    commands = "\n".join(step.get("run", "") for step in weekly["jobs"]["release"]["steps"])
-    release_steps = weekly["jobs"]["release"]["steps"]
-    assert any(
-        step.get("uses") == "dopplerhq/secrets-fetch-action@v2.0.0" for step in release_steps
-    )
-    assert "cargo build --release -p loopflow --bin lf" in commands
-    assert "lf release run patch" in commands
-    assert "bump_patch_version.sh" not in commands
-    assert "git push origin HEAD:main" not in commands
-    assert "gh workflow run release.yml" not in commands
-
-
-def test_release_dmg_workflow_bounds_build_and_upload():
+def test_release_build_workflow_is_credential_free():
     release = yaml.load(
         (ROOT / ".github/workflows/release.yml").read_text(),
         Loader=yaml.BaseLoader,
     )
-    build_dmg = release["jobs"]["build-dmg"]
-    native_commands = "\n".join(
-        step.get("run", "") for step in release["jobs"]["build-native"]["steps"]
+
+    assert release["jobs"] == {
+        "packages": {"uses": "./.github/workflows/nightly-packages.yml"}
+    }
+    assert "schedule" not in release["on"]
+
+    workflow_text = (ROOT / ".github/workflows/release.yml").read_text()
+    forbidden = (
+        "secrets.",
+        "doppler",
+        "flyctl",
+        "cargo publish",
+        "gh release",
+        "R2_",
+        "NOTARY_",
     )
-    steps = build_dmg["steps"]
-    commands = "\n".join(step.get("run", "") for step in steps)
-    assert build_dmg["timeout-minutes"] == "45"
-    assert "--bin lf" in native_commands
-    assert "tar czf ../../../lf-${{ matrix.target }}.tar.gz lf" in native_commands
-    assert "publish-pypi" not in release["jobs"]
-    assert "python3 -u scripts/release-loopflow.py" in commands
-    assert any(
-        step.get("name") == "Build, sign, and notarize DMG" and step.get("timeout-minutes") == "35"
-        for step in steps
-    )
-    assert any(
-        step.get("name") == "Upload DMG to R2" and step.get("timeout-minutes") == "5"
-        for step in steps
-    )
+    assert not any(term in workflow_text for term in forbidden)
+    assert not (ROOT / ".github/workflows/weekly-release.yml").exists()
+    assert not (ROOT / ".github/workflows/website-deploy.yml").exists()
+
+
+def test_host_publisher_owns_credentialed_release_steps():
+    publisher = (ROOT / "scripts/publish_release.py").read_text()
+
+    for proof in (
+        "check_release_host()",
+        "_stage_github_release(artifacts)",
+        "_publish_crate()",
+        '"versioned_dmg_uploaded"',
+        '"scripts/deploy_website.py"',
+        '"latest_dmg_uploaded"',
+        '"--finalize"',
+    ):
+        assert proof in publisher
+
+    assert publisher.index('"website_deployed"') < publisher.index('"--finalize"')
+    assert publisher.index('"latest_dmg_uploaded"') < publisher.index('"--finalize"')
+
+
+def test_infrastructure_cron_runs_the_host_release_after_telemetry():
+    goal = (ROOT / "wave/infrastructure/GOAL.md").read_text()
+    frontmatter = yaml.safe_load(goal.split("---", 2)[1])
+    assert frontmatter["crons"] == [
+        {"flow": "telemetry-daily", "schedule": "0 0 9 * * *"},
+        {"flow": "release-run", "schedule": "0 0 10 * * *"},
+    ]
+
+    config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
+    assert config["release"]["targets"]["default"]["publisher"] == [
+        "doppler",
+        "run",
+        "--",
+        "uv",
+        "run",
+        "python",
+        "scripts/publish_release.py",
+    ]
+
+    bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
+    assert bootstrap.count("--remote-native") == 5
+    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index("lf cron sync")
+
+
+def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
+    installer = (ROOT / "release/install.sh").read_text()
+
+    assert '"$src" install promote --cli-target "$dst"' in installer
+    assert 'mv -f "$tmp" "$dst"' not in installer
 
 
 def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
@@ -258,6 +286,7 @@ def test_rust_ci_materializes_drafts_before_running_tests():
 
     assert materialize < test
     assert "scripts/canonicalize_migrations.py" in command
+    assert "--materialize-for-tests" in command
     assert '["workspace"]["package"]["version"]' in command
 
 

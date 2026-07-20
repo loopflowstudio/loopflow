@@ -169,8 +169,7 @@ enum LocalWaveAgentLauncher {
         directive: String
     ) -> [String] {
         [
-            lfPath, "task", "start", title,
-            "--project", project,
+            lfPath, "task", "start", project, title,
             "--directive", directive,
             "--json",
         ]

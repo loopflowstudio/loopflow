@@ -13,7 +13,7 @@ use crate::provider_account::{
 };
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
-use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
+use crate::store::{ProviderAccount, SharedStore};
 
 pub fn run(cmd: &ProfileCommand, _repo_root: &Path) -> Result<()> {
     if crate::provider_account::lease::account_lease_active() {
@@ -82,7 +82,8 @@ fn show_forwarded_routes() -> Result<()> {
             } else {
                 ""
             };
-            println!("  {}. {}{preferred}", position + 1, account_id);
+            let account = client.login_email(grant.provider, account_id)?;
+            println!("  {}. {}{preferred}", position + 1, account);
         }
     }
     Ok(())
@@ -187,18 +188,18 @@ async fn set_route(
     let provider = parse_managed_provider(raw_provider)?;
     let mut accounts = Vec::new();
     for raw_account in raw_accounts {
-        accounts.push(
-            find_provider_account(store, provider, raw_account)
-                .await?
-                .account_id,
-        );
+        accounts.push(find_provider_account(store, provider, raw_account).await?);
     }
+    let account_ids = accounts
+        .iter()
+        .map(|account| account.account_id.clone())
+        .collect();
     let now = now_unix();
     store
         .set_provider_route(&ProviderRoute {
             scope: scope.clone(),
             provider,
-            accounts: accounts.clone(),
+            accounts: account_ids,
             created_at: now,
             updated_at: now,
         })
@@ -211,7 +212,7 @@ async fn set_route(
         "{label} {provider}: {}",
         accounts
             .iter()
-            .map(ProviderAccountId::as_str)
+            .map(account_login)
             .collect::<Vec<_>>()
             .join(" -> ")
     );

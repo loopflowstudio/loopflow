@@ -52,7 +52,7 @@ flow — with commits between them:
 ```yaml
 # .lf/flows/ship-api.yaml
 - implement
-- lint
+- compress
 - gate
 ```
 

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
+use crate::provider_auth::Provider;
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::engine::repo::find_repo_root()
@@ -166,14 +167,35 @@ fn spawn_session_command(command: &SessionCommand) -> Result<()> {
         ));
     }
 
-    let status = Command::new(&command.program)
+    let provider = match command.program.as_str() {
+        "claude" => Some(Provider::Claude),
+        "codex" => Some(Provider::Codex),
+        _ => None,
+    };
+    let account_route = provider
+        .map(|provider| crate::provider_account::resolve_provider_account_blocking(provider, None))
+        .transpose()
+        .map_err(|error| anyhow!("failed to select provider account: {error}"))?
+        .flatten();
+
+    let mut process = Command::new(&command.program);
+    if provider == Some(Provider::Codex)
+        && account_route
+            .as_ref()
+            .is_some_and(crate::provider_account::ProviderAccountRoute::uses_native_home)
+    {
+        process.args(["-c", "cli_auth_credentials_store=\"file\""]);
+    }
+    process
         .args(&command.args)
         .current_dir(&command.cwd)
-        .env_remove("LOOPFLOW_DIRECTIVE_FILE")
-        .env_remove("ANTHROPIC_API_KEY")
-        .env_remove("OPENAI_API_KEY")
-        .env_remove("GEMINI_API_KEY")
-        .status()?;
+        .env_remove("LOOPFLOW_DIRECTIVE_FILE");
+    crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
+    if let Some(route) = &account_route {
+        tracing::info!(provider = %command.program, "selected managed provider account");
+        route.apply(&mut process);
+    }
+    let status = process.status()?;
 
     if status.success() {
         Ok(())
@@ -210,6 +232,36 @@ fn percent_encode(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::profile::EmailAddress;
+    use crate::provider_account::new_account;
+    use crate::store::{
+        open_store, CredentialType, ProviderAccountId, ProviderToken, StorageConfig,
+    };
+    use std::ffi::OsString;
+
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn capture(names: &[&'static str]) -> Self {
+            Self(
+                names
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in &self.0 {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
 
     fn path() -> PathBuf {
         PathBuf::from("/tmp/loop flow")
@@ -368,6 +420,139 @@ mod tests {
             main.canonicalize().unwrap()
         );
         assert!(launch.command.args.ends_with(&args(&["--", "fix it"])));
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn session_launch_tui_claude_uses_a_healthy_managed_login() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_ACCOUNT_LEASE",
+            "LF_TEST_SESSION_ENV",
+            "CLAUDE_CONFIG_DIR",
+            "PATH",
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var("LF_ACCOUNT_LEASE");
+        std::env::set_var("CLAUDE_CONFIG_DIR", "ambient");
+
+        let bin = temp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let claude = bin.join("claude");
+        std::fs::write(
+            &claude,
+            "#!/bin/sh\nprintf '%s' \"$CLAUDE_CONFIG_DIR\" > \"$LF_TEST_SESSION_ENV\"\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = std::fs::metadata(&claude).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&claude, permissions).unwrap();
+        }
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        let capture = temp.path().join("session-env");
+        std::env::set_var("LF_TEST_SESSION_ENV", &capture);
+
+        let store = open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+            .await
+            .unwrap();
+        let account_home = temp.path().join("accounts/claude/jackstah");
+        let account = new_account(
+            Provider::Claude,
+            ProviderAccountId::parse("jackstah").unwrap(),
+            account_home.clone(),
+            Some(EmailAddress::parse("jackstah@gmail.com").unwrap()),
+        );
+        store.upsert_provider_account(&account).await.unwrap();
+
+        launch_session(LaunchTarget::Tui, "claude", None, temp.path(), "review it").unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(capture).unwrap(),
+            account_home.to_string_lossy()
+        );
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn session_launch_tui_opencode_uses_the_stored_zen_credential() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_ACCOUNT_LEASE",
+            "LF_TEST_SESSION_ENV",
+            "OPENCODE_API_KEY",
+            "PATH",
+        ]);
+        std::env::set_var("LF_HOME", temp.path());
+        std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var("LF_ACCOUNT_LEASE");
+        std::env::set_var("OPENCODE_API_KEY", "ambient-key");
+
+        let bin = temp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let opencode = bin.join("opencode");
+        std::fs::write(
+            &opencode,
+            "#!/bin/sh\nprintf '%s' \"$OPENCODE_API_KEY\" > \"$LF_TEST_SESSION_ENV\"\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = std::fs::metadata(&opencode).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&opencode, permissions).unwrap();
+        }
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
+        );
+        let capture = temp.path().join("session-env");
+        std::env::set_var("LF_TEST_SESSION_ENV", &capture);
+
+        let store = open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
+            .await
+            .unwrap();
+        store
+            .upsert_provider_token(&ProviderToken {
+                provider: Provider::OpenCodeZen.as_str().to_string(),
+                access_token: "stored-key".to_string(),
+                refresh_token: None,
+                oauth_client_id: None,
+                expires_at: None,
+                login: Some("zen@example.com".to_string()),
+                updated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                credential_type: CredentialType::ApiKey,
+            })
+            .await
+            .unwrap();
+
+        launch_session(
+            LaunchTarget::Tui,
+            "opencode",
+            None,
+            temp.path(),
+            "review it",
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
     }
 
     #[test]

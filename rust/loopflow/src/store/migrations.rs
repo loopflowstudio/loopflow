@@ -9,20 +9,22 @@ use std::time::Duration;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
 use rusqlite::OptionalExtension;
+use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
 // -- Identity -----------------------------------------------------------------
 
-/// A migration's release-scoped identity: `{major}.{minor}.{ordinal:03}`.
+/// A migration's identity: legacy `{major}.{minor}.{ordinal:03}` or release-scoped
+/// `{major}.{minor}.{patch}.{ordinal:03}`.
 ///
-/// The namespace is the package major.minor when the migration is authored;
-/// patch releases append into the same namespace. Ordering is the numeric tuple,
-/// never a string sort — `0.9.001` precedes `0.10.001`, which lexical order
-/// would invert.
+/// New migrations carry the full package version of their release cut. Historical
+/// three-part ids remain immutable and sort before release-scoped ids in the same
+/// major/minor line. Ordering is numeric, never a string sort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MigrationId {
     pub major: u32,
     pub minor: u32,
+    pub patch: Option<u32>,
     pub ordinal: u32,
 }
 
@@ -32,23 +34,39 @@ impl MigrationId {
     /// ledger row from the pre-namespace era is told apart from a future release.
     fn parse_version(version: &str) -> Option<Self> {
         let (id, _name) = version.split_once('_')?;
-        let mut parts = id.split('.');
-        let mut number = || parts.next()?.parse().ok();
-        let (major, minor, ordinal) = (number()?, number()?, number()?);
-        if parts.next().is_some() {
-            return None;
+        let numbers = id
+            .split('.')
+            .map(str::parse)
+            .collect::<Result<Vec<u32>, _>>()
+            .ok()?;
+        match numbers.as_slice() {
+            [major, minor, ordinal] => Some(MigrationId {
+                major: *major,
+                minor: *minor,
+                patch: None,
+                ordinal: *ordinal,
+            }),
+            [major, minor, patch, ordinal] => Some(MigrationId {
+                major: *major,
+                minor: *minor,
+                patch: Some(*patch),
+                ordinal: *ordinal,
+            }),
+            _ => None,
         }
-        Some(MigrationId {
-            major,
-            minor,
-            ordinal,
-        })
     }
 }
 
 impl fmt::Display for MigrationId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{:03}", self.major, self.minor, self.ordinal)
+        match self.patch {
+            Some(patch) => write!(
+                f,
+                "{}.{}.{}.{:03}",
+                self.major, self.minor, patch, self.ordinal
+            ),
+            None => write!(f, "{}.{}.{:03}", self.major, self.minor, self.ordinal),
+        }
     }
 }
 
@@ -68,14 +86,14 @@ impl Migration {
     }
 }
 
-/// Every migration, in id order. A new one is appended here and to the
-/// directory; `scripts/new_migration.py` picks the next free ordinal in the
-/// active namespace.
+/// Every canonical migration, in id order. Release cuts append one generated
+/// batch after topologically ordering the ordinal-free drafts.
 const MIGRATIONS: &[Migration] = &[
     Migration {
         id: MigrationId {
             major: 0,
             minor: 10,
+            patch: None,
             ordinal: 1,
         },
         name: "initial",
@@ -85,6 +103,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 10,
+            patch: None,
             ordinal: 2,
         },
         name: "session_execution_context",
@@ -94,6 +113,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 1,
         },
         name: "task_prs",
@@ -103,6 +123,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 2,
         },
         name: "project_session_successors",
@@ -112,6 +133,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 3,
         },
         name: "child_body_lease",
@@ -121,6 +143,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 4,
         },
         name: "task_pr_ci_state",
@@ -130,6 +153,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 5,
         },
         name: "provider_accounts",
@@ -139,6 +163,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 6,
         },
         name: "context_launch_work",
@@ -148,6 +173,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 7,
         },
         name: "task_pr_parent",
@@ -157,6 +183,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 8,
         },
         name: "interactive_handoffs",
@@ -166,6 +193,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 9,
         },
         name: "context_pressure",
@@ -175,6 +203,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 10,
         },
         name: "context_input_normalization",
@@ -184,6 +213,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 11,
         },
         name: "profiles",
@@ -193,6 +223,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 12,
         },
         name: "provider_account_lifecycle",
@@ -202,6 +233,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 13,
         },
         name: "task_review_state",
@@ -211,6 +243,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 14,
         },
         name: "task_lifecycle",
@@ -220,6 +253,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 15,
         },
         name: "interaction_reviews",
@@ -229,6 +263,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 16,
         },
         name: "task_linear_observations",
@@ -238,6 +273,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 17,
         },
         name: "migration_provenance",
@@ -247,6 +283,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 18,
         },
         name: "session_body_provenance",
@@ -256,6 +293,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 19,
         },
         name: "task_pr_github_observation",
@@ -265,6 +303,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 20,
         },
         name: "task_pr_linear_linkage",
@@ -274,6 +313,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 21,
         },
         name: "provider_deliveries",
@@ -283,6 +323,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 22,
         },
         name: "task_session_successors",
@@ -292,6 +333,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 23,
         },
         name: "capture_pruned_state",
@@ -301,6 +343,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 24,
         },
         name: "ci_incidents",
@@ -310,6 +353,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 25,
         },
         name: "usage_deltas",
@@ -319,6 +363,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 26,
         },
         name: "lineage_boundary",
@@ -328,6 +373,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 27,
         },
         name: "accounts_first",
@@ -337,6 +383,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 29,
         },
         name: "ci_incident_repaired_head",
@@ -346,6 +393,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 30,
         },
         name: "one_spend_grain",
@@ -355,6 +403,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 31,
         },
         name: "durable_input_spine",
@@ -364,6 +413,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 32,
         },
         name: "run_launch_attention",
@@ -373,6 +423,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 33,
         },
         name: "launch_attention_only",
@@ -382,6 +433,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 34,
         },
         name: "typed_ci_runs",
@@ -391,6 +443,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 35,
         },
         name: "drop_child_commands",
@@ -400,6 +453,7 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 36,
         },
         name: "delete_sessions",
@@ -409,10 +463,31 @@ const MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 37,
         },
         name: "capture_terminal_states",
         sql: include_str!("migrations/0.11.037_capture_terminal_states.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(2),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.2.001_release.sql"),
+    },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(3),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.3.001_release.sql"),
     },
 ];
 
@@ -425,6 +500,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 8,
         },
         name: "context_pressure",
@@ -434,6 +510,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 9,
         },
         name: "context_input_normalization",
@@ -443,6 +520,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 10,
         },
         name: "profiles",
@@ -452,6 +530,7 @@ const DIVERGENT_MIGRATIONS: &[Migration] = &[
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 11,
         },
         name: "provider_account_lifecycle",
@@ -475,20 +554,21 @@ const LEGACY_BASELINE_VERSION: &str = "001_initial";
 const RECREATE_MESSAGE: &str =
     "incompatible Loopflow database; delete loopflow.db and rerun the command";
 
-/// The major.minor a migration authored today belongs to, from the single version
+/// The package version a migration release cut belongs to, from the single
 /// source of truth (the workspace `Cargo.toml`, via Cargo).
 ///
 /// # Panics
 ///
 /// Panics if the package version is not `major.minor.patch`, which Cargo rejects
 /// long before this runs.
-pub fn active_namespace() -> (u32, u32) {
+pub fn active_namespace() -> (u32, u32, u32) {
     let version = env!("CARGO_PKG_VERSION");
     let mut parts = version.split('.');
     let major = parts.next().and_then(|part| part.parse().ok());
     let minor = parts.next().and_then(|part| part.parse().ok());
-    match (major, minor) {
-        (Some(major), Some(minor)) => (major, minor),
+    let patch = parts.next().and_then(|part| part.parse().ok());
+    match (major, minor, patch, parts.next()) {
+        (Some(major), Some(minor), Some(patch), None) => (major, minor, patch),
         _ => panic!("package version {version} is not major.minor.patch"),
     }
 }
@@ -556,7 +636,8 @@ fn apply_sqlite_transaction(
         Ok(()) => {
             let result = before_migration(conn)
                 .and_then(|()| apply_set(conn, MIGRATIONS))
-                .and_then(|()| validate_foreign_keys(conn));
+                .and_then(|()| validate_foreign_keys(conn))
+                .and_then(|()| validate_persisted_json(conn));
             match result {
                 Ok(()) => conn.execute_batch("COMMIT").map_err(StoreError::from),
                 Err(error) => {
@@ -577,6 +658,97 @@ fn apply_sqlite_transaction(
         Err(error) => Err(error),
         Ok(()) => restore_result,
     }
+}
+
+pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
+    let mut failures = validate_json_column::<crate::task::PmWritebackState>(
+        conn,
+        "tasks",
+        "id",
+        "pm_writeback_json",
+    )?;
+    failures.extend(validate_json_column::<crate::task::TaskGateProposal>(
+        conn,
+        "tasks",
+        "id",
+        "gate_proposal_json",
+    )?);
+    failures.extend(validate_json_column::<crate::task::CiObservation>(
+        conn,
+        "task_prs",
+        "id",
+        "ci_observation",
+    )?);
+    failures.extend(validate_json_column::<crate::task::GithubObservation>(
+        conn,
+        "task_prs",
+        "id",
+        "github_observation",
+    )?);
+    failures.extend(validate_json_column::<crate::task::TaskEventKind>(
+        conn,
+        "task_events",
+        "id",
+        "kind_json",
+    )?);
+    failures.extend(validate_json_column::<crate::project::ProjectEventKind>(
+        conn,
+        "project_events",
+        "id",
+        "kind_json",
+    )?);
+    failures.extend(validate_json_column::<crate::project::ChildEventPayload>(
+        conn,
+        "observation_outbox",
+        "id",
+        "payload_json",
+    )?);
+    failures.extend(validate_json_column::<Vec<String>>(
+        conn,
+        "ci_incidents",
+        "identity",
+        "failure_set_json",
+    )?);
+    failures.extend(validate_json_column::<crate::durable::RunTrigger>(
+        conn,
+        "runs",
+        "id",
+        "trigger_json",
+    )?);
+    failures.extend(validate_json_column::<crate::durable::WaitOn>(
+        conn, "waits", "id", "on_json",
+    )?);
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidData(format!(
+            "semantic migration check failed:\n  - {}",
+            failures.join("\n  - ")
+        )))
+    }
+}
+
+fn validate_json_column<T: DeserializeOwned>(
+    conn: &rusqlite::Connection,
+    table: &str,
+    key: &str,
+    column: &str,
+) -> StoreResult<Vec<String>> {
+    let sql =
+        format!("SELECT CAST({key} AS TEXT), {column} FROM {table} WHERE {column} IS NOT NULL");
+    let mut statement = conn.prepare(&sql)?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut failures = Vec::new();
+    for row in rows {
+        let (row_key, json) = row?;
+        if let Err(error) = serde_json::from_str::<T>(&json) {
+            failures.push(format!("{table}.{column} row {row_key}: {error}"));
+        }
+    }
+    Ok(failures)
 }
 
 pub(crate) fn apply_sqlite_with_backup(
@@ -1379,6 +1551,7 @@ fn incompatible() -> StoreError {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
@@ -1388,9 +1561,19 @@ mod tests {
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
         latest_known_version, latest_version_sqlite, pending_migrations, product_schema,
-        validate_foreign_keys, validate_set, validate_sqlite, Migration, MigrationId,
-        DIVERGENT_MIGRATIONS, MIGRATIONS,
+        validate_foreign_keys, validate_persisted_json, validate_set, validate_sqlite, Migration,
+        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
+
+    const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
+    const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
+
+    fn _draft_is_canonical(name: &str) -> bool {
+        let marker = format!("-- draft: {name}");
+        MIGRATIONS
+            .iter()
+            .any(|migration| migration.sql.lines().any(|line| line == marker.as_str()))
+    }
 
     /// Stand-ins for the releases that have not happened yet: one more migration
     /// in the baseline's minor, and the first of the next minor.
@@ -1398,6 +1581,7 @@ mod tests {
         id: MigrationId {
             major: 0,
             minor: 10,
+            patch: None,
             ordinal: 2,
         },
         name: "add_note",
@@ -1407,6 +1591,7 @@ mod tests {
         id: MigrationId {
             major: 0,
             minor: 11,
+            patch: None,
             ordinal: 1,
         },
         name: "add_colour",
@@ -1435,6 +1620,22 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    fn _repair_sql(name: &str) -> String {
+        let drafts =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
+        let prefix = format!("{name}__");
+        let repair = fs::read_dir(&drafts)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
+            })
+            .expect("repair is canonical or present as an ordinal-free draft");
+        fs::read_to_string(repair).unwrap()
     }
 
     fn apply_permuted_history(conn: &rusqlite::Connection) {
@@ -1529,8 +1730,13 @@ mod tests {
 
         let active = active_namespace();
         for migration in MIGRATIONS {
+            let namespace = (
+                migration.id.major,
+                migration.id.minor,
+                migration.id.patch.unwrap_or(0),
+            );
             assert!(
-                (migration.id.major, migration.id.minor) <= active,
+                namespace <= active,
                 "{} is namespaced ahead of the package version",
                 migration.version()
             );
@@ -2543,6 +2749,204 @@ mod tests {
     }
 
     #[test]
+    fn legacy_persisted_json_upgrades_to_typed_stable_tasks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        apply_set(&conn, &MIGRATIONS[..2]).unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('00000000-0000-0000-0000-000000000001', 'runtime', '/repo', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_sessions (
+                id, project_id, project_slug, project_name, project_prompt_context,
+                wave_id, pm_snapshot_synced_at, status, status_reason, status_at,
+                iteration, observation_cursor, agent, provider,
+                created_at, updated_at,
+                current_directive_version, incorporated_directive_version
+             ) VALUES (
+                'ps_reopen', 'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001', 9, 'running', 'active', 10, 1, 0, 'codex', 'codex',
+                10, 20, 1, 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO task_sessions (
+                id, issue_id, issue_identifier, issue_title, issue_description,
+                project_id, project_slug, project_name, project_prompt_context, wave_id,
+                status, status_reason, status_at, worktree, branch, base_commit,
+                agent, provider, created_at, updated_at,
+                pm_snapshot_synced_at, pm_writeback_json, project_session_id,
+                current_directive_version, incorporated_directive_version
+             ) VALUES
+             (
+                'ts_completed', 'issue-completed', 'INF-DONE', 'Finish it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'completed', 'done', 10, '/repo.inf-done',
+                'jack/inf-done', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_reopen', 'issue-reopen', 'INF-REOPEN', 'Resume it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'waiting', 'writeback failed', 10, '/repo.inf-reopen',
+                'jack/inf-reopen', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"pending\",\"operation\":\"reopen_task\",\"error\":\"offline\"}',
+                'ps_reopen', 1, 1
+             ),
+             (
+                'ts_blocked', 'issue-blocked', 'INF-BLOCKED', 'Unblock it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'blocked', 'dependency', 10, '/repo.inf-blocked',
+                'jack/inf-blocked', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_failed', 'issue-failed', 'INF-FAILED', 'Recover it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'failed', 'provider error', 10, '/repo.inf-failed',
+                'jack/inf-failed', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_abandoned', 'issue-abandoned', 'INF-ABANDONED', 'Retire it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'abandoned', 'superseded', 10, '/repo.inf-abandoned',
+                'jack/inf-abandoned', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             ),
+             (
+                'ts_current', 'issue-current', 'INF-CURRENT', 'Keep it', '',
+                'project-reopen', 'runtime', 'Runtime', 'Definition',
+                '00000000-0000-0000-0000-000000000001',
+                'waiting', 'review', 10, '/repo.inf-current',
+                'jack/inf-current', 'base-sha', 'codex', 'codex', 10, 20,
+                9, '{\"state\":\"current\"}', 'ps_reopen', 1, 1
+             );",
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        apply_set(&conn, prefix_before("interaction_reviews")).unwrap();
+        conn.execute_batch(
+            "UPDATE task_sessions
+             SET gate_proposal_json = CASE id
+                 WHEN 'ts_completed' THEN '{\"status\":\"completed\",\"reason\":\"all done\"}'
+                 WHEN 'ts_reopen' THEN '{\"status\":\"waiting\",\"reason\":\"needs another pass\"}'
+                 WHEN 'ts_blocked' THEN '{\"status\":\"blocked\",\"reason\":\"dependency\"}'
+                 WHEN 'ts_failed' THEN '{\"status\":\"failed\",\"reason\":\"provider error\"}'
+                 WHEN 'ts_abandoned' THEN '{\"status\":\"abandoned\",\"reason\":\"superseded\"}'
+                 WHEN 'ts_current' THEN '{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}'
+             END
+             WHERE id IN (
+                 'ts_completed', 'ts_reopen', 'ts_blocked', 'ts_failed', 'ts_abandoned',
+                 'ts_current'
+             );",
+        )
+        .unwrap();
+
+        apply_set(&conn, MIGRATIONS).unwrap();
+        let stale: String = conn
+            .query_row(
+                "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        if !_draft_is_canonical(REOPEN_REPAIR_NAME) {
+            assert!(stale.contains("reopen_task"));
+            conn.execute_batch(&_repair_sql(REOPEN_REPAIR_NAME))
+                .unwrap();
+        }
+        if !_draft_is_canonical(GATE_PROPOSAL_REPAIR_NAME) {
+            conn.execute_batch(&_repair_sql(GATE_PROPOSAL_REPAIR_NAME))
+                .unwrap();
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT gate_proposal_json FROM tasks WHERE external_issue_id='issue-current'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "{\"done\":false,\"reason\":\"current\",\"future\":\"preserved\"}"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM tasks
+                 WHERE json_type(gate_proposal_json, '$.status') IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
+        validate_foreign_keys(&conn).unwrap();
+        validate_persisted_json(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        let error = apply_sqlite_transaction(&conn, |conn| {
+            conn.execute(
+                "UPDATE tasks
+                 SET pm_writeback_json='{\"state\":\"pending\",\"operation\":\"invented\",\"error\":\"offline\"}'
+                 WHERE external_issue_id='issue-reopen'",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE tasks
+                 SET gate_proposal_json='{\"reason\":\"missing done\"}'
+                 WHERE external_issue_id='issue-completed'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("tasks.pm_writeback_json"));
+        assert!(message.contains("tasks.gate_proposal_json"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "{\"state\":\"current\"}"
+        );
+        drop(conn);
+
+        let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();
+        store.health_check().unwrap();
+        let tasks = store.list_tasks(None).unwrap();
+        assert_eq!(tasks.len(), 6);
+        let reopen = tasks
+            .iter()
+            .find(|task| task.launch.issue.identifier == "INF-REOPEN")
+            .unwrap();
+        assert!(matches!(
+            reopen.pm_writeback,
+            crate::task::PmWritebackState::Current
+        ));
+        let mut decisions = tasks
+            .iter()
+            .map(|task| task.gate_proposal.as_ref().unwrap().done)
+            .collect::<Vec<_>>();
+        decisions.sort_unstable();
+        assert_eq!(decisions, vec![false, false, false, false, false, true]);
+    }
+
+    #[test]
     fn several_migrations_in_one_minor_release_apply_in_order() {
         let conn = open();
         apply_set(&conn, &[baseline(), SECOND_IN_SAME_MINOR]).unwrap();
@@ -2936,25 +3340,89 @@ mod tests {
         let id = |major, minor, ordinal| MigrationId {
             major,
             minor,
+            patch: None,
             ordinal,
         };
         assert!(id(0, 9, 1) < id(0, 10, 1));
         assert!(id(0, 10, 2) < id(0, 11, 1));
         assert_eq!(id(0, 10, 1).to_string(), "0.10.001");
+
+        let release = MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(2),
+            ordinal: 1,
+        };
+        assert!(id(0, 12, 37) < release);
+        assert_eq!(release.to_string(), "0.12.2.001");
     }
 
     #[test]
-    fn only_release_scoped_versions_parse() {
+    fn a_skipped_patch_is_part_of_the_pending_release_suffix() {
+        let releases = [
+            Migration {
+                id: MigrationId {
+                    major: 1,
+                    minor: 1,
+                    patch: Some(0),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql: "SELECT 1;",
+            },
+            Migration {
+                id: MigrationId {
+                    major: 1,
+                    minor: 1,
+                    patch: Some(1),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql: "SELECT 2;",
+            },
+            Migration {
+                id: MigrationId {
+                    major: 1,
+                    minor: 2,
+                    patch: Some(0),
+                    ordinal: 1,
+                },
+                name: "release",
+                sql: "SELECT 3;",
+            },
+        ];
+        let applied = [releases[0].version()];
+
+        let pending = pending_migrations(&applied, &releases).unwrap();
+
+        assert_eq!(
+            pending.iter().map(Migration::version).collect::<Vec<_>>(),
+            ["1.1.1.001_release", "1.2.0.001_release"]
+        );
+    }
+
+    #[test]
+    fn legacy_and_release_scoped_versions_parse() {
         assert_eq!(
             MigrationId::parse_version("0.10.001_initial"),
             Some(MigrationId {
                 major: 0,
                 minor: 10,
+                patch: None,
                 ordinal: 1,
             })
         );
         assert_eq!(MigrationId::parse_version("001_initial"), None);
-        assert_eq!(MigrationId::parse_version("0.10.1.2_initial"), None);
+        assert_eq!(
+            MigrationId::parse_version("0.12.2.001_release"),
+            Some(MigrationId {
+                major: 0,
+                minor: 12,
+                patch: Some(2),
+                ordinal: 1,
+            })
+        );
+        assert_eq!(MigrationId::parse_version("0.10.1.2.3_initial"), None);
         assert_eq!(MigrationId::parse_version("0.10.001"), None);
     }
 }

@@ -4,8 +4,8 @@ use std::fs;
 use std::process::Command;
 
 use loopflow::ops::{
-    bump_version, generate_release, release_bump, release_check, release_notes, release_status,
-    release_tag, NullProgress,
+    bump_version, generate_release, release_bump, release_check, release_notes, release_run,
+    release_status, release_tag, NullProgress, ReleaseRunOutcome,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -18,8 +18,16 @@ fn write_gh_script(pr_list: &str) -> String {
 
 fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
     format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    case \"$*\" in *databaseId*) ;; *) echo 'databaseId was not requested' >&2; exit 1;; esac\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
     )
+}
+
+fn write_gh_incomplete_release_script() -> &'static str {
+    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+}
+
+fn write_gh_failed_release_script() -> &'static str {
+    "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') cat <<'JSON'\n[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"status\":\"completed\",\"conclusion\":\"failure\",\"url\":\"https://example.com/run/42\"}]\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
 }
 
 fn git(repo: &TestRepo, args: &[&str]) {
@@ -60,13 +68,17 @@ fn git_output_bare(repo: &TestRepo, args: &[&str]) -> String {
 
 #[test]
 fn release_generates_notes_and_writes_file() {
-    let gh_script = write_gh_script(
-        r#"[{"number":101,"title":"Add release command","body":"Users can now run lf release."}]"#,
-    );
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
-
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.8.0"]);
+    fs::write(repo.path().join("feature.txt"), "released\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Add release command"]);
+    let sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    let pr_list = format!(
+        r#"[{{"number":101,"title":"Add release command","body":"Users can now run lf release.","mergeCommit":{{"oid":"{sha}"}}}}]"#
+    );
+    let gh_script = write_gh_script(&pr_list);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let version =
         generate_release(repo.path(), "v0.9.1", &NullProgress).expect("release should succeed");
@@ -112,15 +124,22 @@ fn release_with_bump_keyword() {
 
 #[test]
 fn release_notes_falls_back_when_agent_cli_is_missing() {
-    let gh_script = write_gh_script(
-        r#"[{"number":101,"title":"Make weekly release self-contained","body":"Release automation no longer requires a workstation CLI.","additions":42,"deletions":7,"changedFiles":3}]"#,
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    fs::write(repo.path().join("weekly.txt"), "self-contained\n").unwrap();
+    git(&repo, &["add", "weekly.txt"]);
+    git(
+        &repo,
+        &["commit", "-m", "Make weekly release self-contained"],
     );
+    let sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    let pr_list = format!(
+        r#"[{{"number":101,"title":"Make weekly release self-contained","body":"Release automation no longer requires a workstation CLI.","additions":42,"deletions":7,"changedFiles":3,"mergeCommit":{{"oid":"{sha}"}}}}]"#
+    );
+    let gh_script = write_gh_script(&pr_list);
     let lf_script =
         "#!/bin/sh\necho \"'claude' CLI not found. Install it and rerun \\`lf init\\`.\" >&2\nexit 1\n";
     let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
-
-    let repo = TestRepo::new();
-    git(&repo, &["tag", "v0.9.0"]);
     // A staged unreleased artifact still gets promoted; it is no longer a
     // decisions ledger and no longer injected into the notes.
     fs::create_dir_all(repo.path().join("release/unreleased")).unwrap();
@@ -148,6 +167,38 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
 }
 
 #[test]
+fn release_notes_context_fuses_decisions_with_exact_commits() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = "#!/bin/sh\ncp \"$LF_RELEASE_NOTES_CONTEXT\" RELEASE_CONTEXT.json\nprintf '# v0.9.1\\n\\nPrepared from context.\\n' > RELEASE_NOTES.md\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    fs::write(repo.path().join("feature.txt"), "release behavior\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Ship release behavior"]);
+    fs::create_dir_all(repo.path().join("release/unreleased")).unwrap();
+    fs::write(
+        repo.path().join("release/unreleased/DECISIONS.md"),
+        "Prefer explicit completion evidence.\n",
+    )
+    .unwrap();
+
+    release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect("release notes should succeed");
+
+    let context: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(repo.path().join("RELEASE_CONTEXT.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        context["decisions"],
+        "Prefer explicit completion evidence.\n"
+    );
+    assert_eq!(context["commits"][0]["title"], "Ship release behavior");
+    assert!(context["merged_prs"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn bump_version_patch() {
     assert_eq!(bump_version("v1.2.3", "patch").unwrap(), "1.2.4");
 }
@@ -169,18 +220,59 @@ fn bump_version_invalid_format() {
 
 #[test]
 fn release_check_returns_merged_prs() {
-    let gh_script = write_gh_script(
-        r#"[{"number":42,"title":"Add feature","body":"New stuff","additions":100,"deletions":10,"changedFiles":3}]"#,
-    );
-    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
-
     let repo = TestRepo::new();
     git(&repo, &["tag", "v0.9.0"]);
+    fs::write(repo.path().join("feature.txt"), "new stuff\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Add feature"]);
+    let sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    let old_sha = git_output(&repo, &["rev-parse", "v0.9.0"]);
+    let pr_list = format!(
+        r#"[{{"number":41,"title":"Old same-day change","body":"Already tagged","mergeCommit":{{"oid":"{old_sha}"}}}},{{"number":42,"title":"Add feature","body":"New stuff","additions":100,"deletions":10,"changedFiles":3,"mergeCommit":{{"oid":"{sha}"}}}}]"#
+    );
+    let gh_script = write_gh_script(&pr_list);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
-    let prs = release_check(repo.path(), None).expect("check should succeed");
-    assert_eq!(prs.len(), 1);
-    assert_eq!(prs[0].number, 42);
-    assert_eq!(prs[0].title, "Add feature");
+    let changes = release_check(repo.path(), None).expect("check should succeed");
+    assert_eq!(changes.commits.len(), 1);
+    assert_eq!(changes.commits[0].title, "Add feature");
+    assert_eq!(changes.merged_prs.len(), 1);
+    assert_eq!(changes.merged_prs[0].number, 42);
+    assert_eq!(changes.merged_prs[0].title, "Add feature");
+}
+
+#[test]
+fn release_check_uses_direct_commits_as_release_truth() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    fs::write(repo.path().join("direct.txt"), "shipped without a PR\n").unwrap();
+    git(&repo, &["add", "direct.txt"]);
+    git(&repo, &["commit", "-m", "Ship a direct commit"]);
+
+    let changes = release_check(repo.path(), None).expect("check should succeed");
+
+    assert_eq!(changes.commits.len(), 1);
+    assert_eq!(changes.commits[0].title, "Ship a direct commit");
+    assert!(changes.merged_prs.is_empty());
+}
+
+#[test]
+fn release_check_reads_evidence_without_running_repository_hooks() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    app:\n      verify:\n        - exit 19\n",
+    )
+    .unwrap();
+
+    let changes = release_check(repo.path(), Some("app")).expect("check should stay read-only");
+
+    assert!(!changes.commits.is_empty());
 }
 
 #[test]
@@ -189,9 +281,68 @@ fn release_check_returns_empty_without_tag() {
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
     let repo = TestRepo::new();
-    // No tags — release_check should return empty vec (no tag to compare against)
-    let prs = release_check(repo.path(), None).expect("check should succeed");
-    assert!(prs.is_empty());
+    // No tags means the first-parent history is the initial release range.
+    let changes = release_check(repo.path(), None).expect("check should succeed");
+    assert!(!changes.commits.is_empty());
+    assert!(changes.merged_prs.is_empty());
+}
+
+#[test]
+fn release_run_is_a_green_noop_without_merged_changes() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("empty release should succeed");
+
+    assert_eq!(
+        outcome,
+        ReleaseRunOutcome::NoChanges {
+            target: "default".to_string(),
+            latest_tag: Some("v0.9.1".to_string()),
+        }
+    );
+}
+
+#[test]
+fn release_run_refuses_to_skip_an_incomplete_tag() {
+    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script())]);
+
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+    )
+    .expect("write config");
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("incomplete tag should stop the release");
+
+    assert!(error.to_string().contains("v0.9.1 is incomplete"));
+}
+
+#[test]
+fn release_run_keeps_a_failed_tag_red_until_a_fix_merges() {
+    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script())]);
+
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
+    )
+    .expect("write config");
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("failed build without a fix should stay red");
+
+    assert!(error.to_string().contains("no merged fix is available"));
 }
 
 #[test]
@@ -213,8 +364,8 @@ fn release_bump_updates_cargo_toml() {
 #[test]
 fn release_status_reports_latest_tag_and_release() {
     let gh_script = write_gh_status_script(
-        r#"[{"databaseId":42,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
-        r#"{"tagName":"v0.9.1"}"#,
+        r#"[{"databaseId":7,"headBranch":"main","displayTitle":"Retry v0.9.1","status":"completed","conclusion":"failure","url":"https://example.com/run/7"},{"databaseId":42,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
+        r#"{"isDraft":false}"#,
     );
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
@@ -230,10 +381,26 @@ fn release_status_reports_latest_tag_and_release() {
 }
 
 #[test]
+fn release_status_does_not_count_a_draft_as_complete() {
+    let gh_script = write_gh_status_script(
+        r#"[{"databaseId":42,"headBranch":"v0.9.1","status":"completed","conclusion":"success"}]"#,
+        r#"{"isDraft":true}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should succeed");
+
+    assert!(!status.release_exists);
+}
+
+#[test]
 fn release_status_scopes_to_named_target() {
     let gh_script = write_gh_status_script(
         r#"[{"databaseId":7,"headBranch":"cli/v1.2.3","displayTitle":"Release cli/v1.2.3","status":"completed","conclusion":"success","url":"https://example.com/run/7"}]"#,
-        r#"{"tagName":"cli/v1.2.3"}"#,
+        r#"{"isDraft":false}"#,
     );
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
 
@@ -270,6 +437,24 @@ fn release_tag_is_idempotent_when_remote_tag_matches_head() {
 
     let remote_tag = git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.1"]);
     assert_eq!(remote_tag, head);
+}
+
+#[test]
+fn release_run_resumes_an_existing_explicit_tag() {
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    release_tag(repo.path(), "0.9.1", None).expect("tag should succeed");
+
+    let result = release_run(repo.path(), "0.9.1", None, &NullProgress)
+        .expect("interrupted release should resume from its tag");
+
+    let ReleaseRunOutcome::Resumed(receipt) = result else {
+        panic!("expected resumed release");
+    };
+    assert_eq!(receipt.version, "0.9.1");
+    assert_eq!(receipt.tag, "v0.9.1");
+    assert!(receipt.release_exists);
 }
 
 #[test]

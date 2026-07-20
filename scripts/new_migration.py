@@ -12,7 +12,7 @@ collision-resistant — two branches would need on the order of 2**64 same-name
 drafts before a birthday collision, so distinct files are a guarantee, not a
 hope. A draft has no ordinal: the release cut
 (`lf release run`) is the single boundary that orders the accumulated drafts and
-assigns canonical `<major>.<minor>.<ordinal>` ids.
+publishes one canonical `<major>.<minor>.<patch>.001_release` batch.
 
 Because two branches authoring the same readable name mint different ids, they
 write different files and never collide or share an edit — and this script edits
@@ -37,7 +37,8 @@ REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
-MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
+MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
+DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 # A draft file is `<name>__<id>.sql`; the name never contains `__`, so the last
 # `__` separates the readable name from the immutable 128-bit token (32 hex chars).
 DRAFT_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -47,20 +48,23 @@ DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
 def _released_names() -> set[str]:
     if not MIGRATIONS_DIR.is_dir():
         return set()
-    return {
-        match.group(4)
-        for path in MIGRATIONS_DIR.iterdir()
-        if (match := MIGRATION_NAME.match(path.name))
-    }
+    names = set()
+    for path in MIGRATIONS_DIR.iterdir():
+        match = MIGRATION_NAME.match(path.name)
+        if not match:
+            continue
+        if match.group(3) is None:
+            names.add(match.group(5))
+        else:
+            names.update(DRAFT_MARKER.findall(path.read_text()))
+    return names
 
 
 def _draft_names() -> set[str]:
     if not DRAFTS_DIR.is_dir():
         return set()
     return {
-        match.group(1)
-        for path in DRAFTS_DIR.iterdir()
-        if (match := DRAFT_FILE.match(path.name))
+        match.group(1) for path in DRAFTS_DIR.iterdir() if (match := DRAFT_FILE.match(path.name))
     }
 
 

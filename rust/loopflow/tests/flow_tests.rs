@@ -130,7 +130,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
     run_git(repo.path(), &["init", "-b", "main"]);
     run_git(repo.path(), &["config", "user.email", "test@example.com"]);
     run_git(repo.path(), &["config", "user.name", "Test"]);
-    for skill in ["implement", "compress", "lint", "gate"] {
+    for skill in ["implement", "compress"] {
         write_skill(repo.path(), skill, &format!("Run the {skill} step."));
     }
     run_git(repo.path(), &["add", "."]);
@@ -165,7 +165,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
         .expect("flow run event");
     let launches = store.agent_launches_matching(run_id).unwrap();
 
-    assert_eq!(launches.len(), 4);
+    assert_eq!(launches.len(), 2);
     assert!(launches.iter().all(|launch| launch.run_id == run_id));
     assert!(launches
         .iter()
@@ -178,7 +178,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
             .iter()
             .map(|launch| launch.skill.as_deref().unwrap())
             .collect::<Vec<_>>(),
-        ["implement", "compress", "lint", "gate"]
+        ["implement", "compress"]
     );
     assert_eq!(
         launches
@@ -186,7 +186,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
             .map(|launch| launch.id.as_str())
             .collect::<std::collections::HashSet<_>>()
             .len(),
-        4
+        2
     );
     assert_eq!(
         store
@@ -198,7 +198,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
             )
             .unwrap()
             .len(),
-        4
+        2
     );
 
     let trace = run_lf(
@@ -220,7 +220,7 @@ fn code_flow_records_each_agent_launch_in_one_trace() {
             .iter()
             .map(|launch| launch["skill"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["implement", "compress", "lint", "gate"]
+        ["implement", "compress"]
     );
 
     let doctor = run_lf(repo.path(), home.path(), &["doctor", "--json"], None);

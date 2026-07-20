@@ -6,10 +6,10 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
-use loopflow::engine::{load_flow, load_skill};
+use loopflow::engine::load_flow;
 use loopflow::lf::discovery::{
     builtin_skill_description, builtin_skills, discover_skill, discover_target, list_all_skills,
-    list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_STEP_CATEGORIES,
+    list_directions, list_user_flows, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -194,8 +194,6 @@ fn discover_directions() {
     assert!(directions.contains(&"focus".to_string()));
     assert!(directions.contains(&"mygroup".to_string()));
     assert!(directions.contains(&"alpha".to_string()));
-    assert!(directions.contains(&"security".to_string()));
-    assert!(directions.contains(&"infra".to_string()));
 }
 
 #[test]
@@ -226,7 +224,7 @@ fn discover_target_errors_for_unknown() {
 #[test]
 fn categorized_listing_includes_known_skills() {
     let builtins = builtin_skills();
-    for (_category, skills) in BUILTIN_STEP_CATEGORIES {
+    for (_category, skills) in BUILTIN_SKILL_CATEGORIES {
         for skill in *skills {
             assert!(
                 builtins.contains(*skill),
@@ -244,7 +242,7 @@ fn categorized_listing_includes_known_skills() {
 fn every_builtin_skill_is_categorized_and_discoverable() {
     let tmp = TempDir::new().expect("tempdir");
 
-    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_STEP_CATEGORIES
+    let categorized: std::collections::HashMap<&str, &str> = BUILTIN_SKILL_CATEGORIES
         .iter()
         .flat_map(|(cat, names)| names.iter().map(move |n| (*n, *cat)))
         .collect();
@@ -253,7 +251,7 @@ fn every_builtin_skill_is_categorized_and_discoverable() {
         // Appears in exactly one category.
         assert!(
             categorized.contains_key(name),
-            "builtin skill {name} is missing from BUILTIN_STEP_CATEGORIES",
+            "builtin skill {name} is missing from BUILTIN_SKILL_CATEGORIES",
         );
 
         // Resolves by exact name.
@@ -280,7 +278,7 @@ fn every_builtin_skill_is_categorized_and_discoverable() {
     // Every category entry must be a known builtin — no phantom names.
     let known: std::collections::HashSet<&'static str> =
         builtin_skill_names().into_iter().collect();
-    for (_cat, names) in BUILTIN_STEP_CATEGORIES {
+    for (_cat, names) in BUILTIN_SKILL_CATEGORIES {
         for name in *names {
             assert!(
                 known.contains(*name),
@@ -318,31 +316,6 @@ fn every_builtin_flow_is_categorized_and_loadable() {
                 "category lists flow {name} but no matching builtin exists"
             );
         }
-    }
-}
-
-/// Bare-name fallback: a skill in a namespaced builtin must also resolve by its
-/// short name when no core skill / other namespaced skill shares that short name.
-#[test]
-fn namespaced_skills_resolve_by_bare_name_when_unique() {
-    let tmp = TempDir::new().expect("tempdir");
-    // office-hours lives only in gstack; it must also work as a bare name.
-    let bare = load_skill("office-hours", tmp.path()).expect("bare name resolves");
-    let qualified = load_skill("gstack/office-hours", tmp.path()).expect("qualified resolves");
-    assert_eq!(bare.name, qualified.name);
-}
-
-/// A bare name that matches a core builtin must resolve to the core one, not
-/// to any namespaced sibling.
-#[test]
-fn bare_name_prefers_core_over_namespaced() {
-    let tmp = TempDir::new().expect("tempdir");
-    // `debug` exists in core (build/) and in gstack/. Bare name → core.
-    let skill = discover_skill(tmp.path(), "debug").expect("debug resolves");
-    assert_eq!(skill.name, "debug");
-    match discover_target(tmp.path(), "debug").expect("debug resolves via target") {
-        Target::Skill(s) => assert_eq!(s.name, "debug"),
-        Target::Flow(f) => panic!("expected Skill, got Flow {}", f.name),
     }
 }
 

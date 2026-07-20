@@ -1243,8 +1243,8 @@ mod tests {
             project_id: project.id.clone(),
             worktree: PathBuf::from("/repo.inf-123"),
             workspace_slug: format!("task-{}", &id.as_str()[3..11]),
-            lifecycle: crate::task::TaskLifecyclePlan::standard("task"),
-            lifecycle_phase: crate::task::TaskLifecyclePhase::Iterate,
+            lifecycle: crate::task::TaskLifecyclePlan::defaults(),
+            lifecycle_phase: crate::task::TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,
             phase_iteration: 0,
@@ -1945,7 +1945,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
-        task.lifecycle = crate::task::TaskLifecyclePlan::standard("code");
+        task.lifecycle = crate::task::TaskLifecyclePlan::standard("task-design", "code", "ship");
         task.phase_cursor = 2;
         task.phase_iteration = 4;
         store
@@ -1954,13 +1954,13 @@ mod tests {
             .unwrap();
 
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
-        assert_eq!(persisted.lifecycle.iterate.flow, "code");
+        assert_eq!(persisted.lifecycle.loop_.flow, "code");
         assert_eq!(
-            persisted.lifecycle.iterate.interaction_policy,
+            persisted.lifecycle.loop_.interaction_policy,
             crate::engine::InteractionPolicy::Defer
         );
-        assert_eq!(persisted.lifecycle.kickoff.flow, "task-kickoff");
-        assert_eq!(persisted.lifecycle.gate.flow, "task-gate");
+        assert_eq!(persisted.lifecycle.first.flow, "task-design");
+        assert_eq!(persisted.lifecycle.finally.flow, "ship");
         assert_eq!(persisted.phase_cursor, 2);
         assert_eq!(persisted.phase_iteration, 4);
 
@@ -1982,7 +1982,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
-        task.lifecycle_phase = crate::task::TaskLifecyclePhase::Kickoff;
+        task.lifecycle_phase = crate::task::TaskLifecyclePhase::First;
         task.phase_cursor = 1;
         store
             .create_task(&task, &make_task_pr(&task))
@@ -1996,7 +1996,7 @@ mod tests {
         store.activate_task_process(&task, &lease).await.unwrap();
         let mut stale = task.clone();
 
-        task.enter_iterate().unwrap();
+        task.enter_loop().unwrap();
         store.update_task_for_lease(&task, &lease).await.unwrap();
         let iterating = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(
@@ -2005,7 +2005,7 @@ mod tests {
                 iterating.phase_epoch,
                 iterating.phase_cursor
             ),
-            (crate::task::TaskLifecyclePhase::Iterate, 2, 0)
+            (crate::task::TaskLifecyclePhase::Loop, 2, 0)
         );
 
         stale.phase_cursor = 9;
@@ -2019,10 +2019,10 @@ mod tests {
                 after_stale.phase_cursor,
                 after_stale.phase_iteration
             ),
-            (crate::task::TaskLifecyclePhase::Iterate, 2, 0, 0)
+            (crate::task::TaskLifecyclePhase::Loop, 2, 0, 0)
         );
 
-        task.enter_gate(crate::task::TaskGateProposal {
+        task.enter_finally(crate::task::TaskGateProposal {
             done: true,
             reason: "implementation complete".to_string(),
         })
@@ -2031,7 +2031,7 @@ mod tests {
         let gating = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(
             gating.lifecycle_phase,
-            crate::task::TaskLifecyclePhase::Gate
+            crate::task::TaskLifecyclePhase::Finally
         );
         assert_eq!(gating.phase_epoch, 3);
         assert_eq!(gating.gate_cycle, 1);

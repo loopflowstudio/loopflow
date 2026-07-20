@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Freeze the draft migration set into a canonical, ordered, ordinal-assigned tail.
+"""Freeze the draft migration set into one release-scoped canonical batch.
 
-    uv run python scripts/canonicalize_migrations.py 0.11.30           # patch cut
-    uv run python scripts/canonicalize_migrations.py 0.12.0 --check    # plan only
+    uv run python scripts/canonicalize_migrations.py 0.12.2 --release-cut
+    uv run python scripts/canonicalize_migrations.py 0.12.2 --check
 
 The release cut is the single publication boundary that turns drafts into
 canonical migrations. `lf release run` invokes this inside its release worktree,
@@ -14,13 +14,12 @@ the release PR and run under real Rust CI before the queue merges and tags. It:
      readable name in the same cut;
   3. topologically orders the set (dependency edges, ties broken by name), a
      total order that does not depend on merge timing, PR number, or wall clock;
-  4. assigns the next contiguous ordinals in the namespace of the version being
-     cut — a patch continues the current `<major>.<minor>`, a minor/major bump
-     starts a fresh sequence at ordinal 1;
-  5. installs the tail *atomically*: it plans everything in memory first, then
-     writes the canonical `<major>.<minor>.<ordinal>_<name>.sql` files, replaces
-     the MIGRATIONS registry, and deletes the drafts — and on any failure restores
-     the tree byte-for-byte.
+  4. concatenates the ordered SQL into the release's single canonical
+     `<major>.<minor>.<patch>.001_release.sql` batch, retaining `-- draft:`
+     provenance markers;
+  5. installs the batch *atomically*: it plans everything in memory first, then
+     writes the canonical file, replaces the MIGRATIONS registry, and deletes
+     the drafts — and on any failure restores the tree byte-for-byte.
 
 A dependency may name another draft in the cut or an already-released migration
 (a released upstream is an ancestor of the whole cut, so it imposes no in-cut
@@ -29,7 +28,12 @@ produce the same ids, files, and diff, so an aborted release regenerates
 identically. The draft id is authoring-time identity only; it never appears in
 canonical output. An empty draft set is a no-op.
 
-Stdlib only, so the release path needs no Python environment — only an interpreter.
+Writing requires explicit release-cut authority. CI may materialize the same tree
+in its disposable checkout with `--materialize-for-tests`; when the active
+package version has already published a batch, that authority models the next
+patch and bumps the disposable Cargo workspace version with it. All other
+invocations are previews. Stdlib only, so the release path needs no Python
+environment — only an interpreter.
 """
 
 from __future__ import annotations
@@ -44,7 +48,8 @@ REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
 DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
 MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migrations.rs"
-MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(\d{3})_([a-z0-9_]+)\.sql$")
+PACKAGE_MANIFEST = REPO_ROOT / "Cargo.toml"
+MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
 # `<name>__<id>.sql`; the readable name never contains `__`, so the last `__`
 # separates it from the immutable 128-bit token (32 hex chars).
 DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)__([0-9a-f]{32})\.sql$")
@@ -55,6 +60,7 @@ DRAFT_HEADER_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", 
 DRAFT_HEADER_ID = re.compile(r"^--[ \t]*id:[ \t]*(.*)$", re.MULTILINE)
 DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
+DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
 
@@ -72,27 +78,20 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def _released() -> dict[tuple[int, int], list[int]]:
-    """Ordinals already released, grouped by `(major, minor)` namespace."""
-    namespaces: dict[tuple[int, int], list[int]] = {}
-    if not MIGRATIONS_DIR.is_dir():
-        return namespaces
-    for path in MIGRATIONS_DIR.iterdir():
-        match = MIGRATION_NAME.match(path.name)
-        if match:
-            major, minor, ordinal, _ = match.groups()
-            namespaces.setdefault((int(major), int(minor)), []).append(int(ordinal))
-    return namespaces
-
-
 def _released_names() -> set[str]:
+    """Draft identities already published, including names inside release batches."""
     if not MIGRATIONS_DIR.is_dir():
         return set()
-    return {
-        match.group(4)
-        for path in MIGRATIONS_DIR.iterdir()
-        if (match := MIGRATION_NAME.match(path.name))
-    }
+    names = set()
+    for path in MIGRATIONS_DIR.iterdir():
+        match = MIGRATION_NAME.match(path.name)
+        if not match:
+            continue
+        if match.group(3) is None:
+            names.add(match.group(5))
+        else:
+            names.update(DRAFT_MARKER.findall(path.read_text()))
+    return names
 
 
 def _draft_body(text: str) -> str:
@@ -111,9 +110,14 @@ def _read_drafts() -> list[Draft]:
             continue
         match = DRAFT_FILE.match(path.name)
         if not match:
-            _fail(f"draft {path.name} is not `<snake_case_name>__<id>.sql` — run scripts/new_migration.py")
+            _fail(
+                f"draft {path.name} is not `<snake_case_name>__<id>.sql` "
+                "— run scripts/new_migration.py"
+            )
         name, file_id = match.group(1), match.group(2)
         text = path.read_text()
+        if DRAFT_MARKER.search(text):
+            _fail(f"draft {path.name} uses reserved `-- draft:` release provenance")
         header = DRAFT_HEADER_NAME.search(text)
         if not header:
             _fail(f"draft {path.name} has no `-- name:` header")
@@ -196,18 +200,30 @@ def _order(drafts: list[Draft]) -> list[Draft]:
     return [by_name[name] for name in order]
 
 
-def _entry(major: int, minor: int, ordinal: int, name: str) -> str:
+def _entry(major: int, minor: int, patch: int) -> str:
     return (
         f"    Migration {{\n"
         f"        id: MigrationId {{\n"
         f"            major: {major},\n"
         f"            minor: {minor},\n"
-        f"            ordinal: {ordinal},\n"
+        f"            patch: Some({patch}),\n"
+        f"            ordinal: 1,\n"
         f"        }},\n"
-        f'        name: "{name}",\n'
-        f'        sql: include_str!("migrations/{major}.{minor}.{ordinal:03d}_{name}.sql"),\n'
+        f'        name: "release",\n'
+        f'        sql: include_str!("migrations/{major}.{minor}.{patch}.001_release.sql"),\n'
         f"    }},\n"
     )
+
+
+def _batch_sql(drafts: list[Draft]) -> str:
+    blocks = []
+    for draft in drafts:
+        body = draft.sql.rstrip("\n")
+        block = f"-- draft: {draft.name}"
+        if body:
+            block += f"\n{body}"
+        blocks.append(block)
+    return "\n\n".join(blocks) + "\n"
 
 
 def _new_registry_text(entries: str) -> str:
@@ -220,6 +236,35 @@ def _new_registry_text(entries: str) -> str:
     if end == -1:
         _fail(f"the MIGRATIONS registry in {MIGRATIONS_RS.name} is unterminated")
     return source[:end] + entries + source[end:]
+
+
+def _test_package_manifest(current: str, next_version: str) -> str:
+    if not PACKAGE_MANIFEST.is_file():
+        _fail(f"test materialization cannot find {PACKAGE_MANIFEST.name}")
+    lines = PACKAGE_MANIFEST.read_text().splitlines(keepends=True)
+    in_workspace_package = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "[workspace.package]":
+            in_workspace_package = True
+            continue
+        if stripped.startswith("["):
+            in_workspace_package = False
+        if not in_workspace_package:
+            continue
+        body = line.rstrip("\r\n")
+        newline = line[len(body) :]
+        match = re.match(r'^(\s*version\s*=\s*")([^"]+)(".*)$', body)
+        if match is None:
+            continue
+        if match.group(2) != current:
+            _fail(
+                f"{PACKAGE_MANIFEST.name} workspace version {match.group(2)!r} "
+                f"does not match requested test version {current!r}"
+            )
+        lines[index] = f"{match.group(1)}{next_version}{match.group(3)}{newline}"
+        return "".join(lines)
+    _fail(f"{PACKAGE_MANIFEST.name} has no [workspace.package] version")
 
 
 def _atomic_write(path: Path, data: str) -> None:
@@ -242,27 +287,36 @@ def _atomic_write(path: Path, data: str) -> None:
         raise
 
 
-def _install(plan: list[tuple[int, int, int, Draft]], registry_text: str) -> None:
-    """Write the planned tail atomically: on any failure, restore byte-for-byte.
+def _install(
+    canonical: Path,
+    sql: str,
+    drafts: list[Draft],
+    registry_text: str,
+    package_manifest_text: str | None,
+) -> None:
+    """Write the planned batch atomically: on any failure, restore byte-for-byte.
 
     Order matters for rollback: create canonical files, replace the registry, then
     delete drafts last. A failure at any step undoes what came before — restoring
     deleted drafts, the original registry, and removing created files.
     """
     original_registry = MIGRATIONS_RS.read_bytes()
-    created: list[Path] = []
+    original_manifest = PACKAGE_MANIFEST.read_bytes() if package_manifest_text else None
     deleted: list[tuple[Path, bytes]] = []
     registry_written = False
+    manifest_written = False
+    canonical_written = False
     try:
-        for major, minor, ordinal, draft in plan:
-            canonical = MIGRATIONS_DIR / f"{major}.{minor}.{ordinal:03d}_{draft.name}.sql"
-            if canonical.exists():
-                raise RuntimeError(f"{canonical.name} already exists")
-            canonical.write_text(draft.sql)
-            created.append(canonical)
+        if canonical.exists():
+            raise RuntimeError(f"{canonical.name} already exists")
+        canonical.write_text(sql)
+        canonical_written = True
         _atomic_write(MIGRATIONS_RS, registry_text)
         registry_written = True
-        for _major, _minor, _ordinal, draft in plan:
+        if package_manifest_text is not None:
+            _atomic_write(PACKAGE_MANIFEST, package_manifest_text)
+            manifest_written = True
+        for draft in drafts:
             path = DRAFTS_DIR / draft.filename
             data = path.read_bytes()
             path.unlink()
@@ -270,11 +324,14 @@ def _install(plan: list[tuple[int, int, int, Draft]], registry_text: str) -> Non
     except BaseException as error:
         for path, data in deleted:
             path.write_bytes(data)
+        if manifest_written:
+            assert original_manifest is not None
+            PACKAGE_MANIFEST.write_bytes(original_manifest)
         if registry_written:
             MIGRATIONS_RS.write_bytes(original_registry)
-        for path in created:
+        if canonical_written:
             try:
-                path.unlink()
+                canonical.unlink()
             except FileNotFoundError:
                 pass
         _fail(f"install failed; tree restored byte-for-byte ({error})")
@@ -282,20 +339,40 @@ def _install(plan: list[tuple[int, int, int, Draft]], registry_text: str) -> Non
 
 def main() -> None:
     check = False
+    write_mode: str | None = None
     positional: list[str] = []
     for argument in sys.argv[1:]:
         if argument in ("--check", "--dry-run"):
             check = True
+        elif argument in ("--release-cut", "--materialize-for-tests"):
+            if write_mode is not None:
+                print("choose one canonical migration write authority", file=sys.stderr)
+                raise SystemExit(2)
+            write_mode = argument
         else:
             positional.append(argument)
     if len(positional) != 1:
-        print("usage: canonicalize_migrations.py <version> [--check]", file=sys.stderr)
+        print(
+            "usage: canonicalize_migrations.py <version> "
+            "[--check|--release-cut|--materialize-for-tests]",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if check and write_mode is not None:
+        print("--check cannot be combined with a write authority", file=sys.stderr)
+        raise SystemExit(2)
+    if not check and write_mode is None:
+        print(
+            "refusing to create canonical migrations outside the release cut; "
+            "use --check to preview",
+            file=sys.stderr,
+        )
         raise SystemExit(2)
     version = VERSION.match(positional[0])
     if not version:
         print(f"version {positional[0]!r} is not major.minor.patch", file=sys.stderr)
         raise SystemExit(2)
-    major, minor = int(version.group(1)), int(version.group(2))
+    major, minor, patch = (int(version.group(index)) for index in range(1, 4))
 
     drafts = _read_drafts()
     if not drafts:
@@ -303,27 +380,44 @@ def main() -> None:
         return
 
     ordered = _order(drafts)
-    released = _released()
-    next_ordinal = max(released.get((major, minor), []), default=0) + 1
+    release_files = []
+    for path in MIGRATIONS_DIR.iterdir():
+        match = MIGRATION_NAME.match(path.name)
+        if not match or match.group(3) is None:
+            continue
+        namespace = tuple(int(match.group(index)) for index in range(1, 4))
+        if namespace == (major, minor, patch):
+            release_files.append(path.name)
+    package_manifest_text = None
+    if release_files:
+        if write_mode != "--materialize-for-tests":
+            _fail(
+                f"release {major}.{minor}.{patch} already has canonical migration(s): "
+                f"{', '.join(sorted(release_files))}"
+            )
+        current = f"{major}.{minor}.{patch}"
+        patch += 1
+        next_version = f"{major}.{minor}.{patch}"
+        next_file = MIGRATIONS_DIR / f"{next_version}.001_release.sql"
+        if next_file.exists():
+            _fail(f"test release {next_version} already has canonical migration {next_file.name}")
+        package_manifest_text = _test_package_manifest(current, next_version)
+        print(f"test materialization advances the disposable package {current} -> {next_version}")
 
-    plan = []
-    for offset, draft in enumerate(ordered):
-        ordinal = next_ordinal + offset
-        plan.append((major, minor, ordinal, draft))
-
-    print(f"canonicalizing {len(plan)} draft(s) into {major}.{minor}:")
-    for major_, minor_, ordinal, draft in plan:
+    canonical = MIGRATIONS_DIR / f"{major}.{minor}.{patch}.001_release.sql"
+    print(f"canonicalizing {len(ordered)} draft(s) into {major}.{minor}.{patch}.001_release:")
+    for draft in ordered:
         depends = ", ".join(draft.depends_on) if draft.depends_on else "(none)"
-        print(f"  {major_}.{minor_}.{ordinal:03d}_{draft.name}  <- draft {draft.name} [{depends}]")
+        print(f"  draft {draft.name} [{depends}]")
     if check:
         return
 
-    entries = "".join(
-        _entry(major_, minor_, ordinal, draft.name) for major_, minor_, ordinal, draft in plan
+    registry_text = _new_registry_text(_entry(major, minor, patch))
+    _install(canonical, _batch_sql(ordered), ordered, registry_text, package_manifest_text)
+    print(
+        f"wrote 1 canonical migration from {len(ordered)} draft(s); "
+        "run scripts/check_migrations.py to verify"
     )
-    registry_text = _new_registry_text(entries)
-    _install(plan, registry_text)
-    print(f"wrote {len(plan)} canonical migration(s); run scripts/check_migrations.py to verify")
 
 
 if __name__ == "__main__":

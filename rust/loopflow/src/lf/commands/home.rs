@@ -117,7 +117,23 @@ pub fn start(waves: &[String], wave_ids: &[String], json: bool, repo: &Path) -> 
 pub fn stop(name: &str, _repo: &Path) -> anyhow::Result<()> {
     let name = crate::ops::util::normalize_wave_name(name)
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
-    crate::wave::stop(&name)
+    let runtime = tokio::runtime::Runtime::new()?;
+    let stopped = runtime.block_on(async {
+        let Some(store) = crate::store::open_existing_store().await else {
+            return Ok::<_, anyhow::Error>(None);
+        };
+        let Some(wave) = store.get_wave_by_name(&name).await? else {
+            return Ok(None);
+        };
+        let local = store.local_home().await?;
+        crate::lfd::stop_wave(&local.id, wave.id()).await
+    })?;
+    match stopped {
+        Some(true) => println!("stopped wave {name}"),
+        Some(false) => println!("wave {name} is already stopped"),
+        None => return crate::wave::stop(&name),
+    }
+    Ok(())
 }
 
 async fn start_inner(
@@ -147,7 +163,7 @@ async fn start_inner(
                 repo.display()
             ));
         }
-        crate::home_resident::waves_for_home(&store, &local.id, Some(&repo_name)).await?
+        crate::wave_host::waves_for_home(&store, &local.id, Some(&repo_name)).await?
     } else {
         let mut selected = Vec::with_capacity(names.len());
         for raw in names {
@@ -181,8 +197,8 @@ async fn start_inner(
             .place_work(&crate::durable::WorkRef::Wave(wave.id().clone()), &local.id)
             .await?;
     }
-    crate::home_resident::ensure(&local.id, &repo).await?;
-    crate::home_resident::start_waves(&local.id, wave_ids).await?;
+    crate::lfd::ensure(&local.id, &repo).await?;
+    crate::lfd::start_waves(&local.id, wave_ids).await?;
 
     let mut responses = Vec::with_capacity(selected.len());
     for selected_wave in selected {

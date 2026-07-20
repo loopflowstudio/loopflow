@@ -322,9 +322,11 @@ lf ssh <home-id> start shipper --json
 `lf start` returns the same Wave rows as `lf ls --json`; it does not define a
 second launch-result model. With no names it starts every eligible Wave in the
 current repo on this machine. `lfd` starts the same eligible set across all
-repositories known to its local store when the Home daemon starts. `lf stop`
-stops the selected Wave on this machine while the Home keeper and sibling Waves
-continue.
+repositories known to its local store and reconciles it every 30 seconds.
+`lf stop` stops the selected Wave on this machine while `lfd` and sibling Waves
+continue. It suppresses reconciliation until an explicit `lf start` or the
+next `lfd` restart; change `owner`, `home`, or placement for a durable
+assignment change.
 
 `lf ssh <HomeId>` resolves the Home's current observed route and makes the
 target prove that identity. The remote `lf` is implicit, so everything after

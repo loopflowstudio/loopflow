@@ -291,9 +291,6 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
-    /// Internal: one machine-local keeper serving eligible Waves on a Home.
-    #[command(name = "__home-resident", hide = true)]
-    HomeResident { home_id: crate::durable::HomeId },
     /// Internal resident primitive: execute one expanded top-level flow step.
     #[command(name = "__flow-step", hide = true)]
     FlowStep {

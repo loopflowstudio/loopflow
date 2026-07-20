@@ -43,6 +43,38 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
     PathBuf::from("lf")
 }
 
+pub(crate) fn resolve_lfd_binary() -> PathBuf {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lfd") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    let lf = resolve_lf_binary();
+    if let Some(parent) = lf.parent() {
+        let sibling = parent.join("lfd");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+    if let Ok(current) = std::env::current_exe() {
+        if current
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "lfd")
+        {
+            return current;
+        }
+        if let Some(parent) = current.parent() {
+            let sibling = parent.join("lfd");
+            if sibling.exists() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("lfd")
+}
+
 fn select_binary_override(
     provenance: crate::build_info::BuildProvenance,
     control: Option<std::ffi::OsString>,

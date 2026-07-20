@@ -223,9 +223,11 @@ routes verify their provider signatures. `/health` and `/status` are public on
 the bound interface, so a non-loopback listener must sit behind a firewall or
 authenticating proxy.
 
-When `lfd` starts the Home resident, the durable spawn boundary removes its
-webhook secrets and bearer token along with forwarded SSH credentials. Wave and
-agent processes do not inherit daemon ingress authority.
+`lfd` keeps webhook secrets inside the Home server process. Its in-process
+`WaveHost` listeners are trusted Loopflow control code, not agents. When they
+spawn Wave bodies and provider processes, the durable boundary removes daemon
+secrets along with forwarded SSH credentials. Agents do not inherit ingress
+authority.
 
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their

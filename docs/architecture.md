@@ -134,7 +134,7 @@ for the existing opaque interactive surface until Demo owns that protocol.
 ```text
 App / CLI -> shared local SQLite, Linear, GitHub
 
-lf start (machine-local) -> Home resident -> Wave listener -> Wave resident
+lf start (machine-local) -> lfd / WaveHost -> Wave listener -> Wave resident
 parent or CLI -> reserve Run -> __work project -> Project runner -> Task Runs
 parent or CLI -> reserve Run -> __work task -> Task runner -> worktree -> PRs
 ```
@@ -148,9 +148,11 @@ the target proves its stable Home identity before acting. Hostnames and SSH
 routes may change without moving the Work. `lf wave` keeps a foreground
 development path.
 
-At startup, `lfd` ensures the machine-local Home resident. The resident starts
-every eligible Wave known to the local store across repositories and owns the
-per-Wave listener children; `lfd` is not a remote control API.
+At startup and every 30 seconds, `lfd`'s in-process `WaveHost` starts every
+eligible Wave known to the local store across repositories and restarts
+eligible listeners that exit. `lf stop` suppresses the selected Wave until an
+explicit start or `lfd` restart without disturbing sibling Waves. `lfd` is not
+an agent or a remote control API.
 
 Current truth is split deliberately:
 

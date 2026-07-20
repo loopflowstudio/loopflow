@@ -1128,16 +1128,12 @@ fn main() -> anyhow::Result<()> {
     let args = reorder_args(normalize_ssh_args(raw_args.clone()));
 
     let mut cli = Cli::parse_from(args.clone());
-    // The shared Home resident owns an async, multi-Wave shutdown sequence.
-    // Every other command retains the immediate process-wide interrupt path.
-    if !matches!(&cli.command, Some(Commands::HomeResident { .. })) {
-        ctrlc::set_handler(|| {
-            loopflow::engine::agent::run_interrupt_cleanups();
-            loopflow::engine::agent::kill_child_if_running();
-            std::process::exit(130);
-        })
-        .expect("failed to set Ctrl+C handler");
-    }
+    ctrlc::set_handler(|| {
+        loopflow::engine::agent::run_interrupt_cleanups();
+        loopflow::engine::agent::kill_child_if_running();
+        std::process::exit(130);
+    })
+    .expect("failed to set Ctrl+C handler");
     let explicit_wave = cli
         .wave
         .as_deref()
@@ -1320,9 +1316,6 @@ fn main() -> anyhow::Result<()> {
             }),
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
-            }
-            Some(Commands::HomeResident { home_id }) => {
-                in_repo_runtime(&args, |_| loopflow::home_resident::run(home_id))
             }
             Some(Commands::FlowStep { flow, index, seed }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::flow::run_step(flow, *index, seed, &cli, repo)
@@ -1713,7 +1706,7 @@ mod tests {
     }
 
     #[test]
-    fn start_and_home_resident_are_distinct_entrypoints() {
+    fn start_accepts_local_and_home_bound_waves() {
         let start =
             Cli::try_parse_from(["lf", "start", "product", "intelligence", "--json"]).unwrap();
         assert!(matches!(
@@ -1737,17 +1730,6 @@ mod tests {
                 if waves == ["product"]
                     && wave_ids == ["product=wave_00000000000000000000000000000001"]
                     && json
-        ));
-
-        let resident = Cli::try_parse_from([
-            "lf",
-            "__home-resident",
-            "home_00000000000000000000000000000001",
-        ])
-        .unwrap();
-        assert!(matches!(
-            resident.command,
-            Some(Commands::HomeResident { .. })
         ));
 
         let ssh = Cli::try_parse_from([

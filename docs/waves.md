@@ -140,10 +140,18 @@ Project and Task movement stays closed while their Runs remain the
 executor. The shared Run supervisor will open that placement boundary without
 another Work-to-Run routing bridge.
 
-One keeper process per Home serves all placed Waves. When it starts, it starts
-every eligible Wave known to the local store, across repositories. `lfd`
-ensures that keeper after login or reboot. Starting or stopping one Wave does
-not kill the keeper or disturb sibling Waves.
+`lfd` is the one keeper process per Home. Its in-process `WaveHost` starts every
+eligible Wave known to the local store across repositories, then reconciles
+every 30 seconds. Starting or stopping one Wave does not kill `lfd` or disturb
+sibling Waves.
+
+`WaveHost` is server machinery, not an agent: it makes no model calls and
+chooses no work. Each hosted Wave body is the agent with a goal, memory, and
+conversation.
+
+`lf stop <wave>` suppresses automatic restart until the next explicit
+`lf start <wave>` or `lfd` restart. To keep a Wave off this Home across reboots,
+change its `owner`/`home` policy or recorded placement.
 
 `home: localhost`, `home: 127.0.0.1`, and `home: ::1` always match the current
 machine. Loopflow also matches its stable HomeId, hostname and short hostname,

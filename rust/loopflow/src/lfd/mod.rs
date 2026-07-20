@@ -1,8 +1,8 @@
 //! `lfd` — the machine-level Home daemon: Wave startup, webhook ingress, and liveness.
 //!
 //! `lfd` is the one process that must always be running on a Home machine: it
-//! ensures the local Home resident, receives external HTTP that cannot be
-//! SSH/`lf` (webhook deliveries), and serves liveness probes. It is *not* a
+//! hosts local Wave agents, receives external HTTP that cannot be SSH/`lf`
+//! (webhook deliveries), and serves liveness probes. It is *not* a
 //! remote control API — reads become `lf` queries; hands become `lf` directly.
 //!
 //! The ingress path is a durable delivery inbox: each signed Linear delivery is
@@ -28,6 +28,7 @@ pub mod service;
 
 use std::collections::HashSet;
 use std::ffi::OsStr;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -40,19 +41,23 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use fs2::FileExt;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
+use crate::durable::HomeId;
 use crate::engine::config::load_config_or_default;
 use crate::engine::worktrees::{
     main_repo_root, prune_abandoned_prompt_logs, prune_branch_worktree, prune_terminal_worktree,
     prune_worktrees, TargetedPruneOutcome, WorktreePrunePolicy, WorktreePruneReason,
 };
+use crate::id::WaveId;
 use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
 use crate::store::Store;
+use crate::wave_host::WaveHost;
 use crate::webhook::{self, WebhookEvent, WebhookOutcome, SIGNATURE_HEADER};
 
 /// Body limit on webhook routes. Linear deliveries are small; a hard cap keeps
@@ -65,8 +70,7 @@ const ABANDONED_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 /// Everything the `lfd` receiver needs, shared across requests.
 #[derive(Clone)]
 pub struct LfdState {
-    /// Root directory containing `wave/*/` endpoint files, scanned per
-    /// `/status` request (never cached).
+    /// Primary repository for webhook and maintenance configuration.
     repo_root: PathBuf,
     /// The durable store — always open; the delivery inbox lives here.
     store: Arc<Store>,
@@ -74,6 +78,8 @@ pub struct LfdState {
     linear: Option<LinearConfig>,
     /// GitHub webhook config. When absent, `/github/webhook` returns 503.
     github: Option<GithubConfig>,
+    /// The machine-local host for Wave listener tasks.
+    wave_host: WaveHost,
 }
 
 /// Linear webhook verification + ingestion config, sourced from env.
@@ -89,11 +95,29 @@ struct GithubConfig {
     webhook_url: Option<Arc<String>>,
 }
 
+async fn build_state(
+    repo_root: PathBuf,
+    store: Arc<Store>,
+    linear: Option<LinearConfig>,
+    github: Option<GithubConfig>,
+) -> anyhow::Result<LfdState> {
+    let local = store.local_home().await?;
+    Ok(LfdState {
+        repo_root,
+        wave_host: WaveHost::new(local.id, store.clone()),
+        store,
+        linear,
+        github,
+    })
+}
+
 /// Build the `lfd` router.
 pub fn router(state: LfdState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/status", get(status_handler))
+        .route("/waves/start", post(start_waves_handler))
+        .route("/waves/stop", post(stop_wave_handler))
         .route(
             "/linear/webhook",
             post(webhook_handler).layer(DefaultBodyLimit::max(WEBHOOK_BODY_LIMIT)),
@@ -107,13 +131,17 @@ pub fn router(state: LfdState) -> Router {
 
 // -- Handlers ----------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct HealthBody {
-    status: &'static str,
+    status: String,
+    home_id: HomeId,
 }
 
-async fn health_handler() -> Json<HealthBody> {
-    Json(HealthBody { status: "ok" })
+async fn health_handler(State(state): State<LfdState>) -> Json<HealthBody> {
+    Json(HealthBody {
+        status: "ok".to_string(),
+        home_id: state.wave_host.home_id().clone(),
+    })
 }
 
 #[derive(Serialize)]
@@ -123,9 +151,49 @@ struct StatusBody {
 }
 
 async fn status_handler(State(state): State<LfdState>) -> Json<StatusBody> {
-    let waves = scan_wave_endpoints(&state.repo_root).len();
+    let waves = state.wave_host.active_count().await;
     let deliveries = state.store.delivery_count().await.unwrap_or(0);
     Json(StatusBody { waves, deliveries })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StartWavesRequest {
+    wave_ids: Vec<WaveId>,
+}
+
+async fn start_waves_handler(
+    State(state): State<LfdState>,
+    Json(request): Json<StartWavesRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .wave_host
+        .start_waves(request.wave_ids)
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct StopWaveRequest {
+    wave_id: WaveId,
+}
+
+async fn stop_wave_handler(
+    State(state): State<LfdState>,
+    Json(request): Json<StopWaveRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    state
+        .wave_host
+        .stop_wave(&request.wave_id)
+        .await
+        .map(|requested| {
+            if requested {
+                StatusCode::ACCEPTED
+            } else {
+                StatusCode::NO_CONTENT
+            }
+        })
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }
 
 /// Receive a signed Linear delivery, persist it to the durable inbox, and route
@@ -404,31 +472,6 @@ impl<'a> From<&'a WebhookOutcome> for OutcomeSummary<'a> {
             },
         }
     }
-}
-
-// -- Endpoint discovery ------------------------------------------------------
-
-/// Scan `wave/*/` for `.wave-endpoint` files. `/status` reports the count; the
-/// scan runs per request and is never cached.
-fn scan_wave_endpoints(repo_root: &Path) -> Vec<String> {
-    let wave_dir = repo_root.join("wave");
-    let Ok(entries) = std::fs::read_dir(&wave_dir) else {
-        return Vec::new();
-    };
-    let mut endpoints = Vec::new();
-    for entry in entries.flatten() {
-        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-            continue;
-        }
-        let endpoint_file = entry.path().join(crate::wave::server::ENDPOINT_FILE);
-        if let Ok(addr) = std::fs::read_to_string(&endpoint_file) {
-            let addr = addr.trim();
-            if !addr.is_empty() {
-                endpoints.push(addr.to_string());
-            }
-        }
-    }
-    endpoints
 }
 
 async fn managed_repo_roots(state: &LfdState) -> Vec<PathBuf> {
@@ -776,41 +819,12 @@ pub async fn serve(
              the value does not authenticate requests, so gate this listener at the network boundary"
         );
     }
-    let state = LfdState {
-        github: github_config(&repo_root),
-        repo_root: repo_root.clone(),
-        store,
-        linear,
-    };
-    let resident_store = state.store.clone();
-    let resident_repo = repo_root.clone();
-    tokio::spawn(async move {
-        let local = match resident_store.local_home().await {
-            Ok(local) => local,
-            Err(error) => {
-                tracing::error!(%error, "could not read local Home for Wave startup");
-                return;
-            }
-        };
-        let assigned =
-            match crate::home_resident::waves_for_home(&resident_store, &local.id, None).await {
-                Ok(assigned) => assigned,
-                Err(error) => {
-                    tracing::error!(%error, "could not select Waves for Home startup");
-                    return;
-                }
-            };
-        if assigned.is_empty() {
-            return;
-        }
-        if let Err(error) = crate::home_resident::ensure(&local.id, &resident_repo).await {
-            tracing::error!(home_id = %local.id, %error, "could not start Home resident");
-            return;
-        }
-        let wave_ids = assigned.into_iter().map(|wave| wave.id().clone()).collect();
-        if let Err(error) = crate::home_resident::start_waves(&local.id, wave_ids).await {
-            tracing::error!(home_id = %local.id, %error, "could not start every assigned Wave");
-        }
+    let state = build_state(repo_root.clone(), store, linear, github_config(&repo_root)).await?;
+    let _home_lock = lock_home(state.wave_host.home_id())?;
+    let wave_host = state.wave_host.clone();
+    let reconciliation = tokio::spawn({
+        let wave_host = wave_host.clone();
+        async move { wave_host.reconcile_forever().await }
     });
     let autoprune = load_config_or_default(Some(&repo_root)).autoprune;
     if autoprune.enabled {
@@ -821,9 +835,189 @@ pub async fn serve(
     let subscription_state = state.clone();
     tokio::spawn(async move { ensure_github_subscriptions(&subscription_state).await });
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(addr = %listener.local_addr()?, "lfd serving");
-    axum::serve(listener, router(state).into_make_service()).await?;
+    let bound = listener.local_addr()?;
+    let endpoint = local_client_endpoint(bound);
+    write_endpoint(wave_host.home_id(), &endpoint)?;
+    tracing::info!(addr = %bound, home_id = %wave_host.home_id(), "lfd serving");
+    let result = axum::serve(listener, router(state).into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+    reconciliation.abort();
+    let _ = reconciliation.await;
+    wave_host.shutdown().await;
+    remove_endpoint(wave_host.home_id(), &endpoint);
+    result.map_err(anyhow::Error::from)
+}
+
+fn local_client_endpoint(bound: SocketAddr) -> String {
+    match bound.ip() {
+        std::net::IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::from(([127, 0, 0, 1], bound.port())).to_string()
+        }
+        std::net::IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, bound.port())).to_string()
+        }
+        _ => bound.to_string(),
+    }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut terminate = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    let mut hangup = signal(SignalKind::hangup()).expect("install SIGHUP handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+        _ = hangup.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<String> {
+    if let Some(endpoint) = live_endpoint(home_id).await {
+        return Ok(endpoint);
+    }
+    let argv = vec![
+        crate::engine::process::resolve_lfd_binary()
+            .to_string_lossy()
+            .to_string(),
+        "serve".to_string(),
+        "--addr".to_string(),
+        "127.0.0.1:0".to_string(),
+        "--repo".to_string(),
+        repo.display().to_string(),
+    ];
+    let launch = crate::engine::process::start_lf_session(
+        &format!(
+            "lfd-{}",
+            crate::engine::process::tmux_session_slug(home_id.as_str())
+        ),
+        repo,
+        &argv,
+    )
+    .await;
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if let Some(endpoint) = live_endpoint(home_id).await {
+            return Ok(endpoint);
+        }
+    }
+    match launch {
+        Ok(()) => Err(anyhow::anyhow!(
+            "lfd started for Home {home_id} but did not publish a live endpoint"
+        )),
+        Err(error) => Err(anyhow::anyhow!(
+            "failed to start lfd for Home {home_id}: {error}"
+        )),
+    }
+}
+
+pub(crate) async fn start_waves(home_id: &HomeId, wave_ids: Vec<WaveId>) -> anyhow::Result<()> {
+    let endpoint = live_endpoint(home_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("lfd is not running for Home {home_id}"))?;
+    let response = reqwest::Client::new()
+        .post(format!("http://{endpoint}/waves/start"))
+        .json(&StartWavesRequest { wave_ids })
+        .send()
+        .await?;
+    let status = response.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "lfd refused Wave start with HTTP {status}: {}",
+            response.text().await.unwrap_or_default()
+        ))
+    }
+}
+
+pub(crate) async fn stop_wave(home_id: &HomeId, wave_id: &WaveId) -> anyhow::Result<Option<bool>> {
+    let Some(endpoint) = live_endpoint(home_id).await else {
+        return Ok(None);
+    };
+    let response = reqwest::Client::new()
+        .post(format!("http://{endpoint}/waves/stop"))
+        .json(&StopWaveRequest {
+            wave_id: wave_id.clone(),
+        })
+        .send()
+        .await?;
+    match response.status() {
+        StatusCode::ACCEPTED => Ok(Some(true)),
+        StatusCode::NO_CONTENT => Ok(Some(false)),
+        status => Err(anyhow::anyhow!(
+            "lfd refused Wave stop with HTTP {status}: {}",
+            response.text().await.unwrap_or_default()
+        )),
+    }
+}
+
+async fn live_endpoint(home_id: &HomeId) -> Option<String> {
+    let endpoint = std::fs::read_to_string(endpoint_path(home_id)).ok()?;
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        return None;
+    }
+    let health = reqwest::Client::new()
+        .get(format!("http://{endpoint}/health"))
+        .timeout(Duration::from_millis(500))
+        .send()
+        .await
+        .ok()?
+        .json::<HealthBody>()
+        .await
+        .ok()?;
+    (health.home_id == *home_id && health.status == "ok").then(|| endpoint.to_string())
+}
+
+fn endpoint_path(home_id: &HomeId) -> PathBuf {
+    endpoint_dir().join(format!("{}.endpoint", home_id.as_str()))
+}
+
+fn endpoint_dir() -> PathBuf {
+    crate::store::lf_home_dir().join("lfd")
+}
+
+fn lock_home(home_id: &HomeId) -> anyhow::Result<File> {
+    let directory = endpoint_dir();
+    std::fs::create_dir_all(&directory)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(directory.join(format!("{}.lock", home_id.as_str())))?;
+    file.try_lock_exclusive().map_err(|error| {
+        anyhow::anyhow!("another lfd process already owns Home {home_id}: {error}")
+    })?;
+    Ok(file)
+}
+
+fn write_endpoint(home_id: &HomeId, endpoint: &str) -> anyhow::Result<()> {
+    let path = endpoint_path(home_id);
+    let parent = path
+        .parent()
+        .expect("an lfd endpoint always has a parent directory");
+    std::fs::create_dir_all(parent)?;
+    std::fs::write(path, format!("{endpoint}\n"))?;
     Ok(())
+}
+
+fn remove_endpoint(home_id: &HomeId, endpoint: &str) {
+    let path = endpoint_path(home_id);
+    let owned = std::fs::read_to_string(&path)
+        .ok()
+        .is_some_and(|value| value.trim() == endpoint);
+    if owned {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Refuse a non-loopback bind unless `LF_LFD_AUTH_TOKEN` acknowledges that the
@@ -855,13 +1049,10 @@ mod tests {
         hex::encode(mac.finalize().into_bytes())
     }
 
-    fn make_state(repo: &Path, store: Arc<Store>, linear: Option<LinearConfig>) -> LfdState {
-        LfdState {
-            repo_root: repo.to_path_buf(),
-            store,
-            linear,
-            github: None,
-        }
+    async fn make_state(repo: &Path, store: Arc<Store>, linear: Option<LinearConfig>) -> LfdState {
+        build_state(repo.to_path_buf(), store, linear, None)
+            .await
+            .unwrap()
     }
 
     async fn open_store(dir: &Path) -> Arc<Store> {
@@ -875,7 +1066,8 @@ mod tests {
     #[tokio::test]
     async fn health_returns_ok() {
         let repo = tempfile::tempdir().unwrap();
-        let state = make_state(repo.path(), open_store(repo.path()).await, None);
+        let state = make_state(repo.path(), open_store(repo.path()).await, None).await;
+        let home_id = state.wave_host.home_id().clone();
         let app = router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -885,12 +1077,39 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "ok");
+        assert_eq!(body["home_id"], home_id.as_str());
+    }
+
+    #[tokio::test]
+    async fn wave_start_attempts_every_requested_wave() {
+        let repo = tempfile::tempdir().unwrap();
+        let state = make_state(repo.path(), open_store(repo.path()).await, None).await;
+        let first = WaveId::new();
+        let second = WaveId::new();
+        let app = router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{addr}/waves/start"))
+            .json(&StartWavesRequest {
+                wave_ids: vec![first.clone(), second.clone()],
+            })
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let message = response.text().await.unwrap();
+        assert!(message.contains(first.as_str()));
+        assert!(message.contains(second.as_str()));
     }
 
     #[tokio::test]
     async fn status_reports_zero_waves_and_deliveries_on_a_fresh_store() {
         let repo = tempfile::tempdir().unwrap();
-        let state = make_state(repo.path(), open_store(repo.path()).await, None);
+        let state = make_state(repo.path(), open_store(repo.path()).await, None).await;
         let app = router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -909,7 +1128,7 @@ mod tests {
     #[tokio::test]
     async fn webhook_returns_503_when_linear_config_absent() {
         let repo = tempfile::tempdir().unwrap();
-        let state = make_state(repo.path(), open_store(repo.path()).await, None);
+        let state = make_state(repo.path(), open_store(repo.path()).await, None).await;
         let app = router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -932,7 +1151,7 @@ mod tests {
             secret: Arc::new(b"whsec_test".to_vec()),
             viewer_id: Arc::new("viewer-1".to_string()),
         };
-        let state = make_state(repo.path(), open_store(repo.path()).await, Some(linear));
+        let state = make_state(repo.path(), open_store(repo.path()).await, Some(linear)).await;
         let app = router(state);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1158,7 +1377,7 @@ mod tests {
             "repository":{"full_name":"acme/widgets"},
             "pull_request":{"merged":true,"head":{"ref":"user/landed"}}
         }"#;
-        let mut state = make_state(repo.path(), open_store(repo.path()).await, None);
+        let mut state = make_state(repo.path(), open_store(repo.path()).await, None).await;
         state.github = Some(GithubConfig {
             secret: Arc::new(secret.to_vec()),
             webhook_url: None,

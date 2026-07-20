@@ -121,10 +121,25 @@ executes it.
 
 Automatic startup is authored with two independent optional fields in
 `wave/<name>/GOAL.md`: `owner` names the OS user and `home` names a HomeId,
-hostname, or address. Bare `lf start` and the Home resident filter on both and
+hostname, or address. Bare `lf start` and the `WaveHost` filter on both and
 on recorded local placement. Named `lf start <wave>` remains the explicit local
-override. `lfd` ensures the resident, which starts all eligible Waves known to
-the machine across repositories.
+override. `lfd`'s `WaveHost` starts all eligible Waves known to the machine
+across repositories.
+
+### One Home process
+
+`lfd` is the Home server, not the parent of another daemon. Its `WaveHost` owns
+the Wave listener task map and periodically reconciles eligible, locally placed
+Waves. Its existing launchd/systemd service supplies reboot startup. `lf start`
+addresses the local `lfd`; when no installed service is live, it may start that
+same `lfd serve` process in the existing detached containment as a development
+fallback. There is no hidden resident, second endpoint, or second boot
+authority.
+
+The reconciliation loop starts missing eligible Waves and restarts eligible
+listeners that exit. It does not stop an explicitly started Wave merely because
+its optional automatic-start policy does not match. Placement movement remains
+the explicit stop/move boundary.
 
 ## Resolved selection rules
 

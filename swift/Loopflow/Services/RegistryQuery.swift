@@ -419,6 +419,28 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<RoadmapProject>
+    public let unavailableProjects: [UnavailableProjectEvidence]
+
+    enum CodingKeys: String, CodingKey {
+        case wave, projects
+        case unavailableProjects = "unavailable_projects"
+    }
+}
+
+/// Durable Project Work that cannot join the current PM plan.
+public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
+    public let workId: String
+    public let projectId: String
+    public let projectSlug: String
+    public let reason: String
+    public let recovery: String
+
+    enum CodingKeys: String, CodingKey {
+        case reason, recovery
+        case workId = "work_id"
+        case projectId = "project_id"
+        case projectSlug = "project_slug"
+    }
 }
 
 /// `lf status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
@@ -427,6 +449,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let loopState: String?
     public let projects: [WaveProjectWork]
+    public let unavailableProjects: [UnavailableProjectEvidence]
     public let runs: WorkEvidence<SkillRunEntry>
     public let attention: WorkEvidence<WaveAttentionItem>
     /// The focused Wave's Home probed for liveness and its one contextual action.
@@ -440,6 +463,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
         case wave, projects, runs, attention
         case homeRuntime = "home_runtime"
         case loopState = "loop_state"
+        case unavailableProjects = "unavailable_projects"
     }
 }
 

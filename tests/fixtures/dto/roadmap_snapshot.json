@@ -380,7 +380,16 @@
             ]
           }
         ]
-      }
+      },
+      "unavailable_projects": [
+        {
+          "work_id": "proj_3998f8611e9c9069f53c44dc831803d7",
+          "project_id": "0b13d98e-800e-49a3-a778-6fb13ac0f03a",
+          "project_slug": "wave-chat",
+          "reason": "Project is absent from the current PM snapshot",
+          "recovery": "lf project abandon wave-chat --reason \"Project is absent from the current PM snapshot\""
+        }
+      ]
     },
     {
       "wave": {
@@ -405,7 +414,8 @@
       "projects": {
         "state": "unavailable",
         "reason": "no local PM snapshot for wave/context; run `lf pm sync`"
-      }
+      },
+      "unavailable_projects": []
     }
   ]
 }

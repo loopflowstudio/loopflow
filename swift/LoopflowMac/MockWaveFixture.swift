@@ -289,6 +289,7 @@ enum MockWaveFixture {
           ]
         }
       ],
+      "unavailable_projects": [],
       "runs": {
         "state": "ok",
         "truncated": false,

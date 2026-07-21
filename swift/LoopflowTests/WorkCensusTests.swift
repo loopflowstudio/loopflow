@@ -96,7 +96,8 @@ struct WorkCensusTests {
             waves: [
                 WaveRoadmap(
                     wave: sourceWave.wave,
-                    projects: .available(items: [project], truncated: false)
+                    projects: .available(items: [project], truncated: false),
+                    unavailableProjects: []
                 )
             ]
         )

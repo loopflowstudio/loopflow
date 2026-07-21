@@ -2,14 +2,20 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::child::ChildRef;
+use loopflow::durable::{Containment, RunAdvance, RunTrigger};
 use loopflow::id::WaveId;
+use loopflow::planning::{LinearProjectId, ProjectPlan};
+use loopflow::project::{Project, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::RunEventRow;
+use loopflow::store::{PmSnapshotRow, RunEventRow};
 use loopflow::trace::{AgentInvocationRow, AgentTurnRow};
 use loopflow::wave::Wave;
+use time::OffsetDateTime;
 
 /// A machine home holding one wave with lookup noise, a flow, and a skill. The
 /// registry and the ledgers are the same database.
@@ -165,6 +171,7 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
     if let Some(id) = ambient_wave_id {
         command.env("LF_WAVE_ID", id);
     }
+    prepend_test_bin(&mut command, home);
     let output = command.output().expect("lf status runs");
     assert!(
         output.status.success(),
@@ -188,6 +195,160 @@ fn status_human(home: &Path, wave: &str) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("status is utf8")
+}
+
+fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    command
+        .args(["roadmap", "--wave", wave, "--json"])
+        .env("LF_HOME", home)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env_remove("LF_TRACE_ID")
+        .env_remove("LF_WAVE_ID");
+    prepend_test_bin(&mut command, home);
+    let output = command.output().expect("lf roadmap runs");
+    assert!(
+        output.status.success(),
+        "lf roadmap failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("lf roadmap emits JSON")
+}
+
+fn prepend_test_bin(command: &mut Command, home: &Path) {
+    let bin = home.join("bin");
+    if !bin.is_dir() {
+        return;
+    }
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(bin).chain(std::env::split_paths(&inherited));
+    command.env("PATH", std::env::join_paths(paths).expect("test PATH"));
+}
+
+fn seed_stale_project_work(home: &Path) {
+    const STALE_WORK_ID: &str = "proj_3998f8611e9c9069f53c44dc831803d7";
+    const STALE_PROJECT_ID: &str = "0b13d98e-800e-49a3-a778-6fb13ac0f03a";
+
+    let wave = seed(home, "product");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
+    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let now = OffsetDateTime::now_utc();
+    let stale = Project {
+        id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
+        plan: ProjectPlan {
+            id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
+            slug: "wave-chat".to_string(),
+            name: "Wave Chat".to_string(),
+            prompt_context: "Wave Chat remains steerable.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp() - 1,
+        },
+        wave_id: wave.id().clone(),
+        iteration: 1,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store.insert_project(&stale).expect("seed stale Project");
+
+    let current = Project {
+        id: ProjectId::new(),
+        plan: ProjectPlan {
+            id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
+                .expect("current PM Project id"),
+            slug: "auditability".to_string(),
+            name: "Auditability".to_string(),
+            prompt_context: "Every claim points to its receipt.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp(),
+        },
+        wave_id: wave.id().clone(),
+        iteration: 1,
+        observation_cursor: 0,
+        last_state_fingerprint: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store
+        .insert_project(&current)
+        .expect("seed current Project");
+
+    let work = store
+        .work_for_child(&ChildRef::Project(current.id.clone()))
+        .expect("resolve current Project Work");
+    let (_, lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve current Project Run");
+    store
+        .advance_run(
+            &lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::Tmux {
+                    name: "missing-current-project".to_string(),
+                },
+                cwd: repo.clone(),
+            },
+        )
+        .expect("start current Project Run");
+
+    let bin = home.join("bin");
+    std::fs::create_dir_all(&bin).expect("test bin");
+    let tmux = bin.join("tmux");
+    std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").expect("fake tmux");
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755))
+        .expect("make fake tmux executable");
+
+    let payload = serde_json::json!({
+        "projects": [
+            {
+                "id": "95159066-9098-4d0b-8903-01459dc7ec14",
+                "slug": "auditability",
+                "name": "Auditability",
+                "summary": "Every claim points to its receipt.",
+                "definition": "Every product surface shows enough truth to trust the system.",
+                "flows": {"first": null, "loop": null, "finally": null},
+                "krs": [{"text": "Every visible state carries its reason", "holds": false}],
+                "initiative_ids": ["initiative-product"],
+                "team_ids": ["team-product"]
+            }
+        ],
+        "items": [
+            {
+                "id": "task-prd-52",
+                "identifier": "PRD-52",
+                "url": "https://linear.app/loopflow/issue/PRD-52",
+                "name": "Expose one fleet snapshot from Wave to raw trace",
+                "description": "Keep focused reads useful through stale Work.",
+                "rank": 1,
+                "completed": false,
+                "project": "auditability",
+                "assignee": null
+            }
+        ]
+    });
+    store
+        .put_pm_snapshot(&PmSnapshotRow {
+            repo: std::fs::canonicalize(repo)
+                .expect("canonical repo")
+                .display()
+                .to_string(),
+            wave: "product".to_string(),
+            provider: "linear".to_string(),
+            initiative: "initiative-product".to_string(),
+            synced_at: now.unix_timestamp(),
+            payload: serde_json::to_string(&payload).expect("serialize PM snapshot"),
+        })
+        .expect("seed PM snapshot");
 }
 
 fn execs_json(home: &Path) -> serde_json::Value {
@@ -405,4 +566,68 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     assert_eq!(status["runs"]["state"], "ok");
     assert_eq!(status["runs"]["items"], serde_json::json!([]));
     assert_eq!(status["runs"]["truncated"], false);
+}
+
+#[test]
+fn stale_project_work_preserves_status_and_roadmap_evidence() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_stale_project_work(home.path());
+
+    let status = status_json(home.path(), &["product"], None);
+    let status_projects = status["projects"].as_array().expect("status projects");
+    assert_eq!(status_projects.len(), 1);
+    assert_eq!(status_projects[0]["project"]["slug"], "auditability");
+    assert_eq!(
+        status_projects[0]["tasks"][0]["task"]["identifier"],
+        "PRD-52"
+    );
+    assert_eq!(status["runs"]["state"], "ok");
+    assert_eq!(status["runs"]["items"].as_array().expect("runs").len(), 1);
+    assert_eq!(status["attention"]["state"], "ok");
+    let attention = status["attention"]["items"]
+        .as_array()
+        .expect("attention items");
+    assert_eq!(attention.len(), 1);
+    assert_eq!(attention[0]["subject"], "auditability");
+    assert_eq!(attention[0]["owner"], "wave");
+    assert_eq!(
+        attention[0]["reason"],
+        "process is gone but the Work still records 'running'"
+    );
+
+    let unavailable = status["unavailable_projects"]
+        .as_array()
+        .expect("status unavailable Projects");
+    assert_eq!(unavailable.len(), 1);
+    assert_eq!(
+        unavailable[0]["work_id"],
+        "proj_3998f8611e9c9069f53c44dc831803d7"
+    );
+    assert_eq!(
+        unavailable[0]["project_id"],
+        "0b13d98e-800e-49a3-a778-6fb13ac0f03a"
+    );
+    assert_eq!(unavailable[0]["project_slug"], "wave-chat");
+    assert_eq!(
+        unavailable[0]["reason"],
+        "Project is absent from the current PM snapshot"
+    );
+    assert_eq!(
+        unavailable[0]["recovery"],
+        "lf project abandon wave-chat --reason \"Project is absent from the current PM snapshot\""
+    );
+
+    let roadmap = roadmap_json(home.path(), "product");
+    let wave = &roadmap["waves"][0];
+    assert_eq!(wave["projects"]["state"], "ok");
+    let roadmap_projects = wave["projects"]["items"]
+        .as_array()
+        .expect("roadmap projects");
+    assert_eq!(roadmap_projects.len(), 1);
+    assert_eq!(roadmap_projects[0]["project"]["slug"], "auditability");
+    assert_eq!(
+        roadmap_projects[0]["tasks"][0]["task"]["identifier"],
+        "PRD-52"
+    );
+    assert_eq!(wave["unavailable_projects"], status["unavailable_projects"]);
 }

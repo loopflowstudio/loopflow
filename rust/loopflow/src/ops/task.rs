@@ -3657,34 +3657,11 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
         .await
         .map_err(|error| task_error(format!("failed to complete Task: {error}")))?;
         if lease.is_none() {
-            let (_run, completion_lease) = store
-                .reserve_run(&work, crate::durable::RunTrigger::User)
-                .await
-                .map_err(|error| {
-                    task_error(format!("failed to reserve completion Run: {error}"))
-                })?;
-            let basis = store
-                .current_epoch(&work)
-                .await
-                .map_err(|error| task_error(error.to_string()))?
-                .current_basis;
-            store
-                .done(&completion_lease, &basis)
-                .await
-                .map_err(|error| task_error(format!("failed to complete Work: {error}")))?;
             reconcile_pm_writeback(&store, &mut task, None).await;
             store
                 .update_task(&task)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
-            append_task_event_with_authority(
-                &store,
-                &task.id,
-                &TaskEventKind::Completed { summary },
-                None,
-            )
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
         }
         Ok(task)
     })
@@ -4009,14 +3986,14 @@ async fn advance_completion_after_gate(
         .work_for_child(&ChildRef::Task(task.id.clone()))
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    if matches!(
-        store
-            .work_status(&work)
-            .await
-            .map_err(|error| task_error(error.to_string()))?,
-        WorkStatus::Done | WorkStatus::Abandoned
-    ) {
-        return Ok(false);
+    match store
+        .work_status(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+    {
+        WorkStatus::Done | WorkStatus::Abandoned => return Ok(false),
+        WorkStatus::Running { .. } if lease.is_none() => return Ok(false),
+        WorkStatus::Ready | WorkStatus::Waiting { .. } | WorkStatus::Running { .. } => {}
     }
     let Some(pr) = merged_completing_pr(store, task).await? else {
         return Ok(false);
@@ -4044,26 +4021,9 @@ async fn advance_completion_after_gate(
         .await
         .map_err(|error| task_error(error.to_string()))?;
     if lease.is_none() {
-        let (_run, completion_lease) = store
-            .reserve_run(&work, crate::durable::RunTrigger::User)
-            .await
-            .map_err(|error| task_error(format!("failed to reserve completion Run: {error}")))?;
-        let basis = store
-            .current_epoch(&work)
-            .await
-            .map_err(|error| task_error(error.to_string()))?
-            .current_basis;
-        store
-            .done(&completion_lease, &basis)
-            .await
-            .map_err(|error| task_error(format!("failed to complete Work: {error}")))?;
         reconcile_pm_writeback(store, task, url.as_deref()).await;
         store
             .update_task(task)
-            .await
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .append_task_event(&task.id, &TaskEventKind::Completed { summary })
             .await
             .map_err(|error| task_error(error.to_string()))?;
     }

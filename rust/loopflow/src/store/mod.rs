@@ -136,12 +136,16 @@ pub(crate) fn production_database_path() -> PathBuf {
 /// process, and opening it through `open_run_ledger_read_only` cannot migrate
 /// or otherwise mutate its schema. Explicit control authority wins, followed
 /// by an ordinary override, then the installed Home.
-pub(crate) fn observability_home_dir() -> PathBuf {
+pub(crate) fn authority_home_dir() -> PathBuf {
     std::env::var_os(CONTROL_HOME_ENV)
         .or_else(|| std::env::var_os("LF_HOME"))
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| machine_home_dir().join(".lf"))
+}
+
+pub(crate) fn observability_home_dir() -> PathBuf {
+    authority_home_dir()
 }
 
 pub(crate) fn observability_database_path() -> Result<PathBuf, std::io::Error> {

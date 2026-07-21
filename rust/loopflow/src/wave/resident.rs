@@ -207,10 +207,16 @@ pub async fn follow_inbox(endpoint: String, inbox_tx: mpsc::UnboundedSender<Inbo
 
 fn inbox_item(frame: InboxFrame) -> InboxItem {
     match frame {
-        InboxFrame::Message { id, op, text } => InboxItem::Message(PendingMessage {
+        InboxFrame::Message {
+            id,
+            op,
+            text,
+            source,
+        } => InboxItem::Message(PendingMessage {
             id: MessageId(id),
             op,
             text,
+            source,
         }),
         InboxFrame::Task { observation } => InboxItem::Task(observation),
         InboxFrame::Project { observation } => InboxItem::Project(observation),
@@ -502,6 +508,7 @@ mod tests {
             id: "msg-3".into(),
             op: crate::wave::journal::MessageOp::Steer,
             text: "focus".into(),
+            source: None,
         });
         let InboxItem::Message(message) = message else {
             panic!("expected message");

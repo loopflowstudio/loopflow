@@ -47,6 +47,7 @@
 //! exists on the machine, child observations wait durably; the listener remains
 //! functional and acquires the registry when it appears.
 
+pub(crate) mod discord;
 pub mod journal;
 pub(crate) mod memory;
 pub mod playhead;
@@ -71,6 +72,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 
 use crate::engine::repo::find_repo_root;
+use crate::engine::wave_config::{try_read_wave_config, WaveChatConfig};
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::util::normalize_wave_name;
 use crate::store::{open_existing_store, SharedStore};
@@ -236,30 +238,42 @@ fn resident_spawner(
     resident_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
-        let exe = std::env::current_exe()?;
-        let mut command = tokio::process::Command::new(exe);
-        command
-            .arg(RESIDENT_SUBCOMMAND)
-            .arg(&wave)
-            .current_dir(&repo_root)
-            .env(WAVE_SERVER_ENDPOINT_ENV, &endpoint)
-            .env(wire::RESIDENT_TOKEN_ENV, &token)
-            // The resident's children must resolve `lf` to this binary.
-            .env("PATH", crate::flowloop::wave::path_for_children())
-            .env_remove(crate::durable::RUN_CONTEXT_ENV)
-            .env_remove(crate::durable::RUN_LEASE_ENV)
-            .stdin(std::process::Stdio::null());
+        let mut command = resident_command(&wave, &repo_root, &endpoint, &token, &resident_env)?;
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
         // resident by pid — its hooks stop the vendor process group. A
         // SIGKILL-on-drop here would orphan the codex group instead.
-        for (key, value) in &resident_env {
-            command.env(key, value);
-        }
         #[cfg(unix)]
         command.process_group(0);
         command.spawn()
     })
+}
+
+fn resident_command(
+    wave: &str,
+    repo_root: &Path,
+    endpoint: &str,
+    token: &str,
+    resident_env: &[(String, String)],
+) -> std::io::Result<tokio::process::Command> {
+    let exe = std::env::current_exe()?;
+    let mut command = tokio::process::Command::new(exe);
+    command
+        .arg(RESIDENT_SUBCOMMAND)
+        .arg(wave)
+        .current_dir(repo_root)
+        .env(WAVE_SERVER_ENDPOINT_ENV, endpoint)
+        .env(wire::RESIDENT_TOKEN_ENV, token)
+        // The resident's children must resolve `lf` to this binary.
+        .env("PATH", crate::flowloop::wave::path_for_children())
+        .env_remove(crate::durable::RUN_CONTEXT_ENV)
+        .env_remove(crate::durable::RUN_LEASE_ENV)
+        .stdin(std::process::Stdio::null());
+    for (key, value) in resident_env {
+        command.env(key, value);
+    }
+    command.env_remove(discord::TOKEN_ENV);
+    Ok(command)
 }
 
 /// Serve the wave until `shutdown` resolves. Vendor-free by construction:
@@ -304,6 +318,26 @@ pub(crate) async fn run_listener(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
 
+    let discord_adapter =
+        match try_read_wave_config(&repo_root, &wave)?.and_then(|config| config.chat) {
+            Some(WaveChatConfig::Discord {
+                home_id,
+                guild_id,
+                channel_id,
+            }) => {
+                let registry = registry_config.as_ref().ok_or_else(|| {
+                    anyhow!("Discord chat requires the local registry to verify its owner Home")
+                })?;
+                let local_home = registry.store.local_home().await?;
+                let binding = journal::DiscordChatBinding {
+                    guild_id,
+                    channel_id,
+                };
+                Some(discord::DiscordAdapter::preflight(binding, &home_id, &local_home.id).await?)
+            }
+            None => None,
+        };
+
     let registered = registry_config
         .as_ref()
         .map(|config| (config.store.clone(), config.wave.id().clone()));
@@ -347,6 +381,9 @@ pub(crate) async fn run_listener(
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
     let runtime = WaveRuntime::open(wave.clone(), repo_root.clone())?;
+    if let Some(adapter) = discord_adapter.as_ref() {
+        adapter.attach(&runtime)?;
+    }
     // Boot marker, once per life, after replay: restarts are visible in the
     // journal itself (the boot janitor already leaks process lifecycle into
     // the record; make it honest and forensically legible).
@@ -361,6 +398,7 @@ pub(crate) async fn run_listener(
     });
     let observer = Arc::new(registry::ObserverSlot::new(runtime.clone(), observer));
     let observer_task = tokio::spawn(Arc::clone(&observer).run(registry::POLL_CADENCE));
+    let discord_task = discord_adapter.map(|adapter| tokio::spawn(adapter.run(runtime.clone())));
 
     // The resident door: a per-boot token, published beside the endpoint
     // pointer so the resident can attach (same trust domain).
@@ -404,9 +442,17 @@ pub(crate) async fn run_listener(
     let cleanup_addr = own_addr.clone();
     let cleanup_token = token.clone();
     let cleanup_door = door.clone();
+    let cleanup_run = wave_run
+        .as_ref()
+        .map(|(store, lease)| (Arc::clone(store), lease.clone()));
     crate::engine::agent::register_interrupt_cleanup(move || {
         if let Some(pid) = cleanup_door.seat_pid() {
             supervisor::terminate_resident_blocking(pid);
+        }
+        if let Some((store, lease)) = cleanup_run.as_ref() {
+            if let Err(error) = store.stop_run_on_interrupt(lease) {
+                tracing::warn!(%error, "failed to release Wave Run authority on interrupt");
+            }
         }
         server::remove_endpoint(&cleanup_repo, &cleanup_wave, &cleanup_addr);
         server::remove_resident_token(&cleanup_repo, &cleanup_wave, &cleanup_token);
@@ -440,11 +486,14 @@ pub(crate) async fn run_listener(
         .with_graceful_shutdown(graceful_shutdown)
         .await;
 
-    // Shutdown: stand the keeper down FIRST (so the resident's exit below
-    // is not journaled as a failure), then ask the resident to leave
+    // Shutdown: stop external delivery and stand the keeper down FIRST (so
+    // the resident's exit below is not journaled as a failure), then ask the resident to leave
     // (SIGTERM → its interrupt hooks stop the harness; SIGKILL after a
     // grace), mark the registry row terminal, drop the discovery files.
     // Workers are their own tmux sessions — nothing here owns them.
+    if let Some(task) = discord_task {
+        task.abort();
+    }
     supervisor_task.abort();
     if let Some(pid) = door.seat_pid() {
         supervisor::terminate_resident(pid).await;
@@ -510,6 +559,22 @@ mod tests {
                 .command,
             Some(Commands::External(parts)) if parts[0] == "loop"
         ));
+    }
+
+    #[test]
+    fn discord_chat_token_is_explicitly_scrubbed_from_the_resident() {
+        let command = resident_command(
+            "goals",
+            Path::new("/tmp"),
+            "127.0.0.1:1234",
+            "resident-token",
+            &[(discord::TOKEN_ENV.to_string(), "must-not-pass".to_string())],
+        )
+        .expect("resident command");
+        assert!(command
+            .as_std()
+            .get_envs()
+            .any(|(name, value)| { name == discord::TOKEN_ENV && value.is_none() }));
     }
 
     #[tokio::test]

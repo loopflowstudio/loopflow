@@ -180,6 +180,13 @@ impl Store {
         .await
     }
 
+    /// Release Wave Run authority from the process interrupt handler, which
+    /// exits before Tokio can drive the listener's async shutdown path.
+    pub(crate) fn stop_run_on_interrupt(&self, lease: &RunLease) -> StoreResult<StopReceipt> {
+        self.sqlite
+            .stop_run(lease, &StopCause::Requested, ContainmentObservation::Absent)
+    }
+
     pub(crate) async fn run_control(
         &self,
         lease: &RunLease,
@@ -752,6 +759,18 @@ mod tests {
         assert!(receipt.turn_ids.is_empty());
         assert!(store.current_run(&work).await.unwrap().is_none());
         assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn listener_interrupt_releases_run_authority_for_restart() {
+        let (store, work) = wave_work().await;
+        let (_, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+
+        let stopped = store.stop_run_on_interrupt(&lease).unwrap();
+
+        assert_eq!(stopped.run.state, RunState::Ended);
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        assert!(store.reserve_run(&work, RunTrigger::User).await.is_ok());
     }
 
     #[tokio::test]

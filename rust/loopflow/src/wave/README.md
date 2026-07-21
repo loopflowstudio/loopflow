@@ -40,6 +40,14 @@ The journal rebuilds the thread, playhead, and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
 
+An optional Discord channel binding is also listener-owned. The listener
+preflights the binding before reserving a Run or opening the journal, then polls
+after the committed cursor, journals external inputs before advancing it, and
+journals deterministic send intents before posting. The resident receives only
+source-tagged authored input and never inherits `LF_DISCORD_TOKEN`. Binding
+ownership is explicit: the configured Home is the only Home allowed to attach,
+and an OS-held lease prevents concurrent listeners across its checkouts.
+
 The shared `~/.lf/loopflow.db` stores the Wave row and typed Project and Task
 observations. A Wave can still run when that store does not
 exist, but child observations are unavailable. The live endpoint enforces one

@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
 use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
@@ -38,8 +39,9 @@ use crate::task::TaskObservation;
 use crate::wave::journal::JournalAppendStage;
 use crate::wave::journal::{
     fold_thread, journal_path, project_observation_message, promotion_wake_message,
-    restore_pending, task_observation_message, EventKind, Journal, JournalAppendError, MessageId,
-    MessageOp, PendingMessage, Usage,
+    restore_pending, task_observation_message, DiscordAttachment, DiscordChatBinding,
+    DiscordDelivery, DiscordMessagePart, DiscordMessageSource, EventKind, Journal,
+    JournalAppendError, MessageId, MessageOp, PendingMessage, Usage,
 };
 use crate::wave::playhead::{
     now_rfc3339, BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation,
@@ -183,6 +185,13 @@ pub struct Subscription {
     pub inbox_rx: broadcast::Receiver<InboxItem>,
 }
 
+/// Durable Discord state the listener-owned adapter needs to resume.
+#[derive(Debug, Clone)]
+pub struct DiscordSnapshot {
+    pub attachment: Option<DiscordAttachment>,
+    pub deliveries: Vec<DiscordDelivery>,
+}
+
 /// The assistant turn in progress. `turn` is the snapshot the wire watches
 /// grow (status `Running`), re-broadcast on every content delta and committed
 /// to `thread` under the same id at finalization; the rest is bookkeeping that
@@ -225,6 +234,8 @@ struct Inner {
     pending_messages: Vec<PendingMessage>,
     /// Every journaled input by id — requeues restore pending entries from it.
     messages: HashMap<MessageId, PendingMessage>,
+    discord: Option<DiscordAttachment>,
+    discord_deliveries: HashMap<String, DiscordDelivery>,
     tasks: HashMap<MessageId, TaskObservation>,
     projects: HashMap<MessageId, ProjectObservation>,
     promotions: HashMap<MessageId, PromotionWake>,
@@ -335,6 +346,31 @@ impl WaveRuntime {
             LoopState::Idle
         };
 
+        let planned_turns = fold
+            .discord_deliveries
+            .values()
+            .map(|delivery| delivery.turn_id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        for (turn_id, claims) in &fold.completed_claims {
+            if planned_turns.contains(turn_id) {
+                continue;
+            }
+            let Some(turn) = fold.turns.iter().find(|turn| &turn.id == turn_id) else {
+                continue;
+            };
+            let Some(delivery) = build_discord_delivery(turn, claims, &fold.messages) else {
+                continue;
+            };
+            journal.append(|_| EventKind::DiscordChatSendPlanned {
+                delivery_id: delivery.delivery_id.clone(),
+                turn_id: delivery.turn_id.clone(),
+                sources: delivery.sources.clone(),
+                parts: delivery.parts.clone(),
+            });
+            fold.discord_deliveries
+                .insert(delivery.delivery_id.clone(), delivery);
+        }
+
         let (turn_tx, _) = broadcast::channel(TURN_BROADCAST_CAPACITY);
         let (state_tx, _) = broadcast::channel(STATE_BROADCAST_CAPACITY);
         let (playhead_tx, _) = broadcast::channel(PLAYHEAD_BROADCAST_CAPACITY);
@@ -352,6 +388,8 @@ impl WaveRuntime {
                 last_assistant_turn_id,
                 pending_messages: fold.pending_messages,
                 messages: fold.messages,
+                discord: fold.discord,
+                discord_deliveries: fold.discord_deliveries,
                 tasks: fold.tasks,
                 projects: fold.projects,
                 promotions: fold.promotions,
@@ -370,6 +408,150 @@ impl WaveRuntime {
 
     pub fn repo_root(&self) -> &std::path::Path {
         &self.repo_root
+    }
+
+    pub fn discord_snapshot(&self) -> DiscordSnapshot {
+        let inner = self.inner();
+        let mut deliveries = inner
+            .discord_deliveries
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        deliveries.sort_by_key(|delivery| {
+            delivery
+                .turn_id
+                .strip_prefix("turn-")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(u64::MAX)
+        });
+        DiscordSnapshot {
+            attachment: inner.discord.clone(),
+            deliveries,
+        }
+    }
+
+    /// Record the initial channel head before any history can be imported.
+    pub fn try_attach_discord(
+        &self,
+        binding: DiscordChatBinding,
+        bot_user_id: String,
+        cursor: Option<String>,
+    ) -> Result<(), JournalAppendError> {
+        let mut inner = self.inner();
+        let cursor = match inner.discord.as_ref() {
+            Some(attached)
+                if attached.binding == binding && attached.bot_user_id == bot_user_id =>
+            {
+                return Ok(())
+            }
+            Some(attached) if attached.binding == binding => attached.cursor.clone(),
+            _ => cursor,
+        };
+        inner
+            .journal
+            .try_append(|_| EventKind::DiscordChatAttached {
+                binding: binding.clone(),
+                bot_user_id: bot_user_id.clone(),
+                cursor: cursor.clone(),
+            })?;
+        inner.discord = Some(DiscordAttachment {
+            binding,
+            bot_user_id,
+            cursor,
+        });
+        Ok(())
+    }
+
+    /// Journal a Discord input before a cursor can advance. Re-fetching the
+    /// same provider identity is an idempotent no-op.
+    pub fn try_deliver_discord(
+        &self,
+        text: String,
+        source: DiscordMessageSource,
+    ) -> Result<bool, JournalAppendError> {
+        let mut inner = self.inner();
+        if inner.messages.values().any(|known| {
+            known.source.as_ref().is_some_and(|known| {
+                known.binding == source.binding && known.message_id == source.message_id
+            })
+        }) {
+            return Ok(false);
+        }
+        let event = inner
+            .journal
+            .try_append(|seq| EventKind::DiscordUserMessage {
+                id: MessageId(format!("msg-{seq}")),
+                text: text.clone(),
+                source: source.clone(),
+            })?;
+        let id = MessageId(format!("msg-{}", event.seq));
+        let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+        turn.created_at = event.at_rfc3339();
+        self.commit_locked(&mut inner, turn);
+        let pending = PendingMessage {
+            id,
+            op: MessageOp::Message,
+            text: format!("[{}]\n{}", source.uri(), text),
+            source: Some(source.clone()),
+        };
+        inner.messages.insert(pending.id.clone(), pending.clone());
+        inner.pending_messages.push(pending.clone());
+        let _ = self.inbox_tx.send(InboxItem::Message(pending));
+        Ok(true)
+    }
+
+    pub fn try_advance_discord_cursor(
+        &self,
+        binding: &DiscordChatBinding,
+        message_id: String,
+    ) -> Result<(), JournalAppendError> {
+        let mut inner = self.inner();
+        let Some(attached) = inner.discord.as_ref() else {
+            return Ok(());
+        };
+        if &attached.binding != binding || attached.cursor.as_deref() == Some(&message_id) {
+            return Ok(());
+        }
+        inner
+            .journal
+            .try_append(|_| EventKind::DiscordChatCursorAdvanced {
+                binding: binding.clone(),
+                message_id: message_id.clone(),
+            })?;
+        if let Some(attached) = inner.discord.as_mut() {
+            attached.cursor = Some(message_id);
+        }
+        Ok(())
+    }
+
+    pub fn try_confirm_discord_part(
+        &self,
+        delivery_id: &str,
+        part_id: &str,
+        provider_message_id: String,
+    ) -> Result<(), JournalAppendError> {
+        let mut inner = self.inner();
+        let already_confirmed = inner
+            .discord_deliveries
+            .get(delivery_id)
+            .and_then(|delivery| delivery.confirmed.get(part_id))
+            .is_some();
+        if already_confirmed {
+            return Ok(());
+        }
+        inner
+            .journal
+            .try_append(|_| EventKind::DiscordChatSendConfirmed {
+                delivery_id: delivery_id.to_string(),
+                part_id: part_id.to_string(),
+                provider_message_id: provider_message_id.clone(),
+            })?;
+        if let Some(delivery) = inner.discord_deliveries.get_mut(delivery_id) {
+            delivery
+                .confirmed
+                .insert(part_id.to_string(), provider_message_id);
+        }
+        Ok(())
     }
 
     /// Whether the wave is paused, from GOAL.md frontmatter (`paused: true`).
@@ -823,7 +1005,12 @@ impl WaveRuntime {
         let turn = self.commit_locked(&mut inner, turn);
         // The pending fold stays live (not boot-only): it is the replay the
         // resident's subscription serves and the validator for its `answers`.
-        let pending = PendingMessage { id, op, text };
+        let pending = PendingMessage {
+            id,
+            op,
+            text,
+            source: None,
+        };
         inner.messages.insert(pending.id.clone(), pending.clone());
         inner.pending_messages.push(pending.clone());
         // Inbox broadcast still under the lock, so inbox order == journal
@@ -1218,7 +1405,33 @@ impl WaveRuntime {
         turn.status = status;
         turn.close_body(now_rfc3339(), reason);
         self.transition_locked(&mut inner, LoopState::Idle, "turn finalized");
-        self.commit_locked(&mut inner, turn);
+        let committed = self.commit_locked(&mut inner, turn);
+        if status == Lifecycle::Completed {
+            self.plan_discord_delivery_locked(&mut inner, &committed, &claims);
+        }
+    }
+
+    fn plan_discord_delivery_locked(
+        &self,
+        inner: &mut Inner,
+        turn: &ChatTurn,
+        claims: &[MessageId],
+    ) {
+        let Some(delivery) = build_discord_delivery(turn, claims, &inner.messages) else {
+            return;
+        };
+        if inner.discord_deliveries.contains_key(&delivery.delivery_id) {
+            return;
+        }
+        inner.journal.append(|_| EventKind::DiscordChatSendPlanned {
+            delivery_id: delivery.delivery_id.clone(),
+            turn_id: delivery.turn_id.clone(),
+            sources: delivery.sources.clone(),
+            parts: delivery.parts.clone(),
+        });
+        inner
+            .discord_deliveries
+            .insert(delivery.delivery_id.clone(), delivery);
     }
 
     /// Steer consumption (`TurnSteered.answers`). Normally the live turn
@@ -1327,6 +1540,69 @@ fn snapshot_tail_locked(inner: &Inner, limit: Option<usize>) -> Vec<ChatTurn> {
         turns.extend(inner.open.as_ref().map(|open| open.turn.clone()));
     }
     turns
+}
+
+fn build_discord_delivery(
+    turn: &ChatTurn,
+    claims: &[MessageId],
+    messages: &HashMap<MessageId, PendingMessage>,
+) -> Option<DiscordDelivery> {
+    if claims.is_empty() || turn.text.trim().is_empty() {
+        return None;
+    }
+    let sources = claims
+        .iter()
+        .map(|claim| {
+            messages
+                .get(claim)
+                .and_then(|message| message.source.clone())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let binding = &sources.first()?.binding;
+    if sources.iter().any(|source| &source.binding != binding) {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(binding.guild_id.as_bytes());
+    hasher.update(binding.channel_id.as_bytes());
+    hasher.update(turn.id.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let delivery_id = format!("discord-{}", &digest[..24]);
+    let parts = split_discord_content(&turn.text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, content)| DiscordMessagePart {
+            part_id: format!("part-{}", index + 1),
+            nonce: format!("lf-{}-{index}", &digest[..16]),
+            content,
+        })
+        .collect();
+    Some(DiscordDelivery {
+        delivery_id,
+        turn_id: turn.id.clone(),
+        sources,
+        parts,
+        confirmed: HashMap::new(),
+    })
+}
+
+fn split_discord_content(content: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut utf16_units = 0;
+    for (index, character) in content.char_indices() {
+        let units = character.len_utf16();
+        if utf16_units + units > 2_000 {
+            parts.push(content[start..index].to_string());
+            start = index;
+            utf16_units = 0;
+        }
+        utf16_units += units;
+    }
+    if start < content.len() {
+        parts.push(content[start..].to_string());
+    }
+    parts
 }
 
 fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
@@ -2387,6 +2663,147 @@ mod tests {
         assert_eq!(
             inbox_ids, journal_ids,
             "inbox consumption order == journal fold order"
+        );
+    }
+
+    #[test]
+    fn discord_chat_input_is_durable_before_cursor_and_deduplicates_after_restart() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let binding = DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        let source = DiscordMessageSource {
+            binding: binding.clone(),
+            message_id: "101".into(),
+            author_id: "human".into(),
+        };
+        let rt = open_runtime(tmp.path());
+        rt.try_attach_discord(binding.clone(), "bot".into(), Some("100".into()))
+            .expect("attach at current head");
+        assert!(rt
+            .try_deliver_discord("hello".into(), source.clone())
+            .expect("journal input"));
+        assert!(!rt
+            .try_deliver_discord("hello".into(), source.clone())
+            .expect("duplicate input"));
+        assert_eq!(
+            rt.discord_snapshot()
+                .attachment
+                .expect("attached")
+                .cursor
+                .as_deref(),
+            Some("100"),
+            "input commit does not advance the fetch cursor"
+        );
+
+        let reopened = open_runtime(tmp.path());
+        assert!(!reopened
+            .try_deliver_discord("hello".into(), source)
+            .expect("refetched input"));
+        assert_eq!(reopened.pending_messages().len(), 1);
+        assert!(reopened.pending_messages()[0]
+            .text
+            .starts_with("[discord://guild/channel/101]"));
+        reopened
+            .try_advance_discord_cursor(&binding, "101".into())
+            .expect("commit cursor");
+        assert_eq!(
+            open_runtime(tmp.path())
+                .discord_snapshot()
+                .attachment
+                .expect("attached")
+                .cursor
+                .as_deref(),
+            Some("101")
+        );
+    }
+
+    #[test]
+    fn discord_chat_answer_is_planned_in_chunks_before_receipts() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let binding = DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        rt.try_attach_discord(binding.clone(), "bot".into(), None)
+            .expect("attach");
+        rt.try_deliver_discord(
+            "question".into(),
+            DiscordMessageSource {
+                binding,
+                message_id: "101".into(),
+                author_id: "human".into(),
+            },
+        )
+        .expect("deliver");
+        let message_id = rt.pending_messages()[0].id.0.clone();
+        rt.apply_resident_delta(d_opened(&[&message_id]));
+        rt.apply_resident_delta(d_text(&"x".repeat(2_001)));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+
+        let delivery = rt
+            .discord_snapshot()
+            .deliveries
+            .into_iter()
+            .next()
+            .expect("send intent");
+        assert_eq!(delivery.parts.len(), 2);
+        assert_eq!(delivery.parts[0].content.chars().count(), 2_000);
+        assert!(delivery.parts.iter().all(|part| part.nonce.len() <= 25));
+        assert!(delivery.confirmed.is_empty());
+
+        rt.try_confirm_discord_part(
+            &delivery.delivery_id,
+            &delivery.parts[0].part_id,
+            "provider-1".into(),
+        )
+        .expect("confirm first part");
+        let reopened = open_runtime(tmp.path());
+        let resumed = &reopened.discord_snapshot().deliveries[0];
+        assert_eq!(resumed.confirmed.len(), 1);
+        assert_eq!(resumed.parts.len(), 2);
+    }
+
+    #[test]
+    fn discord_chat_never_sends_a_turn_that_claims_local_input() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let binding = DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        rt.try_attach_discord(binding.clone(), "bot".into(), None)
+            .expect("attach");
+        rt.try_deliver_discord(
+            "question from Discord".into(),
+            DiscordMessageSource {
+                binding,
+                message_id: "101".into(),
+                author_id: "human".into(),
+            },
+        )
+        .expect("deliver Discord input");
+        let local = rt
+            .deliver(MessageOp::Message, "local correction".into())
+            .expect("deliver local input");
+        let pending = rt.pending_messages();
+        let discord_id = pending
+            .iter()
+            .find(|message| message.source.is_some())
+            .expect("Discord input remains pending")
+            .id
+            .0
+            .clone();
+
+        rt.apply_resident_delta(d_opened(&[&discord_id, &msg_id(&local)]));
+        rt.apply_resident_delta(d_text("one combined answer"));
+        rt.apply_resident_delta(d_finished(Lifecycle::Completed));
+
+        assert!(
+            rt.discord_snapshot().deliveries.is_empty(),
+            "a turn that incorporated local input must stay inside Loopflow"
         );
     }
 }

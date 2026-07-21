@@ -1278,37 +1278,7 @@ impl SqliteStore {
             StoreError::InvalidData("no successful boundary can complete Work".to_string())
         })?;
         validate_basis(&applied, basis)?;
-        let open: bool = tx.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM agent_invocations
-                WHERE supervising_run_id=?1 AND ended_at IS NULL
-             )",
-            [run.id.as_str()],
-            |row| row.get(0),
-        )?;
-        if open {
-            return Err(StoreError::InvalidData(
-                "Run has an open Invocation".to_string(),
-            ));
-        }
-        let child_ask_open: bool = tx.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM ask_exchanges a
-                JOIN agent_turns t ON t.id=a.turn_id
-                JOIN epochs child_epoch ON child_epoch.id=t.epoch_id
-                WHERE a.answered_at IS NULL AND child_epoch.state='open'
-                  AND t.status NOT IN ('completed', 'interrupted')
-                  AND a.route_kind='parent' AND a.route_work_kind=?1
-                  AND a.route_work_id=?2
-             )",
-            params![run.work.kind(), run.work.id()],
-            |row| row.get(0),
-        )?;
-        if child_ask_open {
-            return Err(StoreError::InvalidData(
-                "Run cannot complete while a child Ask is unanswered".to_string(),
-            ));
-        }
+        validate_completion_readiness_in(&tx, &run)?;
         let proposal = DoneProposal {
             id: DoneProposalId::new(),
             run_id: run.id.clone(),
@@ -3325,7 +3295,7 @@ fn insert_truth(
     Ok(())
 }
 
-fn validate_basis(current: &Basis, expected: &Basis) -> StoreResult<()> {
+pub(crate) fn validate_basis(current: &Basis, expected: &Basis) -> StoreResult<()> {
     if current == expected {
         return Ok(());
     }
@@ -3333,6 +3303,41 @@ fn validate_basis(current: &Basis, expected: &Basis) -> StoreResult<()> {
         expected: format!("{}:{}", expected.epoch_id, expected.revision),
         current: format!("{}:{}", current.epoch_id, current.revision),
     })
+}
+
+pub(crate) fn validate_completion_readiness_in(conn: &Connection, run: &Run) -> StoreResult<()> {
+    let invocation_open: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM agent_invocations
+            WHERE supervising_run_id=?1 AND ended_at IS NULL
+         )",
+        [run.id.as_str()],
+        |row| row.get(0),
+    )?;
+    if invocation_open {
+        return Err(StoreError::InvalidData(
+            "Run has an open Invocation".to_string(),
+        ));
+    }
+    let child_ask_open: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM ask_exchanges a
+            JOIN agent_turns t ON t.id=a.turn_id
+            JOIN epochs child_epoch ON child_epoch.id=t.epoch_id
+            WHERE a.answered_at IS NULL AND child_epoch.state='open'
+              AND t.status NOT IN ('completed', 'interrupted')
+              AND a.route_kind='parent' AND a.route_work_kind=?1
+              AND a.route_work_id=?2
+         )",
+        params![run.work.kind(), run.work.id()],
+        |row| row.get(0),
+    )?;
+    if child_ask_open {
+        return Err(StoreError::InvalidData(
+            "Run cannot complete while a child Ask is unanswered".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_author(tx: &Transaction<'_>, target: &WorkRef, author: &Author) -> StoreResult<()> {
@@ -3406,7 +3411,7 @@ pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreRe
     }
 }
 
-fn current_epoch_in(conn: &Connection, work: &WorkRef) -> StoreResult<Epoch> {
+pub(crate) fn current_epoch_in(conn: &Connection, work: &WorkRef) -> StoreResult<Epoch> {
     let (column, id) = match work {
         WorkRef::Wave(id) => ("wave_id", id.as_str()),
         WorkRef::Project(id) => ("project_id", id.as_str()),

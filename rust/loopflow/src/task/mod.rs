@@ -723,7 +723,7 @@ impl Task {
     /// The third was the 2026-07-14 W2-129 failure: `Open` is not terminal
     /// and carries no live process, so it reads exactly like Work that
     /// merely stopped. A wake therefore launched generation 2, which reopened
-    /// the flow at `task_clarify` and began re-doing work whose PR (#878) was
+    /// the flow at `task/clarify` and began re-doing work whose PR (#878) was
     /// already awaiting a merge. An explicit merge request is not an invitation
     /// to start over.
     ///

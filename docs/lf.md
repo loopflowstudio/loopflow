@@ -24,7 +24,9 @@ lf <skill>: args                  # run with arguments
 lf <namespace>/<skill>            # run a repo-local or installed namespaced skill
 lf npx/<owner>/<repo>            # fetch any Claude Skill live via npx skills
 lf : "inline prompt"             # no skill file, just prompt
-lf --list                        # show all available skills
+lf list                          # show skills and flows, including flow expansions
+lf -l                            # short form of `lf list`
+lf ls                            # list Waves in the local registry
 ```
 
 ## Examples
@@ -47,10 +49,12 @@ Names resolve in this order:
 1. `.lf/skills/<skill>.md` or `.lf/skills/<ns>/<skill>.md` — repo-local (also overrides builtins)
 2. `.claude/commands/<skill>.md` — Claude Code compatible
 3. `~/.lf/skills/<skill>.md`, `~/.lf/skills/<ns>/<skill>.md`, or `~/.claude/commands/<skill>.md` — user-global
-4. Core built-in skills — `task/`, `project/`, `wave/`, `ops/` (run `lf --list` for the full catalog)
+4. Core built-in skills, grouped by Task, Project, Wave, and Ops (`lf list` shows the live catalog)
 5. External skill namespaces — `npx/<owner>/<repo>` fetches live via `npx skills` and caches under `.agents/skills/`; cached or searchable skills can often be run as `npx/<name>`. The legacy `rams/rams` alias also resolves when `~/.claude/commands/rams.md` exists.
 
 Namespaced skills and flows use `/`, not `:`. Run `team/review`, not `team:review`.
+Ownership uses `/` (`wave/clarify`); words within one name use `-`
+(`review-slice`). Public catalog names never use `_`.
 
 ### Skill Arguments
 
@@ -62,9 +66,9 @@ Inside skill files, `{args}` is replaced with whatever comes after the colon.
 
 ### Builtin Catalog
 
-Skills and flows are organized by the thing they act on: **task**, **project**,
-**wave**, and **ops**. The categories share one flat command namespace. Run
-`lf --list` for the live catalog.
+Skills and flows share one catalog organized by the thing they act on:
+**task**, **project**, **wave**, and **ops**. `lf list` shows each flow both as
+written and collapsed into the skills and operations that execute.
 
 Task skills — concrete implementation, investigation, review, and delivery:
 
@@ -89,11 +93,13 @@ Task skills — concrete implementation, investigation, review, and delivery:
 | `demo` | Walk the User through the changed behavior, or prove it headlessly and ask one exact blocking question |
 | `review-design` | Reshape AI-elaborated design into user intent |
 | `refine` | Refine existing work |
+| `task/clarify` / `task/pursue` / `task/mutate` | Clarify, implement, and judge one durable Task |
+
 Project skills — shape and pursue measured bets inside a Wave:
 
 | Skill | What it does |
 |------|--------------|
-| `project_clarify` / `project_pursue` / `project_mutate` | Clarify, advance, and judge a Project |
+| `project/clarify` / `project/pursue` / `project/mutate` | Clarify, advance, and judge a Project |
 | `project-promote` | Promote a Project into a resident child Wave |
 | `expand` / `reduce` / `polish` | Find higher leverage, simplifications, and finish quality |
 | `testing-audit` | Audit test value, rigor, cost, lifecycle ownership, and product proof |
@@ -107,7 +113,7 @@ Wave skills — maintain the durable operating context and its portfolio:
 | `wave-report` | Read health signals across all waves |
 | `mutate` | Compose and apply coordinated mutations across member waves |
 | `review` | Review mutations, amend or revert if needed |
-| `wave_clarify` / `wave_pursue` / `wave_mutate` | Clarify, direct, and evolve a Wave |
+| `wave/clarify` / `wave/pursue` / `wave/mutate` | Clarify, direct, and evolve a Wave |
 | `review-open-work` | Survey branches, PRs, worktrees, and waves for inbox-zero triage |
 | `update-wave` / `split-wave` | Maintain Wave structure and memory |
 | `s2-scan` / `s2-assess` | Coordination: backlogs, PR/path overlap, conflict risk and safe ordering |

@@ -137,7 +137,7 @@ struct ContractTests {
         // a discrete item so `turnPresentation` can fold it behind a disclosure;
         // the conclusion stays the prose.
         let withStep = try opened.absorbing(
-            .message(id: "m-0", text: "Using `wave_clarify` to audit the plan.", phase: "commentary")
+            .message(id: "m-0", text: "Using `wave/clarify` to audit the plan.", phase: "commentary")
         )
         let withConclusion = try withStep.absorbing(
             .message(id: "m-1", text: "Clarification complete.", phase: "final_answer")
@@ -150,7 +150,7 @@ struct ContractTests {
             return
         }
         #expect(phase == "commentary")
-        #expect(stepText.contains("wave_clarify"))
+        #expect(stepText.contains("wave/clarify"))
 
         // And it curates: the conclusion leads, the narration folds into a step.
         let view = turnPresentation(withConclusion)

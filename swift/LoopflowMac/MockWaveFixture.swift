@@ -304,7 +304,7 @@ enum MockWaveFixture {
             "worktree": "/src/loopflow.task",
             "wave": "infrastructure",
             "flow": "task",
-            "skill": "task_pursue",
+            "skill": "task/pursue",
             "status": "ok",
             "started": 1784052000,
             "ended": 1784052600,

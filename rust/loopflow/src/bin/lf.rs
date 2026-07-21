@@ -1451,6 +1451,9 @@ fn main() -> anyhow::Result<()> {
                 },
             ),
             Some(Commands::Doctor { json }) => loopflow::lf::commands::doctor::run(*json),
+            Some(Commands::List) => {
+                in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
+            }
             Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
@@ -1646,8 +1649,8 @@ mod tests {
         let tables = arg_tables();
         for command in [
             ":", "desktop", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task",
-            "project", "flow", "skill", "chat", "usage", "top", "ls", "status", "runs", "trace",
-            "help",
+            "project", "flow", "skill", "chat", "usage", "top", "list", "ls", "status", "runs",
+            "trace", "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }

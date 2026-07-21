@@ -394,6 +394,14 @@ mod tests {
             .written
             .iter()
             .all(|path| path.starts_with(home.path())));
+        assert!(home
+            .path()
+            .join(".agents/skills/wave/clarify/SKILL.md")
+            .exists());
+        assert!(!home
+            .path()
+            .join(".agents/skills/wave_clarify/SKILL.md")
+            .exists());
     }
 
     #[test]

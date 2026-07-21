@@ -14,7 +14,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
-    /// List available skills and flows
+    /// List the skill and flow catalog
     #[arg(short, long)]
     pub list: bool,
 
@@ -467,6 +467,8 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// List available skills and flows, including authored and collapsed flows
+    List,
     /// List every wave in the registry (running and stopped), marking which
     /// have a live server. Local-only query over the shared ledger.
     Ls {
@@ -1739,6 +1741,18 @@ mod tests {
             error.to_string(),
             format!("lf {}\n", crate::build_info::BUILD_VERSION)
         );
+    }
+
+    #[test]
+    fn catalog_accepts_command_and_flag_forms_without_claiming_ls() {
+        let command = Cli::try_parse_from(["lf", "list"]).expect("parse list command");
+        assert!(matches!(command.command, Some(Commands::List)));
+
+        let flag = Cli::try_parse_from(["lf", "-l"]).expect("parse list flag");
+        assert!(flag.list);
+
+        let waves = Cli::try_parse_from(["lf", "ls", "--json"]).expect("parse wave list");
+        assert!(matches!(waves.command, Some(Commands::Ls { json: true })));
     }
 
     #[test]

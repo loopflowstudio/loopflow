@@ -164,7 +164,7 @@ struct DTOFixtureTests {
         #expect(detail.projects[0].tasks[1].reference.issueUrl == nil)
         #expect(detail.projects[0].tasks[1].reference.workspace == nil)
         #expect(detail.runs.items[0].traceId == "run-1")
-        #expect(detail.runs.items[0].skill == "task_pursue")
+        #expect(detail.runs.items[0].skill == "task/pursue")
         #expect(detail.runs.items[0].suppliedContextTokens == 3000)
         #expect(detail.runs.items[0].status == "ok")
         #expect(detail.attention.items[0].subject == "INF-123")

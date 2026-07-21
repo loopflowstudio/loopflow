@@ -10,6 +10,8 @@ use std::process::Command;
 /// Category directories whose skill/flow names are registered flat (no prefix).
 /// Everything else is a namespaced category: names are stored as `<cat>/<name>`.
 /// Core categories share one flat namespace and must not collide with each other.
+/// Within a filename, `_` encodes a namespace separator (`wave_clarify.md`
+/// registers as `wave/clarify`); `-` remains a word separator.
 const CORE_CATEGORIES: &[&str] = &["task", "project", "wave", "ops"];
 
 fn main() {
@@ -270,11 +272,12 @@ fn generate_kind_map(
             let is_core = CORE_CATEGORIES.contains(&cat_name.as_str());
             let mut files: Vec<(String, PathBuf)> = Vec::new();
             collect_files(&kind_dir, extension, &mut files);
-            if is_core {
-                entries.extend(files);
-            } else {
-                for (stem, path) in files {
-                    entries.push((format!("{cat_name}/{stem}"), path));
+            for (stem, path) in files {
+                let name = canonical_builtin_name(&stem);
+                if is_core {
+                    entries.push((name, path));
+                } else {
+                    entries.push((format!("{cat_name}/{name}"), path));
                 }
             }
         }
@@ -389,6 +392,7 @@ fn generate_category_map(
                         .expect("file has no stem")
                         .to_string_lossy()
                         .to_string();
+                    let stem = canonical_builtin_name(&stem);
                     let name = if is_core {
                         stem
                     } else {
@@ -554,6 +558,10 @@ fn title_case(s: &str) -> String {
         None => String::new(),
         Some(c) => c.to_uppercase().to_string() + chars.as_str(),
     }
+}
+
+fn canonical_builtin_name(stem: &str) -> String {
+    stem.replace('_', "/")
 }
 
 /// Recursively collect files with the given extension. The key is the file stem.

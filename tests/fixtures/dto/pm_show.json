@@ -13,7 +13,7 @@
       "definition": "Keep mail flowing.",
       "flows": {
         "first": null,
-        "loop": "task_pursue",
+        "loop": "task/pursue",
         "finally": null
       },
       "krs": [

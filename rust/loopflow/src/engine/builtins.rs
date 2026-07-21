@@ -314,16 +314,16 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
-        let wave = get_builtin_skill("wave_pursue").expect("wave pursue");
+        let wave = get_builtin_skill("wave/pursue").expect("wave pursue");
         assert!(wave.contains("lf task run <issue-id>"));
         assert!(wave.contains("lf task status"));
         assert!(wave.contains("stable worktree"));
 
-        let project = get_builtin_skill("project_pursue").expect("project pursue");
+        let project = get_builtin_skill("project/pursue").expect("project pursue");
         assert!(project.contains("lf task run <issue-id>"));
         assert!(!project.contains("lf loop"));
 
-        let task = get_builtin_skill("task_pursue").expect("task pursue");
+        let task = get_builtin_skill("task/pursue").expect("task pursue");
         assert!(task.contains("second Task"));
         assert!(task.contains("lf pr land"));
         assert!(task.contains("pinned final flow"));
@@ -331,10 +331,10 @@ mod tests {
         assert!(task.contains("lf pm task create"));
 
         for (flow, steps) in [
-            ("wave", ["wave_clarify", "wave_pursue", "wave_mutate"]),
+            ("wave", ["wave/clarify", "wave/pursue", "wave/mutate"]),
             (
                 "project",
-                ["project_clarify", "project_pursue", "project_mutate"],
+                ["project/clarify", "project/pursue", "project/mutate"],
             ),
         ] {
             let flow = get_builtin_flow(flow).expect("tier flow");
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn task_design_and_multi_task_outputs_share_the_machine_contract() {
-        let clarify = get_builtin_skill("task_clarify").expect("task clarify");
+        let clarify = get_builtin_skill("task/clarify").expect("task clarify");
         for requirement in [
             "User-visible outcome",
             "End-to-end proof",
@@ -401,8 +401,8 @@ mod tests {
         }
 
         for name in [
-            "wave_pursue",
-            "project_pursue",
+            "wave/pursue",
+            "project/pursue",
             "scan",
             "assess",
             "wave-report",

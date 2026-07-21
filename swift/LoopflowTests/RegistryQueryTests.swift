@@ -71,7 +71,7 @@ struct RegistryQueryTests {
             }]
           }],
           "unavailable_projects":[],
-          "runs":{"state":"ok","truncated":false,"items":[{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task_pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
+          "runs":{"state":"ok","truncated":false,"items":[{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow.task","wave":"goals","flow":"task","skill":"task/pursue","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"}]},
           "attention":{"state":"ok","truncated":false,"items":[{"kind":"task","id":"ts_2","subject":"INF-124","owner":"user","reason":"User merge requested","since":"2026-07-06T00:00:00Z","age_secs":7200}]},
           "home_runtime":{"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"},"state":"stopped","reason":"no resident is serving","endpoint":null,"action":{"kind":"start","home_id":"home_00000000000000000000000000000001"}}
         }
@@ -97,7 +97,7 @@ struct RegistryQueryTests {
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.worktree == "/task-wt")
         #expect(result.workMap.projects[0].tasks[0].reference.workspace?.branch == "jack/inf-123")
-        #expect(result.runs.items[0].skill == "task_pursue")
+        #expect(result.runs.items[0].skill == "task/pursue")
         #expect(result.runs.items[0].suppliedContextTokens == 150)
         #expect(result.attention.items[0].subject == "INF-124")
         #expect(result.attention.items[0].owner == .user)

@@ -828,7 +828,17 @@ async fn load_show_snapshot(
 }
 
 async fn fetch_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
-    let projects = checked_projects(repo, ctx, wave).await?;
+    let store = pm_store().await?;
+    fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await
+}
+
+async fn fetch_pm_snapshot_with_store(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+    store: &Store,
+) -> OpsResult<PmSnapshot> {
+    let projects = checked_projects_with_store(repo, ctx, wave, store).await?;
     fetch_pm_snapshot_for_projects(ctx, projects).await
 }
 
@@ -1172,6 +1182,7 @@ pub(crate) async fn pm_update_async(
             )));
         }
     }
+    let store = pm_store().await?;
     let result = apply_update(
         repo,
         &wave,
@@ -1179,6 +1190,7 @@ pub(crate) async fn pm_update_async(
         &ctx,
         options,
         progress,
+        &store,
     )
     .await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
@@ -1193,9 +1205,10 @@ async fn apply_update(
     ctx: &PmContext,
     options: &PmUpdateOptions,
     progress: &impl Progress,
+    store: &Store,
 ) -> OpsResult<PmUpdateResult> {
     let mark_done = parse_done_status(options.status.as_deref())?;
-    let projects = checked_projects(repo, ctx, wave).await?;
+    let projects = checked_projects_with_store(repo, ctx, wave, store).await?;
     let project = project_slug
         .map(|slug| find_project(&projects, wave, slug))
         .transpose()?;
@@ -3034,6 +3047,25 @@ mod tests {
         }
     }
 
+    async fn isolated_pm_store(repo: &Path) -> Store {
+        open_store(&crate::store::StorageConfig::sqlite(
+            repo.join("registry.db"),
+        ))
+        .await
+        .expect("open isolated PM store")
+    }
+
+    async fn isolated_apply_update(
+        repo: &Path,
+        wave: &str,
+        project: Option<&str>,
+        ctx: &PmContext,
+        options: &PmUpdateOptions,
+    ) -> OpsResult<PmUpdateResult> {
+        let store = isolated_pm_store(repo).await;
+        apply_update(repo, wave, project, ctx, options, &NullProgress, &store).await
+    }
+
     fn write_goal(repo: &Path, wave: &str, frontmatter: &str) {
         let dir = repo.join("wave").join(wave);
         std::fs::create_dir_all(&dir).expect("create wave dir");
@@ -3671,8 +3703,9 @@ mod tests {
         .await;
         let ctx = linear_test_ctx(base_url, "initiative-123");
         let repo = tempfile::tempdir().unwrap();
+        let store = isolated_pm_store(repo.path()).await;
 
-        let result = fetch_pm_snapshot(repo.path(), "scan", &ctx)
+        let result = fetch_pm_snapshot_with_store(repo.path(), "scan", &ctx, &store)
             .await
             .expect("fetch succeeds");
         assert_eq!(result.projects.len(), 1);
@@ -3700,7 +3733,7 @@ mod tests {
             pr: None,
         };
 
-        let error = apply_update(repo.path(), "goals", None, &ctx, &options, &NullProgress)
+        let error = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
             .await
             .expect_err("project is required");
         assert!(error.to_string().contains("--project <slug>"));
@@ -3732,16 +3765,10 @@ mod tests {
             pr: None,
         };
 
-        let result = apply_update(
-            repo.path(),
-            "product",
-            Some("wave-chat"),
-            &ctx,
-            &options,
-            &NullProgress,
-        )
-        .await
-        .expect("update succeeds");
+        let result =
+            isolated_apply_update(repo.path(), "product", Some("wave-chat"), &ctx, &options)
+                .await
+                .expect("update succeeds");
 
         assert!(result.created);
         let requests = requests.lock().await;
@@ -3783,7 +3810,7 @@ mod tests {
             pr: None,
         };
 
-        let result = apply_update(repo.path(), "goals", None, &ctx, &options, &NullProgress)
+        let result = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
             .await
             .expect("update succeeds");
         assert!(!result.created);
@@ -3834,7 +3861,7 @@ mod tests {
             pr: Some("https://github.com/acme/repo/pull/42".to_string()),
         };
 
-        let result = apply_update(repo.path(), "goals", None, &ctx, &options, &NullProgress)
+        let result = isolated_apply_update(repo.path(), "goals", None, &ctx, &options)
             .await
             .expect("update succeeds");
         assert!(result.completed);

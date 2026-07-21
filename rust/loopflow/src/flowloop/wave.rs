@@ -1942,7 +1942,7 @@ mod tests {
             EventKind::TurnSteered { answers, .. }
                 if answers == &[message_id(&steer)]
         )));
-        assert!(inputs.lock().unwrap()[0].contains("wave_clarify"));
+        assert!(inputs.lock().unwrap()[0].contains("wave/clarify"));
     }
 
     #[tokio::test]
@@ -2013,7 +2013,7 @@ mod tests {
         .await;
 
         let inputs = inputs.lock().unwrap();
-        assert!(inputs[0].starts_with("wave_clarify\n"));
+        assert!(inputs[0].starts_with("wave/clarify\n"));
         assert_eq!(
             inputs.len(),
             1,

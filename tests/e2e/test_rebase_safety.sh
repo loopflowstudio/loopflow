@@ -288,7 +288,7 @@ PUSH_HOOK
 chmod +x "$REMOTE/hooks/update"
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/land-recovery.provider.log"
 : >"$SENTINEL_LOG"; : >"$land_push_log"; rm -f "$GH_STATE"
-(cd "$REPO" && "$LF_BIN" pr land --create-pr --title "one replay" --body "proof" >/dev/null)
+(cd "$REPO" && "$LF_BIN" pr land --title "one replay" --body "proof" >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
 test "$(grep -c '^refs/heads/feature$' "$land_push_log")" = 1
 test "$(git -C "$REPO" rev-list --count origin/main..HEAD)" = 1

@@ -227,7 +227,7 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 | `task-design` | kickoff → review-design |
 | `slice` | code → review-slice → publish/refresh Task PR |
 | `ship` | task-gate → record-learnings → op: pr land -c |
-| `deploy` | gate → op: pr land --create-pr |
+| `deploy` | gate → op: pr land |
 | `design-and-ship` | design → implement → reduce → polish → deploy |
 | `incident` | restore → 5whys |
 | `ship-5whys` | implement the next open prevention from the 5 Whys |

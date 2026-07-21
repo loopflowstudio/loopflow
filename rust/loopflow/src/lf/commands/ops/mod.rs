@@ -78,7 +78,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Land {
             strict,
             local,
-            create_pr,
             complete,
             next,
             worktree,
@@ -89,7 +88,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             &LandOptions {
                 strict: *strict,
                 local: *local,
-                create_pr: *create_pr,
+                create_pr: true,
                 complete: *complete,
                 next_slug: next.clone(),
                 worktree: worktree.clone(),

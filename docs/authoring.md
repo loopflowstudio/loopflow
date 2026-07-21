@@ -65,7 +65,7 @@ Mechanical git/PR operations ride along as `op:` steps:
 ```yaml
 - implement
 - gate
-- op: pr land --create-pr
+- op: pr land
 ```
 
 ### Branching (xor)

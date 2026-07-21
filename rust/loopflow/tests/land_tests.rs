@@ -1189,29 +1189,32 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
 }
 
 #[test]
-fn lf_ops_land_leaves_worktree_in_place() {
+fn lf_pr_land_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let repo = TestRepo::new();
     let log_path = repo.bare_path().join("gh.log");
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree =
-        create_named_worktree(repo.path(), "land", None, false).expect("create worktree");
+    let worktree = repo.create_named_worktree("land");
+    let branch = "land";
 
-    fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
+    fs::write(worktree.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
         .args(["add", "."])
-        .current_dir(&worktree.path)
+        .current_dir(&worktree)
         .status()
         .expect("git add");
     assert!(status.success(), "git add should succeed");
     let status = Command::new("git")
         .args(["commit", "-m", "feature work"])
-        .current_dir(&worktree.path)
+        .current_dir(&worktree)
         .status()
         .expect("git commit");
     assert!(status.success(), "git commit should succeed");
-    push_branch(&repo, &worktree.branch);
+    assert!(
+        !remote_branch_exists(&repo, branch),
+        "the test must begin before publication"
+    );
 
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -1219,21 +1222,29 @@ fn lf_ops_land_leaves_worktree_in_place() {
             "pr",
             "land",
             "--strict",
-            "--create-pr",
             "--title",
             "test title",
             "--body",
             "test body",
         ])
-        .current_dir(&worktree.path)
+        .current_dir(&worktree)
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
         .status()
         .expect("run lf pr land");
     assert!(status.success(), "lf pr land should succeed");
+    assert!(
+        remote_branch_exists(&repo, branch),
+        "lf pr land should push its branch"
+    );
+    let gh_log = fs::read_to_string(&log_path).expect("read gh log");
+    assert!(
+        gh_log.lines().any(|line| line.starts_with("pr create ")),
+        "lf pr land should create its missing PR, got: {gh_log}"
+    );
 
     // The wave home is permanent: land never rotates the worktree or cds away.
     assert!(
-        worktree.path.exists(),
+        worktree.exists(),
         "worktree should stay in place after land"
     );
     let directive = fs::read_to_string(&directive_path).unwrap_or_default();

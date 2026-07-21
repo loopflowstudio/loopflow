@@ -46,6 +46,18 @@ public enum ChatAction: Codable, Sendable, Equatable {
             try values.encode(url, forKey: .url)
         }
     }
+
+    public var label: String {
+        switch self {
+        case let .openDiscord(label, _): label
+        }
+    }
+
+    public var url: URL? {
+        switch self {
+        case let .openDiscord(_, url): URL(string: url)
+        }
+    }
 }
 
 public enum ChatBacking: Codable, Sendable, Equatable {
@@ -89,6 +101,29 @@ public enum ChatBacking: Codable, Sendable, Equatable {
             try values.encode(channelId, forKey: .channelId)
             try values.encode(open, forKey: .open)
         }
+    }
+}
+
+public enum WaveChatComposeRoute: Sendable, Equatable {
+    case unavailable
+    case local
+    case openDiscord(ChatAction)
+    case archived
+}
+
+public func waveChatComposeRoute(
+    activeEpoch: ConversationEpoch?,
+    selectedEpoch: ConversationEpoch?
+) -> WaveChatComposeRoute {
+    guard let activeEpoch else { return .unavailable }
+    if let selectedEpoch, selectedEpoch.id != activeEpoch.id {
+        return .archived
+    }
+    switch activeEpoch.backing {
+    case .local:
+        return .local
+    case let .discord(_, _, open):
+        return .openDiscord(open)
     }
 }
 

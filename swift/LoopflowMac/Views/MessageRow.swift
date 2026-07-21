@@ -19,6 +19,7 @@ struct MessageRow: View {
     let turn: ChatTurn
     let timestampLabel: String?
     let attemptFailure: AttemptFailurePresentation?
+    var source: ChatMessageSource?
     var references: ReferenceContext = .inert
 
     private var presentation: TurnPresentation {
@@ -55,11 +56,40 @@ struct MessageRow: View {
                 failedBadge
             }
 
-            if let timestampLabel, attemptFailure?.count ?? 1 == 1 {
-                Text(timestampLabel)
-                    .font(Typography.caption(11))
-                    .foregroundStyle(palette.textSecondary)
+            let showsTimestamp = attemptFailure?.count ?? 1 == 1 && timestampLabel != nil
+            if showsTimestamp || source != nil {
+                HStack(spacing: Spacing.xs) {
+                    if showsTimestamp, let timestampLabel {
+                        Text(timestampLabel)
+                    }
+                    if showsTimestamp, source != nil {
+                        Text("·")
+                    }
+                    sourceLabel
+                }
+                .font(Typography.caption(11))
+                .foregroundStyle(palette.textSecondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var sourceLabel: some View {
+        switch source {
+        case .local:
+            Label("Local", systemImage: "macbook")
+        case let .discord(_, _, _, _, url):
+            if let destination = URL(string: url) {
+                Link(destination: destination) {
+                    Label("Discord", systemImage: "arrow.up.right")
+                }
+                .foregroundStyle(palette.accent)
+                .accessibilityLabel("Open original Discord message")
+            } else {
+                Label("Discord", systemImage: "bubble.left.and.bubble.right")
+            }
+        case nil:
+            EmptyView()
         }
     }
 

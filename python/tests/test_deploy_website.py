@@ -1,4 +1,6 @@
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,35 @@ from scripts import deploy_website
 
 def _completed(stdout: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], 0, stdout, "")
+
+
+def test_health_probe_identifies_itself_to_production(monkeypatch: pytest.MonkeyPatch):
+    class Response:
+        status = 200
+
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self._body
+
+    def production(request: urllib.request.Request, timeout: int) -> Response:
+        if request.get_header("User-agent") is None:
+            raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
+        body = (
+            b'{"status":"ok","release":"v1.2.3"}' if request.full_url.endswith("healthz") else b""
+        )
+        return Response(body)
+
+    monkeypatch.setattr(deploy_website.urllib.request, "urlopen", production)
+
+    assert deploy_website._release_is_healthy("v1.2.3")
 
 
 def test_deploy_is_a_green_noop_when_the_tag_is_already_live(

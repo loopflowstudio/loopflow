@@ -102,6 +102,23 @@ public struct WorkReference: Codable, Sendable, Hashable {
 
     public let kind: Kind
     public let id: String
+
+    public init(kind: Kind, id: String) {
+        self.kind = kind
+        self.id = id
+    }
+
+    public static func wave(id: String) -> WorkReference {
+        WorkReference(kind: .wave, id: id)
+    }
+
+    public static func project(id: String) -> WorkReference {
+        WorkReference(kind: .project, id: id)
+    }
+
+    public static func task(id: String) -> WorkReference {
+        WorkReference(kind: .task, id: id)
+    }
 }
 
 /// The durable author shared by Answers and Steers.

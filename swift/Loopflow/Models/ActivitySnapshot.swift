@@ -36,6 +36,10 @@ public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {
     public let parentId: String?
     public let kind: ActivityNodeKind
     public let label: String
+    public let repo: String?
+    public let wave: String?
+    public let project: String?
+    public let task: String?
     public let pid: UInt32?
     public let startedAt: Int64
     public let lastProgressAt: Int64?
@@ -44,7 +48,7 @@ public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {
     public let cumulative: OutputActivity
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, label, pid, state, direct, cumulative
+        case id, kind, label, repo, wave, project, task, pid, state, direct, cumulative
         case parentId = "parent_id"
         case startedAt = "started_at"
         case lastProgressAt = "last_progress_at"

@@ -31,8 +31,8 @@ Turn, AgentInvocation, trace, and exec; the second row proves a cache-only measu
 survives while absent token and cost fields remain explicit nulls. Rust and
 Swift both round-trip it.
 
-`activity_snapshot.json` pins `lf ps --json`: attributed Exec and provider
-nodes retain working/stalled state and exact token rates, while a registered
+`activity_snapshot.json` pins `lf ps --json`: Exec and provider nodes retain
+their existing Work attribution, working/stalled state, and exact token rates, while a registered
 orphan stays separate from the counted call tree. Rust and Swift both
 round-trip it; The Podium derives no process state of its own.
 

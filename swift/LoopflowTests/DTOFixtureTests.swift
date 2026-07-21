@@ -58,6 +58,12 @@ struct DTOFixtureTests {
         #expect(snapshot.aggregate.outputTokensPerSecondFast == 4.0)
         #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.state)
             == [.working, .stalled])
+        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.wave)
+            == ["product", "product"])
+        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.project)
+            == ["loopflow-api", "loopflow-api"])
+        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.task)
+            == ["W2-144", "W2-144"])
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
 
         let encoded = try JSONEncoder().encode(snapshot)

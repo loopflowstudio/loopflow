@@ -59,6 +59,30 @@ final class PodiumStateTests: XCTestCase {
     }
 
     @MainActor
+    func testScoreDisclosesWorkHierarchyWithOneOutputLanguage() {
+        forEachWidth { app in
+            let wave = app.descendants(matching: .any)["podium-score-wave-wave-1"]
+            XCTAssertTrue(wave.waitForExistence(timeout: 8))
+            XCTAssertTrue(String(describing: wave.value).contains("tokens per second"))
+
+            app.descendants(matching: .any)["podium-score-wave-wave-1-disclosure"].click()
+            let project = app.descendants(matching: .any)["podium-score-project-project-1"]
+            XCTAssertTrue(project.waitForExistence(timeout: 8))
+            XCTAssertTrue(String(describing: project.value).contains("tokens per second"))
+
+            app.descendants(matching: .any)["podium-score-project-project-1-disclosure"].click()
+            let task = app.descendants(matching: .any)["podium-score-task-issue-now"]
+            XCTAssertTrue(task.waitForExistence(timeout: 8))
+            XCTAssertTrue(String(describing: task.value).contains("tokens per second"))
+
+            app.descendants(matching: .any)["podium-score-task-issue-now-disclosure"].click()
+            let exec = app.descendants(matching: .any)["podium-score-exec-exec:exec-podium"]
+            XCTAssertTrue(exec.waitForExistence(timeout: 8))
+            XCTAssertTrue(String(describing: exec.value).contains("tokens per second"))
+        }
+    }
+
+    @MainActor
     func testWaveScoreClosesWithoutRemovingTheLiveSurface() {
         forEachWidth { app in
             ensureWaveScoreOpen(app)
@@ -99,6 +123,10 @@ final class PodiumStateTests: XCTestCase {
             XCTAssertTrue(waitFor(app, id: "podium-wave-score-empty"))
             XCTAssertTrue(waitFor(app, id: "podium-work-empty"))
             XCTAssertTrue(waitFor(app, id: "podium-activity-empty"))
+            XCTAssertTrue(
+                app.descendants(matching: .any)["podium-work-empty"].label
+                    .contains("No planned Work")
+            )
         }
     }
 
@@ -144,6 +172,19 @@ final class PodiumStateTests: XCTestCase {
             podium.frame.height,
             app.windows.element(boundBy: 0).frame.height * 0.75,
             "The Podium must fill the window instead of centering an intrinsic-height strip"
+        )
+        let bar = app.descendants(matching: .any)["podium-bar"]
+        let work = app.descendants(matching: .any)["podium-work"]
+        let activity = app.descendants(matching: .any)["podium-activity"]
+        XCTAssertLessThan(
+            abs(work.frame.minY - bar.frame.maxY),
+            12,
+            "Work must begin directly below the Podium bar"
+        )
+        XCTAssertLessThan(
+            abs(activity.frame.minY - bar.frame.maxY),
+            12,
+            "Activity must begin directly below the Podium bar"
         )
     }
 

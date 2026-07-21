@@ -15,11 +15,11 @@ struct PodiumModelTests {
         await model.refresh()
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["product", "context"])
 
-        model.select(.wave(waveId: "wave-1"))
+        model.select(.wave(id: "wave-1"))
         model.setRepoPath("/src/context")
 
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["context"])
-        #expect(model.waveSummary?.registeredWaves == 1)
+        #expect(model.waveSummary?.waves == 1)
         #expect(model.waveSummary?.activeRuns == 0)
         #expect(model.selection == nil)
     }
@@ -30,15 +30,15 @@ struct PodiumModelTests {
         let model = PodiumModel(query: fixture.query)
 
         await model.refresh()
-        model.select(.task(waveId: "wave-1", taskId: "issue-now"))
+        model.select(.task(id: "issue-now"))
         await model.refresh()
 
-        #expect(model.selection == .task(waveId: "wave-1", taskId: "issue-now"))
-        #expect(model.task(waveId: "wave-1", taskId: "issue-now")?.task.task.name
+        #expect(model.selection == .task(id: "issue-now"))
+        #expect(model.task(id: "issue-now")?.task.task.name
             == "Make lf roadmap the machine-wide view")
 
-        model.select(.task(waveId: "wave-1", taskId: "missing"))
-        #expect(model.selection == .wave(waveId: "wave-1"))
+        model.select(.task(id: "missing"))
+        #expect(model.selection == nil)
     }
 
     @Test("Refresh failure preserves last-good evidence and exposes the reason")
@@ -66,7 +66,7 @@ struct PodiumModelTests {
         #expect(model.processActivity.errorMessage == "registry unavailable")
         #expect(model.workActivity.value == fixture.workActivity)
         #expect(model.workActivity.errorMessage == "registry unavailable")
-        #expect(model.waveSummary?.registeredWaves == 2)
+        #expect(model.waveSummary?.waves == 2)
     }
 
     @Test("Wave summary identifies running Waves without listeners")
@@ -77,7 +77,7 @@ struct PodiumModelTests {
         await model.refresh()
         let summary = try #require(model.waveSummary)
 
-        #expect(summary.registeredWaves == 2)
+        #expect(summary.waves == 2)
         #expect(summary.activeRuns == 1)
         #expect(summary.unservedRuns == 0)
 
@@ -106,27 +106,62 @@ struct PodiumModelTests {
         #expect(model.waveSummary?.unservedRuns == 1)
     }
 
+    @Test("Wave summary counts authored Waves without active Runs")
+    func waveSummaryCountsAuthoredWaves() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let repo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("podium-authored-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        for name in ["infrastructure", "intelligence", "product"] {
+            let wave = repo
+                .appendingPathComponent("wave", isDirectory: true)
+                .appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: wave, withIntermediateDirectories: true)
+            try Data("# \(name)\n".utf8).write(to: wave.appendingPathComponent("GOAL.md"))
+        }
+
+        let model = PodiumModel(query: fixture.query)
+        model.applyFixture(
+            roadmap: .available(fixture.roadmap),
+            waves: .available([]),
+            processActivity: .available(fixture.processActivity),
+            workActivity: .available(fixture.workActivity),
+            repos: []
+        )
+        await model.refreshPortfolio(
+            initialRepoPath: nil,
+            persistedRepos: [PortfolioRepo(path: repo.path, lastOpened: .distantPast)]
+        )
+        model.setRepoPath(repo.path)
+
+        #expect(model.visibleWaves.map(\.displayName) == [
+            "infrastructure", "intelligence", "product",
+        ])
+        #expect(model.waveSummary?.waves == 3)
+        #expect(model.waveSummary?.activeRuns == 0)
+    }
+
     @Test("Work selection becomes one server-side Activity filter")
     func workActivityFollowsSelection() async throws {
         let fixture = try PodiumTestFixture.load()
         let model = PodiumModel(query: fixture.query)
         await model.refresh()
 
-        model.select(.wave(waveId: "wave-1"))
+        model.select(.wave(id: "wave-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
             "activity", "--since", "7d", "--limit", "50",
             "--wave", "product", "--json",
         ])
 
-        model.select(.project(waveId: "wave-1", projectId: "project-1"))
+        model.select(.project(id: "project-1"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
             "activity", "--since", "7d", "--limit", "50",
             "--wave", "product", "--project", "loopflow-api", "--json",
         ])
 
-        model.select(.task(waveId: "wave-1", taskId: "issue-now"))
+        model.select(.task(id: "issue-now"))
         await model.refreshWorkActivity()
         #expect(await fixture.activityArguments.last == [
             "activity", "--since", "7d", "--limit", "50",
@@ -157,18 +192,18 @@ struct PodiumModelTests {
             repos: []
         )
 
-        model.select(.wave(waveId: "wave-1"))
+        model.select(.wave(id: "wave-1"))
         let staleRefresh = Task { await model.refreshWorkActivity() }
         await deferred.waitUntilRequested()
 
-        model.select(.task(waveId: "wave-1", taskId: "issue-now"))
+        model.select(.task(id: "issue-now"))
         await model.refreshWorkActivity()
         #expect(model.workActivity.value?.items.first?.subject == "W2-144")
 
         await deferred.release(staleJSON)
         await staleRefresh.value
 
-        #expect(model.selection == .task(waveId: "wave-1", taskId: "issue-now"))
+        #expect(model.selection == .task(id: "issue-now"))
         #expect(model.workActivity.value?.items.first?.subject == "W2-144")
     }
 }

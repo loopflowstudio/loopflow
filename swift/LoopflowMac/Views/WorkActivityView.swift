@@ -54,7 +54,7 @@ struct WorkActivityView: View {
                         .accessibilityIdentifier("podium-activity-scope")
                 }
                 Spacer(minLength: Spacing.sm)
-                if let wave = selectedWave, case .wave = model.selection {
+                if let wave = selectedWave, model.selection?.kind == .wave {
                     Button(wave.paused ? "Resume" : "Pause") {
                         Task { await setPaused(!wave.paused, waveId: wave.id) }
                     }
@@ -178,19 +178,23 @@ struct WorkActivityView: View {
 
     private var selectedWave: WaveSnapshot? {
         guard let selection = model.selection else { return nil }
-        return model.wave(id: selection.waveId)?.wave
+        guard let waveId = model.waveId(for: selection) else { return nil }
+        return model.wave(id: waveId)?.wave
     }
 
     private var scopeTitle: String {
         switch model.selection {
         case nil:
             "All durable Work"
-        case .wave(let waveId):
-            "Wave · \(waveName(waveId))"
-        case .project(let waveId, let projectId):
-            "Project · \(model.project(waveId: waveId, projectId: projectId)?.project.name ?? projectId)"
-        case .task(let waveId, let taskId):
-            "Task · \(model.task(waveId: waveId, taskId: taskId)?.task.task.identifier ?? taskId)"
+        case let work?:
+            switch work.kind {
+            case .wave:
+                "Wave · \(waveName(work.id))"
+            case .project:
+                "Project · \(model.project(id: work.id)?.project.project.name ?? work.id)"
+            case .task:
+                "Task · \(model.task(id: work.id)?.task.task.identifier ?? work.id)"
+            }
         }
     }
 
@@ -198,12 +202,15 @@ struct WorkActivityView: View {
         switch model.selection {
         case nil:
             nil
-        case .wave(let waveId):
-            model.wave(id: waveId)?.wave.goal
-        case .project(let waveId, let projectId):
-            model.project(waveId: waveId, projectId: projectId)?.project.definition
-        case .task(let waveId, let taskId):
-            model.task(waveId: waveId, taskId: taskId)?.task.attention.reason
+        case let work?:
+            switch work.kind {
+            case .wave:
+                model.wave(id: work.id)?.wave.goal
+            case .project:
+                model.project(id: work.id)?.project.project.definition
+            case .task:
+                model.task(id: work.id)?.task.attention.reason
+            }
         }
     }
 

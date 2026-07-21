@@ -86,7 +86,7 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// Commands whose optional `--wave` narrows a machine-wide result instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
 /// reject names absent from the registry.
-const FILTER_ONLY: &[&[&str]] = &[&["ci"], &["runs"]];
+const FILTER_ONLY: &[&[&str]] = &[&["activity"], &["ci"], &["runs"]];
 
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────

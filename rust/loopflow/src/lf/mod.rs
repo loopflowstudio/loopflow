@@ -494,6 +494,27 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Show one ordered record of durable Work, Run, PR, and Steer facts
+    Activity {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Maximum rows after Work filters (1-200)
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        /// Scope to one Wave by name
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one Project by slug
+        #[arg(long)]
+        project: Option<String>,
+        /// Scope to one Task by Linear identifier
+        #[arg(long)]
+        task: Option<String>,
+        /// Emit the typed activity snapshot as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show recent agent-backed skill runs with context and token evidence
     Runs {
         /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
@@ -1730,6 +1751,40 @@ mod tests {
                 repo: Some(repo),
                 json: true,
             }) if since == "24h" && wave == "infrastructure" && repo == "loopflowstudio/loopflow"
+        ));
+    }
+
+    #[test]
+    fn activity_accepts_composed_work_filters() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "activity",
+            "--since",
+            "24h",
+            "--limit",
+            "100",
+            "--wave",
+            "live",
+            "--project",
+            "control-room",
+            "--task",
+            "W2-140",
+            "--json",
+        ])
+        .expect("parse Activity query");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Activity {
+                since,
+                limit: 100,
+                wave: Some(wave),
+                project: Some(project),
+                task: Some(task),
+                json: true,
+            }) if since == "24h"
+                && wave == "live"
+                && project == "control-room"
+                && task == "W2-140"
         ));
     }
 

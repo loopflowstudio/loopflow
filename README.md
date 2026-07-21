@@ -85,6 +85,7 @@ Watch the whole machine:
 lf ls                  # every durable Wave and its Home/runtime evidence
 lf roadmap             # every open Task across every wave, bucketed by need
 lf status designer     # one wave's live Project → Task hierarchy
+lf activity            # durable Work changes with exact Run, PR, and Steer proof
 lf trace <exec-id>     # what one agent did — and exactly what it was told
 lf ps                  # rank live call trees by cumulative completed output
 lf top                 # refresh call-tree rates, age, idle time, and health

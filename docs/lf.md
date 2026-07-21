@@ -411,6 +411,8 @@ Waves sharing `main`.
 lf ls --json                    # every durable Wave and its Home/runtime evidence
 lf status <wave> --json         # one Wave's Work hierarchy, Runs, and attention
 lf roadmap --json               # current plan across Waves joined to runtime truth
+lf activity                     # durable Work changes, newest first
+lf activity --task INF-123 --json # filter before the bounded typed snapshot
 lf runs                         # one row per skill call: context, tokens, cost
 lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf execs                        # one row per lf process
@@ -437,7 +439,9 @@ lf doctor --json                # machine-readable audit
 
 `lf ls` reads the Wave registry. `lf status` focuses one Wave's operational
 truth. `lf roadmap` overlays the current Linear-backed plan without creating a
-second runtime model.
+second runtime model. `lf activity` orders durable Work creation, Run, Task PR,
+and Steer facts; it reuses `WorkRef` identity and does not read reconstructable
+Task or Project wake events.
 
 `lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
 attach `lf` processes to call records; exact ancestry attaches provider

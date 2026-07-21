@@ -12,6 +12,7 @@ local ledger. Use `lf ps --json` for a machine-readable activity frame and
 lf ls                  # every wave, running and stopped, live servers marked
 lf status <wave>       # one wave's Project → Task hierarchy, runs, attention
 lf roadmap             # every open Task across every wave
+lf activity            # what changed, newest first, with durable evidence
 ```
 
 `lf roadmap` buckets the whole machine's work by what it needs: **Now** (live
@@ -19,6 +20,10 @@ and advancing), **Needs attention** (a User-routed Ask or recovery),
 **Available**, **Later**. It overlays live evidence on
 the Linear-backed plan, so the answer to "where is my attention needed" is one
 command.
+
+`lf activity` orders durable Work creation, Run, Task PR, and Steer facts.
+Filter with `--wave`, `--project`, or `--task`; filters apply before `--limit`.
+It is history, not another live process model: `lf ps` owns current motion.
 
 ## Drill down
 

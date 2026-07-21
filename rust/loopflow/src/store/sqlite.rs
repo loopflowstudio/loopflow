@@ -1817,6 +1817,25 @@ impl SqliteStore {
         )
     }
 
+    /// Invocations with a start or finish fact at or after `since`.
+    pub fn agent_invocations_with_activity_since(
+        &self,
+        since: i64,
+    ) -> StoreResult<Vec<AgentInvocationRow>> {
+        self.query_agent_invocations(
+            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
+             FROM agent_invocations
+             WHERE started_at >= ?1 OR ended_at >= ?1
+             ORDER BY started_at, rowid",
+            params![since],
+        )
+    }
+
     fn query_agent_invocations(
         &self,
         sql: &str,

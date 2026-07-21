@@ -2,12 +2,41 @@ use anyhow::{anyhow, bail, Result};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{check_cli_available, codex_permission_args, workspace_add_dirs, LaunchTarget};
 use crate::provider_auth::Provider;
 
 pub fn find_repo_root() -> Result<PathBuf> {
     crate::engine::repo::find_repo_root()
+}
+
+pub(crate) fn parse_since(value: &str, now: OffsetDateTime) -> Result<OffsetDateTime> {
+    if let Ok(timestamp) = OffsetDateTime::parse(value, &Rfc3339) {
+        return Ok(timestamp);
+    }
+    let (amount, unit) = value.split_at(value.len().saturating_sub(1));
+    let amount: i64 = amount
+        .parse()
+        .map_err(|_| anyhow!("invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"))?;
+    if amount < 0 {
+        return Err(anyhow!("--since duration must be non-negative"));
+    }
+    let seconds_per_unit = match unit {
+        "d" => 86_400,
+        "h" => 3_600,
+        "m" => 60,
+        _ => {
+            return Err(anyhow!(
+                "invalid --since '{value}'; use 7d, 24h, 30m, or RFC3339"
+            ));
+        }
+    };
+    let seconds = amount
+        .checked_mul(seconds_per_unit)
+        .ok_or_else(|| anyhow!("--since duration is too large"))?;
+    now.checked_sub(Duration::seconds(seconds))
+        .ok_or_else(|| anyhow!("--since duration is too large"))
 }
 
 /// Message text from the args (joined) or stdin (heredoc-friendly). The

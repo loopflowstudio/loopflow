@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use crate::child::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildRef, ObservationRecipient,
 };
-use crate::durable::{Author, RunLease};
+use crate::durable::{Author, Basis, RunLease};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::project::{
@@ -31,8 +31,9 @@ use crate::task::{
 };
 
 use super::durable::{
-    create_project_spine, create_task_spine, end_run_for_lease, validate_run_lease,
-    validate_stop_lease, work_for_child_in, work_status_in,
+    create_project_spine, create_task_spine, current_epoch_in, end_run_for_lease, validate_basis,
+    validate_completion_readiness_in, validate_run_lease, validate_stop_lease, work_for_child_in,
+    work_status_in,
 };
 use super::SqliteStore;
 
@@ -1002,6 +1003,12 @@ impl SqliteStore {
         outcome: crate::durable::BoundaryState,
     ) -> StoreResult<()> {
         validate_project(project)?;
+        if outcome == crate::durable::BoundaryState::Failed {
+            return Err(StoreError::InvalidData(
+                "Project failure must use fail_project_run so its event and Run settle atomically"
+                    .to_string(),
+            ));
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_cleanup_run_owns_child(
@@ -1023,6 +1030,98 @@ impl SqliteStore {
         end_run_for_lease(&transaction, lease, outcome)?;
         transaction.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn fail_project_run(
+        &self,
+        project: &Project,
+        lease: &RunLease,
+        error: &str,
+    ) -> StoreResult<ProjectEvent> {
+        validate_project(project)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_cleanup_run_owns_child(
+            &transaction,
+            &ChildRef::Project(project.id.clone()),
+            lease,
+        )?;
+        let parameters = project_params(project);
+        if transaction.execute(
+            PROJECT_RUN_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot fail Project {}",
+                lease.run_id, project.id
+            )));
+        }
+        let event = insert_project_event_in(
+            &transaction,
+            project,
+            &ProjectEventKind::Failed {
+                error: error.to_string(),
+                resumable: true,
+            },
+        )?;
+        end_run_for_lease(&transaction, lease, crate::durable::BoundaryState::Failed)?;
+        transaction.commit()?;
+        Ok(event)
+    }
+
+    pub(crate) fn complete_project_run(
+        &self,
+        project: &Project,
+        lease: &RunLease,
+        basis: &Basis,
+        summary: &str,
+    ) -> StoreResult<ProjectEvent> {
+        validate_project(project)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_run_owns_child(&transaction, &ChildRef::Project(project.id.clone()), lease)?;
+        let run = validate_run_lease(&transaction, lease)?;
+        let epoch = current_epoch_in(&transaction, &run.work)?;
+        if epoch.id != run.epoch_id {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} does not own the current Project Epoch {}",
+                run.id, epoch.id
+            )));
+        }
+        validate_basis(&epoch.current_basis, basis)?;
+        validate_completion_readiness_in(&transaction, &run)?;
+        if update_project_for_run_in(&transaction, project, lease)? == 0 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot complete Project {}",
+                lease.run_id, project.id
+            )));
+        }
+        let event = insert_project_event_in(
+            &transaction,
+            project,
+            &ProjectEventKind::Completed {
+                summary: summary.to_string(),
+            },
+        )?;
+        if transaction.execute(
+            "UPDATE epochs SET state='done', terminal_at=?2
+             WHERE id=?1 AND state='open' AND current_rev=?3",
+            params![epoch.id.as_str(), now_unix(), basis.revision as i64,],
+        )? != 1
+        {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} Work changed while completion was being recorded",
+                project.id
+            )));
+        }
+        end_run_for_lease(
+            &transaction,
+            lease,
+            crate::durable::BoundaryState::Succeeded,
+        )?;
+        transaction.commit()?;
+        Ok(event)
     }
 
     pub fn handoff_project_body(

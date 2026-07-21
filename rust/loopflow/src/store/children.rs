@@ -1,7 +1,7 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child::{ChildBodyHandoffRequest, ObservationRecipient};
-use crate::durable::{Author, RunLease};
+use crate::durable::{Author, Basis, RunLease};
 use crate::id::WaveId;
 use crate::project::{ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::task::{
@@ -651,6 +651,72 @@ impl Store {
             store.finish_project_run(&project, &lease, outcome)
         })
         .await
+    }
+
+    pub(crate) async fn fail_project_run(
+        &self,
+        project: &Project,
+        lease: &RunLease,
+        error: &str,
+    ) -> StoreResult<ProjectEvent> {
+        let project_id = project.id.clone();
+        let wave_id = project.wave_id.clone();
+        let project = project.clone();
+        let lease = lease.clone();
+        let error = error.to_string();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.fail_project_run(&project, &lease, &error)
+        })
+        .await?;
+        self.nudge_project_terminal_observation(&project_id, &wave_id, event.id, "failed")
+            .await;
+        Ok(event)
+    }
+
+    pub(crate) async fn complete_project_run(
+        &self,
+        project: &Project,
+        lease: &RunLease,
+        basis: &Basis,
+        summary: &str,
+    ) -> StoreResult<ProjectEvent> {
+        let project_id = project.id.clone();
+        let wave_id = project.wave_id.clone();
+        let project = project.clone();
+        let lease = lease.clone();
+        let basis = basis.clone();
+        let summary = summary.to_string();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.complete_project_run(&project, &lease, &basis, &summary)
+        })
+        .await?;
+        self.nudge_project_terminal_observation(&project_id, &wave_id, event.id, "completed")
+            .await;
+        Ok(event)
+    }
+
+    async fn nudge_project_terminal_observation(
+        &self,
+        project_id: &ProjectId,
+        wave_id: &WaveId,
+        event_id: i64,
+        outcome: &'static str,
+    ) {
+        match self.get_wave(wave_id).await {
+            Ok(Some(wave)) => {
+                if let Err(error) =
+                    crate::lf::commands::chat::nudge_child_observations(wave.name()).await
+                {
+                    tracing::debug!(%error, %project_id, event_id, outcome, "live Project terminal observation delivery failed; Wave observer will retry");
+                }
+            }
+            Ok(None) => {
+                tracing::error!(%wave_id, %project_id, event_id, outcome, "Project terminal event cannot nudge its missing owning Wave")
+            }
+            Err(error) => {
+                tracing::debug!(%error, %wave_id, %project_id, event_id, outcome, "Project terminal observation lookup failed; Wave observer will retry")
+            }
+        }
     }
 
     #[cfg(test)]

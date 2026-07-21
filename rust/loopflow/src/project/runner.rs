@@ -692,14 +692,15 @@ async fn finish_project_outcome(
     summary: String,
 ) -> Result<()> {
     if disposition == ProjectDisposition::Done {
-        store
-            .append_project_event_for_run(
-                &project.id,
-                lease,
-                &ProjectEventKind::Completed { summary },
-            )
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
             .await?;
-        store.done(lease, basis).await?;
+        if store.work_status(&work).await? == WorkStatus::Done {
+            return Ok(());
+        }
+        store
+            .complete_project_run(project, lease, basis, &summary)
+            .await?;
     } else {
         store
             .finish_project_run(project, lease, crate::durable::BoundaryState::Succeeded)
@@ -1004,19 +1005,7 @@ async fn finish_failed(
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    store
-        .append_project_event_for_run(
-            &project.id,
-            lease,
-            &ProjectEventKind::Failed {
-                error: error.to_string(),
-                resumable: true,
-            },
-        )
-        .await?;
-    store
-        .finish_project_run(project, lease, crate::durable::BoundaryState::Failed)
-        .await?;
+    store.fail_project_run(project, lease, error).await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1229,19 +1218,7 @@ async fn record_unhandled_failure(
         return;
     }
     let message = format!("project runner failed: {error}");
-    let _ = store
-        .append_project_event_for_run(
-            &project.id,
-            lease,
-            &ProjectEventKind::Failed {
-                error: message.clone(),
-                resumable: true,
-            },
-        )
-        .await;
-    let _ = store
-        .finish_project_run(&project, lease, crate::durable::BoundaryState::Failed)
-        .await;
+    let _ = store.fail_project_run(&project, lease, &message).await;
 }
 
 fn project_seed(
@@ -1281,11 +1258,305 @@ fn bounded_summary(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
+    use anyhow::anyhow;
+    use time::OffsetDateTime;
+
+    use crate::child::ChildRef;
+    use crate::durable::{BoundaryState, RunAdvance, RunLease, WorkStatus};
+    use crate::id::WaveId;
+    use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::project::{Project, ProjectEventKind, ProjectId};
+    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::wave::Wave;
+
+    async fn project_fixture() -> (
+        tempfile::TempDir,
+        PathBuf,
+        SharedStore,
+        Project,
+        RunLease,
+        crate::durable::AgentInvocation,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database.clone()))
+                .await
+                .unwrap(),
+        );
+        let wave = Wave::new(
+            WaveId::new(),
+            "incident-management".to_string(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let now = OffsetDateTime::now_utc();
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("incident-management-project").unwrap(),
+                slug: "incident-management".to_string(),
+                name: "Incident Management".to_string(),
+                prompt_context: "Restore incidents before prevention.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project(&project).await.unwrap();
+        let reservation = store
+            .reserve_project_process(&project, WorkStatus::Ready)
+            .await
+            .unwrap()
+            .unwrap();
+        let lease = store
+            .resolve_run_lease(reservation.run_token.clone())
+            .await
+            .unwrap();
+        let invocation = store
+            .open_invocation_for_run(&lease.run_id)
+            .await
+            .unwrap()
+            .unwrap();
+        (directory, database, store, project, lease, invocation)
+    }
+
     #[test]
     fn project_summary_is_bounded() {
         assert_eq!(
             super::bounded_summary(&"x".repeat(2_500)).chars().count(),
             2_000
         );
+    }
+
+    #[tokio::test]
+    async fn successful_project_flow_boundary_settles_once_without_turn_capture() {
+        let (_directory, database, store, mut project, lease, invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        let basis = store.boundary_seed(&work).await.unwrap().basis;
+        project.iteration = 1;
+        store
+            .append_project_event_for_run(
+                &project.id,
+                &lease,
+                &ProjectEventKind::IterationCompleted {
+                    iteration: project.iteration,
+                    summary: "restored the reported surface".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id,
+                    outcome: BoundaryState::Succeeded,
+                },
+            )
+            .await
+            .unwrap();
+
+        super::finish_project_outcome(
+            &store,
+            &project,
+            &lease,
+            &basis,
+            super::ProjectDisposition::Done,
+            "restored the reported surface".to_string(),
+        )
+        .await
+        .unwrap();
+        super::finish_project_outcome(
+            &store,
+            &project,
+            &lease,
+            &basis,
+            super::ProjectDisposition::Done,
+            "restored the reported surface".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
+        let events = store.project_events_after(&project.id, 0).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0].kind,
+            ProjectEventKind::IterationCompleted { iteration: 1, .. }
+        ));
+        assert!(matches!(events[1].kind, ProjectEventKind::Completed { .. }));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event.kind, ProjectEventKind::Failed { .. })));
+
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let run_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM runs WHERE epoch_id=?1",
+                [basis.epoch_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let turn_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM agent_turns WHERE epoch_id=?1",
+                [basis.epoch_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(run_count, 1);
+        assert_eq!(turn_count, 0);
+    }
+
+    #[tokio::test]
+    async fn project_failure_before_success_remains_resumable_and_exact() {
+        let (_directory, database, store, project, lease, invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+
+        super::record_unhandled_failure(
+            &store,
+            &project.id,
+            &lease,
+            &anyhow!("Linear project snapshot is unavailable"),
+        )
+        .await;
+
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+        let events = store.project_events_after(&project.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0].kind,
+            ProjectEventKind::Failed { error, resumable: true }
+                if error == "project runner failed: Linear project snapshot is unavailable"
+        ));
+
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let run_state: String = connection
+            .query_row(
+                "SELECT state FROM runs WHERE id=?1",
+                [lease.run_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (invocation_ended, invocation_outcome): (bool, String) = connection
+            .query_row(
+                "SELECT ended_at IS NOT NULL, outcome FROM agent_invocations WHERE id=?1",
+                [invocation.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_state, "ended");
+        assert!(invocation_ended);
+        assert_eq!(invocation_outcome, "failed");
+    }
+
+    #[tokio::test]
+    async fn project_failure_cannot_bypass_its_atomic_receipt() {
+        let (_directory, _database, store, project, lease, _invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+
+        let error = store
+            .finish_project_run(&project, &lease, BoundaryState::Failed)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("must use fail_project_run"));
+        assert!(matches!(
+            store.work_status(&work).await.unwrap(),
+            WorkStatus::Running { .. }
+        ));
+        assert!(store
+            .project_events_after(&project.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .open_invocation_for_run(&lease.run_id)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn project_failure_receipt_rolls_back_together() {
+        let (_directory, database, store, project, lease, invocation) = project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER inject_project_failure_receipt_error
+                 BEFORE UPDATE OF state ON runs
+                 WHEN NEW.state='ended'
+                 BEGIN
+                    SELECT RAISE(ABORT, 'injected Project failure receipt error');
+                 END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let error = store
+            .fail_project_run(&project, &lease, "provider event stream closed")
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("injected Project failure receipt error"));
+        assert!(matches!(
+            store.work_status(&work).await.unwrap(),
+            WorkStatus::Running { .. }
+        ));
+        assert!(store
+            .project_events_after(&project.id, 0)
+            .await
+            .unwrap()
+            .is_empty());
+        let connection = rusqlite::Connection::open(database).unwrap();
+        let run_state: String = connection
+            .query_row(
+                "SELECT state FROM runs WHERE id=?1",
+                [lease.run_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (invocation_ended, invocation_outcome): (bool, String) = connection
+            .query_row(
+                "SELECT ended_at IS NOT NULL, outcome FROM agent_invocations WHERE id=?1",
+                [invocation.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let observation_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM observation_outbox", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(run_state, "active");
+        assert!(!invocation_ended);
+        assert_eq!(invocation_outcome, "running");
+        assert_eq!(observation_count, 0);
     }
 }

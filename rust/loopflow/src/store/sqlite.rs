@@ -1836,6 +1836,29 @@ impl SqliteStore {
         )
     }
 
+    /// Invocations owning a terminal Turn at or after `since`.
+    pub fn agent_invocations_with_turns_ended_since(
+        &self,
+        since: i64,
+    ) -> StoreResult<Vec<AgentInvocationRow>> {
+        self.query_agent_invocations(
+            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
+             FROM agent_invocations
+             WHERE EXISTS (
+                 SELECT 1 FROM agent_turns
+                 WHERE agent_turns.invocation_id = agent_invocations.id
+                   AND agent_turns.ended_at >= ?1
+             )
+             ORDER BY started_at, rowid",
+            params![since],
+        )
+    }
+
     fn query_agent_invocations(
         &self,
         sql: &str,

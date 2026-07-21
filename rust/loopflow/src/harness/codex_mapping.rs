@@ -57,25 +57,20 @@ pub(super) fn map_turn_status(params: &Value) -> Lifecycle {
 pub(super) fn map_token_usage(params: &Value) -> TurnUsage {
     let total = params.pointer("/tokenUsage/total");
     let last = params.pointer("/tokenUsage/last");
-    let field = |key: &str| {
-        total
-            .and_then(|t| t.get(key))
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-    };
+    let field = |key: &str| total.and_then(|t| t.get(key)).and_then(Value::as_u64);
     let peak_input_tokens = last
         .and_then(|usage| usage.get("inputTokens"))
         .and_then(Value::as_u64);
     TurnUsage {
         input_tokens: field("inputTokens"),
         output_tokens: field("outputTokens"),
-        total_input_tokens: Some(field("inputTokens")),
+        total_input_tokens: field("inputTokens"),
         peak_input_tokens,
         context_window_tokens: params
             .pointer("/tokenUsage/modelContextWindow")
             .and_then(Value::as_u64),
-        reasoning_tokens: Some(field("reasoningOutputTokens")),
-        cache_read_tokens: Some(field("cachedInputTokens")),
+        reasoning_tokens: field("reasoningOutputTokens"),
+        cache_read_tokens: field("cachedInputTokens"),
         cache_write_tokens: None,
         model: None,
         cost_usd: None,
@@ -537,11 +532,11 @@ mod tests {
             }
         }));
 
-        assert_eq!(usage.input_tokens, 16065);
+        assert_eq!(usage.input_tokens, Some(16065));
         assert_eq!(usage.total_input_tokens, Some(16065));
         assert_eq!(usage.peak_input_tokens, Some(16065));
         assert_eq!(usage.context_window_tokens, Some(258400));
-        assert_eq!(usage.output_tokens, 5);
+        assert_eq!(usage.output_tokens, Some(5));
         assert_eq!(usage.reasoning_tokens, Some(0));
         assert_eq!(usage.cache_read_tokens, Some(9600));
     }

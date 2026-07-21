@@ -361,13 +361,15 @@ pub(super) fn process_line(
             } else {
                 Lifecycle::Completed
             };
+            if let Some(usage) = usage {
+                let _ = events.send(ConversationEvent::TurnUsage {
+                    turn_id: turn_id.to_string(),
+                    usage,
+                });
+            }
             let _ = events.send(ConversationEvent::TurnCompleted {
                 turn_id: turn_id.to_string(),
                 status,
-            });
-            let _ = events.send(ConversationEvent::TurnUsage {
-                turn_id: turn_id.to_string(),
-                usage,
             });
             return true;
         }
@@ -390,11 +392,8 @@ pub(super) fn process_line(
     false
 }
 
-fn map_turn_usage(event: &Value, state: &mut ReaderState) -> TurnUsage {
-    let input_tokens = event
-        .pointer("/usage/input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
+    let input_tokens = event.pointer("/usage/input_tokens").and_then(Value::as_u64);
     let cache_read_tokens = event
         .pointer("/usage/cache_read_input_tokens")
         .and_then(Value::as_u64);
@@ -404,15 +403,13 @@ fn map_turn_usage(event: &Value, state: &mut ReaderState) -> TurnUsage {
     let (peak_input_tokens, context_window_tokens) = state
         .take_peak_pressure(event)
         .map_or((None, None), |(input, window)| (Some(input), Some(window)));
-    TurnUsage {
+    let receipt = TurnUsage {
         input_tokens,
         output_tokens: event
             .pointer("/usage/output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        total_input_tokens: Some(
-            input_tokens + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0),
-        ),
+            .and_then(Value::as_u64),
+        total_input_tokens: input_tokens
+            .map(|input| input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)),
         peak_input_tokens,
         context_window_tokens,
         reasoning_tokens: event
@@ -428,7 +425,8 @@ fn map_turn_usage(event: &Value, state: &mut ReaderState) -> TurnUsage {
             .get("cost_usd")
             .or_else(|| event.get("total_cost_usd"))
             .and_then(Value::as_f64),
-    }
+    };
+    receipt.is_reported().then_some(receipt)
 }
 
 /// Map Claude tool name to a ConversationItem category.
@@ -864,25 +862,23 @@ mod tests {
         let result = process_line(line, "turn_1", &tx, &mut state);
         assert!(result);
 
-        let event = rx.try_recv().expect("should have event");
-        match event {
-            ConversationEvent::TurnCompleted { turn_id, status } => {
-                assert_eq!(turn_id, "turn_1");
-                assert_eq!(status, Lifecycle::Completed);
-            }
-            other => panic!("expected TurnCompleted, got {other:?}"),
-        }
-
         let usage_event = rx.try_recv().expect("should have usage event");
         match usage_event {
             ConversationEvent::TurnUsage { turn_id, usage } => {
                 assert_eq!(turn_id, "turn_1");
-                assert_eq!(usage.input_tokens, 0);
-                assert_eq!(usage.output_tokens, 0);
+                assert_eq!(usage.input_tokens, None);
+                assert_eq!(usage.output_tokens, None);
                 assert_eq!(usage.cost_usd, Some(0.01));
             }
             other => panic!("expected TurnUsage, got {other:?}"),
         }
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ConversationEvent::TurnCompleted {
+                turn_id,
+                status: Lifecycle::Completed,
+            }) if turn_id == "turn_1"
+        ));
     }
 
     #[test]
@@ -913,14 +909,13 @@ mod tests {
         let result = process_line(line, "turn_42", &tx, &mut state);
         assert!(result);
 
-        let _completed = rx.try_recv().expect("completion event");
         let usage_event = rx.try_recv().expect("usage event");
         match usage_event {
             ConversationEvent::TurnUsage { turn_id, usage } => {
                 assert_eq!(turn_id, "turn_42");
-                assert_eq!(usage.input_tokens, 321);
+                assert_eq!(usage.input_tokens, Some(321));
                 assert_eq!(usage.total_input_tokens, Some(337));
-                assert_eq!(usage.output_tokens, 123);
+                assert_eq!(usage.output_tokens, Some(123));
                 assert_eq!(usage.reasoning_tokens, Some(9));
                 assert_eq!(usage.cache_read_tokens, Some(11));
                 assert_eq!(usage.cache_write_tokens, Some(5));
@@ -929,6 +924,13 @@ mod tests {
             }
             other => panic!("expected TurnUsage, got {other:?}"),
         }
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ConversationEvent::TurnCompleted {
+                turn_id,
+                status: Lifecycle::Completed,
+            }) if turn_id == "turn_42"
+        ));
     }
 
     #[test]
@@ -940,7 +942,6 @@ mod tests {
 
         assert!(!process_line(assistant, "turn_42", &tx, &mut state));
         assert!(process_line(result, "turn_42", &tx, &mut state));
-        let _completed = rx.try_recv().expect("completion event");
         let usage_event = rx.try_recv().expect("usage event");
         let ConversationEvent::TurnUsage { usage, .. } = usage_event else {
             panic!("expected usage event");
@@ -948,6 +949,13 @@ mod tests {
         assert_eq!(usage.total_input_tokens, Some(104));
         assert_eq!(usage.peak_input_tokens, Some(50));
         assert_eq!(usage.context_window_tokens, Some(200));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ConversationEvent::TurnCompleted {
+                status: Lifecycle::Completed,
+                ..
+            })
+        ));
     }
 
     #[test]

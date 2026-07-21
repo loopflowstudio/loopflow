@@ -214,7 +214,10 @@ def _python_commands(changed: list[str]) -> list[Command]:
     test_files = [
         p
         for p in changed
-        if p.startswith("python/tests/") and Path(p).name.startswith("test_") and p.endswith(".py")
+        if p.startswith("python/tests/")
+        and Path(p).name.startswith("test_")
+        and p.endswith(".py")
+        and (REPO_ROOT / p).is_file()
     ]
     touches_source = (
         any(p.startswith("python/") and p not in test_files for p in changed)

@@ -9,7 +9,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::engine::agent::{build_claude_session_turn_args, AgentConfig};
 use crate::harness::claude_mapping::ReaderState;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
@@ -309,12 +309,8 @@ impl Harness for ClaudeHarness {
                     });
                 }
                 let _ = events.send(ConversationEvent::TurnCompleted {
-                    turn_id: reader_turn_id.clone(),
-                    status,
-                });
-                let _ = events.send(ConversationEvent::TurnUsage {
                     turn_id: reader_turn_id,
-                    usage: TurnUsage::default(),
+                    status,
                 });
             }
 

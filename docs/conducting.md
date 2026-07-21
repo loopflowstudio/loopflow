@@ -48,6 +48,7 @@ lf ps              # one call-tree snapshot ranked by completed output
 lf top             # continuously refresh rates, age, idle time, and health
 lf prune --dry-run # inspect safely removable process state
 lf usage           # subscription state per account, spend by repo/provider
+lf performance     # 14-day performance/spend scorecard with coverage
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf doctor          # audit the ledger: continuity, attribution, lineage

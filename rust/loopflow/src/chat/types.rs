@@ -103,8 +103,10 @@ pub struct SuggestedActionPayload {
 /// Token usage for a single agent turn.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TurnUsage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
     /// Provider-normalized input processed across the reported agent turn or
     /// session snapshot. Cached input is included exactly once.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,6 +127,20 @@ pub struct TurnUsage {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+}
+
+impl TurnUsage {
+    pub fn is_reported(&self) -> bool {
+        self.input_tokens.is_some()
+            || self.output_tokens.is_some()
+            || self.total_input_tokens.is_some()
+            || self.peak_input_tokens.is_some()
+            || self.context_window_tokens.is_some()
+            || self.reasoning_tokens.is_some()
+            || self.cache_read_tokens.is_some()
+            || self.cache_write_tokens.is_some()
+            || self.cost_usd.is_some()
+    }
 }
 
 // -- Event stream --
@@ -189,7 +205,7 @@ pub enum ConversationEvent {
         turn_id: String,
         status: Lifecycle,
     },
-    /// Token usage for a completed turn. Emitted after TurnCompleted.
+    /// Provider-reported usage for a turn. Emitted before `TurnCompleted`.
     TurnUsage {
         turn_id: String,
         usage: TurnUsage,
@@ -268,8 +284,8 @@ mod tests {
     #[test]
     fn turn_usage_round_trips_through_json() {
         let usage = TurnUsage {
-            input_tokens: 123,
-            output_tokens: 45,
+            input_tokens: Some(123),
+            output_tokens: Some(45),
             total_input_tokens: Some(149),
             peak_input_tokens: Some(80),
             context_window_tokens: Some(200),

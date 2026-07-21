@@ -103,11 +103,11 @@ impl ReaderState {
         self.turn_substantive
     }
 
-    /// Close a turn left open when the SSE stream disconnected. Returns
-    /// `TurnCompleted { Failed }` + `TurnUsage` so every `TurnStarted` gets a
-    /// terminal close and the journal never carries an open turn past a
-    /// disconnect. The body still fails once via the consumer's `Error`
-    /// handler — this is ledger honesty, not a second failure.
+    /// Close a turn left open when the SSE stream disconnected so every
+    /// `TurnStarted` gets a terminal close and the journal never carries an
+    /// open turn past a disconnect. The body still fails once via the
+    /// consumer's `Error` handler — this is ledger honesty, not a second
+    /// failure.
     pub(super) fn close_orphaned_turn(&mut self) -> Vec<ConversationEvent> {
         let turn_id = self
             .current_turn_id
@@ -240,20 +240,17 @@ fn complete_turn(
         .take()
         .unwrap_or_else(|| "unknown".to_string());
     state.tools.clear();
-    mapped.events.push(ConversationEvent::TurnCompleted {
-        turn_id: turn_id.clone(),
-        status,
-    });
-    // Only report usage the provider actually reported. A defaulted TurnUsage
-    // claims "the provider measured zero", and the trace capture takes a
-    // reported usage as authoritative — it replaces the totals accumulated from
-    // the stream rather than merging them. Emitting one here on every turn
-    // therefore erased real token counts.
+    // Only report usage the provider actually reported. An empty receipt would
+    // claim the provider measured zero instead of preserving missing evidence.
     if let Some(usage) = usage {
-        mapped
-            .events
-            .push(ConversationEvent::TurnUsage { turn_id, usage });
+        mapped.events.push(ConversationEvent::TurnUsage {
+            turn_id: turn_id.clone(),
+            usage,
+        });
     }
+    mapped
+        .events
+        .push(ConversationEvent::TurnCompleted { turn_id, status });
 }
 
 /// Close a turn that opencode reported `idle` but that produced no usable work.
@@ -267,7 +264,10 @@ fn complete_hollow_turn(
     usage: Option<TurnUsage>,
     mapped: &mut MappedEvent,
 ) {
-    let produced_tokens = usage.as_ref().is_some_and(|usage| usage.output_tokens > 0);
+    let produced_tokens = usage
+        .as_ref()
+        .and_then(|usage| usage.output_tokens)
+        .is_some_and(|tokens| tokens > 0);
     let (code, message, terminal_class) = if produced_tokens {
         (
             DECODE_GAP_CODE,
@@ -285,7 +285,8 @@ fn complete_hollow_turn(
     };
     let provider_output_tokens = usage
         .as_ref()
-        .map(|u| u.output_tokens as i64)
+        .and_then(|usage| usage.output_tokens)
+        .map(|tokens| tokens as i64)
         .filter(|&t| t > 0);
     let stream_ended_at = chrono::Utc::now().timestamp_millis();
     let evidence = FailureEvidence {
@@ -310,25 +311,20 @@ fn complete_hollow_turn(
 }
 
 fn map_turn_usage(properties: &Value) -> Option<TurnUsage> {
-    properties.get("usage").map(|usage| {
-        let input_tokens = usage
-            .pointer("/input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        TurnUsage {
+    properties.get("usage").and_then(|usage| {
+        let input_tokens = usage.pointer("/input_tokens").and_then(Value::as_u64);
+        let receipt = TurnUsage {
             input_tokens,
-            output_tokens: usage
-                .pointer("/output_tokens")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            total_input_tokens: Some(input_tokens),
+            output_tokens: usage.pointer("/output_tokens").and_then(Value::as_u64),
+            total_input_tokens: input_tokens,
             model: properties
                 .get("model")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
             cost_usd: usage.get("cost").and_then(Value::as_f64),
             ..TurnUsage::default()
-        }
+        };
+        receipt.is_reported().then_some(receipt)
     })
 }
 
@@ -755,16 +751,16 @@ mod tests {
         assert_eq!(completed.events.len(), 2);
         assert!(matches!(
             &completed.events[0],
-            ConversationEvent::TurnCompleted { turn_id, status }
-                if turn_id == &started_turn_id && *status == Lifecycle::Completed
+            ConversationEvent::TurnUsage { turn_id, usage }
+                if turn_id == &started_turn_id
+                    && usage.input_tokens == Some(222)
+                    && usage.output_tokens == Some(77)
+                    && usage.cost_usd == Some(0.13)
         ));
         assert!(matches!(
             &completed.events[1],
-            ConversationEvent::TurnUsage { turn_id, usage }
-                if turn_id == &started_turn_id
-                    && usage.input_tokens == 222
-                    && usage.output_tokens == 77
-                    && usage.cost_usd == Some(0.13)
+            ConversationEvent::TurnCompleted { turn_id, status }
+                if turn_id == &started_turn_id && *status == Lifecycle::Completed
         ));
     }
 
@@ -1077,7 +1073,7 @@ mod tests {
             other => panic!("expected decode-gap Error, got {other:?}"),
         }
         assert!(matches!(
-            closed.events[0],
+            closed.events[1],
             ConversationEvent::TurnCompleted {
                 status: Lifecycle::Failed,
                 ..

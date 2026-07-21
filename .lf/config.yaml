@@ -5,8 +5,8 @@ branch_names:
 pm:
   provider: linear
   linear_team: 3871bed0-8c95-4077-ab72-728327d615b3
-linear:
-  team: 60558c53-2169-49f8-a76a-1f4586705aa9
+internal:
+  use_rust: true
 release:
   targets:
     default:
@@ -24,5 +24,3 @@ release:
       - run
       - python
       - scripts/publish_release.py
-internal:
-  use_rust: true

@@ -492,14 +492,17 @@ fn repository_team_matrix() {
     assert!(error.contains("lf pm reteam --apply"), "{error}");
     assert!(error.contains("PRD-44"), "{error}");
 
-    // PRD-44 stages the repository target without deleting any legacy
-    // authority before the provider migration verifies successfully.
+    // PRD-44 leaves the repository Team as the sole PM authority after the
+    // provider migration verifies successfully.
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let config = std::fs::read_to_string(source.join(".lf/config.yaml")).unwrap();
-    assert!(config.contains("linear:\n  team:"));
     assert!(config.contains("linear_team:"));
-    let product = std::fs::read_to_string(source.join("wave/product/GOAL.md")).unwrap();
-    assert!(product.contains("linear_team:"));
+    assert!(!config.contains("linear:\n  team:"));
+    for wave in ["infrastructure", "intelligence", "product"] {
+        let goal = std::fs::read_to_string(source.join(format!("wave/{wave}/GOAL.md"))).unwrap();
+        assert!(!goal.contains("provider: linear"), "{wave}");
+        assert!(!goal.contains("linear_team:"), "{wave}");
+    }
 
     println!("one Team team-loo: Survival — A real task reaches done; Survival / Infrastructure — Gmail; LOO-1 and LOO-2 resolve independently");
 }

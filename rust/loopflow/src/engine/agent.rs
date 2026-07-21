@@ -101,6 +101,16 @@ pub enum AgentAuthority {
     Detached,
 }
 
+/// Filesystem write boundary for a provider launch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AgentWriteScope {
+    /// Respect the provider's configured permissions and Loopflow's ordinary floor.
+    #[default]
+    Configured,
+    /// Permit writes only inside the assigned working directory.
+    Worktree,
+}
+
 #[derive(Clone, Default)]
 pub struct AgentConfig {
     /// System/context prompt content.
@@ -117,6 +127,8 @@ pub struct AgentConfig {
     pub cwd: Option<std::path::PathBuf>,
     /// Whether the provider process inherits ambient Work execution authority.
     pub authority: AgentAuthority,
+    /// Maximum filesystem write scope granted to the provider.
+    pub write_scope: AgentWriteScope,
     /// Skip permission prompts
     pub skip_permissions: bool,
     /// Engine-injected structured replies (rendered via harness prompt guidance).
@@ -153,6 +165,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
             .field("authority", &self.authority)
+            .field("write_scope", &self.write_scope)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -344,6 +357,23 @@ pub fn codex_permission_args(
     auto: bool,
     skip_permissions: bool,
 ) -> Vec<String> {
+    codex_permission_args_for_scope(cwd, auto, skip_permissions, AgentWriteScope::Configured)
+}
+
+fn codex_permission_args_for_scope(
+    cwd: Option<&Path>,
+    auto: bool,
+    skip_permissions: bool,
+    write_scope: AgentWriteScope,
+) -> Vec<String> {
+    if write_scope == AgentWriteScope::Worktree {
+        let mut args = vec!["--sandbox".to_string(), "workspace-write".to_string()];
+        if auto {
+            args.push("--ask-for-approval".to_string());
+            args.push("never".to_string());
+        }
+        return args;
+    }
     if skip_permissions {
         return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
     }
@@ -462,6 +492,8 @@ pub struct ClaudeArgs {
     pub add_dirs: Vec<PathBuf>,
     /// Skip permission prompts.
     pub skip_permissions: bool,
+    /// Enforce the managed Task worktree boundary.
+    pub worktree_isolation: bool,
     /// Max turn budget.
     pub max_turns: Option<u32>,
     /// Enable streaming output (`--output-format stream-json --verbose`).
@@ -522,6 +554,24 @@ impl ClaudeArgs {
             args.push("--dangerously-skip-permissions".to_string());
         }
 
+        if self.worktree_isolation {
+            args.push("--permission-mode".to_string());
+            args.push("acceptEdits".to_string());
+            args.push("--setting-sources".to_string());
+            args.push(String::new());
+            args.push("--settings".to_string());
+            args.push(
+                serde_json::json!({
+                    "sandbox": {
+                        "enabled": true,
+                        "failIfUnavailable": true,
+                        "allowUnsandboxedCommands": false
+                    }
+                })
+                .to_string(),
+            );
+        }
+
         if let Some(max_turns) = self.max_turns {
             args.push("--max-turns".to_string());
             args.push(max_turns.to_string());
@@ -556,16 +606,13 @@ pub fn build_claude_session_turn_args(
         model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(system_prompt_with_structured_replies(config)),
         system_prompt_file: None,
-        add_dirs: config
-            .cwd
-            .as_deref()
-            .map(workspace_add_dirs)
+        add_dirs: (config.write_scope == AgentWriteScope::Configured)
+            .then(|| config.cwd.as_deref().map(workspace_add_dirs))
+            .flatten()
             .unwrap_or_default(),
-        skip_permissions: claude_skip_permissions(
-            config.cwd.as_deref(),
-            true,
-            config.skip_permissions,
-        ),
+        skip_permissions: config.write_scope == AgentWriteScope::Configured
+            && claude_skip_permissions(config.cwd.as_deref(), true, config.skip_permissions),
+        worktree_isolation: config.write_scope == AgentWriteScope::Worktree,
         max_turns: config.max_turns,
         stream: true,
         chrome: false,
@@ -647,7 +694,16 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    if launch.skip_permissions {
+    if launch.write_scope == AgentWriteScope::Worktree {
+        params.insert(
+            "approvalPolicy".to_string(),
+            serde_json::Value::String("never".to_string()),
+        );
+        params.insert(
+            "sandbox".to_string(),
+            serde_json::Value::String("workspace-write".to_string()),
+        );
+    } else if launch.skip_permissions {
         params.insert(
             "approvalPolicy".to_string(),
             serde_json::Value::String("never".to_string()),
@@ -707,16 +763,17 @@ pub fn build_claude_command(
         model: model_variant.map(str::to_string),
         system_prompt: Some(system_prompt_with_structured_replies(launch)),
         system_prompt_file: process.context_file.clone(),
-        add_dirs: launch
-            .cwd
-            .as_deref()
-            .map(workspace_add_dirs)
+        add_dirs: (launch.write_scope == AgentWriteScope::Configured)
+            .then(|| launch.cwd.as_deref().map(workspace_add_dirs))
+            .flatten()
             .unwrap_or_default(),
-        skip_permissions: claude_skip_permissions(
-            launch.cwd.as_deref(),
-            process.auto,
-            launch.skip_permissions,
-        ),
+        skip_permissions: launch.write_scope == AgentWriteScope::Configured
+            && claude_skip_permissions(
+                launch.cwd.as_deref(),
+                process.auto,
+                launch.skip_permissions,
+            ),
+        worktree_isolation: launch.write_scope == AgentWriteScope::Worktree,
         max_turns: launch.max_turns,
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
@@ -770,7 +827,7 @@ pub fn build_codex_command(
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
-    if !launch.skip_permissions {
+    if !launch.skip_permissions && launch.write_scope == AgentWriteScope::Configured {
         for dir in launch
             .cwd
             .as_deref()
@@ -786,10 +843,11 @@ pub fn build_codex_command(
         cmd.push("--json".to_string());
     }
 
-    cmd.extend(codex_permission_args(
+    cmd.extend(codex_permission_args_for_scope(
         launch.cwd.as_deref(),
         process.auto,
         launch.skip_permissions,
+        launch.write_scope,
     ));
 
     if process.auto {
@@ -852,8 +910,20 @@ pub fn build_opencode_command(process: &ProcessConfig, model_variant: Option<&st
 ///
 /// Returns `None` when no config overrides are needed (interactive mode, no context).
 pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
+    build_opencode_env_for_scope(process, AgentWriteScope::Configured)
+}
+
+fn build_opencode_env_for_scope(
+    process: &ProcessConfig,
+    write_scope: AgentWriteScope,
+) -> Option<String> {
     let mut oc_config = serde_json::Map::new();
-    if process.auto {
+    if write_scope == AgentWriteScope::Worktree {
+        oc_config.insert(
+            "permission".into(),
+            serde_json::json!({"*": "allow", "external_directory": "deny"}),
+        );
+    } else if process.auto {
         oc_config.insert(
             "permission".into(),
             serde_json::Value::String("allow".into()),
@@ -872,6 +942,12 @@ pub fn build_opencode_env(process: &ProcessConfig) -> Option<String> {
     }
 }
 
+/// Highest-priority OpenCode configuration for a managed Task provider.
+pub fn opencode_worktree_config() -> String {
+    build_opencode_env_for_scope(&ProcessConfig::default(), AgentWriteScope::Worktree)
+        .expect("worktree scope always produces OpenCode configuration")
+}
+
 pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMap<String, String> {
     let mut env = process.env.clone();
     let agent = launch.agent();
@@ -886,7 +962,7 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
             }
         }
         "opencode" => {
-            if let Some(env_val) = build_opencode_env(process) {
+            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
                 env.insert("OPENCODE_CONFIG_CONTENT".to_string(), env_val);
             }
         }
@@ -897,7 +973,12 @@ pub fn build_agent_env(launch: &AgentConfig, process: &ProcessConfig) -> BTreeMa
 }
 
 /// Apply harness-specific environment variables to a command.
-fn apply_harness_env(harness: &str, cmd: &mut Command, process: &ProcessConfig) {
+fn apply_harness_env(
+    harness: &str,
+    cmd: &mut Command,
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+) {
     match harness {
         "gemini" => {
             if let Some(ref context_file) = process.context_file {
@@ -908,7 +989,7 @@ fn apply_harness_env(harness: &str, cmd: &mut Command, process: &ProcessConfig) 
             }
         }
         "opencode" => {
-            if let Some(env_val) = build_opencode_env(process) {
+            if let Some(env_val) = build_opencode_env_for_scope(process, launch.write_scope) {
                 cmd.env("OPENCODE_CONFIG_CONTENT", env_val);
             }
         }
@@ -1350,7 +1431,7 @@ fn _launch_agent_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
-    apply_harness_env(&harness, &mut cmd, process);
+    apply_harness_env(&harness, &mut cmd, launch, process);
 
     // Callers that already assembled semantic assets supply a capture handle.
     // Small internal agent launches (PR copy, commit copy, ops fallback) still
@@ -2102,6 +2183,48 @@ trust_level = "trusted"
     }
 
     #[test]
+    fn managed_task_scope_cannot_be_widened_by_yolo_or_linked_main() {
+        let (_tmp, _main, worktree) = git_worktree_fixture();
+        let launch = AgentConfig {
+            agent: Some("codex".to_string()),
+            cwd: Some(worktree),
+            write_scope: AgentWriteScope::Worktree,
+            skip_permissions: true,
+            ..default_launch()
+        };
+        let process = auto_process();
+
+        let codex = build_codex_command(&launch, &process, None);
+        assert_arg_pair(&codex, "--sandbox", "workspace-write");
+        assert_arg_pair(&codex, "--ask-for-approval", "never");
+        assert!(!codex.contains(&"--add-dir".to_string()));
+        assert!(!codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        let thread = build_codex_thread_start_params(&launch);
+        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["approvalPolicy"], "never");
+
+        let claude = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
+        assert_arg_pair(&claude, "--permission-mode", "acceptEdits");
+        assert_arg_pair(&claude, "--setting-sources", "");
+        assert!(!claude.contains(&"--add-dir".to_string()));
+        assert!(!claude.contains(&"--dangerously-skip-permissions".to_string()));
+        let settings = claude
+            .windows(2)
+            .find_map(|pair| (pair[0] == "--settings").then_some(&pair[1]))
+            .expect("managed Claude settings");
+        let settings: serde_json::Value = serde_json::from_str(settings).unwrap();
+        assert_eq!(settings["sandbox"]["enabled"], true);
+        assert_eq!(settings["sandbox"]["failIfUnavailable"], true);
+        assert_eq!(settings["sandbox"]["allowUnsandboxedCommands"], false);
+
+        let opencode = build_opencode_env_for_scope(&process, AgentWriteScope::Worktree)
+            .expect("managed OpenCode settings");
+        let opencode: serde_json::Value = serde_json::from_str(&opencode).unwrap();
+        assert_eq!(opencode["permission"]["*"], "allow");
+        assert_eq!(opencode["permission"]["external_directory"], "deny");
+    }
+
+    #[test]
     fn build_codex_command_with_model() {
         let launch = default_launch();
         let process = auto_process();
@@ -2358,6 +2481,7 @@ trust_level = "trusted"
             system_prompt_file: None,
             add_dirs: vec!["/tmp/repo".into()],
             skip_permissions: true,
+            worktree_isolation: false,
             max_turns: Some(10),
             stream: true,
             chrome: true,
@@ -2477,6 +2601,7 @@ trust_level = "trusted"
             max_turns: None,
             resume_token: None,
             authority: AgentAuthority::Inherit,
+            write_scope: AgentWriteScope::Configured,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2503,6 +2628,7 @@ trust_level = "trusted"
             max_turns: Some(5),
             resume_token: None,
             authority: AgentAuthority::Inherit,
+            write_scope: AgentWriteScope::Configured,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2529,6 +2655,7 @@ trust_level = "trusted"
             max_turns: None,
             resume_token: None,
             authority: AgentAuthority::Inherit,
+            write_scope: AgentWriteScope::Configured,
             skip_permissions: false,
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".to_string(),

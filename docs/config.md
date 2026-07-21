@@ -349,13 +349,20 @@ If vendor config is less permissive, Loopflow warns and supplies its default.
 `--dangerously-bypass-approvals-and-sandbox`, Gemini uses `--yolo`, and OpenCode
 uses `permission: "allow"` via `OPENCODE_CONFIG_CONTENT`.
 
+Durable Task provider turns are the exception. Their assigned worktree is a
+hard write boundary, so `yolo` and a more permissive vendor config cannot widen
+it. Codex runs with `workspace-write`, Claude uses its strict fail-closed Bash
+sandbox, and OpenCode denies external-directory tools.
+
 ### Worktree Sandboxes
 
 Claude and Codex CLI/TUI sessions launched from a Git worktree automatically add
 the main repo as an extra writable directory. This keeps normal agent
 permissions, but lets Git write the linked worktree index under
 `<main>/.git/worktrees/<worktree>/` when the agent stages, commits, rebases, or
-runs mechanical `lf` commands.
+runs mechanical `lf` commands. Durable Task provider turns do not add the main
+repo. Loopflow owns their Git mutations after the provider edits and tests the
+assigned files.
 
 ### Session Launch
 

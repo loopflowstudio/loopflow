@@ -4,6 +4,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 const OPENCODE_REGISTRY_FILE: &str = "runtime/opencode-servers.json";
@@ -26,7 +27,9 @@ pub(crate) struct OpenCodeServerEntry {
 }
 
 pub(crate) fn registered_opencode_servers_at(lf_home: &Path) -> Result<Vec<OpenCodeServerEntry>> {
-    read_registry_entries(&lf_home.join(OPENCODE_REGISTRY_FILE))
+    let path = lf_home.join(OPENCODE_REGISTRY_FILE);
+    let _lock = lock_registry_for_read(&path)?;
+    read_registry_entries(&path)
 }
 
 pub(crate) fn register_opencode_server(opencode_pid: u32) -> Result<()> {
@@ -38,8 +41,12 @@ pub(crate) fn unregister_opencode_server(opencode_pid: u32) -> Result<()> {
 }
 
 pub fn reap_orphaned_opencode_servers() -> OpenCodeReapReport {
+    reap_orphaned_opencode_servers_at(&crate::store::lf_home_dir())
+}
+
+pub(crate) fn reap_orphaned_opencode_servers_at(lf_home: &Path) -> OpenCodeReapReport {
     reap_orphaned_opencode_servers_at_path(
-        &registry_path(),
+        &lf_home.join(OPENCODE_REGISTRY_FILE),
         |_| true,
         pid_is_alive,
         classify_leader,
@@ -71,6 +78,7 @@ fn register_opencode_server_at_path(
     opencode_pid: u32,
     owner_loopflow_pid: u32,
 ) -> Result<()> {
+    let _lock = lock_registry(path)?;
     let mut entries = read_registry_entries(path)?;
     entries.retain(|entry| entry.opencode_pid != opencode_pid);
     entries.push(OpenCodeServerEntry {
@@ -81,6 +89,7 @@ fn register_opencode_server_at_path(
 }
 
 fn unregister_opencode_server_at_path(path: &Path, opencode_pid: u32) -> Result<()> {
+    let _lock = lock_registry(path)?;
     let mut entries = read_registry_entries(path)?;
     let original_len = entries.len();
     entries.retain(|entry| entry.opencode_pid != opencode_pid);
@@ -113,6 +122,14 @@ fn reap_orphaned_opencode_servers_at_path(
     terminate_group: impl Fn(u32) -> bool,
 ) -> OpenCodeReapReport {
     let mut report = OpenCodeReapReport::default();
+    let _lock = match lock_registry(path) {
+        Ok(lock) => lock,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, "failed to lock OpenCode registry");
+            report.errors += 1;
+            return report;
+        }
+    };
     let entries = match read_registry_entries(path) {
         Ok(entries) => entries,
         Err(err) => {
@@ -176,6 +193,48 @@ fn reap_orphaned_opencode_servers_at_path(
     }
 
     report
+}
+
+fn lock_registry(path: &Path) -> Result<std::fs::File> {
+    let lock_path = path.with_extension("json.lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed creating runtime dir {}", parent.display()))?;
+    }
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| {
+            format!(
+                "failed opening OpenCode registry lock {}",
+                lock_path.display()
+            )
+        })?;
+    FileExt::lock_exclusive(&lock)
+        .with_context(|| format!("failed locking OpenCode registry {}", lock_path.display()))?;
+    Ok(lock)
+}
+
+fn lock_registry_for_read(path: &Path) -> Result<Option<std::fs::File>> {
+    let lock_path = path.with_extension("json.lock");
+    let lock = match std::fs::OpenOptions::new().read(true).open(&lock_path) {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed opening OpenCode registry lock {}",
+                    lock_path.display()
+                )
+            })
+        }
+    };
+    FileExt::lock_shared(&lock)
+        .with_context(|| format!("failed locking OpenCode registry {}", lock_path.display()))?;
+    Ok(Some(lock))
 }
 
 fn read_registry_entries(path: &Path) -> Result<Vec<OpenCodeServerEntry>> {
@@ -379,6 +438,16 @@ mod tests {
         unregister_opencode_server_at_path(&path, 111).expect("unregister pid");
         let entries = read_registry_entries(&path).expect("read entries");
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn reading_an_absent_registry_creates_no_runtime_state() {
+        let tmp = tempdir().expect("tempdir");
+
+        assert!(registered_opencode_servers_at(tmp.path())
+            .expect("read absent registry")
+            .is_empty());
+        assert!(!tmp.path().join("runtime").exists());
     }
 
     #[test]

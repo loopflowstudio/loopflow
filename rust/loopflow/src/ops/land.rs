@@ -9,7 +9,7 @@ use crate::engine::worktrees::{main_repo_root, worktree_path};
 use crate::engine::command::run_command;
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pr::{generate_pr_copy, PrInfo};
+use crate::ops::pr::{generate_pr_copy, read_cached_pr_copy, PrInfo};
 
 use crate::ops::progress::Progress;
 
@@ -329,11 +329,11 @@ fn resolve_pr_copy(
         return Ok((pr_title, pr_body));
     }
 
-    if let Some((title, body)) = read_cached_pr_copy(repo_root, progress)? {
+    if let Some(copy) = read_cached_pr_copy(repo_root, progress)? {
         progress.status("Using cached PR copy from scratch/");
-        pr_title = Some(title);
+        pr_title = Some(copy.title);
         if pr_body.is_none() {
-            pr_body = Some(body);
+            pr_body = Some(copy.body);
         }
         return Ok((pr_title, pr_body));
     }
@@ -344,57 +344,6 @@ fn resolve_pr_copy(
         pr_body = Some(generated.body);
     }
     Ok((pr_title, pr_body))
-}
-
-fn read_cached_pr_copy(
-    repo_root: &Path,
-    progress: &impl Progress,
-) -> OpsResult<Option<(String, String)>> {
-    let title_path = repo_root.join("scratch/pr-title.txt");
-    let body_path = repo_root.join("scratch/pr-body.md");
-    let ref_path = repo_root.join("scratch/.pr-copy-ref");
-
-    if !title_path.exists() || !body_path.exists() {
-        return Ok(None);
-    }
-
-    let title = std::fs::read_to_string(&title_path)?.trim().to_string();
-    if title.is_empty() {
-        return Ok(None);
-    }
-
-    let copied_for = match std::fs::read_to_string(&ref_path) {
-        Ok(value) => value.trim().to_string(),
-        Err(_) => {
-            progress.status("Ignoring cached PR copy: scratch/.pr-copy-ref is missing");
-            return Ok(None);
-        }
-    };
-    if !is_recent_ancestor(repo_root, &copied_for, 1)? {
-        progress.status("Ignoring cached PR copy: branch changed since gate output");
-        return Ok(None);
-    }
-
-    let body = std::fs::read_to_string(body_path)?;
-    Ok(Some((title, body)))
-}
-
-/// Check if HEAD is no more than `max_ahead` commits ahead of `commit`.
-/// This tolerates one bookkeeping commit after gate output while still
-/// forcing regeneration if substantive commits were added later.
-fn is_recent_ancestor(repo_root: &Path, commit: &str, max_ahead: u32) -> OpsResult<bool> {
-    let output = Command::new("git")
-        .args(["rev-list", "--count", &format!("{commit}..HEAD")])
-        .current_dir(repo_root)
-        .output()?;
-    if !output.status.success() {
-        return Ok(false);
-    }
-    let ahead = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u32>()
-        .unwrap_or(u32::MAX);
-    Ok(ahead <= max_ahead)
 }
 
 fn prepare_land(

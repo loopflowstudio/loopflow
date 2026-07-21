@@ -801,6 +801,30 @@ impl SqliteStore {
         Ok(event)
     }
 
+    pub(crate) fn fail_task_run(
+        &self,
+        task_id: &TaskId,
+        lease: &RunLease,
+        error: &str,
+    ) -> StoreResult<TaskEvent> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_cleanup_run_owns_child(&transaction, &ChildRef::Task(task_id.clone()), lease)?;
+        let task = transaction.query_row(TASK_SELECT, params![task_id.as_str()], map_task_row)?;
+        validate_task(&task)?;
+        let event = insert_task_event_in(
+            &transaction,
+            &task,
+            &TaskEventKind::Failed {
+                error: error.to_string(),
+                resumable: true,
+            },
+        )?;
+        end_run_for_lease(&transaction, lease, crate::durable::BoundaryState::Failed)?;
+        transaction.commit()?;
+        Ok(event)
+    }
+
     pub fn task_events_after(&self, task_id: &TaskId, cursor: i64) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(

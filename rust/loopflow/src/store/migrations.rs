@@ -502,6 +502,31 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
+#[cfg(test)]
+pub(crate) fn migration_sql_for_test(name: &str) -> String {
+    let marker = format!("-- draft: {name}");
+    if let Some(migration) = MIGRATIONS
+        .iter()
+        .find(|migration| migration.sql.lines().any(|line| line == marker))
+    {
+        return migration.sql.to_string();
+    }
+
+    let drafts =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
+    let prefix = format!("{name}__");
+    let path = std::fs::read_dir(drafts)
+        .expect("migration draft directory")
+        .map(|entry| entry.expect("migration draft entry").path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
+        })
+        .expect("migration is canonical or present as an ordinal-free draft");
+    std::fs::read_to_string(path).expect("migration SQL")
+}
+
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
 /// released. They remain here only long enough to recognize and converge that
@@ -1563,7 +1588,6 @@ fn incompatible() -> StoreError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::sync::mpsc::sync_channel;
     use std::time::Duration;
 
@@ -1572,13 +1596,14 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, migration_checksum, pending_migrations,
-        product_schema, validate_foreign_keys, validate_persisted_json, validate_set,
-        validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, migration_checksum, migration_sql_for_test,
+        pending_migrations, product_schema, validate_foreign_keys, validate_persisted_json,
+        validate_set, validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
+    const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
 
     fn _draft_is_canonical(name: &str) -> bool {
         let marker = format!("-- draft: {name}");
@@ -1632,22 +1657,6 @@ mod tests {
             )
             .unwrap();
         }
-    }
-
-    fn _repair_sql(name: &str) -> String {
-        let drafts =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/store/migrations/drafts");
-        let prefix = format!("{name}__");
-        let repair = fs::read_dir(&drafts)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".sql"))
-            })
-            .expect("repair is canonical or present as an ordinal-free draft");
-        fs::read_to_string(repair).unwrap()
     }
 
     fn apply_permuted_history(conn: &rusqlite::Connection) {
@@ -3010,11 +3019,11 @@ mod tests {
             .unwrap();
         if !_draft_is_canonical(REOPEN_REPAIR_NAME) {
             assert!(stale.contains("reopen_task"));
-            conn.execute_batch(&_repair_sql(REOPEN_REPAIR_NAME))
+            conn.execute_batch(&migration_sql_for_test(REOPEN_REPAIR_NAME))
                 .unwrap();
         }
         if !_draft_is_canonical(GATE_PROPOSAL_REPAIR_NAME) {
-            conn.execute_batch(&_repair_sql(GATE_PROPOSAL_REPAIR_NAME))
+            conn.execute_batch(&migration_sql_for_test(GATE_PROPOSAL_REPAIR_NAME))
                 .unwrap();
         }
         assert_eq!(
@@ -3773,6 +3782,152 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn legacy_task_flow_repair_restores_existing_tasks_without_moving_their_work() {
+        let conn = open();
+        if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
+            apply_before_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
+        } else {
+            apply_set(&conn, MIGRATIONS).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+                 VALUES ('wave_restore', 'restore', '/repo', 100);
+             INSERT INTO projects (id, wave_id, external_project_id, created_at)
+                 VALUES ('proj_restore', 'wave_restore', 'linear_project', 100);
+             INSERT INTO tasks (
+                 id, project_id, external_issue_id, issue_identifier, created_at,
+                 issue_title, issue_description, pm_snapshot_synced_at,
+                 pm_writeback_json, worktree, workspace_slug, agent, provider,
+                 iterate_flow, phase_cursor, phase_iteration, kickoff_flow,
+                 gate_flow, lifecycle_phase, phase_epoch, gate_cycle, updated_at
+             ) VALUES
+                 ('task_legacy_a', 'proj_restore', 'issue_a', 'LOO-193', 101,
+                  'Legacy A', '', 101, '{\"state\":\"current\"}', '/repo.a',
+                  'legacy-a', 'codex', 'codex', 'task', 3, 4,
+                  'task-design', 'ship', 'iterate', 7, 2, 111),
+                 ('task_legacy_b', 'proj_restore', 'issue_b', 'LOO-195', 102,
+                  'Legacy B', '', 102, '{\"state\":\"current\"}', '/repo.b',
+                  'legacy-b', 'codex', 'codex', 'task', 5, 6,
+                  'incident', 'ship', 'iterate', 8, 3, 112),
+                 ('task_explicit', 'proj_restore', 'issue_c', 'LOO-206', 103,
+                  'Explicit', '', 103, '{\"state\":\"current\"}', '/repo.c',
+                  'explicit-c', 'codex', 'codex', 'ship-5whys', 1, 2,
+                  'incident', 'ship', 'iterate', 9, 4, 113);
+             INSERT INTO epochs (
+                 id, number, task_id, state, current_rev, created_at
+             ) VALUES
+                 ('epoch_a', 1, 'task_legacy_a', 'open', 0, 101),
+                 ('epoch_b', 1, 'task_legacy_b', 'open', 0, 102),
+                 ('epoch_c', 1, 'task_explicit', 'open', 0, 103);
+             INSERT INTO task_prs (
+                 id, task_id, sequence, slug, branch, base_commit,
+                 created_at, updated_at
+             ) VALUES
+                 ('pr_a', 'task_legacy_a', 1, 'legacy-a', 'jack/legacy-a', 'base-a', 101, 111),
+                 ('pr_b', 'task_legacy_b', 1, 'legacy-b', 'jack/legacy-b', 'base-b', 102, 112),
+                 ('pr_c', 'task_explicit', 1, 'explicit-c', 'jack/explicit-c', 'base-c', 103, 113);",
+        )
+        .unwrap();
+
+        if _draft_is_canonical(LEGACY_TASK_FLOW_REPAIR_NAME) {
+            apply_draft(&conn, LEGACY_TASK_FLOW_REPAIR_NAME);
+        } else {
+            conn.execute_batch(&migration_sql_for_test(LEGACY_TASK_FLOW_REPAIR_NAME))
+                .unwrap();
+        }
+
+        let tasks = conn
+            .prepare(
+                "SELECT id, iterate_flow, kickoff_flow, gate_flow, lifecycle_phase,
+                        phase_epoch, phase_cursor, phase_iteration, gate_cycle,
+                        worktree, updated_at
+                 FROM tasks ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            tasks,
+            vec![
+                (
+                    "task_explicit".into(),
+                    "ship-5whys".into(),
+                    "incident".into(),
+                    "ship".into(),
+                    "iterate".into(),
+                    9,
+                    1,
+                    2,
+                    4,
+                    "/repo.c".into(),
+                    113,
+                ),
+                (
+                    "task_legacy_a".into(),
+                    "slice".into(),
+                    "task-design".into(),
+                    "ship".into(),
+                    "iterate".into(),
+                    7,
+                    3,
+                    4,
+                    2,
+                    "/repo.a".into(),
+                    111,
+                ),
+                (
+                    "task_legacy_b".into(),
+                    "slice".into(),
+                    "incident".into(),
+                    "ship".into(),
+                    "iterate".into(),
+                    8,
+                    5,
+                    6,
+                    3,
+                    "/repo.b".into(),
+                    112,
+                ),
+            ]
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM epochs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM task_prs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for flow in ["slice", "slice", "ship-5whys"] {
+            let invocation = crate::wave::playhead::QueuedInvocation::load(&repo, flow)
+                .expect("every repaired persisted loop flow resolves");
+            assert_eq!(invocation.flow, flow);
+        }
     }
 
     #[test]

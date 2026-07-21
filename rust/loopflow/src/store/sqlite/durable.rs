@@ -278,6 +278,12 @@ impl SqliteStore {
         run_by_id_in(&conn, run_id)
     }
 
+    pub(crate) fn latest_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let epoch = current_epoch_in(&conn, work)?;
+        latest_run_for_epoch_in(&conn, &epoch.id)
+    }
+
     pub(crate) fn resolve_run_lease(&self, token: &RunLeaseToken) -> StoreResult<RunLease> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let id = conn
@@ -1991,6 +1997,22 @@ fn run_for_epoch_in(conn: &Connection, epoch_id: &EpochId) -> StoreResult<Option
     let id = conn
         .query_row(
             "SELECT id FROM runs WHERE epoch_id=?1 AND state != 'ended'",
+            [epoch_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    id.map(|id| {
+        RunId::parse(&id)
+            .map_err(invalid_durable)
+            .and_then(|id| run_by_id_in(conn, &id))
+    })
+    .transpose()
+}
+
+fn latest_run_for_epoch_in(conn: &Connection, epoch_id: &EpochId) -> StoreResult<Option<Run>> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM runs WHERE epoch_id=?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
             [epoch_id.as_str()],
             |row| row.get::<_, String>(0),
         )

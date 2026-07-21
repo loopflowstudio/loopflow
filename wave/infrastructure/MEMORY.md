@@ -23,6 +23,12 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as parent Asks, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
+- **Tests must survive draft migration materialization** (learned 2026-07-21).
+  Release-equivalent Rust tests delete ordinal-free drafts and compile the
+  generated canonical batch. Test fixtures resolve migration SQL by its draft
+  marker through `migration_sql_for_test`; an `include_str!` pointing directly
+  at `migrations/drafts/` passes locally and fails the release tree at compile
+  time.
 - **Ordinary-PR integration tests inherit Task authority inside a worker.** Scrub `LF_RUN_CONTEXT` (plus its lease/invocation companions) when a fixture deliberately represents a non-Task repository. A missing registry while Run context is present is the intended fail-closed behavior, not a commit/push regression.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
 - **Linear Project names are identity-bearing under the native hierarchy.** The CLI slug derives deterministically from the Project name, and the slug is the cache filename (`projects/<slug>.md`) and the `--project` argument to task commands. Renaming a Linear Project changes its slug, so it moves the cache file and changes every task command's input — a rename is a migration, not a cosmetic edit.
@@ -67,6 +73,16 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   phase owns the Task worktree; providers without enforceable read-only mode
   fail closed. Launch failure ends the Invocation once, while a successful
   launch stays live until optional handback records its evidence.
+- **Persisted executable references are an installed-state invariant** (learned
+  2026-07-21). Removing or renaming a builtin flow requires a forward migration
+  for every surviving Task pin, plus catalog resolution before Run reservation.
+  A non-empty stored name is not proof that the installed binary and worktree
+  can execute it.
+- **One Task failure is one atomic durable fact** (learned 2026-07-21). The
+  failure event and Run/Invocation terminal state commit together; if the event
+  cannot persist, the Run stays open and recoverable. Automatic relaunch is
+  progress-relative and bounded, and only durable progress or explicit User
+  input resets its budget. An empty Run slot alone never authorizes retries.
 
 ## Planning model (settled, PR #852)
 
@@ -91,6 +107,12 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
 - **Cadenza release parity** — same nightly/weekly cadence, one-command updater, tests, self-hosted assumptions; document any deliberate divergence.
 - **Cron host bootstrap** — bring up the first maintained `lf cron` host (Mac mini default), Doppler configured, with scheduled checks.
 - **Release feedback loop** — failed nightly/weekly runs surface as attention items or focused fix PRs, distinguishing verification vs publish vs host vs stale-local drift.
+- **Installed-upgrade semantic gate** — resolve every active placed Work's
+  persisted lifecycle through the candidate builtin and repo-local catalogs
+  after migrations, before that binary becomes the Home launcher.
+- **Project terminal-receipt parity** — make Project failure events and
+  Run/Invocation settlement share the atomic receipt boundary now used by
+  Tasks, with a fault-injection proof.
 - **Replicate intentionally** — apply the skeleton to Manabot/Hootro only when they need it.
 
 - **Deferred: "up/down 5ths"** (Jack, 2026-07-06) — referent unresolved. `lf wt` shipped up/down stack navigation this branch; candidates for the phrase are stack level-jumps ("fifth" = a level), circle-of-fifths name generation instead of random word pairs, or a chord-model transpose. Jack said "keep going" — deferred, not dropped.

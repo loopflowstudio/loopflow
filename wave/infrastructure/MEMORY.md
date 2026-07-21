@@ -44,6 +44,12 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   deleted. Authored input is a durable Work Steer. Best-effort process nudges may
   reduce latency, but the server follow-up must make Home-owned Ready scanning
   the correctness path so a stopped Project cannot miss child Feedback.
+- **Controller evidence is not an agent Run** (learned 2026-07-20). When a
+  merged PR or another controller fact completes a Task, persist the Task
+  lifecycle, Work Epoch, and completion event in one transaction. Never mint a
+  synthetic Run to reuse a Run-owned terminal transition. Prove this boundary
+  with a zero-agent-boundary fixture and repeated reads that count Runs and
+  completion events.
 - **Durable Ask is the only blocking human-input primitive** (decided
   2026-07-21). Interactive Task phases are advisory: the runner makes one launch
   attempt and advances independently of launcher success, UI lifetime, or

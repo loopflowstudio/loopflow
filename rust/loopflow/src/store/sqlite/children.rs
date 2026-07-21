@@ -97,7 +97,7 @@ impl SqliteStore {
         let parameters = task_params(task);
         transaction
             .execute(
-                TASK_REOPEN_UPDATE,
+                TASK_LIFECYCLE_UPDATE,
                 rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
             )
             .map_err(|error| StoreError::InvalidData(format!("update reopened Task: {error}")))?;
@@ -286,7 +286,7 @@ impl SqliteStore {
             None => {
                 let parameters = task_control_params(task);
                 transaction.execute(
-                    TASK_UPDATE,
+                    TASK_LIFECYCLE_UPDATE,
                     rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
                 )?
             }
@@ -299,6 +299,9 @@ impl SqliteStore {
                 )));
             }
             return Err(StoreError::NotFound);
+        }
+        if run_lease.is_none() {
+            complete_task_work_in(&transaction, task)?;
         }
         transaction.commit()?;
         Ok(())
@@ -544,12 +547,13 @@ impl SqliteStore {
         settle_task_pr_on(&transaction, pr)?;
         let parameters = task_control_params(task);
         if transaction.execute(
-            TASK_UPDATE,
+            TASK_LIFECYCLE_UPDATE,
             rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
         )? == 0
         {
             return Err(StoreError::NotFound);
         }
+        complete_task_work_in(&transaction, task)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1319,6 +1323,72 @@ fn validate_task(task: &Task) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
+// A controller-proven Task completion is its own authority boundary. It must
+// not fabricate a Run merely to reuse the agent-owned `done` transition.
+fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
+    let proposal = task
+        .gate_proposal
+        .as_ref()
+        .filter(|proposal| proposal.done)
+        .ok_or_else(|| {
+            StoreError::InvalidData("completed Task requires a done gate proposal".to_string())
+        })?;
+    let (epoch_id, state) = conn.query_row(
+        "SELECT id, state FROM epochs
+         WHERE task_id=?1 ORDER BY number DESC LIMIT 1",
+        [task.id.as_str()],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    match state.as_str() {
+        "done" => return Ok(()),
+        "open" => {}
+        "abandoned" => {
+            return Err(StoreError::InvalidData(format!(
+                "Task {} Work is abandoned and cannot be completed",
+                task.id
+            )))
+        }
+        other => {
+            return Err(StoreError::InvalidData(format!(
+                "Task {} Work has invalid Epoch state {other:?}",
+                task.id
+            )))
+        }
+    }
+    let active_run: Option<String> = conn
+        .query_row(
+            "SELECT id FROM runs WHERE epoch_id=?1 AND state!='ended' LIMIT 1",
+            [epoch_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(run_id) = active_run {
+        return Err(StoreError::InvalidData(format!(
+            "Task {} Work cannot complete while Run {run_id} is active",
+            task.id
+        )));
+    }
+    if conn.execute(
+        "UPDATE epochs SET state='done', terminal_at=?2
+         WHERE id=?1 AND state='open'",
+        params![epoch_id, now_unix()],
+    )? != 1
+    {
+        return Err(StoreError::InvalidData(format!(
+            "Task {} Work changed while completion was being recorded",
+            task.id
+        )));
+    }
+    insert_task_event_in(
+        conn,
+        task,
+        &TaskEventKind::Completed {
+            summary: proposal.reason.clone(),
+        },
+    )?;
+    Ok(())
+}
+
 fn resolve_current_task(key: &str, mut tasks: Vec<Task>) -> StoreResult<Option<Task>> {
     if tasks.len() > 1 {
         return Err(StoreError::InvalidData(format!(
@@ -1516,7 +1586,7 @@ const TASK_UPDATE: &str = "UPDATE tasks SET
     iterate_flow=?16, kickoff_flow=?19, gate_flow=?20,
     created_at=?25, updated_at=?26
     WHERE id=?1";
-const TASK_REOPEN_UPDATE: &str = "UPDATE tasks SET
+const TASK_LIFECYCLE_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
     issue_title=?5, issue_description=?6, pm_snapshot_synced_at=?7,
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,

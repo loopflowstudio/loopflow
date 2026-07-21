@@ -229,7 +229,17 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, false)
+    register_task_with_process(home, worktree, branch, base_commit, true, false)
+}
+
+#[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
+pub fn register_unrun_task(
+    home: &Path,
+    worktree: &Path,
+    branch: &str,
+    base_commit: &str,
+) -> RegisteredTask {
+    register_task_with_process(home, worktree, branch, base_commit, false, false)
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
@@ -239,7 +249,7 @@ pub fn register_active_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_with_process(home, worktree, branch, base_commit, true)
+    register_task_with_process(home, worktree, branch, base_commit, true, true)
 }
 
 fn register_task_with_process(
@@ -247,6 +257,7 @@ fn register_task_with_process(
     worktree: &Path,
     branch: &str,
     base_commit: &str,
+    completed_boundary: bool,
     active: bool,
 ) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
@@ -341,6 +352,9 @@ fn register_task_with_process(
             .work_for_child(&loopflow::child::ChildRef::Task(task.id.clone()))
             .await
             .expect("resolve test Task Work");
+        if !completed_boundary {
+            return;
+        }
         let (_, lease) = store
             .reserve_run(&work, loopflow::durable::RunTrigger::User)
             .await

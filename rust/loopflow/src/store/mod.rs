@@ -1990,7 +1990,12 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
-        let task = make_task(&wave, &project);
+        let mut task = make_task(&wave, &project);
+        task.enter_finally(crate::task::TaskGateProposal {
+            done: true,
+            reason: "empty Task is complete".to_string(),
+        })
+        .unwrap();
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr).await.unwrap();
 

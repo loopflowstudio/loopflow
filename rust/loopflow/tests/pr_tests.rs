@@ -12,7 +12,10 @@ use loopflow::ops::{
 };
 use loopflow::task::{AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPublication};
 use loopflow_test_support::TestRepo;
-use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
+use support::{
+    counting_open_script, presentation_attempts, register_active_task, register_task,
+    register_unrun_task, EnvGuard,
+};
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
     let diff = pr_diff.unwrap_or("");
@@ -674,6 +677,158 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
         .expect("read completing PR");
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
+}
+
+#[test]
+fn repeated_status_of_merged_task_without_a_boundary_records_completion_once() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_unrun_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as completing");
+
+    let first = task_status("INF-123").expect("first completed status");
+    let first_snapshot = task_snapshot(&first).expect("first completed snapshot");
+    assert_eq!(first_snapshot.status, WorkStatus::Done);
+    let first_events = runtime
+        .block_on(task.store.task_events_after(&task.task.id, 0))
+        .expect("read first Task events");
+    let conn =
+        rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open test registry");
+    let first_epoch: (String, String, i64, i64) = conn
+        .query_row(
+            "SELECT id, state, current_rev, terminal_at FROM epochs
+             WHERE task_id=?1 ORDER BY number DESC LIMIT 1",
+            [task.task.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read completed Epoch");
+    let second = task_status("INF-123").expect("repeated completed status");
+    let second_snapshot = task_snapshot(&second).expect("repeated completed snapshot");
+    let second_epoch: (String, String, i64, i64) = conn
+        .query_row(
+            "SELECT id, state, current_rev, terminal_at FROM epochs
+             WHERE task_id=?1 ORDER BY number DESC LIMIT 1",
+            [task.task.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("reread completed Epoch");
+    let second_events = runtime
+        .block_on(task.store.task_events_after(&task.task.id, 0))
+        .expect("reread Task events");
+
+    assert_eq!(second_snapshot.status, WorkStatus::Done);
+    assert_eq!(
+        second_epoch, first_epoch,
+        "terminal Work must not be mutated"
+    );
+    assert_eq!(
+        second_events, first_events,
+        "completion must be recorded once"
+    );
+    let run_count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM runs WHERE epoch_id=?1",
+            [first_epoch.0.as_str()],
+            |row| row.get(0),
+        )
+        .expect("count completion Runs");
+    assert_eq!(run_count, 0, "status must not reserve a completion Run");
+    let completion_count = second_events
+        .iter()
+        .filter(|event| matches!(event.kind, loopflow::task::TaskEventKind::Completed { .. }))
+        .count();
+    assert_eq!(completion_count, 1);
+}
+
+#[test]
+fn status_does_not_duplicate_an_active_run_while_completion_is_pending() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let repo = TestRepo::new();
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_active_task(home.path(), repo.path(), branch, &base);
+    let head = repo.head_sha();
+    let now = time::OffsetDateTime::now_utc();
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: now,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: Some(head.clone()),
+        }),
+        merge: Some(PrMergeRequest {
+            mode: PrMergeMode::User,
+            requested_at: now,
+            head_sha: head,
+            after_merge: AfterMerge::CompleteTask,
+            next_slug: None,
+        }),
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as completing");
+    let conn =
+        rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open test registry");
+    let count_runs = || {
+        conn.query_row(
+            "SELECT count(*) FROM runs r
+             JOIN epochs e ON e.id=r.epoch_id WHERE e.task_id=?1",
+            [task.task.id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("count Task Runs")
+    };
+    let runs_before = count_runs();
+
+    let first = task_status("INF-123").expect("status with active Run");
+    let second = task_status("INF-123").expect("repeated status with active Run");
+
+    assert!(matches!(
+        task_snapshot(&first).expect("first active snapshot").status,
+        WorkStatus::Running { .. }
+    ));
+    assert!(matches!(
+        task_snapshot(&second)
+            .expect("repeated active snapshot")
+            .status,
+        WorkStatus::Running { .. }
+    ));
+    assert_eq!(
+        count_runs(),
+        runs_before,
+        "status must not reserve another Run"
+    );
 }
 
 #[test]

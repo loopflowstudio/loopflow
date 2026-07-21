@@ -151,6 +151,18 @@ enum Commands {
         /// Defaults to the Loopflow repo root of this checkout.
         #[arg(long)]
         repo: Option<String>,
+
+        /// Internal one-shot id used by `lf start` to correlate daemon startup.
+        #[arg(long, hide = true, requires_all = ["startup_receipt", "startup_socket"])]
+        startup_attempt: Option<String>,
+
+        /// Internal durable startup receipt written before signaling the caller.
+        #[arg(long, hide = true, requires_all = ["startup_attempt", "startup_socket"])]
+        startup_receipt: Option<PathBuf>,
+
+        /// Internal Unix socket used to signal the waiting `lf start` process.
+        #[arg(long, hide = true, requires_all = ["startup_attempt", "startup_receipt"])]
+        startup_socket: Option<PathBuf>,
     },
     /// Render and load the launchd (macOS) or systemd user (Linux) service so
     /// the daemon stays up across reboots. Service files never carry secrets —
@@ -178,34 +190,33 @@ fn main() -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
 
     match cli.command {
-        Commands::Serve { addr, repo } => {
-            let repo_root = match repo {
-                Some(path) => std::path::PathBuf::from(path),
-                None => loopflow::lf::commands::util::find_repo_root()
-                    .map_err(|e| anyhow::anyhow!("cannot find repo root: {e}"))?,
+        Commands::Serve {
+            addr,
+            repo,
+            startup_attempt,
+            startup_receipt,
+            startup_socket,
+        } => {
+            let startup = match (startup_attempt, startup_receipt, startup_socket) {
+                (Some(attempt_id), Some(receipt_path), Some(socket_path)) => {
+                    Some(lfd::StartupSignal {
+                        attempt_id,
+                        receipt_path,
+                        socket_path,
+                    })
+                }
+                (None, None, None) => None,
+                _ => unreachable!("clap requires the complete startup signal"),
             };
-
-            let socket: std::net::SocketAddr = addr
-                .parse()
-                .map_err(|error| anyhow::anyhow!("invalid --addr {addr:?}: {error}"))?;
-
-            // The store is always open: the delivery inbox lives there. A
-            // machine with no registry yet cannot host the daemon.
-            let store = rt.block_on(async {
-                store::open_existing_store().await.ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "no Loopflow registry on this machine; run `lf` once to create it"
-                    )
-                })
-            })?;
-            let store = std::sync::Arc::new(store);
-
-            // Linear config is optional: the daemon runs without it, but
-            // /linear/webhook returns 503 until LF_LINEAR_WEBHOOK_SECRET and
-            // LF_LINEAR_VIEWER_ID are both set.
-            let linear = read_linear_config();
-
-            rt.block_on(lfd::serve(repo_root, socket, store, linear))
+            let result = run_serve(&rt, addr, repo, startup.clone());
+            if let (Err(error), Some(startup)) = (&result, startup) {
+                if let Err(report_error) = rt.block_on(startup.report(lfd::StartupState::Failed {
+                    reason: error.to_string(),
+                })) {
+                    tracing::warn!(%report_error, "could not publish failed lfd startup receipt");
+                }
+            }
+            result
         }
         Commands::Install { addr, repo } => {
             let lfd_path = std::env::current_exe()
@@ -244,6 +255,37 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_serve(
+    rt: &tokio::runtime::Runtime,
+    addr: String,
+    repo: Option<String>,
+    startup: Option<lfd::StartupSignal>,
+) -> anyhow::Result<()> {
+    let repo_root = match repo {
+        Some(path) => std::path::PathBuf::from(path),
+        None => loopflow::lf::commands::util::find_repo_root()
+            .map_err(|e| anyhow::anyhow!("cannot find repo root: {e}"))?,
+    };
+
+    let socket: std::net::SocketAddr = addr
+        .parse()
+        .map_err(|error| anyhow::anyhow!("invalid --addr {addr:?}: {error}"))?;
+
+    // The store is always open: the delivery inbox lives there. A machine with
+    // no registry yet cannot host the daemon.
+    let store = rt.block_on(async {
+        store::open_existing_store().await.ok_or_else(|| {
+            anyhow::anyhow!("no Loopflow registry on this machine; run `lf` once to create it")
+        })
+    })?;
+    let store = std::sync::Arc::new(store);
+
+    // Linear config is optional: the daemon runs without it, but
+    // /linear/webhook returns 503 until both variables are configured.
+    let linear = read_linear_config();
+    rt.block_on(lfd::serve(repo_root, socket, store, linear, startup))
 }
 
 /// Read Linear webhook config from env. `None` when either the secret or the

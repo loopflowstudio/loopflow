@@ -199,6 +199,37 @@ struct RegistryQueryTests {
         #expect(result[0].home.id == "home_00000000000000000000000000000001")
     }
 
+    @Test("lf start rejects a non-live receipt")
+    func startRejectsNonLiveReceipt() async {
+        let json = #"""
+        [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
+          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":false,"paused":false,
+          "endpoint":null,"created_at":"2026-07-17T00:00:00Z","parent_wave_id":null,
+          "home":{"id":"home_00000000000000000000000000000001","route":"local",
+          "created_at":"2026-07-17T00:00:00Z","observed_at":"2026-07-17T00:00:00Z"}}]
+        """#
+        let query = RegistryQuery { _, _ in json }
+
+        await #expect(throws: RegistryQueryError.self) {
+            try await query.start(wave: "product", cwd: "/tmp/repo")
+        }
+    }
+
+    @Test("lf start surfaces an actionable preflight failure")
+    func startSurfacesPreflightFailure() async {
+        let query = RegistryQuery { _, _ in
+            throw RegistryQueryError("Wave broken failed preflight: invalid chat policy")
+        }
+
+        do {
+            _ = try await query.start(wave: "broken", cwd: "/tmp/repo")
+            Issue.record("expected the preflight failure")
+        } catch {
+            #expect(error.localizedDescription.contains("failed preflight"))
+            #expect(error.localizedDescription.contains("invalid chat policy"))
+        }
+    }
+
     @Test("lf pause and resume return the authored turn intent")
     func setWavePausedUsesIntentVerbs() async throws {
         let query = RegistryQuery { args, cwd in

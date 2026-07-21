@@ -61,6 +61,7 @@ use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
 use crate::store::Store;
 use crate::wave_host::WaveHost;
+use crate::wave_host::WaveStartOutcome;
 use crate::webhook::{self, WebhookEvent, WebhookOutcome, SIGNATURE_HEADER};
 
 /// Body limit on webhook routes. Linear deliveries are small; a hard cap keeps
@@ -69,6 +70,53 @@ const WEBHOOK_BODY_LIMIT: usize = 256 * 1024;
 const GITHUB_SIGNATURE_HEADER: &str = "x-hub-signature-256";
 const GITHUB_EVENT_HEADER: &str = "x-github-event";
 const ABANDONED_LOG_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone)]
+pub struct StartupSignal {
+    pub attempt_id: String,
+    pub receipt_path: PathBuf,
+    pub socket_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum StartupState {
+    Live { endpoint: String, home_id: HomeId },
+    Failed { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartupReceipt {
+    pub attempt_id: String,
+    #[serde(flatten)]
+    pub state: StartupState,
+}
+
+#[derive(Debug)]
+struct StartupSocket {
+    path: PathBuf,
+    directory: PathBuf,
+}
+
+impl Drop for StartupSocket {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
+impl StartupSignal {
+    pub async fn report(&self, state: StartupState) -> anyhow::Result<()> {
+        let receipt = StartupReceipt {
+            attempt_id: self.attempt_id.clone(),
+            state,
+        };
+        write_startup_receipt(&self.receipt_path, &receipt)?;
+        tokio::net::UnixStream::connect(&self.socket_path).await?;
+        Ok(())
+    }
+}
 
 /// Everything the `lfd` receiver needs, shared across requests.
 #[derive(Clone)]
@@ -172,14 +220,9 @@ async fn start_waves_handler(
     State(state): State<LfdState>,
     headers: HeaderMap,
     Json(request): Json<StartWavesRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<Json<Vec<WaveStartOutcome>>, (StatusCode, String)> {
     authorize_wave_control(&state, &headers)?;
-    state
-        .wave_host
-        .start_waves(request.wave_ids)
-        .await
-        .map(|()| StatusCode::NO_CONTENT)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+    Ok(Json(state.wave_host.start_waves(request.wave_ids).await))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -839,6 +882,7 @@ pub async fn serve(
     addr: SocketAddr,
     store: Arc<Store>,
     linear: Option<LinearConfig>,
+    startup: Option<StartupSignal>,
 ) -> anyhow::Result<()> {
     ensure_bind_allowed(
         addr,
@@ -882,6 +926,17 @@ pub async fn serve(
         token: state.control_token.as_ref().clone(),
     };
     write_endpoint(wave_host.home_id(), &client)?;
+    if let Some(startup) = startup {
+        if let Err(error) = startup
+            .report(StartupState::Live {
+                endpoint: client.endpoint.clone(),
+                home_id: wave_host.home_id().clone(),
+            })
+            .await
+        {
+            tracing::warn!(%error, "could not publish lfd startup receipt");
+        }
+    }
     tracing::info!(addr = %bound, home_id = %wave_host.home_id(), "lfd serving");
     let result = axum::serve(listener, router(state).into_make_service())
         .with_graceful_shutdown(shutdown_signal())
@@ -927,17 +982,45 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
     if live_endpoint(home_id).await.is_some() {
         return Ok(());
     }
+    let _launch_lock = lock_start(home_id).await?;
+    if live_endpoint(home_id).await.is_some() {
+        return Ok(());
+    }
+    let lfd = crate::engine::process::resolve_lfd_binary_checked()?;
+    let attempt_id = uuid::Uuid::new_v4().simple().to_string();
+    let startup_dir = endpoint_dir().join("startup");
+    std::fs::create_dir_all(&startup_dir)?;
+    let socket_id = &attempt_id[..12];
+    let socket_dir = std::env::temp_dir().join(format!("lfd-{socket_id}"));
+    std::fs::create_dir(&socket_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let socket_path = socket_dir.join("startup.sock");
+    let _socket_cleanup = StartupSocket {
+        path: socket_path.clone(),
+        directory: socket_dir,
+    };
+    let receipt_path = startup_dir.join(format!("{attempt_id}.json"));
+    let listener = tokio::net::UnixListener::bind(&socket_path)?;
     let argv = vec![
-        crate::engine::process::resolve_lfd_binary()
-            .to_string_lossy()
-            .to_string(),
+        lfd.to_string_lossy().to_string(),
         "serve".to_string(),
         "--addr".to_string(),
         "127.0.0.1:0".to_string(),
         "--repo".to_string(),
         repo.display().to_string(),
+        "--startup-attempt".to_string(),
+        attempt_id.clone(),
+        "--startup-receipt".to_string(),
+        receipt_path.display().to_string(),
+        "--startup-socket".to_string(),
+        socket_path.display().to_string(),
     ];
-    let launch = crate::engine::process::start_lf_session(
+    let launch = crate::engine::process::start_home_session(
         &format!(
             "lfd-{}",
             crate::engine::process::tmux_session_slug(home_id.as_str())
@@ -946,23 +1029,51 @@ pub(crate) async fn ensure(home_id: &HomeId, repo: &Path) -> anyhow::Result<()> 
         &argv,
     )
     .await;
-    for _ in 0..40 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        if live_endpoint(home_id).await.is_some() {
-            return Ok(());
-        }
-    }
-    match launch {
-        Ok(()) => Err(anyhow::anyhow!(
-            "lfd started for Home {home_id} but did not publish a live endpoint"
-        )),
-        Err(error) => Err(anyhow::anyhow!(
+    if let Err(error) = launch {
+        return Err(anyhow::anyhow!(
             "failed to start lfd for Home {home_id}: {error}"
+        ));
+    }
+    let receipt = tokio::time::timeout(
+        STARTUP_TIMEOUT,
+        read_startup_signal(listener, &receipt_path, &attempt_id),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "lfd did not publish a live or failed startup receipt for Home {home_id} within 10s; inspect {}",
+            crate::store::lf_home_dir().join("logs/lfd.log").display()
+        )
+    })??;
+    match receipt.state {
+        StartupState::Live {
+            home_id: reported, ..
+        } if reported == *home_id => live_endpoint(home_id).await.map(|_| ()).ok_or_else(|| {
+            anyhow::anyhow!(
+                "lfd reported live for Home {home_id}, but its endpoint is not answering"
+            )
+        }),
+        StartupState::Live {
+            home_id: reported, ..
+        } => Err(anyhow::anyhow!(
+            "lfd startup reached Home {reported}, not requested Home {home_id}"
         )),
+        StartupState::Failed { reason } => {
+            if live_endpoint(home_id).await.is_some() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "failed to start lfd for Home {home_id}: {reason}"
+                ))
+            }
+        }
     }
 }
 
-pub(crate) async fn start_waves(home_id: &HomeId, wave_ids: Vec<WaveId>) -> anyhow::Result<()> {
+pub(crate) async fn start_waves(
+    home_id: &HomeId,
+    wave_ids: Vec<WaveId>,
+) -> anyhow::Result<Vec<WaveStartOutcome>> {
     let client = live_endpoint(home_id)
         .await
         .ok_or_else(|| anyhow::anyhow!("lfd is not running for Home {home_id}"))?;
@@ -974,7 +1085,10 @@ pub(crate) async fn start_waves(home_id: &HomeId, wave_ids: Vec<WaveId>) -> anyh
         .await?;
     let status = response.status();
     if status.is_success() {
-        Ok(())
+        response
+            .json::<Vec<WaveStartOutcome>>()
+            .await
+            .map_err(anyhow::Error::from)
     } else {
         Err(anyhow::anyhow!(
             "lfd refused Wave start with HTTP {status}: {}",
@@ -1046,6 +1160,63 @@ fn lock_home(home_id: &HomeId) -> anyhow::Result<File> {
         anyhow::anyhow!("another lfd process already owns Home {home_id}: {error}")
     })?;
     Ok(file)
+}
+
+async fn lock_start(home_id: &HomeId) -> anyhow::Result<File> {
+    let path = endpoint_dir().join(format!("{}.start.lock", home_id.as_str()));
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        file.lock_exclusive()?;
+        Ok::<_, anyhow::Error>(file)
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("lfd launch lock task failed: {error}"))?
+}
+
+async fn read_startup_signal(
+    listener: tokio::net::UnixListener,
+    receipt_path: &Path,
+    attempt_id: &str,
+) -> anyhow::Result<StartupReceipt> {
+    listener.accept().await?;
+    let bytes = std::fs::read(receipt_path)?;
+    let receipt: StartupReceipt = serde_json::from_slice(&bytes)?;
+    if receipt.attempt_id != attempt_id {
+        anyhow::bail!(
+            "lfd startup receipt belongs to attempt {}, not {attempt_id}",
+            receipt.attempt_id
+        );
+    }
+    Ok(receipt)
+}
+
+fn write_startup_receipt(path: &Path, receipt: &StartupReceipt) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("startup receipt path has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let temporary = path.with_extension("json.tmp");
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    file.write_all(&serde_json::to_vec(receipt)?)?;
+    file.sync_all()?;
+    std::fs::rename(temporary, path)?;
+    Ok(())
 }
 
 fn read_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
@@ -1175,10 +1346,19 @@ mod tests {
             .send()
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        let message = response.text().await.unwrap();
-        assert!(message.contains(first.as_str()));
-        assert!(message.contains(second.as_str()));
+        assert_eq!(response.status(), StatusCode::OK);
+        let outcomes = response.json::<Vec<WaveStartOutcome>>().await.unwrap();
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].wave_id, first);
+        assert!(matches!(
+            outcomes[0].state,
+            crate::wave_host::WaveStartState::Failed { .. }
+        ));
+        assert_eq!(outcomes[1].wave_id, second);
+        assert!(matches!(
+            outcomes[1].state,
+            crate::wave_host::WaveStartState::Failed { .. }
+        ));
     }
 
     #[tokio::test]

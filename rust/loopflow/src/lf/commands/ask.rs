@@ -126,7 +126,19 @@ async fn wake_parent(store: &Store, route: &AnswerRoute) -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow!("parent Wave {wave_id} is not registered"))?;
             let placement = store.placement(parent).await?;
             crate::lfd::ensure(&placement.home_id, Path::new(wave.repo())).await?;
-            crate::lfd::start_waves(&placement.home_id, vec![wave_id.clone()]).await
+            let outcomes =
+                crate::lfd::start_waves(&placement.home_id, vec![wave_id.clone()]).await?;
+            match outcomes.as_slice() {
+                [crate::wave_host::WaveStartOutcome {
+                    state: crate::wave_host::WaveStartState::Live { .. },
+                    ..
+                }] => Ok(()),
+                [crate::wave_host::WaveStartOutcome {
+                    state: crate::wave_host::WaveStartState::Failed { reason },
+                    ..
+                }] => Err(anyhow!(reason.clone())),
+                _ => Err(anyhow!("lfd returned no outcome for parent Wave {wave_id}")),
+            }
         }
         WorkRef::Task(task_id) => Err(anyhow!(
             "Task {task_id} cannot own child Work and is not an Ask parent"

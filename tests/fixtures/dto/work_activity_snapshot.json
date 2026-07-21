@@ -42,6 +42,32 @@
       }
     },
     {
+      "id": "pr:pr_00000000000000000000000000000001:merge_requested",
+      "recorded_at": 1784654550,
+      "summary": "Merge requested for PR #1144",
+      "work": {
+        "kind": "task",
+        "id": "task_00000000000000000000000000000001"
+      },
+      "subject": "W2-144",
+      "fact": {
+        "kind": "pr_merge_requested",
+        "id": "pr_00000000000000000000000000000001",
+        "request": {
+          "mode": "auto",
+          "requested_at": "2026-07-21T18:35:51Z",
+          "head_sha": "3333333333333333333333333333333333333333",
+          "after_merge": "complete_task",
+          "next_slug": null
+        },
+        "github": {
+          "number": 1144,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/1144",
+          "head_sha": "3333333333333333333333333333333333333333"
+        }
+      }
+    },
+    {
       "id": "steer:steer_00000000000000000000000000000001",
       "recorded_at": 1784654500,
       "summary": "Steered: Make The Podium primary",

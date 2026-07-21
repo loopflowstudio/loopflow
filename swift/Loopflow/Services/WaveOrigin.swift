@@ -31,6 +31,17 @@ public enum WaveOrigin {
         return origin
     }
 
+    /// Return a previously resolved origin without performing I/O.
+    ///
+    /// Render paths use this after their query boundary has called `resolve` on
+    /// a detached task. A cache miss stays at the supplied path; SwiftUI must
+    /// never run `git` while evaluating its attribute graph.
+    public static func cached(_ repoPath: String) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache[repoPath] ?? repoPath
+    }
+
     #if os(macOS)
     private static func resolveUncached(_ repoPath: String) -> String {
         // Only a working-tree root resolves. A plain subdirectory inside a

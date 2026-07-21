@@ -50,7 +50,9 @@ struct WaveOriginTests {
             )
             try git(["worktree", "add", "-q", worktree.path], at: origin)
 
+            #expect(WaveOrigin.cached(worktree.path) == worktree.path)
             #expect(canonical(WaveOrigin.resolve(worktree.path)) == canonical(origin.path))
+            #expect(canonical(WaveOrigin.cached(worktree.path)) == canonical(origin.path))
             #expect(canonical(WaveOrigin.resolve(origin.path)) == canonical(origin.path))
         }
     }

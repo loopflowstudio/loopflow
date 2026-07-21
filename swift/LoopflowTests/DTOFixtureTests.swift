@@ -77,17 +77,24 @@ struct DTOFixtureTests {
         let snapshot = try JSONDecoder().decode(WorkActivitySnapshot.self, from: data)
 
         #expect(snapshot.limit == 50)
-        #expect(snapshot.items.map(\.subject) == ["W2-144", "W2-144", "product", "mac-surface-ux"])
+        #expect(snapshot.items.map(\.subject) == [
+            "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
+        ])
         #expect(snapshot.items[0].fact.invocationId == "invocation-product-run")
         #expect(snapshot.items[1].fact.github?.number == 1144)
         #expect(snapshot.items[1].fact.github?.url.host == "github.com")
-        #expect(snapshot.items[2].work.kind == .wave)
-        if case .steerIssued(_, .run(let id)) = snapshot.items[2].fact {
+        if case .prMergeRequested(_, let request, _) = snapshot.items[2].fact {
+            #expect(request.requestedAt == "2026-07-21T18:35:51Z")
+        } else {
+            Issue.record("expected a typed PR merge request")
+        }
+        #expect(snapshot.items[3].work.kind == .wave)
+        if case .steerIssued(_, .run(let id)) = snapshot.items[3].fact {
             #expect(id == "run_00000000000000000000000000000001")
         } else {
             Issue.record("expected a Run-authored Steer")
         }
-        #expect(snapshot.items[3].fact == .workCreated)
+        #expect(snapshot.items[4].fact == .workCreated)
     }
 
     @Test("Context Lab fixture preserves missing coverage and trace identity")

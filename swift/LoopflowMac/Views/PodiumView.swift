@@ -92,8 +92,7 @@ private struct PodiumBar: View {
     private var scopeTitle: String {
         guard let repoPath = model.repoPath else { return "All repositories" }
         return model.allRepos.first {
-            WaveOrigin.resolve($0.path).normalizedFilePath
-                == WaveOrigin.resolve(repoPath).normalizedFilePath
+            model.repoIdentity($0.path) == model.repoIdentity(repoPath)
         }?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
     }
 
@@ -589,7 +588,7 @@ private struct WaveScore: View {
     }
 
     private func normalized(_ path: String) -> String {
-        WaveOrigin.resolve(path).normalizedFilePath
+        model.repoIdentity(path)
     }
 
     private func toggle(_ id: String, in expanded: inout Set<String>) {

@@ -361,13 +361,26 @@ pub struct PrPublicationSnapshot {
     pub merge: Option<PrMergeRequestSnapshot>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrMergeRequestSnapshot {
     pub mode: PrMergeMode,
     pub requested_at: String,
     pub head_sha: String,
     pub after_merge: AfterMerge,
     pub next_slug: Option<String>,
+}
+
+impl From<&PrMergeRequest> for PrMergeRequestSnapshot {
+    fn from(request: &PrMergeRequest) -> Self {
+        Self {
+            mode: request.mode,
+            requested_at: format_time(request.requested_at)
+                .expect("PR merge request timestamp formats as RFC 3339"),
+            head_sha: request.head_sha.clone(),
+            after_merge: request.after_merge,
+            next_slug: request.next_slug.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -396,17 +409,7 @@ impl PrSnapshot {
                         number: github.number,
                         url: github.url.clone(),
                     }),
-                    merge: publication
-                        .merge
-                        .as_ref()
-                        .map(|request| PrMergeRequestSnapshot {
-                            mode: request.mode,
-                            requested_at: format_time(request.requested_at)
-                                .expect("PR merge request timestamp formats as RFC 3339"),
-                            head_sha: request.head_sha.clone(),
-                            after_merge: request.after_merge,
-                            next_slug: request.next_slug.clone(),
-                        }),
+                    merge: publication.merge.as_ref().map(PrMergeRequestSnapshot::from),
                 }),
             merge_commit: pr.merge_commit.clone(),
             abandoned_at: pr.abandoned_at.and_then(format_time),
@@ -1247,7 +1250,12 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
         else {
             continue;
         };
-        let planning = decode_pm_planning(wave, &row.payload)?;
+        let Ok(planning) = decode_pm_planning(wave, &row.payload) else {
+            // The Wave's own roadmap row reports its unreadable planning as
+            // unavailable. Keep validating every readable sibling so one stale
+            // snapshot cannot erase unrelated Work from the machine view.
+            continue;
+        };
         let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
         ownership.validate(
             wave.name(),

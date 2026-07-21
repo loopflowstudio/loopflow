@@ -122,11 +122,39 @@ struct RoadmapView: View {
     private var isRefreshing: Bool { model.isRefreshing }
 
     private var visibleWaves: [WaveRoadmap] {
-        guard let repoPath else { return snapshot?.waves ?? [] }
-        let target = WaveOrigin.resolve(repoPath).normalizedFilePath
-        return (snapshot?.waves ?? []).filter {
-            WaveOrigin.resolve($0.wave.repo).normalizedFilePath == target
+        model.visibleRoadmaps
+    }
+
+    private var selectedWaveRoadmap: WaveRoadmap? {
+        guard let selection, let waveId = model.waveId(for: selection) else { return nil }
+        return model.wave(id: waveId)
+    }
+
+    private var selectedRosterWave: Wave? {
+        guard let selection, selection.kind == .wave else { return nil }
+        return model.rosterWave(id: selection.id)?.api
+    }
+
+    private var selectedProject: (wave: WaveRoadmap, project: RoadmapProject)? {
+        guard let selection else { return nil }
+        switch selection.kind {
+        case .project:
+            return model.project(id: selection.id)
+        case .task:
+            guard let task = model.task(id: selection.id) else { return nil }
+            return (task.wave, task.project)
+        case .wave:
+            return nil
         }
+    }
+
+    private var selectedTask: (
+        wave: WaveRoadmap,
+        project: RoadmapProject,
+        task: RoadmapTask
+    )? {
+        guard let selection, selection.kind == .task else { return nil }
+        return model.task(id: selection.id)
     }
 
     var body: some View {
@@ -184,25 +212,31 @@ struct RoadmapView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+        HStack(alignment: .center, spacing: Spacing.md) {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text("Work")
+                if selection != nil {
+                    workBreadcrumb
+                }
+                Text(workTitle)
                     .font(Typography.sectionTitle(20))
                     .foregroundStyle(palette.text)
-                Text(repoPath == nil ? "All planned Work" : "Planned Work in this repository")
+                Text(workSubtitle)
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
+                    .lineLimit(1)
             }
             Spacer()
-            Picker("Lens", selection: $lens) {
-                ForEach(WorkLens.allCases) { lens in
-                    Text(lens.title).tag(lens)
+            if selection == nil {
+                Picker("Lens", selection: $lens) {
+                    ForEach(WorkLens.allCases) { lens in
+                        Text(lens.title).tag(lens)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityIdentifier("work-lens")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityIdentifier("work-lens")
             if isRefreshing {
                 ProgressView()
                     .controlSize(.small)
@@ -222,6 +256,72 @@ struct RoadmapView: View {
     }
 
     @ViewBuilder
+    private var workBreadcrumb: some View {
+        HStack(spacing: Spacing.xs) {
+            Button("Work") { selection = nil }
+                .buttonStyle(.plain)
+            if let waveId = selectedWaveRoadmap?.wave.id ?? selectedRosterWave?.id,
+               let waveName = selectedWaveRoadmap?.wave.name ?? selectedRosterWave?.name {
+                breadcrumbSeparator
+                Button(waveName) { selection = .wave(id: waveId) }
+                    .buttonStyle(.plain)
+                    .disabled(selection == .wave(id: waveId))
+            }
+            if let project = selectedProject?.project {
+                breadcrumbSeparator
+                Button(project.project.name) { selection = .project(id: project.id) }
+                    .buttonStyle(.plain)
+                    .disabled(selection == .project(id: project.id))
+            }
+            if let task = selectedTask?.task {
+                breadcrumbSeparator
+                Text(task.task.identifier)
+            }
+        }
+        .font(Typography.caption(9).weight(.semibold))
+        .foregroundStyle(palette.textSecondary)
+        .accessibilityIdentifier("podium-work-breadcrumb")
+    }
+
+    private var breadcrumbSeparator: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(palette.textSecondary.opacity(0.7))
+    }
+
+    private var workTitle: String {
+        switch selection {
+        case nil:
+            "Work"
+        case .some(let work):
+            switch work.kind {
+            case .wave:
+                selectedWaveRoadmap?.wave.name ?? selectedRosterWave?.name ?? "Wave"
+            case .project:
+                selectedProject?.project.project.name ?? "Project"
+            case .task:
+                selectedTask?.task.task.name ?? "Task"
+            }
+        }
+    }
+
+    private var workSubtitle: String {
+        switch selection {
+        case nil:
+            repoPath == nil ? "All planned Work" : "Planned Work in this repository"
+        case .some(let work):
+            switch work.kind {
+            case .wave:
+                selectedWaveRoadmap?.wave.goal ?? "No readable plan for this Wave"
+            case .project:
+                selectedProject?.project.project.definition ?? "Project unavailable"
+            case .task:
+                selectedTask?.task.attention.reason ?? "Task unavailable"
+            }
+        }
+    }
+
+    @ViewBuilder
     private var content: some View {
         if snapshot == nil, queryError == nil {
             ProgressView("Reading roadmap…")
@@ -238,15 +338,70 @@ struct RoadmapView: View {
             ContentUnavailableView(
                 repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
-                description: Text("Waves without readable Projects remain in the score.")
+                description: Text("Waves without readable Projects remain in the Waves sidebar.")
             )
             .accessibilityIdentifier("podium-work-empty")
         } else {
-            switch lens {
-            case .now: nowContent
-            case .roadmap: roadmapContent
+            if selection != nil {
+                focusedContent
+            } else {
+                switch lens {
+                case .now: nowContent
+                case .roadmap: roadmapContent
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private var focusedContent: some View {
+        switch selection?.kind {
+        case .wave:
+            if let roadmap = selectedWaveRoadmap {
+                focusedScroll {
+                    waveCard(roadmap)
+                }
+            } else {
+                missingFocus("No planned Work for this Wave")
+            }
+        case .project:
+            if let selectedProject {
+                focusedScroll {
+                    projectCard(selectedProject.project, wave: selectedProject.wave.wave)
+                }
+            } else {
+                missingFocus("Project unavailable")
+            }
+        case .task:
+            if let selectedTask {
+                focusedScroll {
+                    taskCard(selectedTask.task, wave: selectedTask.wave.wave)
+                }
+            } else {
+                missingFocus("Task unavailable")
+            }
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func focusedScroll<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ScrollView {
+            content()
+                .padding(Spacing.xl)
+                .frame(maxWidth: 920, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+    }
+
+    private func missingFocus(_ title: String) -> some View {
+        ContentUnavailableView(
+            title,
+            systemImage: "map",
+            description: Text("Return to Work or refresh the latest roadmap.")
+        )
     }
 
     private var nowSectionsList: [NowSection] {
@@ -295,31 +450,7 @@ struct RoadmapView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.lg) {
                 ForEach(visibleWaves, id: \.wave.id) { roadmap in
-                    RoadmapWaveCard(
-                        roadmap: roadmap,
-                        selection: selection,
-                        activeControlId: activeControlId,
-                        onSelect: { selected in selection = selected },
-                        onOpen: {
-                            selection = .wave(id: roadmap.wave.id)
-                            openWave(roadmap.wave)
-                        },
-                        onRefresh: { await refresh() },
-                        onSetPaused: { paused in
-                            try await model.setWavePaused(
-                                waveId: roadmap.wave.id,
-                                paused: paused
-                            )
-                        },
-                        onError: { controlError = $0 },
-                        onTaskAction: { task, action in
-                            perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
-                        },
-                        onInterrupt: { task in
-                            interruptSelection = RoadmapTaskSelection(wave: roadmap.wave, task: task)
-                        },
-                        onOpenWorktree: openWorktree
-                    )
+                    waveCard(roadmap)
                 }
             }
             .padding(Spacing.xl)
@@ -327,6 +458,73 @@ struct RoadmapView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .accessibilityIdentifier("wave-roadmap")
+    }
+
+    private func waveCard(_ roadmap: WaveRoadmap) -> some View {
+        RoadmapWaveCard(
+            roadmap: roadmap,
+            selection: selection,
+            activeControlId: activeControlId,
+            onSelect: { selected in selection = selected },
+            onOpen: {
+                selection = .wave(id: roadmap.wave.id)
+                openWave(roadmap.wave)
+            },
+            onRefresh: { await refresh() },
+            onSetPaused: { paused in
+                try await model.setWavePaused(
+                    waveId: roadmap.wave.id,
+                    paused: paused
+                )
+            },
+            onError: { controlError = $0 },
+            onTaskAction: { task, action in
+                perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
+            },
+            onInterrupt: { task in
+                interruptSelection = RoadmapTaskSelection(wave: roadmap.wave, task: task)
+            },
+            onOpenWorktree: openWorktree
+        )
+    }
+
+    private func projectCard(_ project: RoadmapProject, wave: WaveSnapshot) -> some View {
+        RoadmapProjectCard(
+            project: project,
+            selection: selection,
+            activeControlId: activeControlId,
+            onSelect: { selected in selection = selected },
+            onTaskAction: { task, action in
+                perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
+            },
+            onInterrupt: { task in
+                interruptSelection = RoadmapTaskSelection(wave: wave, task: task)
+            },
+            onOpenWorktree: openWorktree
+        )
+    }
+
+    private func taskCard(_ task: RoadmapTask, wave: WaveSnapshot) -> some View {
+        RoadmapTaskRow(
+            task: task,
+            isSelected: true,
+            activeControlId: activeControlId,
+            onSelect: {},
+            onAction: { action in
+                perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
+            },
+            onInterrupt: {
+                interruptSelection = RoadmapTaskSelection(wave: wave, task: task)
+            },
+            onOpenWorktree: openWorktree
+        )
+        .padding(Spacing.lg)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.lg)
+                .stroke(palette.border, lineWidth: 1)
+        }
     }
 
     private func evidenceBanner(title: String, detail: String) -> some View {

@@ -164,6 +164,8 @@ pub struct LinearConfig {
 pub struct PmConfig {
     #[serde(default)]
     pub provider: Option<String>,
+    #[serde(default)]
+    pub linear_team: Option<String>,
 }
 
 /// Main configuration struct.
@@ -407,6 +409,19 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
         .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
 
     Ok(Some(config))
+}
+
+/// Load only the repository-owned config, without inheriting user-global values.
+///
+/// PM identity uses this path because a global Team binding must never become a
+/// repository's authority implicitly.
+pub fn load_repo_config(repo_root: &Path) -> Result<Option<Config>, LoadError> {
+    let Some(value) = load_yaml_file(&repo_root.join(".lf/config.yaml"))? else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(value)
+        .map(Some)
+        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
 }
 
 /// Get config or default if no config files exist.
@@ -959,5 +974,22 @@ supported_harnesses:
 
         let config = load_config_or_default(Some(temp.path()));
         assert_eq!(config.agent.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn load_repo_config_reads_repository_pm_authority() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let config_dir = temp.path().join(".lf");
+        std::fs::create_dir_all(&config_dir).expect("create .lf dir");
+        std::fs::write(
+            config_dir.join("config.yaml"),
+            "pm:\n  provider: linear\n  linear_team: team-loo\n",
+        )
+        .expect("write config");
+
+        let config = load_repo_config(temp.path()).unwrap().unwrap();
+        let pm = config.pm.unwrap();
+        assert_eq!(pm.provider.as_deref(), Some("linear"));
+        assert_eq!(pm.linear_team.as_deref(), Some("team-loo"));
     }
 }

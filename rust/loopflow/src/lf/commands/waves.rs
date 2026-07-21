@@ -25,7 +25,7 @@ use crate::durable::{Containment, Home, WorkRef, WorkStatus};
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::commands::runs::{format_tokens, SkillRunEntry};
 use crate::lf::output::Colors;
-use crate::pm::{PmItem, PmKr, PmProject, ProjectFlowPlan};
+use crate::pm::{PmItem, PmKr, PmPortfolioValidator, PmProject, PmSnapshot, ProjectFlowPlan};
 use crate::project::Project;
 use crate::store::{open_existing_store, SharedStore};
 use crate::task::{
@@ -543,6 +543,11 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             return no_registry(json, "null");
         };
         let wave = resolve_status_wave(&store, wave).await?;
+        let repository_waves = store
+            .list_waves(Some(wave.repo()))
+            .await
+            .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
+        validate_pm_portfolio(&store, &repository_waves).await?;
         let snapshot = snapshot_wave(&store, &wave).await?;
         let loop_state = match &snapshot.endpoint {
             Some(endpoint) => loop_state(endpoint).await,
@@ -557,7 +562,12 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .await
             .map_err(|err| anyhow!("failed to read Tasks: {err}"))?;
         let liveness = TmuxLiveness::snapshot().await;
-        let planning = read_pm_planning(&store, &wave).await?.unwrap_or_default();
+        let planning = read_pm_planning(&store, &wave)
+            .await?
+            .unwrap_or(PmSnapshot {
+                projects: Vec::new(),
+                items: Vec::new(),
+            });
         let project_snapshots = snapshot_projects(
             &store,
             &wave,
@@ -641,6 +651,16 @@ pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
         };
         // One tmux reading for every Work process on the machine, taken once.
         let liveness = TmuxLiveness::snapshot().await;
+        // A Wave filter narrows presentation, not repository ownership checks.
+        let ownership_waves = if waves.len() == 1 {
+            store
+                .list_waves(Some(waves[0].repo()))
+                .await
+                .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?
+        } else {
+            waves.clone()
+        };
+        validate_pm_portfolio(&store, &ownership_waves).await?;
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
             let snapshot = snapshot_wave(&store, wave).await?;
@@ -1162,17 +1182,11 @@ async fn child_run_alive(
     })
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct CachedPmSnapshot {
-    projects: Vec<PmProject>,
-    items: Vec<PmItem>,
-}
-
 /// The wave's local PM snapshot, or `None` when none has been synced. `None` is
 /// a real, readable state ("no plan on this machine yet") — a caller that must
 /// tell it apart from "the plan is empty" keeps the `Option`; `lf status`
 /// flattens it to an empty plan, `lf roadmap` renders it as unavailable.
-async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<CachedPmSnapshot>> {
+async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmSnapshot>> {
     let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
         .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
     let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
@@ -1183,13 +1197,42 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<Cac
     else {
         return Ok(None);
     };
-    let planning = serde_json::from_str::<CachedPmSnapshot>(&row.payload).map_err(|err| {
+    Ok(Some(decode_pm_planning(wave, &row.payload)?))
+}
+
+fn decode_pm_planning(wave: &Wave, payload: &str) -> Result<PmSnapshot> {
+    serde_json::from_str(payload).map_err(|err| {
         anyhow!(
             "invalid PM snapshot for wave/{}; run `lf pm sync`: {err}",
             wave.name()
         )
-    })?;
-    Ok(Some(planning))
+    })
+}
+
+async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
+    let mut ownership = PmPortfolioValidator::default();
+    for wave in waves {
+        let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+            .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
+        let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
+        let Some(row) = store
+            .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().to_string())
+            .await
+            .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
+        else {
+            continue;
+        };
+        let planning = decode_pm_planning(wave, &row.payload)?;
+        let expected_team = crate::ops::pm::repository_team_for_snapshot_validation(&repo)?;
+        ownership.validate(
+            wave.name(),
+            &row.initiative,
+            expected_team.as_deref(),
+            &planning.projects,
+            &planning.items,
+        )?;
+    }
+    Ok(())
 }
 
 async fn snapshot_projects(
@@ -1197,7 +1240,7 @@ async fn snapshot_projects(
     wave: &Wave,
     projects: Vec<Project>,
     tasks: Vec<Task>,
-    planning: CachedPmSnapshot,
+    planning: PmSnapshot,
     liveness: &TmuxLiveness,
     probe_pr_empty: bool,
 ) -> Result<ProjectSnapshots> {
@@ -1235,14 +1278,7 @@ async fn snapshot_projects(
     }
 
     for item in planning.items {
-        let project_slug = item.project.as_deref().ok_or_else(|| {
-            anyhow!(
-                "Task {} belongs to no Project in the PM snapshot; fix it in Linear and run `lf pm sync --wave {}`",
-                item.identifier,
-                wave.name()
-            )
-        })?;
-        let index = project_index(&details, project_slug, project_slug)?;
+        let index = project_index(&details, &item.project_id, &item.project)?;
         let runtime_task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
@@ -1296,7 +1332,9 @@ async fn snapshot_projects(
             description: runtime_task.plan.description.clone(),
             rank: u32::MAX,
             completed: work_status_is_terminal(&status),
-            project: Some(parent.plan.slug.clone()),
+            project_id: parent.plan.id.as_str().to_string(),
+            project: parent.plan.slug.clone(),
+            team_id: String::new(),
             assignee: None,
         };
         details[project_index].tasks.push(

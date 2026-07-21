@@ -33,13 +33,14 @@ pub(crate) async fn publish_pending_ask_comments(store: &Store) -> OpsResult<()>
         else {
             continue;
         };
-        let client = match super::pm::linear_client(Path::new(&write.repo), &write.wave).await {
-            Ok(client) => client,
-            Err(error) => {
-                record_failure(store, &write, &error.to_string()).await?;
-                continue;
-            }
-        };
+        let client =
+            match super::pm::linear_issue_client(Path::new(&write.repo), &write.issue_id).await {
+                Ok(client) => client,
+                Err(error) => {
+                    record_failure(store, &write, &error.to_string()).await?;
+                    continue;
+                }
+            };
         publish_claimed_ask_comment(store, &client, write).await?;
     }
     Ok(())

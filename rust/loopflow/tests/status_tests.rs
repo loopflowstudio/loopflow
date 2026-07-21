@@ -331,7 +331,9 @@ fn seed_stale_project_work(home: &Path) {
                 "description": "Keep focused reads useful through stale Work.",
                 "rank": 1,
                 "completed": false,
+                "project_id": "95159066-9098-4d0b-8903-01459dc7ec14",
                 "project": "auditability",
+                "team_id": "team-product",
                 "assignee": null
             }
         ]

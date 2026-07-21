@@ -1,0 +1,48 @@
+{
+  "wave": "survival/infrastructure",
+  "provider": "linear",
+  "initiative": "initiative-infrastructure",
+  "project": null,
+  "synced_at": 1784592000,
+  "projects": [
+    {
+      "id": "project-gmail",
+      "slug": "gmail",
+      "name": "Gmail",
+      "summary": "Keep mail flowing.",
+      "definition": "Keep mail flowing.",
+      "flows": {
+        "first": null,
+        "loop": "task_pursue",
+        "finally": null
+      },
+      "krs": [
+        {
+          "text": "Mail processing survives restart",
+          "holds": true
+        }
+      ],
+      "initiative_ids": [
+        "initiative-infrastructure"
+      ],
+      "team_ids": [
+        "team-loo"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "issue-gmail",
+      "identifier": "LOO-2",
+      "url": "https://linear.app/loopflow/issue/LOO-2/gmail",
+      "name": "Route incoming mail",
+      "description": "Resolve through the owning Project.",
+      "rank": 1,
+      "completed": false,
+      "project_id": "project-gmail",
+      "project": "gmail",
+      "team_id": "team-loo",
+      "assignee": null
+    }
+  ]
+}

@@ -269,9 +269,10 @@ private struct PmShowSnapshot: Decodable {
     let project: String?
     let syncedAt: Int64
     let projects: [PmProjectSnapshot]
+    let items: [PmItemSnapshot]
 
     enum CodingKeys: String, CodingKey {
-        case wave, provider, initiative, project, projects
+        case wave, provider, initiative, project, projects, items
         case syncedAt = "synced_at"
     }
 }
@@ -285,15 +286,32 @@ private struct PmProjectSnapshot: Decodable {
     let flows: ProjectFlowPlanSnapshot
     let krs: [PmKrSnapshot]
     let initiativeIds: [String]
-    // Stable ids of the Linear teams the Project belongs to. Optional: a snapshot
-    // written before the field existed decodes to nil. Mirrors Rust
-    // `PmProject.team_ids`.
-    let teamIds: [String]?
+    let teamIds: [String]
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, summary, definition, flows, krs
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"
+    }
+}
+
+private struct PmItemSnapshot: Decodable {
+    let id: String
+    let identifier: String
+    let url: String?
+    let name: String
+    let description: String
+    let rank: Int
+    let completed: Bool
+    let projectId: String
+    let project: String
+    let teamId: String
+    let assignee: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, identifier, url, name, description, rank, completed, project, assignee
+        case projectId = "project_id"
+        case teamId = "team_id"
     }
 }
 

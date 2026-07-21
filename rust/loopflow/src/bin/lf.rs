@@ -1335,6 +1335,8 @@ fn main() -> anyhow::Result<()> {
                 let message = format!(
                     "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
                 );
+                loopflow::ops::project::prepare_promotion(repo, &parent, slug)
+                    .map_err(anyhow::Error::from)?;
                 run_target("project-promote", Some(&message), &cli, &args)?;
                 let residency = loopflow::ops::project::complete_promotion(repo, &parent, slug)
                     .map_err(anyhow::Error::from)?;

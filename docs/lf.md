@@ -778,7 +778,7 @@ refreshes the local SQLite read model used by every other read surface.
 
 ```bash
 lf pm status                                # linked waves and task counts
-lf pm init --wave designer --team-key DSG   # connect or rebind Initiative + team
+lf pm init --wave designer --team-key DSG   # connect Wave; establish repo Team once
 lf pm sync --wave designer                  # refresh SQLite from Linear
 lf pm sync --plan                           # report drift without writing
 lf pm show --wave designer                  # read; refresh when stale
@@ -794,34 +794,44 @@ lf pm task update --id 1207... --title "Refine dark mode"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 lf pm task move --id 1207... --wave designer --project api
 lf pm rename --wave designer --title "Designer"   # rename the Initiative
-lf pm reteam --wave designer --apply    # move the hierarchy when no body is writing
-lf pm doctor                            # flag issues stranded in the old team
+lf pm reteam                            # dry-run the repository-wide Team migration
+lf pm reteam --apply                    # migrate when no Task Run can write old ids
+lf pm doctor                            # flag ownership and title drift
 ```
 
 Connect Linear first with `lf auth linear`. `lf pm init` pins the Initiative
-and a Wave-owned team into `GOAL.md` frontmatter; the team key becomes each
-Task's prefix (`PRD-1`, `INF-1`) so every wave owns its identifiers. When no
-id is pinned, init links one exact Initiative-title match, creates one when
-absent, and fails on duplicates. Creation fails closed: `project create` and
-`task create` require a bound team and error with the `lf pm init` recovery
-rather than silently attaching work to a shared team. Reads stay
-team-agnostic.
+into `GOAL.md` and the repository Team into `.lf/config.yaml`. Every Wave in
+that repository reuses the Team and Task prefix (`LOO-1`, `LOO-2`); Initiatives
+and Project membership decide which Wave owns a Task. `pm init --all` discovers
+nested `GOAL.md` files recursively and initializes them against the same Team.
+When no Initiative is pinned, init links one exact title match, creates one
+when absent, and fails on duplicates. Creation fails closed unless the
+repository Team and its Git-origin claim both validate.
 
-Linear's Projects view is flat, so provider titles use `<Wave> — <Project>`;
-Loopflow strips that display prefix and keeps the canonical slug
-(`Product — Loopflow API` remains `project:loopflow-api`). `show` serves
+```yaml
+# .lf/config.yaml
+pm:
+  provider: linear
+  linear_team: "stable-team-uuid"
+```
+
+Linear's Projects view is flat, so provider titles use
+`<canonical Wave path> — <Project>`; nested Waves remain legible as
+`Survival / Infrastructure — Gmail`. Loopflow resolves ownership from stable
+Initiative and Project ids, then strips that presentation prefix and keeps the
+canonical slug. `show` serves
 snapshots younger than an hour without a network request, tries a
 five-second refresh for older ones, and refuses to silently serve a snapshot
 older than a week. Use `--no-sync` in agents and UI paths so rendering never
 waits on Linear.
 
-`lf pm reteam` migrates a wave's existing issues into its own team. It
+`lf pm reteam` migrates every linked Wave onto the repository Team. It
 **defaults to a dry run** and only mutates with `--apply`; it defers an issue
-only while a Task body can write in its worktree. Completed issues move too:
-Linear cannot remove the shared team from a Project while any issue in that
-Project still belongs to it. Before each issue moves, Loopflow records its old
-identifier in a comment; after every issue is on the wave team, it narrows the
-Projects to that team and reconciles cached Task identifiers. Interrupted runs
+while a Task Run can still write its old identifier. Completed issues move too.
+Loopflow first attaches the destination Team to every Project, comments and
+moves Issues by UUID, narrows Projects to exactly that Team, repairs Wave-path
+titles, verifies every association, refreshes every snapshot, and only then
+removes legacy Wave Team fields. Interrupted runs keep a legacy sentinel and
 resume without duplicating comments or moves.
 
 ## lf release

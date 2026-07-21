@@ -524,26 +524,6 @@ fn abandon_current(branch: Option<&str>, force: bool, progress: &impl Progress) 
 pub fn run_pm(cmd: &PmCommand) -> Result<()> {
     let progress = &CliProgress;
     let repo_root = find_repo_root()?;
-    let list_all_waves = || -> Result<Vec<String>> {
-        let wave_dir = repo_root.join("wave");
-        if !wave_dir.is_dir() {
-            return Err(anyhow!("no wave/ directory found"));
-        }
-        let mut waves = Vec::new();
-        for entry in std::fs::read_dir(&wave_dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                if let Some(name) = entry.file_name().to_str() {
-                    waves.push(name.to_string());
-                }
-            }
-        }
-        waves.sort();
-        if waves.is_empty() {
-            return Err(anyhow!("no waves found in wave/"));
-        }
-        Ok(waves)
-    };
     // The one ambient-Wave rule for every PM arm: `--wave` wins, else
     // `LF_WAVE_ID` (durable UUID → registry name, hand-set name as fallback).
     // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
@@ -565,13 +545,8 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             team_key,
             team_name,
         } => {
-            if *all && (team_key.is_some() || team_name.is_some()) {
-                return Err(anyhow!(
-                    "--team-key/--team-name apply to one wave; omit them with --all so each wave keys off its own name"
-                ));
-            }
             let targets = if *all {
-                list_all_waves()?
+                crate::ops::pm::list_local_waves(&repo_root)?
             } else {
                 let explicit = wave.as_deref().or(wave_flag.as_deref());
                 // pm init is a creation flow: an explicit --wave may name a
@@ -598,10 +573,16 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
                     progress,
                 )?;
                 let initiative_state = if result.created { "created" } else { "linked" };
-                let team_state = match (&result.team_key, result.team_created) {
-                    (Some(key), true) => format!(", team {} created ({key}-*)", result.team_id),
-                    (Some(key), false) => format!(", team {} adopted ({key}-*)", result.team_id),
-                    (None, _) => format!(", team {} linked", result.team_id),
+                let team_state = if result.team_created {
+                    format!(
+                        ", repository Team {} created ({}-*)",
+                        result.team_id, result.team_key
+                    )
+                } else {
+                    format!(
+                        ", repository Team {} adopted ({}-*)",
+                        result.team_id, result.team_key
+                    )
                 };
                 println!(
                     "{}: Linear Initiative {} ({initiative_state}){team_state}",
@@ -855,18 +836,15 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
             )?;
             print_pm_sync_result(&result);
         }
-        PmCommand::Reteam { wave, apply } => {
+        PmCommand::Reteam { apply } => {
             let result = crate::ops::pm::pm_reteam(
                 &repo_root,
-                &crate::ops::pm::PmReteamOptions {
-                    wave: ambient_wave(wave.as_deref())?,
-                    apply: *apply,
-                },
+                &crate::ops::pm::PmReteamOptions { apply: *apply },
                 progress,
             )?;
             print_pm_reteam_result(&result);
         }
-        PmCommand::Webhook { cmd } => run_pm_webhook(&repo_root, cmd, &ambient_wave)?,
+        PmCommand::Webhook { cmd } => run_pm_webhook(&repo_root, cmd)?,
     }
     Ok(())
 }
@@ -874,11 +852,7 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
 /// The Linear webhook receiver and its one-time registration. The signing secret
 /// is read from the environment (sourced from Doppler), never a flag or the
 /// store, so a raw value never lands in shell history or a process listing.
-fn run_pm_webhook(
-    repo_root: &std::path::Path,
-    cmd: &crate::lf::PmWebhookCommand,
-    ambient_wave: &impl Fn(Option<&str>) -> Result<Option<String>>,
-) -> Result<()> {
+fn run_pm_webhook(repo_root: &std::path::Path, cmd: &crate::lf::PmWebhookCommand) -> Result<()> {
     use crate::lf::PmWebhookCommand;
 
     let secret = std::env::var("LF_LINEAR_WEBHOOK_SECRET").unwrap_or_default();
@@ -887,17 +861,9 @@ fn run_pm_webhook(
             "set LF_LINEAR_WEBHOOK_SECRET to a non-empty value (source it from Doppler: `doppler run -- lf pm webhook ...`)"
         ));
     }
-    let wave_arg = match cmd {
-        PmWebhookCommand::Serve { wave, .. } | PmWebhookCommand::Register { wave, .. } => {
-            wave.as_deref()
-        }
-    };
-    let wave = ambient_wave(wave_arg)?
-        .ok_or_else(|| anyhow!("cannot determine wave; pass --wave <name>"))?;
-
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let client = crate::ops::pm::linear_client(repo_root, &wave).await?;
+        let client = crate::ops::pm::linear_client(repo_root).await?;
         match cmd {
             PmWebhookCommand::Register { url, .. } => {
                 let id = client.create_webhook(url, &secret).await?;
@@ -926,8 +892,9 @@ fn run_pm_webhook(
 fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
     let verb = if result.applied { "moved" } else { "will move" };
     println!(
-        "wave/{} → team {} ({}-*){}",
-        result.wave,
+        "repository {} (waves: {}) → team {} ({}-*){}",
+        result.repository,
+        result.waves.join(", "),
         result.team_id,
         result.team_key,
         if result.applied {
@@ -945,7 +912,10 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
             } else {
                 format!("team(s) [{}]", pm.from_teams.join(", "))
             };
-            println!("    {}  (from {from})", pm.name);
+            println!(
+                "    wave/{}: {} → {}  (from {from})",
+                pm.wave, pm.name, pm.target_name
+            );
         }
     }
 
@@ -955,10 +925,13 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         println!("  {verb} ({}):", result.moves.len());
         for mv in &result.moves {
             match &mv.new_identifier {
-                Some(new_id) => println!("    {} → {new_id}  {}", mv.old_identifier, mv.title),
+                Some(new_id) => println!(
+                    "    wave/{}: {} → {new_id}  {}",
+                    mv.wave, mv.old_identifier, mv.title
+                ),
                 None => println!(
-                    "    {}  {}  (Linear assigns the new number at move time)",
-                    mv.old_identifier, mv.title
+                    "    wave/{}: {}  {}  (Linear assigns the new number at move time)",
+                    mv.wave, mv.old_identifier, mv.title
                 ),
             }
         }
@@ -971,8 +944,8 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         );
         for deferral in &result.deferrals {
             println!(
-                "    {}  {}  ({})",
-                deferral.identifier, deferral.title, deferral.reason
+                "    wave/{}: {}  {}  ({})",
+                deferral.wave, deferral.identifier, deferral.title, deferral.reason
             );
         }
     }
@@ -980,7 +953,7 @@ fn print_pm_reteam_result(result: &crate::ops::pm::PmReteamResult) {
         println!("  reconciled Task identifiers: {}", result.task_updates);
     }
     if result.already > 0 {
-        println!("  already in team: {} (skipped)", result.already);
+        println!("  already in repository Team: {} (skipped)", result.already);
     }
 }
 
@@ -1035,7 +1008,7 @@ fn format_pm_task_table(items: &[crate::pm::PmItem]) -> Vec<String> {
         .map(|item| PmTaskRow {
             status: if item.completed { "done" } else { "open" },
             title: item.name.split_whitespace().collect::<Vec<_>>().join(" "),
-            project: item.project.clone().unwrap_or_else(|| "-".to_string()),
+            project: item.project.clone(),
             assignee: item.assignee.clone().unwrap_or_else(|| "-".to_string()),
             id: item.id.clone(),
             completed: item.completed,
@@ -1079,7 +1052,9 @@ mod pm_output_tests {
                 description: String::new(),
                 rank: 0,
                 completed: true,
-                project: None,
+                project_id: "project-done".to_string(),
+                project: "-".to_string(),
+                team_id: "team-loo".to_string(),
                 assignee: None,
             },
             PmItem {
@@ -1090,7 +1065,9 @@ mod pm_output_tests {
                 description: String::new(),
                 rank: 1,
                 completed: false,
-                project: Some("wave-chat".to_string()),
+                project_id: "project-chat".to_string(),
+                project: "wave-chat".to_string(),
+                team_id: "team-loo".to_string(),
                 assignee: Some("me".to_string()),
             },
         ]);

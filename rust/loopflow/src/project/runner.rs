@@ -888,7 +888,7 @@ async fn inspect_outcome(
         .snapshot
         .items
         .iter()
-        .filter(|item| item.project.as_deref() == Some(project.plan.slug.as_str()))
+        .filter(|item| item.project == project.plan.slug)
         .collect::<Vec<_>>();
     let mut task_states = Vec::with_capacity(tasks.len());
     for task in &tasks {

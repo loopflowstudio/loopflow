@@ -753,6 +753,69 @@ pub(crate) async fn wake_project(project_id: &ProjectId) -> OpsResult<()> {
 pub(crate) async fn wake_task_project_route(_store: &Store, task: &Task) -> OpsResult<()> {
     wake_project(&task.project_id).await
 }
+
+/// Persist the child's ancestry before the authored promotion flow creates its
+/// first Initiative or Project. Completion records the promotion occurrence.
+pub fn prepare_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<()> {
+    let origin = crate::engine::wave_context::wave_origin(repo);
+    block_on_project(async {
+        let store = open_existing_store().await.ok_or_else(|| {
+            OpsError::Message(
+                "project promotion requires the wave registry; start the parent wave first"
+                    .to_string(),
+            )
+        })?;
+        prepare_promotion_with_store(&store, &origin, parent, child).await
+    })
+}
+
+async fn prepare_promotion_with_store(
+    store: &Store,
+    repo: &Path,
+    parent: &str,
+    child: &str,
+) -> OpsResult<()> {
+    let parent = store
+        .get_wave_by_name(parent)
+        .await
+        .map_err(|error| project_error(format!("failed to read parent Wave: {error}")))?
+        .ok_or_else(|| project_error(format!("parent Wave '{parent}' is not registered")))?;
+    let existing = store
+        .get_wave_by_name(child)
+        .await
+        .map_err(|error| project_error(format!("failed to read child Wave: {error}")))?;
+    if let Some(mut child_wave) = existing {
+        if child_wave
+            .parent_wave_id()
+            .is_some_and(|id| id != parent.id())
+        {
+            return Err(project_error(format!(
+                "child Wave '{child}' already belongs to another parent"
+            )));
+        }
+        if Path::new(child_wave.repo()) != repo {
+            return Err(project_error(format!(
+                "child Wave '{child}' is registered to another repository ({})",
+                child_wave.repo()
+            )));
+        }
+        if child_wave.parent_wave_id().is_none() {
+            child_wave = child_wave.with_parent(parent.id().clone());
+            store.update_wave(&child_wave).await.map_err(|error| {
+                project_error(format!("failed to prepare child Wave ancestry: {error}"))
+            })?;
+        }
+        return Ok(());
+    }
+
+    let child_wave = Wave::new(WaveId::new(), child.to_string(), repo.display().to_string())
+        .with_parent(parent.id().clone());
+    store
+        .create_wave(&child_wave)
+        .await
+        .map_err(|error| project_error(format!("failed to prepare child Wave ancestry: {error}")))
+}
+
 /// Complete the mechanical half of an authored project-promotion flow: record
 /// the promotion and ancestry, start the child residency, and wait for its endpoint.
 pub fn complete_promotion(repo: &Path, parent: &str, child: &str) -> OpsResult<String> {
@@ -831,6 +894,12 @@ async fn record_promotion(store: &Store, repo: &Path, parent: &str, child: &str)
         Some(wave) => wave,
         None => Wave::new(WaveId::new(), child.to_string(), repo.display().to_string()),
     };
+    if Path::new(child_wave.repo()) != repo {
+        return Err(OpsError::Message(format!(
+            "child Wave '{child}' is registered to another repository ({})",
+            child_wave.repo()
+        )));
+    }
     child_wave
         .record_promotion(parent.id(), time::OffsetDateTime::now_utc())
         .map_err(OpsError::Message)?;
@@ -1058,9 +1127,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_promotion_persists_ancestry_without_occurrence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let database = tmp.path().join("loopflow.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let parent = Wave::new(
+            WaveId::new(),
+            "survival".into(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&parent).await.unwrap();
+
+        prepare_promotion_with_store(&store, tmp.path(), "survival", "infrastructure")
+            .await
+            .unwrap();
+        prepare_promotion_with_store(&store, tmp.path(), "survival", "infrastructure")
+            .await
+            .unwrap();
+
+        let child = store
+            .get_wave_by_name("infrastructure")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(child.parent_wave_id(), Some(parent.id()));
+        assert_eq!(child.promoted_at(), None);
+
+        let other = Wave::new(
+            WaveId::new(),
+            "other".into(),
+            tmp.path().display().to_string(),
+        );
+        store.create_wave(&other).await.unwrap();
+        let error = prepare_promotion_with_store(&store, tmp.path(), "other", "infrastructure")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("another parent"));
+    }
+
+    #[tokio::test]
     async fn record_promotion_persists_occurrence_and_ancestry() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = open_store(&StorageConfig::sqlite(tmp.path().join("loopflow.db")))
+        let database = tmp.path().join("loopflow.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
             .await
             .unwrap();
         let parent = Wave::new(

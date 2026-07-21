@@ -92,7 +92,7 @@ struct WaveChatConnectionTests {
         #expect(waveChatComposeRoute(activeEpoch: local, selectedEpoch: local) == .local)
         #expect(
             waveChatComposeRoute(activeEpoch: discord, selectedEpoch: discord)
-                == .openDiscord(
+                == .discord(
                     .openDiscord(
                         label: "Open in Discord",
                         url: "https://discord.com/channels/guild/channel"

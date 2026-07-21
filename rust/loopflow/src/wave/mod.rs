@@ -71,6 +71,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use secrecy::SecretString;
 
 use crate::engine::repo::find_repo_root;
 use crate::engine::wave_config::{try_read_wave_config, WaveChatConfig};
@@ -106,6 +107,7 @@ pub fn run(name: &str, force: bool) -> Result<()> {
             registry_config,
             force,
             true,
+            None,
             shutdown_signal(),
         )
         .await
@@ -225,14 +227,16 @@ impl Drop for WaveRunGuard {
     }
 }
 
-/// The production resident spawner: `lf __resident <wave>`, run by this
-/// same executable, endpoint + token + Wave context in env. The
-/// resident's stdout/stderr inherit — one `lf wave` terminal shows both
-/// halves, today's UX.
+/// The production resident spawner: `lf __resident <wave>`, run by the
+/// current Home's `lf` binary with endpoint + token + Wave context in env.
+/// The resident's stdout/stderr inherit — one `lf wave` terminal shows both
+/// halves, today's UX. Resolving `lf` explicitly matters when the listener is
+/// hosted in-process by `lfd`: the daemon does not own the hidden subcommand.
 // TODO(M1): keep this shutdown contract in the wave/supervisor owner: stand
 // the respawn ladder down before terminating the resident, honor interrupt
 // cleanup, and keep SIGKILL deadlines in the supervisor path.
 fn resident_spawner(
+    lf_bin: PathBuf,
     wave: String,
     repo_root: PathBuf,
     endpoint: String,
@@ -240,7 +244,8 @@ fn resident_spawner(
     resident_env: Vec<(String, String)>,
 ) -> supervisor::SpawnResident {
     Box::new(move || {
-        let mut command = resident_command(&wave, &repo_root, &endpoint, &token, &resident_env)?;
+        let mut command =
+            resident_command(&lf_bin, &wave, &repo_root, &endpoint, &token, &resident_env);
         // No kill_on_drop: shutdown stops the supervisor FIRST (so a TERM'd
         // resident's exit isn't journaled as a failure), then SIGTERMs the
         // resident by pid — its hooks stop the vendor process group. A
@@ -252,14 +257,14 @@ fn resident_spawner(
 }
 
 fn resident_command(
+    lf_bin: &Path,
     wave: &str,
     repo_root: &Path,
     endpoint: &str,
     token: &str,
     resident_env: &[(String, String)],
-) -> std::io::Result<tokio::process::Command> {
-    let exe = std::env::current_exe()?;
-    let mut command = tokio::process::Command::new(exe);
+) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(lf_bin);
     command
         .arg(RESIDENT_SUBCOMMAND)
         .arg(wave)
@@ -275,7 +280,7 @@ fn resident_command(
         command.env(key, value);
     }
     command.env_remove(discord::TOKEN_ENV);
-    Ok(command)
+    command
 }
 
 /// Serve the wave until `shutdown` resolves. Vendor-free by construction:
@@ -291,6 +296,7 @@ pub(crate) async fn run_listener(
     registry_config: Option<registry::RegistryConfig>,
     force: bool,
     spawn_resident: bool,
+    discord_token: Option<SecretString>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
     // File-level one-brain floor, before anything else: an existing pointer
@@ -319,6 +325,9 @@ pub(crate) async fn run_listener(
     // writes nothing.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
+    let resident_lf = spawn_resident
+        .then(crate::engine::process::resolve_current_home_lf_binary_checked)
+        .transpose()?;
 
     let (chat_backing, discord_adapter) =
         match try_read_wave_config(&repo_root, &wave)?.and_then(|config| config.chat) {
@@ -336,8 +345,13 @@ pub(crate) async fn run_listener(
                     channel_id,
                 };
                 let backing = ChatBacking::discord(&binding);
-                let adapter =
-                    discord::DiscordAdapter::preflight(binding, &home_id, &local_home.id).await?;
+                let adapter = discord::DiscordAdapter::preflight(
+                    binding,
+                    &home_id,
+                    &local_home.id,
+                    discord_token,
+                )
+                .await?;
                 (backing, Some(adapter))
             }
             Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
@@ -417,8 +431,9 @@ pub(crate) async fn run_listener(
     // The keeper's watch: resident liveness, respawn ladder, interrupt
     // janitor. Runs even without a spawner — the pen-side anti-wedges (janitor, attach
     // probe) never depend on who spawned the resident.
-    let spawner = spawn_resident.then(|| {
+    let spawner = resident_lf.map(|lf_bin| {
         resident_spawner(
+            lf_bin,
             wave.clone(),
             repo_root.clone(),
             addr.to_string(),
@@ -574,13 +589,14 @@ mod tests {
     #[test]
     fn discord_chat_token_is_explicitly_scrubbed_from_the_resident() {
         let command = resident_command(
+            Path::new("/paired/bin/lf"),
             "goals",
             Path::new("/tmp"),
             "127.0.0.1:1234",
             "resident-token",
             &[(discord::TOKEN_ENV.to_string(), "must-not-pass".to_string())],
-        )
-        .expect("resident command");
+        );
+        assert_eq!(command.as_std().get_program(), "/paired/bin/lf");
         assert!(command
             .as_std()
             .get_envs()
@@ -1453,7 +1469,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            run_listener(repo2, "ship".into(), None, false, false, async {
+            run_listener(repo2, "ship".into(), None, false, false, None, async {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -1493,6 +1509,7 @@ mod tests {
                 None,
                 false,
                 false,
+                None,
                 std::future::pending(),
             )
             .await
@@ -1522,6 +1539,7 @@ mod tests {
                 None,
                 false,
                 false,
+                None,
                 std::future::pending(),
             )
             .await
@@ -1576,7 +1594,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let handle = tokio::spawn(async move {
-            run_listener(repo2, "ship".into(), None, false, false, async {
+            run_listener(repo2, "ship".into(), None, false, false, None, async {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -1605,7 +1623,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let repo2 = repo.clone();
         let first = tokio::spawn(async move {
-            run_listener(repo2, "ship".into(), None, false, false, async {
+            run_listener(repo2, "ship".into(), None, false, false, None, async {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -1616,9 +1634,17 @@ mod tests {
 
         // Second server: probed live, refused, pointer untouched.
         let (_shutdown_tx2, shutdown_rx2) = tokio::sync::oneshot::channel::<()>();
-        let err = run_listener(repo.clone(), "ship".into(), None, false, false, async {
-            let _ = shutdown_rx2.await;
-        })
+        let err = run_listener(
+            repo.clone(),
+            "ship".into(),
+            None,
+            false,
+            false,
+            None,
+            async {
+                let _ = shutdown_rx2.await;
+            },
+        )
         .await
         .expect_err("live endpoint refuses a second server");
         assert!(

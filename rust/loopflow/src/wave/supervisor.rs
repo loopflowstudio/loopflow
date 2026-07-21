@@ -60,7 +60,7 @@ pub const ATTACH_PROBE: Duration = Duration::from_secs(10);
 
 /// Spawn one resident process. Production spawns `lf __resident <name>` with the
 /// resident endpoint/token in its environment
-/// (the current executable); tests spawn whatever stands in for a resident.
+/// (the current Home's resolved `lf`); tests spawn whatever stands in for a resident.
 /// A closure, not a trait: the supervisor needs exactly one behavior.
 pub type SpawnResident = Box<dyn FnMut() -> std::io::Result<Child> + Send>;
 

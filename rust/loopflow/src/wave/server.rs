@@ -54,14 +54,16 @@
 //!   - `GET /resident/context` → `{playhead, provider_session}` — the
 //!     pre-turn snapshot and optional typed provider thread; serving it drains
 //!     pending child observations first.
-//! - `POST /messages {op, text}` → `{turn, state}`. `op` is
+//! - `POST /messages {id?, op, text}` → `{message, state, epoch}`. `op` is
 //!   required — `"message"` (queued; the next turn answers it), `"steer"`
 //!   (into the live turn when the harness supports it, else degrades to a
 //!   queued message), `"interrupt"` (cancel the open turn; non-empty text
 //!   becomes the next turn — "interrupt & send"; while idle, an interrupt is
 //!   a no-op success). `text` may be empty only for `interrupt` (400
-//!   otherwise). `turn` is the appended user `Turn`,
-//!   or null for a bare interrupt (nothing was said); `state` is the
+//!   otherwise). A local epoch journals immediately; a Discord epoch uses
+//!   `id` as an enforced provider nonce and returns the source-bearing provider
+//!   message, which the adapter then queues from its canonical Discord id.
+//!   `message` is null only for a bare interrupt (nothing was said); `state` is the
 //!   loop-state name when the request was accepted — ops are applied by the
 //!   loop asynchronously, so watch the stream's `state` events for the
 //!   outcome.
@@ -101,7 +103,7 @@ use crate::wave::chat::{
     ChatBacking, ChatBackingHealth, ChatHistorySnapshot, ChatHistoryState, ChatMessageSource,
     ConversationEpoch, PostMessageErrorResponse, PostMessageResponse, WaveChatMessage,
 };
-use crate::wave::discord::DiscordProjection;
+use crate::wave::discord::{DiscordError, DiscordProjection};
 use crate::wave::journal::{MessageOp, PendingMessage};
 use crate::wave::playhead::PlayheadView;
 use crate::wave::registry::{process_alive, ObserverSlot, StoreObserver};
@@ -250,9 +252,11 @@ struct ConversationQuery {
 }
 
 /// `POST /messages` request body. `op` is required — explicit, never inferred.
+/// `id` becomes the Discord nonce when the active epoch is provider-backed.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PostMessage {
+    id: Option<String>,
     op: MessageOp,
     text: String,
 }
@@ -597,6 +601,43 @@ async fn messages_handler(
             }),
         )
             .into_response();
+    }
+    let active_epoch = state.runtime.active_conversation_epoch();
+    if !body.text.trim().is_empty() && matches!(active_epoch.backing, ChatBacking::Discord { .. }) {
+        if let Some(discord) = &state.discord {
+            let request_id = body
+                .id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            return match discord
+                .post_authored(&state.runtime, body.op, body.text.trim(), &request_id)
+                .await
+            {
+                Ok(message) => Json(PostMessageResponse {
+                    message: Some(message),
+                    state: state.runtime.loop_state().name().to_string(),
+                    epoch: active_epoch,
+                })
+                .into_response(),
+                Err(error) => {
+                    let status = if matches!(error, DiscordError::MessageTooLong { .. }) {
+                        StatusCode::BAD_REQUEST
+                    } else {
+                        StatusCode::BAD_GATEWAY
+                    };
+                    (
+                        status,
+                        Json(PostMessageErrorResponse {
+                            error: format!("message was not accepted: {error}"),
+                            epoch: active_epoch,
+                        }),
+                    )
+                        .into_response()
+                }
+            };
+        }
     }
     let turn = match state.runtime.try_deliver_authored(body.op, body.text) {
         Ok(turn) => turn,

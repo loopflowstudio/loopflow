@@ -134,7 +134,20 @@ chat:
 ---
 ```
 
-Start the Wave with `LF_DISCORD_TOKEN` injected by Doppler:
+Store the bot token in the Home daemon repository's Doppler config, reload the
+service, then start the Wave:
+
+```bash
+doppler secrets set LF_DISCORD_TOKEN > /dev/null
+doppler run -- lfd install
+lf start product
+```
+
+The service file retains only the non-secret Doppler project and config names.
+`lfd` resolves the token from Doppler once at boot and keeps it inside the
+trusted Home process. The Wave resident and its provider children never
+inherit it. Reload the service after changing or rotating the token. For a
+foreground listener without `lfd`, inject the same secret for that process:
 
 ```bash
 doppler run -- lf wave product
@@ -147,10 +160,13 @@ conversation epoch. Earlier local epochs stay selectable and read-only.
 
 Discord is the transcript authority while its epoch is active. Loopflow reads
 bounded history from Discord on demand and stores no duplicate presentation
-transcript. `lf chat "text"` returns an Open-in-Discord action as a rejection
-instead of appending a hidden local message. Agent speech appears only after
-Discord returns its provider message id. Every API message names its epoch and
-exact local journal event or Discord message source.
+transcript. The Mac composer and `lf chat "text"` post through the bot, visibly
+prefix the message with the Wave name, and preserve message, steer, or interrupt
+intent when the provider echo reaches the resident. The Open in Discord action
+stays beside the native composer. A provider failure never falls through to a
+hidden local message. Human and agent speech appears only after Discord returns
+its provider message id. Every API message names its epoch and exact local
+journal event or Discord message source.
 
 Loopflow retains source-linked inputs until the resident consumes them,
 execution turns, deterministic send intents, cursors, and provider receipts as

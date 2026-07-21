@@ -96,6 +96,12 @@ pub enum StoreError {
     NotFound,
     #[error("invalid data: {0}")]
     InvalidData(String),
+    #[error("cannot reserve {target} while Run {run_id} is {state:?}")]
+    RunFenced {
+        target: String,
+        run_id: crate::durable::RunId,
+        state: crate::durable::RunState,
+    },
     #[error("{target} generation {generation} no longer holds its write lease")]
     LeaseRevoked { target: String, generation: u32 },
     #[error("stale Basis: expected {expected}, current {current}")]

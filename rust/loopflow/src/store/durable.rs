@@ -779,6 +779,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reserving_a_fenced_run_names_the_existing_authority() {
+        let (store, work) = wave_work().await;
+        let (run, _) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+
+        let error = store
+            .reserve_run(&work, RunTrigger::User)
+            .await
+            .expect_err("second Run must remain fenced");
+
+        assert!(matches!(
+            error,
+            StoreError::RunFenced { run_id, state, .. }
+                if run_id == run.id && state == RunState::Reserved
+        ));
+    }
+
+    #[tokio::test]
     async fn one_run_can_supervise_overlapping_invocations_without_changing_containment() {
         let (store, work) = wave_work().await;
         let (lease, first) = start_invocation(&store, &work).await;

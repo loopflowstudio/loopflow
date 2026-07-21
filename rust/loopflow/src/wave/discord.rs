@@ -23,7 +23,7 @@ use tokio::sync::watch;
 use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::durable::HomeId;
 use crate::wave::chat::{ChatBackingHealth, ChatMessageSource, ConversationEpoch, WaveChatMessage};
-use crate::wave::journal::{DiscordChatBinding, DiscordMessageSource};
+use crate::wave::journal::{DiscordChatBinding, DiscordMessageSource, MessageOp};
 use crate::wave::runtime::WaveRuntime;
 
 pub const TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
@@ -31,6 +31,7 @@ const API_BASE: &str = "https://discord.com/api/v10";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_CADENCE: Duration = Duration::from_secs(2);
 const ERROR_BACKOFF: Duration = Duration::from_secs(10);
+const MESSAGE_LIMIT: usize = 2_000;
 const VIEW_CHANNEL: u64 = 1 << 10;
 const SEND_MESSAGES: u64 = 1 << 11;
 const READ_MESSAGE_HISTORY: u64 = 1 << 16;
@@ -54,6 +55,8 @@ pub enum DiscordError {
     MissingPermissions(String),
     #[error("Discord returned an invalid permission value: {0}")]
     InvalidPermission(String),
+    #[error("Discord messages are limited to {limit} characters; this message has {actual}")]
+    MessageTooLong { limit: usize, actual: usize },
     #[error("Discord chat binding is owned by Home {owner}; current Home is {current}")]
     WrongHome { owner: String, current: String },
     #[error(
@@ -156,9 +159,12 @@ impl DiscordClient {
     }
 
     fn from_token(token: Option<String>, base_url: &str) -> Result<Self, DiscordError> {
+        Self::from_secret(token.map(SecretString::new), base_url)
+    }
+
+    fn from_secret(token: Option<SecretString>, base_url: &str) -> Result<Self, DiscordError> {
         let token = token
-            .filter(|value| !value.trim().is_empty())
-            .map(SecretString::new)
+            .filter(|value| !value.expose_secret().trim().is_empty())
             .ok_or(DiscordError::MissingToken)?;
         Self::new(token, base_url)
     }
@@ -262,9 +268,14 @@ impl DiscordAdapter {
         binding: DiscordChatBinding,
         owner_home_id: &HomeId,
         local_home_id: &HomeId,
+        token: Option<SecretString>,
     ) -> Result<Self, DiscordError> {
         let lease = DiscordBindingLease::acquire(&binding, owner_home_id, local_home_id)?;
-        let mut adapter = Self::preflight_with_client(DiscordClient::from_env()?, binding).await?;
+        let client = match token {
+            Some(token) => DiscordClient::from_secret(Some(token), API_BASE)?,
+            None => DiscordClient::from_env()?,
+        };
+        let mut adapter = Self::preflight_with_client(client, binding).await?;
         adapter._lease = Some(lease);
         Ok(adapter)
     }
@@ -438,7 +449,23 @@ impl DiscordAdapter {
             return Ok(());
         }
         if message.author.id == self.bot_user_id {
-            self.reconcile_echo(runtime, &message)?;
+            if self.reconcile_echo(runtime, &message)? {
+                return Ok(());
+            }
+            let Some((op, text)) = parse_authored_content(runtime.name(), &message.content) else {
+                return Ok(());
+            };
+            runtime
+                .try_deliver_discord_authored(
+                    text,
+                    DiscordMessageSource {
+                        binding: self.binding.clone(),
+                        message_id: message.id,
+                        author_id: message.author.id,
+                    },
+                    op,
+                )
+                .context("journal Discord app input")?;
             return Ok(());
         }
         if message.author.bot == Some(true)
@@ -461,23 +488,24 @@ impl DiscordAdapter {
         Ok(())
     }
 
-    fn reconcile_echo(&self, runtime: &WaveRuntime, message: &Message) -> Result<()> {
-        let Some(reply_id) = message
+    fn reconcile_echo(&self, runtime: &WaveRuntime, message: &Message) -> Result<bool> {
+        let reply_id = message
             .message_reference
             .as_ref()
-            .and_then(|reference| reference.message_id.as_deref())
-        else {
-            return Ok(());
-        };
+            .and_then(|reference| reference.message_id.as_deref());
         for delivery in runtime.discord_snapshot().deliveries {
-            let Some(reply_to) = delivery.reply_to() else {
-                continue;
-            };
-            if reply_to.binding != self.binding {
+            if delivery.binding != self.binding {
                 continue;
             }
-            if reply_to.message_id != reply_id {
+            if delivery.reply_to().map(|source| source.message_id.as_str()) != reply_id {
                 continue;
+            }
+            if delivery
+                .confirmed
+                .values()
+                .any(|provider_id| provider_id == &message.id)
+            {
+                return Ok(true);
             }
             if let Some(part) = delivery
                 .parts
@@ -492,10 +520,10 @@ impl DiscordAdapter {
                         message.id.clone(),
                     )
                     .context("journal reconciled Discord send")?;
-                break;
+                return Ok(true);
             }
         }
-        Ok(())
+        Ok(false)
     }
 
     async fn deliver_pending(&self, runtime: &WaveRuntime) -> Result<()> {
@@ -538,6 +566,64 @@ impl DiscordProjection {
         self.health.borrow().clone()
     }
 
+    pub(crate) async fn post_authored(
+        &self,
+        runtime: &WaveRuntime,
+        op: MessageOp,
+        text: &str,
+        request_id: &str,
+    ) -> Result<WaveChatMessage, DiscordError> {
+        let epoch = runtime.active_conversation_epoch();
+        if epoch.backing.discord_binding().as_ref() != Some(&self.binding) {
+            return Err(DiscordError::Binding(format!(
+                "active chat epoch {} is not backed by channel {}/{}",
+                epoch.id, self.binding.guild_id, self.binding.channel_id
+            )));
+        }
+        let content = authored_content(runtime.name(), op, text);
+        let actual = content.chars().count();
+        if actual > MESSAGE_LIMIT {
+            return Err(DiscordError::MessageTooLong {
+                limit: MESSAGE_LIMIT,
+                actual,
+            });
+        }
+        let nonce = authored_nonce(request_id);
+        let path = format!("/channels/{}/messages", self.binding.channel_id);
+        let body = CreateMessage {
+            content: &content,
+            nonce: &nonce,
+            enforce_nonce: true,
+            allowed_mentions: AllowedMentions { parse: Vec::new() },
+            message_reference: None,
+        };
+        let sent: Message = match self.client.post(&path, &body).await {
+            Err(error) if error.retryable() => self.client.post(&path, &body).await?,
+            result => result?,
+        };
+        if sent.author.id != self.bot_user_id {
+            return Err(DiscordError::Binding(format!(
+                "authored message {} was returned with unexpected author {}",
+                sent.id, sent.author.id
+            )));
+        }
+        let Some((sent_op, sent_text)) = parse_authored_content(runtime.name(), &sent.content)
+        else {
+            return Err(DiscordError::Binding(format!(
+                "authored message {} did not retain its Loopflow header",
+                sent.id
+            )));
+        };
+        if sent_op != op || sent_text != text {
+            return Err(DiscordError::Binding(format!(
+                "request id already committed a different Discord message {}",
+                sent.id
+            )));
+        }
+        project_message(&self.binding, &epoch, sent, ChatRole::User, sent_text)
+            .map_err(|error| DiscordError::Binding(error.to_string()))
+    }
+
     pub async fn history(
         &self,
         runtime: &WaveRuntime,
@@ -577,38 +663,20 @@ impl DiscordProjection {
                 {
                     return None;
                 }
-                let role = if message.author.id == self.bot_user_id {
-                    if !confirmed.contains(&message.id) {
-                        return None;
+                let (role, text) = if message.author.id == self.bot_user_id {
+                    if confirmed.contains(&message.id) {
+                        (ChatRole::Assistant, message.content.clone())
+                    } else {
+                        let (_, text) = parse_authored_content(runtime.name(), &message.content)?;
+                        (ChatRole::User, text)
                     }
-                    ChatRole::Assistant
                 } else {
                     if message.author.bot == Some(true) {
                         return None;
                     }
-                    ChatRole::User
+                    (ChatRole::User, message.content.clone())
                 };
-                let created_at = snowflake_timestamp(&message.id)
-                    .and_then(|timestamp| {
-                        timestamp
-                            .format(&time::format_description::well_known::Rfc3339)
-                            .map_err(anyhow::Error::from)
-                    })
-                    .ok()?;
-                let mut turn = ChatTurn::user(format!("discord-{}", message.id), message.content);
-                turn.role = role;
-                turn.created_at = created_at;
-                Some(WaveChatMessage {
-                    epoch_id: epoch.id.clone(),
-                    source: ChatMessageSource::Discord {
-                        guild_id: self.binding.guild_id.clone(),
-                        channel_id: self.binding.channel_id.clone(),
-                        message_id: message.id.clone(),
-                        author_id: message.author.id,
-                        url: self.binding.message_url(&message.id),
-                    },
-                    turn,
-                })
+                project_message(&self.binding, epoch, message, role, text).ok()
             })
             .collect::<Vec<_>>();
         if projected.len() > requested {
@@ -662,6 +730,64 @@ fn message_in_epoch(message: &Message, epoch: &ConversationEpoch) -> Result<bool
         })
         .transpose()?;
     Ok(timestamp >= started_at && ended_at.is_none_or(|ended_at| timestamp < ended_at))
+}
+
+fn authored_content(wave: &str, op: MessageOp, text: &str) -> String {
+    format!("{}\n{text}", authored_header(wave, op))
+}
+
+fn authored_header(wave: &str, op: MessageOp) -> String {
+    let action = match op {
+        MessageOp::Message => String::new(),
+        MessageOp::Steer => " · steer".to_string(),
+        MessageOp::Interrupt => " · interrupt".to_string(),
+    };
+    format!("**[{wave} · Loopflow app{action}]**")
+}
+
+fn parse_authored_content(wave: &str, content: &str) -> Option<(MessageOp, String)> {
+    for op in [MessageOp::Message, MessageOp::Steer, MessageOp::Interrupt] {
+        let header = authored_header(wave, op);
+        if let Some(text) = content
+            .strip_prefix(&header)
+            .and_then(|rest| rest.strip_prefix('\n'))
+        {
+            return Some((op, text.to_string()));
+        }
+    }
+    None
+}
+
+fn authored_nonce(request_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"loopflow-discord-authored\0");
+    digest.update(request_id.as_bytes());
+    format!("lf-u-{}", &format!("{:x}", digest.finalize())[..16])
+}
+
+fn project_message(
+    binding: &DiscordChatBinding,
+    epoch: &ConversationEpoch,
+    message: Message,
+    role: ChatRole,
+    text: String,
+) -> Result<WaveChatMessage> {
+    let created_at =
+        snowflake_timestamp(&message.id)?.format(&time::format_description::well_known::Rfc3339)?;
+    let mut turn = ChatTurn::user(format!("discord-{}", message.id), text);
+    turn.role = role;
+    turn.created_at = created_at;
+    Ok(WaveChatMessage {
+        epoch_id: epoch.id.clone(),
+        source: ChatMessageSource::Discord {
+            guild_id: binding.guild_id.clone(),
+            channel_id: binding.channel_id.clone(),
+            message_id: message.id.clone(),
+            author_id: message.author.id,
+            url: binding.message_url(&message.id),
+        },
+        turn,
+    })
 }
 
 fn snowflake_timestamp(value: &str) -> Result<time::OffsetDateTime> {
@@ -878,6 +1004,7 @@ mod tests {
         permissions: u64,
         channel_kind: u8,
         messages: Vec<Message>,
+        nonces: HashMap<String, Message>,
         posts: usize,
         lose_next_post_response: bool,
         channel_status: Option<u16>,
@@ -997,15 +1124,22 @@ mod tests {
                 let body: serde_json::Value = serde_json::from_slice(&body).expect("message body");
                 assert_eq!(body["allowed_mentions"]["parse"], json!([]));
                 assert_eq!(body["enforce_nonce"], true);
-                assert!(body["nonce"].as_str().expect("nonce").len() <= 25);
+                let nonce = body["nonce"].as_str().expect("nonce").to_string();
+                assert!(nonce.len() <= 25);
                 let mut fixture = fixture.lock().expect("fixture");
                 fixture.posts += 1;
+                if let Some(message) = fixture.nonces.get(&nonce) {
+                    return json_response(
+                        StatusCode::OK,
+                        serde_json::to_value(message).expect("message"),
+                    );
+                }
                 let id = fixture
                     .messages
                     .last()
                     .and_then(|message| message.id.parse::<u64>().ok())
-                    .unwrap_or(0)
-                    + 1;
+                    .map(|id| id + 1)
+                    .unwrap_or_else(|| snowflake_at_offset(1, fixture.posts as u64));
                 let message = Message {
                     id: id.to_string(),
                     author: User {
@@ -1022,6 +1156,7 @@ mod tests {
                     }),
                 };
                 fixture.messages.push(message.clone());
+                fixture.nonces.insert(nonce, message.clone());
                 if std::mem::take(&mut fixture.lose_next_post_response) {
                     Response::builder()
                         .status(StatusCode::OK)
@@ -1059,6 +1194,7 @@ mod tests {
             permissions: VIEW_CHANNEL | READ_MESSAGE_HISTORY | SEND_MESSAGES,
             channel_kind: 0,
             messages,
+            nonces: HashMap::new(),
             posts: 0,
             lose_next_post_response: false,
             channel_status: None,
@@ -1104,7 +1240,7 @@ mod tests {
         let local = HomeId::new();
         let owner = HomeId::new();
 
-        let error = DiscordAdapter::preflight(binding(), &owner, &local)
+        let error = DiscordAdapter::preflight(binding(), &owner, &local, None)
             .await
             .expect_err("another Home must not reach token or Discord preflight");
 
@@ -1332,6 +1468,106 @@ mod tests {
             "provider-committed answer"
         );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn native_compose_posts_to_discord_and_reenters_as_a_steer() {
+        let fixture = fixture(Vec::new());
+        let (base_url, discord_server) = fixture_server(fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let projection = adapter.projection();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        adapter.attach(&runtime).expect("attach");
+        fixture.lock().expect("fixture").lose_next_post_response = true;
+        let app = crate::wave::server::router_with_chat_projection(
+            runtime.clone(),
+            crate::wave::server::ResidentDoor::new("resident"),
+            Arc::new(crate::wave::registry::ObserverSlot::new(
+                runtime.clone(),
+                None,
+            )),
+            None,
+            crate::wave::server::ShutdownDoor::new(),
+            Some(projection.clone()),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind Wave listener");
+        let address = listener.local_addr().expect("Wave listener address");
+        let wave_server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve Wave");
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}/messages");
+        let body = json!({
+            "id": "request-1",
+            "op": "steer",
+            "text": "favor reliability"
+        });
+        let response = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .expect("post native message");
+        assert_eq!(response.status(), StatusCode::OK);
+        let posted: crate::wave::chat::PostMessageResponse =
+            response.json().await.expect("posted response");
+        let posted = posted.message.expect("provider-backed message");
+        assert_eq!(posted.turn.role, ChatRole::User);
+        assert_eq!(posted.turn.text, "favor reliability");
+        assert!(matches!(&posted.source, ChatMessageSource::Discord { .. }));
+        assert_eq!(
+            fixture.lock().expect("fixture").messages[0].content,
+            "**[ship · Loopflow app · steer]**\nfavor reliability"
+        );
+        let retried: crate::wave::chat::PostMessageResponse = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .expect("retry native message")
+            .json()
+            .await
+            .expect("retry response");
+        assert_eq!(
+            retried.message.expect("retried message").source,
+            posted.source
+        );
+        assert_eq!(fixture.lock().expect("fixture").messages.len(), 1);
+        assert_eq!(fixture.lock().expect("fixture").posts, 3);
+
+        adapter.sync_once(&runtime).await.expect("ingest bot echo");
+        let pending = runtime.pending_messages();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].op, MessageOp::Steer);
+        assert!(pending[0].text.ends_with("favor reliability"));
+        adapter
+            .sync_once(&runtime)
+            .await
+            .expect("repeat sync stays idempotent");
+        assert_eq!(runtime.pending_messages().len(), 1);
+        let history = projection
+            .history(&runtime, &runtime.active_conversation_epoch(), Some(12))
+            .await
+            .expect("native provider history");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].turn.role, ChatRole::User);
+        assert_eq!(history[0].turn.text, "favor reliability");
+
+        wave_server.abort();
+        discord_server.abort();
     }
 
     #[tokio::test]

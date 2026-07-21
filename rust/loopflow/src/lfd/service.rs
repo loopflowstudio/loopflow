@@ -29,6 +29,10 @@ pub struct ServiceSpec {
     /// Executable search path captured at install time so launchd can find
     /// Homebrew tools such as `gh` and `doppler`.
     pub path_env: Option<String>,
+    /// Non-secret Doppler project selection captured from `doppler run`.
+    pub doppler_project: Option<String>,
+    /// Non-secret Doppler config selection captured from `doppler run`.
+    pub doppler_config: Option<String>,
 }
 
 /// Where the rendered service file lands, and how it is loaded, per platform.
@@ -98,6 +102,18 @@ pub fn render_launchd_plist(spec: &ServiceSpec) -> String {
             xml_escape(path)
         ));
     }
+    if let Some(project) = &spec.doppler_project {
+        env.push_str(&format!(
+            "        <key>DOPPLER_PROJECT</key>\n        <string>{}</string>\n",
+            xml_escape(project)
+        ));
+    }
+    if let Some(config) = &spec.doppler_config {
+        env.push_str(&format!(
+            "        <key>DOPPLER_CONFIG</key>\n        <string>{}</string>\n",
+            xml_escape(config)
+        ));
+    }
     let env_block = if env.is_empty() {
         String::new()
     } else {
@@ -149,6 +165,18 @@ pub fn render_systemd_unit(spec: &ServiceSpec) -> String {
     }
     if let Some(path) = &spec.path_env {
         env_lines.push_str(&format!("Environment=PATH={}\n", shell_escape(path)));
+    }
+    if let Some(project) = &spec.doppler_project {
+        env_lines.push_str(&format!(
+            "Environment=DOPPLER_PROJECT={}\n",
+            shell_escape(project)
+        ));
+    }
+    if let Some(config) = &spec.doppler_config {
+        env_lines.push_str(&format!(
+            "Environment=DOPPLER_CONFIG={}\n",
+            shell_escape(config)
+        ));
     }
     let exec_start = shell_escape(&spec.lfd_path.to_string_lossy());
     format!(
@@ -331,6 +359,8 @@ mod tests {
             lf_home: Some(PathBuf::from("/home/op/.lf")),
             db_path: None,
             path_env: Some("/opt/homebrew/bin:/usr/bin:/bin".to_string()),
+            doppler_project: Some("loopflow".to_string()),
+            doppler_config: Some("dev".to_string()),
         }
     }
 
@@ -349,6 +379,10 @@ mod tests {
         assert!(plist.contains("/home/op/src/loopflow</string>"));
         assert!(plist.contains("<key>PATH</key>"));
         assert!(plist.contains("/opt/homebrew/bin:/usr/bin:/bin"));
+        assert!(plist.contains("<key>DOPPLER_PROJECT</key>"));
+        assert!(plist.contains("<string>loopflow</string>"));
+        assert!(plist.contains("<key>DOPPLER_CONFIG</key>"));
+        assert!(plist.contains("<string>dev</string>"));
         assert_eq!(plist.matches("<string>/dev/null</string>").count(), 2);
         // Secrets must never appear in the file.
         assert!(!plist.contains("WEBHOOK_SECRET"));
@@ -368,6 +402,8 @@ mod tests {
         assert!(unit.contains("StandardError=null"));
         assert!(unit.contains("Environment=LF_HOME=/home/op/.lf"));
         assert!(unit.contains("Environment=PATH=/opt/homebrew/bin:/usr/bin:/bin"));
+        assert!(unit.contains("Environment=DOPPLER_PROJECT=loopflow"));
+        assert!(unit.contains("Environment=DOPPLER_CONFIG=dev"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(!unit.contains("WEBHOOK_SECRET"));
     }
@@ -381,6 +417,8 @@ mod tests {
             lf_home: None,
             db_path: None,
             path_env: None,
+            doppler_project: None,
+            doppler_config: None,
         };
         let plist = render_launchd_plist(&bare);
         assert!(!plist.contains("EnvironmentVariables"));

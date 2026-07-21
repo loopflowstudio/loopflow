@@ -45,9 +45,7 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
     assert not any(term in commands for term in forbidden)
 
     acceptance = workflow["jobs"]["release-acceptance"]
-    acceptance_commands = "\n".join(
-        step.get("run", "") for step in acceptance["steps"]
-    )
+    acceptance_commands = "\n".join(step.get("run", "") for step in acceptance["steps"])
     assert "release_acceptance_recovers_from_a_revoked_selected_account" in acceptance_commands
 
 
@@ -189,9 +187,7 @@ def test_release_build_workflow_is_credential_free():
         Loader=yaml.BaseLoader,
     )
 
-    assert release["jobs"] == {
-        "packages": {"uses": "./.github/workflows/nightly-packages.yml"}
-    }
+    assert release["jobs"] == {"packages": {"uses": "./.github/workflows/nightly-packages.yml"}}
     assert "schedule" not in release["on"]
 
     workflow_text = (ROOT / ".github/workflows/release.yml").read_text()
@@ -239,6 +235,10 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     assert config["release"]["targets"]["default"]["publisher"] == [
         "doppler",
         "run",
+        "--project",
+        "loopflow",
+        "--config",
+        "prd",
         "--",
         "uv",
         "run",
@@ -282,9 +282,7 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
 
 
 def test_rust_ci_materializes_drafts_before_running_tests():
-    ci = yaml.load(
-        (ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader
-    )
+    ci = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
     steps = ci["jobs"]["rust-test"]["steps"]
     names = [step.get("name") for step in steps]
 

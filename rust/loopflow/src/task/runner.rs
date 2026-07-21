@@ -1309,7 +1309,15 @@ fn resume_task_phase(task: &Task) -> Result<Playhead> {
 
 fn sync_task_state(task: &mut Task, latest: &Task) {
     task.pm_writeback = latest.pm_writeback.clone();
-    task.gate_proposal = latest.gate_proposal.clone();
+    if task.lifecycle_phase == TaskLifecyclePhase::Finally && task.phase_epoch == latest.phase_epoch
+    {
+        task.gate_proposal = latest.gate_proposal.clone();
+    } else if task.lifecycle_phase != TaskLifecyclePhase::Finally {
+        // A gate proposal belongs to one Finally epoch. Copying a newer
+        // proposal into a pre-final body forms an invalid Task before the store's
+        // phase-epoch fence can discard that stale body's write.
+        task.gate_proposal = None;
+    }
 }
 
 fn task_state_fingerprint(task: &Task) -> Result<String> {
@@ -1974,7 +1982,8 @@ fn progress_summary(text: &str) -> String {
 #[cfg(test)]
 mod planning_tests {
     use super::{
-        complete_interactive_step, finish_task_flow_turn, interactive_step_prompt, task_seed,
+        complete_interactive_step, finish_task_flow_turn, interactive_step_prompt, sync_task_state,
+        task_seed,
     };
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::durable::{
@@ -1986,8 +1995,8 @@ mod planning_tests {
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig};
     use crate::task::{
-        Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-        TaskPrId,
+        Observation, PmWritebackState, Task, TaskGateProposal, TaskId, TaskLifecyclePhase,
+        TaskLifecyclePlan, TaskPr, TaskPrId,
     };
     use crate::wave::playhead::{BodyProvenance, Playhead, QueuedInvocation};
     use crate::wave::Wave;
@@ -2049,6 +2058,68 @@ mod planning_tests {
         assert!(prompt.contains("lf invocation handback invocation_demo"));
         assert!(prompt.contains("do not execute the command from this read-only surface"));
         assert!(!prompt.contains("leaves this step waiting"));
+    }
+
+    #[test]
+    fn task_state_sync_keeps_gate_proposals_scoped_to_finally_epoch() {
+        let now = time::OffsetDateTime::now_utc();
+        let first = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("incident-issue").unwrap(),
+                identifier: "ENG-125".to_string(),
+                title: "Incident".to_string(),
+                description: String::new(),
+                pm_snapshot_synced_at: 1,
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: crate::id::WaveId::new(),
+            project_id: ProjectId::new(),
+            worktree: "/tmp/incident".into(),
+            workspace_slug: "incident".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("incident", "ship-5whys", "ship"),
+            lifecycle_phase: TaskLifecyclePhase::First,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let mut finally = first.clone();
+        finally.enter_loop().unwrap();
+        finally
+            .enter_finally(TaskGateProposal {
+                done: true,
+                reason: "pull request merged".to_string(),
+            })
+            .unwrap();
+
+        let mut first_body = first.clone();
+        sync_task_state(&mut first_body, &finally);
+        assert!(first_body.gate_proposal.is_none());
+        first_body.validate().unwrap();
+
+        let mut loop_body = first;
+        loop_body.enter_loop().unwrap();
+        sync_task_state(&mut loop_body, &finally);
+        assert!(loop_body.gate_proposal.is_none());
+        loop_body.validate().unwrap();
+
+        let mut finally_body = finally.clone();
+        finally.gate_proposal = Some(TaskGateProposal {
+            done: false,
+            reason: "another prevention remains".to_string(),
+        });
+        sync_task_state(&mut finally_body, &finally);
+        assert_eq!(finally_body.gate_proposal, finally.gate_proposal);
+        finally_body.validate().unwrap();
     }
 
     #[test]

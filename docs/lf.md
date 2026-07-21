@@ -897,10 +897,13 @@ unreleased ledger; headless runs do not. The release workflow promotes
 intent source, the exact git range as shipped-behavior truth, and merged PRs as
 narrative context, then archives the generated notes. If the ledger is absent,
 notes fall back to commits and PR history. Headless release automation needs no
-runner-local agent CLI — if no harness can start, Loopflow writes deterministic
-notes from the same context. Configure repository-specific verification,
-preparation, and completion evidence under `release.targets`; see
-[Configuration](config.md).
+healthy notes provider. Missing CLIs, cooldowns, rate limits, quota or
+authentication failures, and provider outages write deterministic notes from
+bounded context. Unknown skill failures and missing, stale-version, or
+oversized output keep the release gate red. `lf release status` reports note
+quality and gate safety separately from workflow and GitHub Release completion.
+Configure repository-specific verification, preparation, and completion
+evidence under `release.targets`; see [Configuration](config.md).
 
 ## See Also
 

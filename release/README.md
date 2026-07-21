@@ -88,7 +88,14 @@ writes the final notes to both `RELEASE_NOTES.md` and
 the shipped-behavior ledger; matching PRs add narrative context. If the
 decisions directory is absent, the same commit evidence still produces notes.
 
-Scheduled releases prefer the same agent-backed `release-notes` skill. When
-the runner has no Claude, Codex, or OpenCode CLI, `lf release run` writes
-deterministic notes from the exact commits, matching PRs, and archived
-decisions instead of blocking the patch release.
+Scheduled releases prefer the same agent-backed `release-notes` skill. Missing
+CLIs, provider cooldowns, rate limits, quota exhaustion, authentication loss,
+and provider outages select concise deterministic notes instead of stranding a
+verified patch release. Release-note source context is capped at 128 KiB and
+the resulting notes/merge-queue body at 60 KiB; omission counts travel with the
+agent context. Unknown skill failures, stale-version output, missing output,
+and oversized notes still block the release gate.
+
+`lf release status` reports narrative notes, degraded-but-safe deterministic
+notes, missing unsafe notes, or an unmarked legacy archive separately from the
+workflow and GitHub Release status.

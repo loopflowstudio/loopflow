@@ -46,8 +46,8 @@ pub use rebase::{
 };
 pub use release::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_publish,
-    release_run, release_status, release_tag, MergedPr, ReleaseReceipt, ReleaseRunOutcome,
-    ReleaseStatusResult,
+    release_run, release_status, release_tag, MergedPr, ReleaseNotesDegradation,
+    ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome, ReleaseStatusResult,
 };
 pub(crate) use run::{launch_in_run, RunLaunch};
 pub use trace::{hash_prompt, trace_enabled, MockResponses, OpTrace, Tracer};

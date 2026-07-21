@@ -56,7 +56,7 @@ struct LoopflowApp: App {
         let launchRepoURL = LaunchArguments.repoURL()
 
         WindowGroup {
-            ControlRoomView(
+            PodiumView(
                 portfolioService: portfolioService,
                 initialRepoPath: launchRepoURL?.path
             )
@@ -254,6 +254,7 @@ private extension View {
     func uiTestWindowWidth() -> some View {
         if let width = AppTestMode.viewPinnedWidth {
             frame(width: width)
+                .frame(maxHeight: .infinity, alignment: .top)
         } else {
             self
         }

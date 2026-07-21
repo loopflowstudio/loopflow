@@ -2,7 +2,7 @@ import Foundation
 import Loopflow
 import Observation
 
-enum ControlRoomSelection: Equatable, Hashable, Sendable {
+enum PodiumSelection: Equatable, Hashable, Sendable {
     case wave(waveId: String)
     case project(waveId: String, projectId: String)
     case task(waveId: String, taskId: String)
@@ -15,14 +15,13 @@ enum ControlRoomSelection: Equatable, Hashable, Sendable {
     }
 }
 
-struct SelectedRunTarget: Equatable, Sendable {
-    let selection: ControlRoomSelection
-    let wave: String
+struct WorkActivityScope: Equatable, Sendable {
+    let wave: String?
     let project: String?
     let task: String?
 }
 
-enum ControlRoomReading<Value> {
+enum PodiumReading<Value> {
     case loading
     case available(Value)
     case unavailable(lastGood: Value?, reason: String)
@@ -49,60 +48,33 @@ enum ControlRoomReading<Value> {
     }
 }
 
-struct ControlRoomActivitySummary: Equatable {
-    let activeAgents: Int
-    let working: Int
-    let waiting: Int
-    let stalled: Int
-    let orphaned: Int
-    let unclaimed: Int
-    let outputTokensPerSecond5m: Double
-    let measuredOutputTokens: UInt64
-}
-
-struct ControlRoomFleetSummary: Equatable {
+struct WaveSummary: Equatable {
     let registeredWaves: Int
-    let pausedWaves: Int
     let activeRuns: Int
-    let liveListeners: Int
     let unservedRuns: Int
-    let activeProjects: Int
-    let activeTasks: Int
-}
-
-extension ActivitySnapshot {
-    var controlRoomSummary: ControlRoomActivitySummary {
-        let providers = nodes.filter { $0.kind == .providerLaunch }
-        return ControlRoomActivitySummary(
-            activeAgents: providers.count + providerProcesses.count,
-            working: providers.count { $0.state == .working },
-            waiting: providers.count { $0.state == .waiting },
-            stalled: providers.count { $0.state == .stalled },
-            orphaned: providerProcesses.count { $0.claim == .orphaned },
-            unclaimed: providerProcesses.count { $0.claim == .unclaimed },
-            outputTokensPerSecond5m: aggregate.outputTokensPerSecondFast,
-            measuredOutputTokens: aggregate.measuredOutputTokens
-        )
-    }
 }
 
 @MainActor
 @Observable
-final class ControlRoomModel {
+final class PodiumModel {
     var repoPath: String?
-    var selection: ControlRoomSelection?
-    private(set) var roadmap: ControlRoomReading<RoadmapSnapshot> = .loading
-    private(set) var waves: ControlRoomReading<[Wave]> = .loading
-    private(set) var activity: ControlRoomReading<ActivitySnapshot> = .loading
-    private(set) var selectedRuns: ControlRoomReading<[SkillRunEntry]> = .available([])
-    private(set) var selectedRunTarget: SelectedRunTarget?
+    var selection: PodiumSelection?
+    private(set) var roadmap: PodiumReading<RoadmapSnapshot> = .loading
+    private(set) var waves: PodiumReading<[Wave]> = .loading
+    private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
+    private(set) var workActivity: PodiumReading<WorkActivitySnapshot> = .loading
+    private(set) var workActivityScope = WorkActivityScope(
+        wave: nil,
+        project: nil,
+        task: nil
+    )
     private(set) var repos: [PortfolioRepo] = []
     private(set) var authoredWavesByRepo: [String: [String]] = [:]
     private(set) var isRefreshing = false
 
     private let query: RegistryQuery
     private var usesFixedFixture = false
-    private var selectedRunsGeneration = 0
+    private var workActivityGeneration = 0
 
     init(query: RegistryQuery, repoPath: String? = nil) {
         self.query = query
@@ -142,17 +114,13 @@ final class ControlRoomModel {
         }
     }
 
-    var fleetSummary: ControlRoomFleetSummary? {
+    var waveSummary: WaveSummary? {
         guard waves.value != nil else { return nil }
         let registered = visibleWaves.filter(\.isRegistered).map(\.api)
-        return ControlRoomFleetSummary(
+        return WaveSummary(
             registeredWaves: registered.count,
-            pausedWaves: registered.count { $0.paused },
             activeRuns: registered.count { $0.status.isRunning },
-            liveListeners: registered.count { $0.live },
-            unservedRuns: registered.count { $0.status.isRunning && !$0.live },
-            activeProjects: registered.reduce(0) { $0 + $1.activeProjects },
-            activeTasks: registered.reduce(0) { $0 + $1.activeTasks }
+            unservedRuns: registered.count { $0.status.isRunning && !$0.live }
         )
     }
 
@@ -183,19 +151,23 @@ final class ControlRoomModel {
 
         let previousRoadmap = roadmap.value
         let previousWaves = waves.value
-        let previousActivity = activity.value
+        let previousProcessActivity = processActivity.value
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
-        if previousActivity == nil { activity = .loading }
+        if previousProcessActivity == nil { processActivity = .loading }
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let activityResult = readActivity()
+        async let processActivityResult = readProcessActivity()
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         waves = reading(from: await wavesResult, lastGood: previousWaves)
-        activity = reading(from: await activityResult, lastGood: previousActivity)
+        processActivity = reading(
+            from: await processActivityResult,
+            lastGood: previousProcessActivity
+        )
         selectRequestedWaveIfNeeded()
         clearSelectionIfOutsideScope()
+        await refreshWorkActivity()
     }
 
     func refreshPortfolio(
@@ -229,7 +201,7 @@ final class ControlRoomModel {
             nil
         }
         guard let target else {
-            throw RegistryQueryError("Wave is absent from the latest control-room evidence")
+            throw RegistryQueryError("Wave is absent from the latest Podium evidence")
         }
         _ = try await query.setWavePaused(
             wave: target.name,
@@ -239,56 +211,36 @@ final class ControlRoomModel {
         await refresh()
     }
 
-    func select(_ selection: ControlRoomSelection?) {
+    func select(_ selection: PodiumSelection?) {
         setSelection(selection)
         clearSelectionIfOutsideScope()
     }
 
-    func refreshSelectedRuns() async {
+    func refreshWorkActivity() async {
         guard !usesFixedFixture else { return }
-        selectedRunsGeneration &+= 1
-        let generation = selectedRunsGeneration
-        guard let selection, let target = runTarget(for: selection) else {
-            selectedRunTarget = nil
-            selectedRuns = .available([])
+        workActivityGeneration &+= 1
+        let generation = workActivityGeneration
+        let requestedSelection = selection
+        guard let scope = activityScope(for: requestedSelection) else {
+            workActivity = .unavailable(
+                lastGood: nil,
+                reason: "Selected Work is absent from the latest Podium evidence"
+            )
             return
         }
 
-        let previous = selectedRunTarget?.selection == selection ? selectedRuns.value : nil
-        selectedRunTarget = target
-        if previous == nil { selectedRuns = .loading }
+        let previous = workActivityScope == scope ? workActivity.value : nil
+        workActivityScope = scope
+        if previous == nil { workActivity = .loading }
 
-        let result: Result<[SkillRunEntry], Error>
-        do {
-            let runs = try await query.recentRuns(
-                wave: target.wave,
-                project: target.project,
-                task: target.task
-            )
-            result = .success(runs.filter { run in
-                run.wave == target.wave
-                    && (target.project == nil || run.project == target.project)
-                    && (target.task == nil || run.task == target.task)
-            })
-        } catch {
-            result = .failure(error)
-        }
+        let result = await readWorkActivity(scope: scope)
 
-        guard self.selection == selection, selectedRunsGeneration == generation else { return }
-        selectedRuns = reading(from: result, lastGood: previous)
+        guard selection == requestedSelection, workActivityGeneration == generation else { return }
+        workActivity = reading(from: result, lastGood: previous)
     }
 
-    func runs(for selection: ControlRoomSelection) -> [SkillRunEntry] {
-        guard let target = runTarget(for: selection) else { return [] }
-        return (selectedRuns.value ?? []).filter { run in
-            run.wave == target.wave
-                && (target.project == nil || run.project == target.project)
-                && (target.task == nil || run.task == target.task)
-        }
-    }
-
-    func traceAddress(for run: SkillRunEntry) async throws -> TraceAddress {
-        try await query.traceAddress(for: run)
+    func traceAddress(invocationId: String) async throws -> TraceAddress {
+        try await query.traceAddress(invocationId: invocationId)
     }
 
     func wave(id: String) -> WaveRoadmap? {
@@ -336,17 +288,17 @@ final class ControlRoomModel {
     }
 
     func applyFixture(
-        roadmap: ControlRoomReading<RoadmapSnapshot>,
-        waves: ControlRoomReading<[Wave]>,
-        activity: ControlRoomReading<ActivitySnapshot>,
-        selectedRuns: ControlRoomReading<[SkillRunEntry]> = .available([]),
+        roadmap: PodiumReading<RoadmapSnapshot>,
+        waves: PodiumReading<[Wave]>,
+        processActivity: PodiumReading<ActivitySnapshot>,
+        workActivity: PodiumReading<WorkActivitySnapshot>,
         repos: [PortfolioRepo],
         fixed: Bool = false
     ) {
         self.roadmap = roadmap
         self.waves = waves
-        self.activity = activity
-        self.selectedRuns = selectedRuns
+        self.processActivity = processActivity
+        self.workActivity = workActivity
         self.repos = repos
         authoredWavesByRepo = [:]
         usesFixedFixture = fixed
@@ -366,7 +318,10 @@ final class ControlRoomModel {
         "\(WaveOrigin.resolve(repo).normalizedFilePath)#\(name)"
     }
 
-    private func runTarget(for selection: ControlRoomSelection) -> SelectedRunTarget? {
+    private func activityScope(for selection: PodiumSelection?) -> WorkActivityScope? {
+        guard let selection else {
+            return WorkActivityScope(wave: nil, project: nil, task: nil)
+        }
         switch selection {
         case .wave(let waveId):
             let name: String
@@ -377,8 +332,7 @@ final class ControlRoomModel {
             } else {
                 return nil
             }
-            return SelectedRunTarget(
-                selection: selection,
+            return WorkActivityScope(
                 wave: name,
                 project: nil,
                 task: nil
@@ -387,8 +341,7 @@ final class ControlRoomModel {
             guard let wave = wave(id: waveId)?.wave,
                   let project = project(waveId: waveId, projectId: projectId)
             else { return nil }
-            return SelectedRunTarget(
-                selection: selection,
+            return WorkActivityScope(
                 wave: wave.name,
                 project: project.project.slug,
                 task: nil
@@ -397,8 +350,7 @@ final class ControlRoomModel {
             guard let wave = wave(id: waveId)?.wave,
                   let selected = task(waveId: waveId, taskId: taskId)
             else { return nil }
-            return SelectedRunTarget(
-                selection: selection,
+            return WorkActivityScope(
                 wave: wave.name,
                 project: selected.project.project.slug,
                 task: selected.task.task.identifier
@@ -406,16 +358,11 @@ final class ControlRoomModel {
         }
     }
 
-    private func setSelection(_ selection: ControlRoomSelection?) {
+    private func setSelection(_ selection: PodiumSelection?) {
         guard self.selection != selection else { return }
-        selectedRunsGeneration &+= 1
+        workActivityGeneration &+= 1
         self.selection = selection
-        selectedRunTarget = selection.flatMap { runTarget(for: $0) }
-        if selection == nil {
-            selectedRuns = .available([])
-        } else if !usesFixedFixture {
-            selectedRuns = .loading
-        }
+        if !usesFixedFixture { workActivity = .loading }
     }
 
     private func selectRequestedWaveIfNeeded() {
@@ -440,9 +387,23 @@ final class ControlRoomModel {
         }
     }
 
-    private func readActivity() async -> Result<ActivitySnapshot, Error> {
+    private func readProcessActivity() async -> Result<ActivitySnapshot, Error> {
         do {
-            return .success(try await query.activity())
+            return .success(try await query.processActivity())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func readWorkActivity(
+        scope: WorkActivityScope
+    ) async -> Result<WorkActivitySnapshot, Error> {
+        do {
+            return .success(try await query.workActivity(
+                wave: scope.wave,
+                project: scope.project,
+                task: scope.task
+            ))
         } catch {
             return .failure(error)
         }
@@ -451,7 +412,7 @@ final class ControlRoomModel {
     private func reading<Value>(
         from result: Result<Value, Error>,
         lastGood: Value?
-    ) -> ControlRoomReading<Value> {
+    ) -> PodiumReading<Value> {
         switch result {
         case .success(let value):
             .available(value)

@@ -5,6 +5,34 @@
 import SwiftUI
 import Loopflow
 
+func waveOutline(_ waves: [WaveViewModel]) -> [(wave: WaveViewModel, indent: Int)] {
+    let byId = Dictionary(waves.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let roots = waves.filter { wave in
+        guard let parent = wave.parentWaveId else { return true }
+        return byId[parent] == nil
+    }
+    let children = Dictionary(
+        grouping: waves.filter { !roots.contains($0) },
+        by: { $0.parentWaveId ?? "" }
+    )
+    func sorted(_ waves: [WaveViewModel]) -> [WaveViewModel] {
+        waves.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+    var result: [(WaveViewModel, Int)] = []
+    func append(_ wave: WaveViewModel, indent: Int) {
+        result.append((wave, indent))
+        for child in sorted(children[wave.id] ?? []) {
+            append(child, indent: indent + 1)
+        }
+    }
+    for root in sorted(roots) {
+        append(root, indent: 0)
+    }
+    return result
+}
+
 struct WaveRow: View {
     let wave: WaveViewModel
     let isSelected: Bool
@@ -18,6 +46,45 @@ struct WaveRow: View {
         let hierarchy = indentLevel > 0 ? "child wave" : "top-level wave"
         return "\(wave.lens.color.rawValue) lens; \(hierarchy)"
     }
+
+    var body: some View {
+        Button(action: onSelect) {
+            WaveRowLabel(wave: wave)
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, Spacing.md + CGFloat(indentLevel) * Spacing.lg)
+        .padding(.trailing, Spacing.md)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .onChange(of: isSelected) { _, selected in
+            if selected { isHovering = false }
+        }
+        .contextMenu {
+            if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Wave", systemImage: "trash")
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Wave: \(wave.displayName). \(wave.lens.reason)")
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(indentLevel > 0 ? "Child wave" : "Top-level wave")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+private struct WaveRowLabel: View {
+    let wave: WaveViewModel
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
@@ -38,7 +105,7 @@ struct WaveRow: View {
                         Text("\(wave.openTaskCount)")
                             .font(Typography.caption(10))
                             .fontWeight(.medium)
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(.white.opacity(0.68))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Color.white.opacity(0.1))
@@ -52,42 +119,11 @@ struct WaveRow: View {
                 if let tagline = wave.objectiveTagline {
                     Text(tagline)
                         .font(Typography.caption())
-                        .foregroundStyle(.white.opacity(0.5))
+                        .foregroundStyle(.white.opacity(0.68))
                         .lineLimit(1)
                         .accessibilityIdentifier("wave-objective")
                 }
             }
         }
-        .padding(.leading, Spacing.md + CGFloat(indentLevel) * Spacing.lg)
-        .padding(.trailing, Spacing.md)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .fill(isSelected ? Color.white.opacity(0.2) : (isHovering ? Color.white.opacity(0.08) : Color.clear))
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            isHovering = hovering
-        }
-        .onChange(of: isSelected) { _, selected in
-            if selected { isHovering = false }
-        }
-        .onTapGesture {
-            onSelect()
-        }
-        .contextMenu {
-            if let onDelete {
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
-                    Label("Delete Wave", systemImage: "trash")
-                }
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Wave: \(wave.displayName). \(wave.lens.reason)")
-        .accessibilityValue(accessibilityValue)
-        .accessibilityHint(indentLevel > 0 ? "Child wave" : "Top-level wave")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

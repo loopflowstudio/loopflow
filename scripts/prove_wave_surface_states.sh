@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prove the primary control room renders its four fixture states — populated,
+# Prove The Podium renders its four fixture states — populated,
 # loading, unavailable, and empty — DISTINCTLY at both a narrow and a wide
 # desktop width, on a host without UI-automation permission.
 #
@@ -85,7 +85,7 @@ for ((i = 0; i < n; i++)); do
 done
 
 if [ "$fail" -ne 0 ]; then
-  echo "FAIL — the control room did not render all states distinctly."
+  echo "FAIL — The Podium did not render all states distinctly."
   exit 1
 fi
 echo "PASS — all ${n} captures (4 states × 2 widths) are distinct and non-empty."

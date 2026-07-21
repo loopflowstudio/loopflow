@@ -14,7 +14,7 @@
   },
   "nodes": [
     {
-      "id": "exec:exec-control-room",
+      "id": "exec:exec-podium",
       "parent_id": null,
       "kind": "exec",
       "label": "lf task pursue",
@@ -43,7 +43,7 @@
     },
     {
       "id": "launch:invocation-working",
-      "parent_id": "exec:exec-control-room",
+      "parent_id": "exec:exec-podium",
       "kind": "provider_launch",
       "label": "codex 4101",
       "pid": 4101,
@@ -71,7 +71,7 @@
     },
     {
       "id": "launch:invocation-stalled",
-      "parent_id": "exec:exec-control-room",
+      "parent_id": "exec:exec-podium",
       "kind": "provider_launch",
       "label": "claude 4201",
       "pid": 4201,

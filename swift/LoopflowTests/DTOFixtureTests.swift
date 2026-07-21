@@ -65,6 +65,25 @@ struct DTOFixtureTests {
         #expect(decoded == snapshot)
     }
 
+    @Test("Work Activity fixture preserves proof links and typed facts")
+    func workActivityFixturePreservesProof() throws {
+        let data = try loadFixtureData("work_activity_snapshot.json")
+        let snapshot = try JSONDecoder().decode(WorkActivitySnapshot.self, from: data)
+
+        #expect(snapshot.limit == 50)
+        #expect(snapshot.items.map(\.subject) == ["W2-144", "W2-144", "product", "mac-surface-ux"])
+        #expect(snapshot.items[0].fact.invocationId == "invocation-product-run")
+        #expect(snapshot.items[1].fact.github?.number == 1144)
+        #expect(snapshot.items[1].fact.github?.url.host == "github.com")
+        #expect(snapshot.items[2].work.kind == .wave)
+        if case .steerIssued(_, .run(let id)) = snapshot.items[2].fact {
+            #expect(id == "run_00000000000000000000000000000001")
+        } else {
+            Issue.record("expected a Run-authored Steer")
+        }
+        #expect(snapshot.items[3].fact == .workCreated)
+    }
+
     @Test("Context Lab fixture preserves missing coverage and trace identity")
     func contextLabFixturePreservesResearchTruth() throws {
         let data = try loadFixtureData("context_lab_snapshot.json")
@@ -216,7 +235,7 @@ struct DTOFixtureTests {
             kind: .project,
             id: "proj_00000000000000000000000000000001"
         )))
-        #expect(ask.answer?.author == .run("run_00000000000000000000000000000001"))
+        #expect(ask.answer?.author == .run(id: "run_00000000000000000000000000000001"))
         #expect(ask.answer?.text == "The live blocking exchange.")
 
         let encoded = try JSONEncoder().encode(ask)

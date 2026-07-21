@@ -49,51 +49,9 @@ public enum AnswerRouteRecord: Codable, Sendable, Hashable {
     }
 }
 
-public enum AnswerAuthorRecord: Codable, Sendable, Hashable {
-    case user
-    case run(String)
-
-    private struct DynamicKey: CodingKey {
-        let stringValue: String
-        let intValue: Int? = nil
-
-        init?(stringValue: String) { self.stringValue = stringValue }
-        init?(intValue: Int) { return nil }
-    }
-
-    public init(from decoder: Decoder) throws {
-        if let value = try? decoder.singleValueContainer().decode(String.self), value == "User" {
-            self = .user
-            return
-        }
-        let values = try decoder.container(keyedBy: DynamicKey.self)
-        guard let run = DynamicKey(stringValue: "Run"), values.contains(run) else {
-            throw DecodingError.dataCorrupted(
-                DecodingError.Context(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Answer author must be User or Run"
-                )
-            )
-        }
-        self = .run(try values.decode(String.self, forKey: run))
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        switch self {
-        case .user:
-            var value = encoder.singleValueContainer()
-            try value.encode("User")
-        case .run(let id):
-            var values = encoder.container(keyedBy: DynamicKey.self)
-            guard let run = DynamicKey(stringValue: "Run") else { return }
-            try values.encode(id, forKey: run)
-        }
-    }
-}
-
 public struct AnswerRecord: Codable, Sendable, Hashable {
     public let askId: String
-    public let author: AnswerAuthorRecord
+    public let author: WorkAuthor
     public let text: String
     public let answeredAt: String
 

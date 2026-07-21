@@ -117,6 +117,27 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
+    @Test("lf activity composes Work filters before the bounded result")
+    func workActivityUsesOneFilteredQuery() async throws {
+        let json = try String(contentsOf: workActivityFixtureURL(), encoding: .utf8)
+        let query = RegistryQuery { args, cwd in
+            #expect(args == [
+                "activity", "--since", "7d", "--limit", "50",
+                "--wave", "product", "--project", "mac-surface-ux",
+                "--task", "W2-144", "--json",
+            ])
+            #expect(cwd == nil)
+            return json
+        }
+
+        let result = try await query.workActivity(
+            wave: "product",
+            project: "mac-surface-ux",
+            task: "W2-144"
+        )
+        #expect(result.items[0].subject == "W2-144")
+    }
+
     @Test("Wave Chat history uses the backing-aware DTO")
     func chatHistoryUsesBackingAwareDTO() async throws {
         let query = RegistryQuery { args, cwd in
@@ -269,48 +290,8 @@ struct RegistryQueryTests {
         #expect(file.sizeBytes == 14)
     }
 
-    @Test("lf runs decodes the ledger window")
-    func runsDecode() async throws {
-        let json = """
-        [{"id":"invocation-1","trace_id":"abc","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":"auditability","task":"W2-122","flow":"build","skill":"gate","status":"ok","started":100,"ended":110,"turns":1,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"claude","model":"opus","surface":"headless","capture_status":"complete"},
-         {"id":"invocation-2","trace_id":"def","exec_id":"span-2","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"goals","project":null,"task":null,"flow":null,"skill":"debug","status":"running","started":120,"ended":null,"turns":0,"system_tokens":0,"task_tokens":0,"supplied_context_tokens":0,"input_tokens":null,"output_tokens":null,"reasoning_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null,"cost_usd":null,"duration_secs":null,"provider":"claude","model":null,"surface":"headless","capture_status":"pending"}]
-        """
-        let query = RegistryQuery { args, cwd in
-            #expect(args == [
-                "runs", "--wave", "goals", "--project", "auditability",
-                "--task", "W2-122", "--json",
-            ])
-            #expect(cwd == nil)
-            return json
-        }
-
-        let runs = try await query.recentRuns(
-            wave: "goals",
-            project: "auditability",
-            task: "W2-122"
-        )
-        #expect(runs.count == 2)
-        #expect(runs[0].id == "invocation-1")
-        #expect(runs[0].traceId == "abc")
-        #expect(runs[0].wave == "goals")
-        #expect(runs[0].status == "ok")
-        #expect(runs[0].ended == 110)
-        #expect(runs[0].cacheReadTokens == 800)
-        #expect(runs[0].suppliedContextTokens == 150)
-        #expect(runs[0].model == "opus")
-        // The drill foreign key: a run declares the roadmap Project/Task it owns,
-        // or nil when it was launched outside a Task Work.
-        #expect(runs[0].project == "auditability")
-        #expect(runs[0].task == "W2-122")
-        #expect(runs[1].project == nil)
-        #expect(runs[1].task == nil)
-    }
-
-    @Test("A visible Run opens its exact latest captured turn")
-    func runResolvesLatestTraceAddress() async throws {
-        let runJSON = """
-        [{"id":"invocation-1","trace_id":"trace-1","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"product","project":"mac-surface-ux","task":"W2-144","flow":"task","skill":"implement","status":"ok","started":100,"ended":110,"turns":2,"system_tokens":100,"task_tokens":50,"supplied_context_tokens":150,"input_tokens":1000,"output_tokens":200,"reasoning_tokens":null,"cache_read_tokens":800,"cache_write_tokens":null,"cost_usd":0.25,"duration_secs":10.0,"provider":"codex","model":"gpt-5","surface":"headless","capture_status":"complete"}]
-        """
+    @Test("A durable Activity Run opens its exact latest captured turn")
+    func activityRunResolvesLatestTraceAddress() async throws {
         let traceJSON = """
         {"trace_id":"trace-1","spans":[],"invocations":[],"turns":[
           {"id":"turn-new","invocation_id":"invocation-1","ordinal":2},
@@ -319,16 +300,11 @@ struct RegistryQueryTests {
         ],"asks":[],"assets":[],"decisions":[]}
         """
         let query = RegistryQuery { args, _ in
-            switch args {
-            case ["runs", "--json"]: runJSON
-            case ["trace", "invocation-1", "--json"]: traceJSON
-            default: throw RegistryQueryError("unexpected argv: \(args)")
-            }
+            #expect(args == ["trace", "invocation-1", "--json"])
+            return traceJSON
         }
 
-        let runs = try await query.recentRuns()
-        let run = try #require(runs.first)
-        let address = try await query.traceAddress(for: run)
+        let address = try await query.traceAddress(invocationId: "invocation-1")
 
         #expect(address == TraceAddress(
             runId: "trace-1",
@@ -339,18 +315,13 @@ struct RegistryQueryTests {
 
     @Test("A Run without a captured turn stays explicitly unavailable")
     func runWithoutTurnHasNoTraceAddress() async throws {
-        let runJSON = """
-        [{"id":"invocation-1","trace_id":"trace-1","exec_id":"span-1","parent_exec_id":null,"repo":"/src/loopflow","worktree":"/src/loopflow","wave":"product","project":null,"task":null,"flow":null,"skill":"design","status":"running","started":100,"ended":null,"turns":0,"system_tokens":0,"task_tokens":0,"supplied_context_tokens":0,"input_tokens":null,"output_tokens":null,"reasoning_tokens":null,"cache_read_tokens":null,"cache_write_tokens":null,"cost_usd":null,"duration_secs":null,"provider":"codex","model":null,"surface":"headless","capture_status":"pending"}]
-        """
         let query = RegistryQuery { args, _ in
-            if args == ["runs", "--json"] { return runJSON }
+            #expect(args == ["trace", "invocation-1", "--json"])
             return #"{"trace_id":"trace-1","turns":[]}"#
         }
-        let runs = try await query.recentRuns()
-        let run = try #require(runs.first)
 
         await #expect(throws: RegistryQueryError.self) {
-            _ = try await query.traceAddress(for: run)
+            _ = try await query.traceAddress(invocationId: "invocation-1")
         }
     }
 
@@ -363,7 +334,7 @@ struct RegistryQueryTests {
             return fixture
         }
 
-        let snapshot = try await query.activity()
+        let snapshot = try await query.processActivity()
 
         #expect(snapshot.nodes.count == 3)
         #expect(snapshot.aggregate.outputTokensPerSecondFast == 4.0)
@@ -529,6 +500,14 @@ private func activityFixtureURL(sourceFile: String = #filePath) -> URL {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .appendingPathComponent("tests/fixtures/dto/activity_snapshot.json")
+}
+
+private func workActivityFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/work_activity_snapshot.json")
 }
 
 private actor CallCounter {

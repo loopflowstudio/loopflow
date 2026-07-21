@@ -54,7 +54,7 @@ Installation and release paths now treat schema history, paired binaries, and ge
 
 **Migrate Linear Team ownership before removing legacy configuration.** Run `lf pm reteam` for a dry run, stop any Task Runs that can write old issue identifiers, then run `lf pm reteam --apply`. The resulting canonical binding is `pm.linear_team` in `.lf/config.yaml`; Wave-level provider and Team overrides are no longer supported.
 
-**Update runtime automation.** Replace Feedback/Continue flows with `lf ask` and `lf work answer`, inspect provider conversations through `lf invocation`, use durable Work Steers instead of radio, and keep reviewed Wave memory in `wave/<name>/MEMORY.md`. Audit scripts for removed `lf launch`, `lf radio`, `lf receipt`, `lf memory`, and `lf work feedback`/`continue` commands.
+**Update runtime automation.** Replace Feedback/Continue flows with `lf ask` and `lf work answer`, inspect provider conversations through `lf invocation`, use durable Work Steers instead of radio, and keep reviewed Wave memory in `wave/<name>/MEMORY.md`. Audit scripts for removed `lf launch`, radio, `lf receipt`, `lf memory`, and `lf work feedback`/`continue` commands.
 
 **Update catalog references.** Replace public underscore names such as `task_pursue`, `project_clarify`, and `wave_mutate` with `task/pursue`, `project/clarify`, and `wave/mutate`. Run `lf list` to inspect the installed expansion before updating Project lifecycle policies or repo-local flows.
 

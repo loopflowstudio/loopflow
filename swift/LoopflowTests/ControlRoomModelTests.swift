@@ -122,12 +122,83 @@ struct ControlRoomModelTests {
         #expect(model.fleetSummary?.liveListeners == 0)
         #expect(model.fleetSummary?.unservedRuns == 1)
     }
+
+    @Test("Selected Runs require explicit Wave, Project, and Task attribution")
+    func selectedRunsFollowWorkAttribution() async throws {
+        let fixture = try ControlRoomTestFixture.load()
+        let model = ControlRoomModel(query: fixture.query)
+        await model.refresh()
+
+        model.select(.wave(waveId: "wave-1"))
+        await model.refreshSelectedRuns()
+        #expect(model.runs(for: .wave(waveId: "wave-1")).map(\.id)
+            == ["invocation-product-run"])
+
+        model.select(.project(waveId: "wave-1", projectId: "project-1"))
+        await model.refreshSelectedRuns()
+        #expect(model.runs(for: .project(waveId: "wave-1", projectId: "project-1")).map(\.id)
+            == ["invocation-product-run"])
+
+        model.select(.task(waveId: "wave-1", taskId: "issue-now"))
+        await model.refreshSelectedRuns()
+        #expect(model.runs(for: .task(waveId: "wave-1", taskId: "issue-now")).map(\.id)
+            == ["invocation-product-run"])
+
+        model.select(.task(waveId: "wave-1", taskId: "issue-available"))
+        await model.refreshSelectedRuns()
+        #expect(model.runs(for: .task(waveId: "wave-1", taskId: "issue-available")).isEmpty)
+    }
+
+    @Test("A late Run query cannot replace evidence for a newer selection")
+    func staleRunQueryDoesNotReplaceNewSelection() async throws {
+        let fixture = try ControlRoomTestFixture.load()
+        var staleRuns = try #require(
+            JSONSerialization.jsonObject(with: Data(fixture.runsJSON.utf8))
+                as? [[String: Any]]
+        )
+        staleRuns[0]["id"] = "invocation-stale-wave"
+        staleRuns[0]["project"] = NSNull()
+        staleRuns[0]["task"] = NSNull()
+        let staleData = try JSONSerialization.data(withJSONObject: staleRuns)
+        let staleJSON = try #require(String(data: staleData, encoding: .utf8))
+        let selectedJSON = fixture.runsJSON
+        let deferred = DeferredRunResponse()
+        let query = RegistryQuery { args, _ in
+            guard args.first == "runs" else {
+                throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
+            }
+            if args.contains("W2-144") { return selectedJSON }
+            return await deferred.response()
+        }
+        let model = ControlRoomModel(query: query)
+        model.applyFixture(
+            roadmap: .available(fixture.roadmap),
+            waves: .available(fixture.waves),
+            activity: .available(fixture.activity),
+            repos: []
+        )
+
+        model.select(.wave(waveId: "wave-1"))
+        let staleRefresh = Task { await model.refreshSelectedRuns() }
+        await deferred.waitUntilRequested()
+
+        model.select(.task(waveId: "wave-1", taskId: "issue-now"))
+        await model.refreshSelectedRuns()
+        #expect(model.selectedRuns.value?.map(\.id) == ["invocation-product-run"])
+
+        await deferred.release(staleJSON)
+        await staleRefresh.value
+
+        #expect(model.selection == .task(waveId: "wave-1", taskId: "issue-now"))
+        #expect(model.selectedRuns.value?.map(\.id) == ["invocation-product-run"])
+    }
 }
 
 private struct ControlRoomTestFixture {
     let roadmap: RoadmapSnapshot
     let waves: [Wave]
     let activity: ActivitySnapshot
+    let runsJSON: String
     let query: RegistryQuery
 
     static func load(sourceFile: String = #filePath) throws -> ControlRoomTestFixture {
@@ -141,6 +212,8 @@ private struct ControlRoomTestFixture {
         let activityURL = url.deletingLastPathComponent().appendingPathComponent("activity_snapshot.json")
         let activityData = try Data(contentsOf: activityURL)
         let activity = try JSONDecoder().decode(ActivitySnapshot.self, from: activityData)
+        let runsURL = url.deletingLastPathComponent().appendingPathComponent("recent_runs.json")
+        let runsData = try Data(contentsOf: runsURL)
         let object = try #require(JSONSerialization.jsonObject(with: roadmapData) as? [String: Any])
         let roadmapWaves = try #require(object["waves"] as? [[String: Any]])
         let waveObjects = try roadmapWaves.map { try #require($0["wave"] as? [String: Any]) }
@@ -150,11 +223,13 @@ private struct ControlRoomTestFixture {
         let roadmapJSON = try #require(String(data: roadmapData, encoding: .utf8))
         let wavesJSON = try #require(String(data: waveData, encoding: .utf8))
         let activityJSON = try #require(String(data: activityData, encoding: .utf8))
+        let runsJSON = try #require(String(data: runsData, encoding: .utf8))
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": roadmapJSON
             case "ls": wavesJSON
             case "ps": activityJSON
+            case "runs": runsJSON
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
             }
         }
@@ -162,8 +237,34 @@ private struct ControlRoomTestFixture {
             roadmap: roadmap,
             waves: waves,
             activity: activity,
+            runsJSON: runsJSON,
             query: query
         )
+    }
+}
+
+private actor DeferredRunResponse {
+    private var responseContinuation: CheckedContinuation<String, Never>?
+    private var requestContinuation: CheckedContinuation<Void, Never>?
+
+    func response() async -> String {
+        await withCheckedContinuation { continuation in
+            responseContinuation = continuation
+            requestContinuation?.resume()
+            requestContinuation = nil
+        }
+    }
+
+    func waitUntilRequested() async {
+        if responseContinuation != nil { return }
+        await withCheckedContinuation { continuation in
+            requestContinuation = continuation
+        }
+    }
+
+    func release(_ response: String) {
+        responseContinuation?.resume(returning: response)
+        responseContinuation = nil
     }
 }
 #endif

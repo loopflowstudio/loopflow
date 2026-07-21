@@ -1447,6 +1447,7 @@ fn main() -> anyhow::Result<()> {
             }
             Some(Commands::Runs {
                 task,
+                project,
                 wave,
                 json,
                 cmd,
@@ -1457,6 +1458,7 @@ fn main() -> anyhow::Result<()> {
                 None => loopflow::lf::commands::runs::list(
                     *json,
                     wave.as_deref(),
+                    project.as_deref(),
                     task.as_deref(),
                 ),
             },

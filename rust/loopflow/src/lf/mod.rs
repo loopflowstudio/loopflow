@@ -499,6 +499,9 @@ pub enum Commands {
         /// Drill to one roadmap Task by its Linear issue identifier (e.g. W2-122)
         #[arg(long)]
         task: Option<String>,
+        /// Drill to one roadmap Project by slug
+        #[arg(long)]
+        project: Option<String>,
         /// Scope to one Wave by name
         #[arg(long)]
         wave: Option<String>,

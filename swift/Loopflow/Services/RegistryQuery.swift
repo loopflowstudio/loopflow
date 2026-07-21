@@ -154,11 +154,39 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// Recent agent-backed skill calls across every Wave, with their context and
-    /// token evidence. Process diagnostics live in `lf execs`.
-    public func recentRuns() async throws -> [SkillRunEntry] {
-        let stdout = try await run(["runs", "--json"], nil)
+    /// Recent agent-backed skill calls, optionally drilled to one Wave, Project,
+    /// or Task, with their context and token evidence. Process diagnostics live
+    /// in `lf execs`.
+    public func recentRuns(
+        wave: String? = nil,
+        project: String? = nil,
+        task: String? = nil
+    ) async throws -> [SkillRunEntry] {
+        var args = ["runs"]
+        if let wave { args.append(contentsOf: ["--wave", wave]) }
+        if let project { args.append(contentsOf: ["--project", project]) }
+        if let task { args.append(contentsOf: ["--task", task]) }
+        args.append("--json")
+        let stdout = try await run(args, nil)
         return try Self.decode([SkillRunEntry].self, from: stdout)
+    }
+
+    /// Resolve one visible Run to the latest captured turn for its exact
+    /// invocation. Trace bodies remain unopened until `traceContent` is called.
+    public func traceAddress(for entry: SkillRunEntry) async throws -> TraceAddress {
+        let stdout = try await run(["trace", entry.id, "--json"], nil)
+        let trace = try Self.decode(TraceIndexSnapshot.self, from: stdout)
+        guard let turn = trace.turns
+            .filter({ $0.invocationId == entry.id })
+            .max(by: { $0.ordinal < $1.ordinal })
+        else {
+            throw RegistryQueryError("Run \(entry.id) has no captured trace turn")
+        }
+        return TraceAddress(
+            runId: trace.traceId,
+            invocationId: entry.id,
+            turnId: turn.id
+        )
     }
 
     /// Every active normalized Invocation across the machine.
@@ -569,6 +597,30 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
         case costUsd = "cost_usd"
         case durationSecs = "duration_secs"
         case captureStatus = "capture_status"
+    }
+}
+
+/// Narrow decoding view over `lf trace <run> --json`. Rust owns the full trace
+/// graph; the control room needs only the immutable ids for an explicit content
+/// request.
+public struct TraceIndexSnapshot: Decodable, Sendable {
+    public let traceId: String
+    public let turns: [TraceTurnIndex]
+
+    enum CodingKeys: String, CodingKey {
+        case turns
+        case traceId = "trace_id"
+    }
+}
+
+public struct TraceTurnIndex: Decodable, Sendable {
+    public let id: String
+    public let invocationId: String
+    public let ordinal: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, ordinal
+        case invocationId = "invocation_id"
     }
 }
 

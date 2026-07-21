@@ -20,12 +20,13 @@ use crate::wave::journal::short_id;
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-/// A drill filter over the run ledger. Both constituents scope the same invocation
-/// set: `wave` narrows to one Wave, `task` to one roadmap Task by its Linear
-/// issue identifier — the key that joins a roadmap row to its runs.
+/// A drill filter over the run ledger. Every field scopes the same invocation
+/// set: `wave` narrows to one Wave, `project` to one roadmap Project by slug,
+/// and `task` to one roadmap Task by its Linear issue identifier.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct RunFilter<'a> {
     pub wave: Option<&'a str>,
+    pub project: Option<&'a str>,
     pub task: Option<&'a str>,
 }
 
@@ -34,14 +35,17 @@ impl RunFilter<'_> {
         self.wave
             .is_none_or(|wave| invocation.wave.as_deref() == Some(wave))
             && self
+                .project
+                .is_none_or(|project| invocation.project.as_deref() == Some(project))
+            && self
                 .task
                 .is_none_or(|task| invocation.task.as_deref() == Some(task))
     }
 }
 
 /// The skill runs matching a filter, newest first, capped. One reader behind
-/// `lf runs`, its `--wave`/`--task` drills, and `lf status`'s Runs evidence, so
-/// the surfaces can never disagree on what a run is.
+/// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
+/// can never disagree on what a run is.
 pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, bool)> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
@@ -69,10 +73,19 @@ pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, boo
     Ok((runs, truncated))
 }
 
-/// `lf runs [--wave <name>] [--task <id>]`: recent agent-backed skill invocations,
-/// optionally drilled to one Wave or one roadmap Task.
-pub fn list(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
-    let (runs, _truncated) = collect_runs(RunFilter { wave, task })?;
+/// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent
+/// agent-backed skill invocations, optionally drilled to one Work owner.
+pub fn list(
+    json: bool,
+    wave: Option<&str>,
+    project: Option<&str>,
+    task: Option<&str>,
+) -> Result<()> {
+    let (runs, _truncated) = collect_runs(RunFilter {
+        wave,
+        project,
+        task,
+    })?;
 
     if json {
         println!("{}", serde_json::to_string(&runs)?);
@@ -80,14 +93,21 @@ pub fn list(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     }
 
     if runs.is_empty() {
-        match (wave, task) {
-            (_, Some(task)) => {
+        match (wave, project, task) {
+            (_, _, Some(task)) => {
                 println!("No skill runs recorded for {task} in the last {WINDOW_DAYS} days.")
             }
-            (Some(wave), None) => {
+            (_, Some(project), None) => {
+                println!(
+                    "No skill runs recorded for project/{project} in the last {WINDOW_DAYS} days."
+                )
+            }
+            (Some(wave), None, None) => {
                 println!("No skill runs recorded for wave/{wave} in the last {WINDOW_DAYS} days.")
             }
-            (None, None) => println!("No skill runs recorded in the last {WINDOW_DAYS} days."),
+            (None, None, None) => {
+                println!("No skill runs recorded in the last {WINDOW_DAYS} days.")
+            }
         }
         return Ok(());
     }
@@ -1060,6 +1080,7 @@ pub struct ExecLedgerEntry {
 pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<SkillRunEntry>, bool)> {
     collect_runs(RunFilter {
         wave: Some(wave),
+        project: None,
         task: None,
     })
 }

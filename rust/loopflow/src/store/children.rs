@@ -456,43 +456,7 @@ impl Store {
             store.append_task_event(&write_task_id, &write_kind)
         })
         .await?;
-        if kind.is_project_observable() {
-            if let Some(task) = self.get_task(&task_id).await? {
-                if let Err(error) = crate::ops::project::wake_task_project_route(self, &task).await
-                {
-                    tracing::debug!(
-                        %error,
-                        %task_id,
-                        project_id = %task.project_id,
-                        event_id = event.id,
-                        "Task observation wake failed; Project lifecycle touch will retry"
-                    );
-                }
-                if kind.is_root_wave_observable() {
-                    match self.get_wave(&task.wave_id).await? {
-                        Some(wave) => {
-                            if let Err(error) =
-                                crate::lf::commands::chat::nudge_child_observations(wave.name())
-                                    .await
-                            {
-                                tracing::debug!(
-                                    %error,
-                                    %task_id,
-                                    event_id = event.id,
-                                    "live Task observation delivery failed; Wave observer will retry"
-                                );
-                            }
-                        }
-                        None => tracing::error!(
-                            wave_id = %task.wave_id,
-                            %task_id,
-                            event_id = event.id,
-                            "Task observation cannot nudge its missing owning Wave"
-                        ),
-                    }
-                }
-            }
-        }
+        self.nudge_task_event(&task_id, &kind, &event).await?;
         Ok(event)
     }
 
@@ -511,8 +475,48 @@ impl Store {
             store.append_task_event_for_run(&write_task_id, &lease, &write_kind)
         })
         .await?;
+        self.nudge_task_event(&task_id, &kind, &event).await?;
+        Ok(event)
+    }
+
+    pub(crate) async fn fail_task_run(
+        &self,
+        task_id: &TaskId,
+        lease: &RunLease,
+        error: &str,
+    ) -> StoreResult<TaskEvent> {
+        let task_id = task_id.clone();
+        let lease = lease.clone();
+        let error = error.to_string();
+        let write_task_id = task_id.clone();
+        let write_error = error.clone();
+        let event = run_sqlite(&self.sqlite, move |store| {
+            store.fail_task_run(&write_task_id, &lease, &write_error)
+        })
+        .await?;
+        let kind = TaskEventKind::Failed {
+            error,
+            resumable: true,
+        };
+        if let Err(error) = self.nudge_task_event(&task_id, &kind, &event).await {
+            tracing::debug!(
+                %error,
+                %task_id,
+                event_id = event.id,
+                "terminal Task event persisted; live observer nudge will retry"
+            );
+        }
+        Ok(event)
+    }
+
+    async fn nudge_task_event(
+        &self,
+        task_id: &TaskId,
+        kind: &TaskEventKind,
+        event: &TaskEvent,
+    ) -> StoreResult<()> {
         if kind.is_project_observable() {
-            if let Some(task) = self.get_task(&task_id).await? {
+            if let Some(task) = self.get_task(task_id).await? {
                 if let Err(error) = crate::ops::project::wake_task_project_route(self, &task).await
                 {
                     tracing::debug!(
@@ -548,7 +552,7 @@ impl Store {
                 }
             }
         }
-        Ok(event)
+        Ok(())
     }
 
     pub async fn task_events_after(

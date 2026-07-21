@@ -114,7 +114,7 @@ impl Child {
         }
         match self {
             Self::Project(project) => super::project::launch_project_process(store, project).await,
-            Self::Task(task) => super::task::relaunch_inactive_process(store, task).await,
+            Self::Task(task) => super::task::resume_inactive_process(store, task).await,
         }
     }
 }

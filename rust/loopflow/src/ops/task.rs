@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::{File, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AgentInvocation, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx,
-    RunLease, RunState, WorkRef, WorkStatus,
+    AgentInvocation, AuthenticatedRequest, Containment, ContainmentObservation, ControlCtx, Run,
+    RunLease, RunState, RunTrigger, WaitOn, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
@@ -848,6 +848,22 @@ fn resolve_task_lifecycle(
     Ok(crate::task::TaskLifecyclePlan::standard(
         first, loop_flow, finally,
     ))
+}
+
+fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
+    for (phase, flow, allow_ops) in [
+        ("first", &task.lifecycle.first.flow, false),
+        ("loop", &task.lifecycle.loop_.flow, false),
+        ("finally", &task.lifecycle.finally.flow, true),
+    ] {
+        resolve_task_flow(&task.worktree, flow, allow_ops).map_err(|error| {
+            task_error(format!(
+                "Task {} cannot launch: pinned {phase} flow {flow:?} is invalid: {error}",
+                task.plan.identifier
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
@@ -2091,13 +2107,207 @@ pub(crate) async fn relaunch_inactive_process(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
+    relaunch_inactive_process_with_trigger(store, task, None).await
+}
+
+pub(crate) async fn resume_inactive_process(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
+    relaunch_inactive_process_with_trigger(store, task, Some(RunTrigger::User)).await
+}
+
+async fn relaunch_inactive_process_with_trigger(
+    store: &SharedStore,
+    task: &mut Task,
+    trigger: Option<RunTrigger>,
+) -> OpsResult<()> {
     let Some(_) = ensure_working_pr(store, task).await? else {
         return Err(task_error(format!(
             "Task {} is terminal and cannot start a Run",
             task.plan.identifier
         )));
     };
-    launch_task_process(store, task, None).await
+    launch_task_process(store, task, trigger).await
+}
+
+const MAX_AUTOMATIC_TASK_RECOVERY_RUNS: usize = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AutomaticTaskRelaunch {
+    Idle,
+    Launch(RunTrigger),
+    Exhausted {
+        basis: crate::durable::Basis,
+        recoveries: usize,
+        error: String,
+    },
+}
+
+async fn task_recovery_chain(store: &SharedStore, latest: Run) -> OpsResult<(usize, Run)> {
+    let mut seen = HashSet::new();
+    let mut recoveries = 0;
+    let mut run = latest;
+    loop {
+        if !seen.insert(run.id.clone()) {
+            return Err(task_error(format!(
+                "Task recovery chain contains a cycle at Run {}",
+                run.id
+            )));
+        }
+        let Some(prior_run_id) = run.retry_of.clone() else {
+            return Ok((recoveries, run));
+        };
+        recoveries += 1;
+        run = store
+            .run_by_id(&prior_run_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task recovery chain: {error}")))?;
+    }
+}
+
+fn failed_run_made_durable_progress(events: &[crate::task::TaskEvent]) -> bool {
+    events
+        .iter()
+        .skip(1)
+        .take_while(|event| !matches!(event.kind, TaskEventKind::Started))
+        .any(|event| !matches!(event.kind, TaskEventKind::Failed { .. }))
+}
+
+async fn plan_automatic_task_relaunch(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<AutomaticTaskRelaunch> {
+    let work = store
+        .work_for_child(&ChildRef::Task(task.id.clone()))
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    if !matches!(
+        store
+            .work_status(&work)
+            .await
+            .map_err(|error| task_error(error.to_string()))?,
+        WorkStatus::Ready
+    ) {
+        return Ok(AutomaticTaskRelaunch::Idle);
+    }
+    let basis = store
+        .current_epoch(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+        .current_basis;
+    let Some(crate::task::TaskEvent {
+        kind: TaskEventKind::Failed { error, resumable },
+        ..
+    }) = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+    else {
+        return Ok(AutomaticTaskRelaunch::Launch(RunTrigger::Input { basis }));
+    };
+    let Some(latest_run) = store
+        .latest_run(&work)
+        .await
+        .map_err(|error| task_error(error.to_string()))?
+    else {
+        return Ok(AutomaticTaskRelaunch::Launch(RunTrigger::Input { basis }));
+    };
+    let (recoveries, root) = task_recovery_chain(store, latest_run.clone()).await?;
+    let recent_events = store
+        .recent_task_events(&task.id, 16)
+        .await
+        .map_err(|store_error| task_error(store_error.to_string()))?;
+    let durable_progress = failed_run_made_durable_progress(&recent_events);
+    let input_advanced = match &root.trigger {
+        RunTrigger::Input { basis: prior } => {
+            prior.epoch_id != basis.epoch_id || prior.revision < basis.revision
+        }
+        _ => false,
+    };
+    if durable_progress || input_advanced {
+        return Ok(AutomaticTaskRelaunch::Launch(RunTrigger::Input { basis }));
+    }
+    if resumable && recoveries < MAX_AUTOMATIC_TASK_RECOVERY_RUNS {
+        return Ok(AutomaticTaskRelaunch::Launch(RunTrigger::Recovery {
+            prior_run_id: latest_run.id,
+        }));
+    }
+    Ok(AutomaticTaskRelaunch::Exhausted {
+        basis,
+        recoveries,
+        error,
+    })
+}
+
+async fn prepare_automatic_task_relaunch(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Option<RunTrigger>> {
+    match plan_automatic_task_relaunch(store, task).await? {
+        AutomaticTaskRelaunch::Idle => Ok(None),
+        AutomaticTaskRelaunch::Launch(trigger) => Ok(Some(trigger)),
+        AutomaticTaskRelaunch::Exhausted {
+            basis,
+            recoveries,
+            error,
+        } => {
+            let work = store
+                .work_for_child(&ChildRef::Task(task.id.clone()))
+                .await
+                .map_err(|store_error| task_error(store_error.to_string()))?;
+            let (_, lease) = store
+                .reserve_run(
+                    &work,
+                    RunTrigger::Input {
+                        basis: basis.clone(),
+                    },
+                )
+                .await
+                .map_err(|store_error| {
+                    task_error(format!(
+                        "failed to reserve exhausted Task recovery Run: {store_error}"
+                    ))
+                })?;
+            store
+                .advance_run(
+                    &lease,
+                    crate::durable::RunAdvance::Wait {
+                        on: WaitOn::Input {
+                            after: basis.clone(),
+                        },
+                    },
+                )
+                .await
+                .map_err(|store_error| {
+                    task_error(format!(
+                        "failed to park exhausted Task recovery: {store_error}"
+                    ))
+                })?;
+            tracing::warn!(
+                task = %task.plan.identifier,
+                recoveries,
+                limit = MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
+                %error,
+                "automatic Task recovery exhausted; waiting for durable input"
+            );
+            Ok(None)
+        }
+    }
+}
+
+async fn relaunch_inactive_process_automatically(
+    store: &SharedStore,
+    task: &mut Task,
+) -> OpsResult<()> {
+    let Some(_) = ensure_working_pr(store, task).await? else {
+        return Err(task_error(format!(
+            "Task {} is terminal and cannot start a Run",
+            task.plan.identifier
+        )));
+    };
+    validate_task_lifecycle(task)?;
+    let Some(trigger) = prepare_automatic_task_relaunch(store, task).await? else {
+        return Ok(());
+    };
+    launch_task_process(store, task, Some(trigger)).await
 }
 
 async fn relaunch_for_ci_incident(
@@ -2111,18 +2321,13 @@ async fn relaunch_for_ci_incident(
             task.plan.identifier
         )));
     };
-    launch_task_process(
-        store,
-        task,
-        Some(crate::durable::RunTrigger::CiIncident { incident_id }),
-    )
-    .await
+    launch_task_process(store, task, Some(RunTrigger::CiIncident { incident_id })).await
 }
 
 async fn launch_task_process(
     store: &SharedStore,
     task: &mut Task,
-    trigger: Option<crate::durable::RunTrigger>,
+    trigger: Option<RunTrigger>,
 ) -> OpsResult<()> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
@@ -2136,9 +2341,10 @@ async fn launch_task_process(
     {
         return Ok(());
     }
+    validate_task_lifecycle(task)?;
     let trigger = match trigger {
         Some(trigger) => trigger,
-        None => crate::durable::RunTrigger::Input {
+        None => RunTrigger::Input {
             basis: store
                 .current_epoch(&work)
                 .await
@@ -2276,7 +2482,7 @@ async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<
         );
         return Ok(());
     }
-    relaunch_inactive_process(store, task).await
+    relaunch_inactive_process_automatically(store, task).await
 }
 
 /// Let one live Project body supervise the progress leases of its Task bodies.
@@ -2345,7 +2551,7 @@ pub(crate) async fn reconcile_project_tasks(
                 task_work_status(store, task).await?,
                 WorkStatus::Running { .. }
             ) {
-                relaunch_inactive_process(store, task).await?;
+                relaunch_inactive_process_automatically(store, task).await?;
             }
         } else {
             let Some(pr) = observed.as_ref() else {
@@ -2360,7 +2566,7 @@ pub(crate) async fn reconcile_project_tasks(
             {
                 // Publication is not settlement. Keep executing the authored
                 // Task flow unless submit/land requested a merge for this head.
-                relaunch_inactive_process(store, task).await?;
+                relaunch_inactive_process_automatically(store, task).await?;
             }
         }
     }
@@ -2493,12 +2699,13 @@ pub(crate) async fn route_ci_incident(
     let Some(incident) = current_ci_incident(pr) else {
         return Ok(());
     };
-    if !matches!(
-        task_work_status(store, task).await?,
-        WorkStatus::Running { .. }
-    ) {
-        let mut task = task.clone();
-        relaunch_for_ci_incident(store, &mut task, incident.identity.clone()).await?;
+    match task_work_status(store, task).await? {
+        WorkStatus::Ready => {
+            let mut task = task.clone();
+            relaunch_for_ci_incident(store, &mut task, incident.identity.clone()).await?;
+        }
+        WorkStatus::Running { .. } => {}
+        WorkStatus::Waiting { .. } | WorkStatus::Done | WorkStatus::Abandoned => return Ok(()),
     }
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
@@ -4750,11 +4957,159 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     use super::{
-        ensure_task_flow_override, lock_task_pr_mutation, resolve_task_lifecycle,
-        resolve_task_start_input, TaskFlowOverrides,
+        ensure_task_flow_override, launch_task_process, lock_task_pr_mutation,
+        prepare_automatic_task_relaunch, resolve_task_lifecycle, resolve_task_start_input,
+        TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
     };
+    use crate::child::ChildRef;
+    use crate::durable::{RunTrigger, WorkRef, WorkStatus};
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::ProjectFlowPlan;
+    use crate::project::{Project, ProjectId};
+    use crate::store::{open_store, SharedStore, StorageConfig};
+    use crate::task::{
+        Observation, PmWritebackState, Task, TaskEventKind, TaskId, TaskLifecyclePhase,
+        TaskLifecyclePlan, TaskPr, TaskPrId,
+    };
+    use crate::wave::Wave;
+
+    struct TaskFixture {
+        _database: tempfile::TempDir,
+        database_path: std::path::PathBuf,
+        store: SharedStore,
+        task: Task,
+        work: WorkRef,
+    }
+
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn capture(names: &[&'static str]) -> Self {
+            Self(
+                names
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in &self.0 {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    async fn task_fixture(identifier: &str, loop_flow: &str) -> TaskFixture {
+        let repository =
+            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .unwrap();
+        let database = tempfile::tempdir().unwrap();
+        let database_path = database.path().join("registry.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database_path.clone()))
+                .await
+                .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "task-recovery".to_string(),
+            repository.display().to_string(),
+        );
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("task-recovery-project").unwrap(),
+                slug: "task-recovery".to_string(),
+                name: "Task recovery".to_string(),
+                prompt_context: "Keep automatic Task recovery bounded.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let task = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new(format!("{identifier}-issue")).unwrap(),
+                identifier: identifier.to_string(),
+                title: "Task recovery fixture".to_string(),
+                description: String::new(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: repository,
+            workspace_slug: "task-recovery-fixture".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("task-design", loop_flow, "ship"),
+            lifecycle_phase: TaskLifecyclePhase::Loop,
+            phase_epoch: 4,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 1,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: format!("test/{}", task.workspace_slug),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.unwrap();
+        store.create_project(&project).await.unwrap();
+        store.create_task(&task, &pr).await.unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        TaskFixture {
+            _database: database,
+            database_path,
+            store,
+            task,
+            work,
+        }
+    }
 
     #[test]
     fn piped_report_supplies_title_and_preserves_full_description() {
@@ -4826,6 +5181,202 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Task INF-123 already pins loop flow \"slice\""));
+    }
+
+    #[tokio::test]
+    async fn unavailable_persisted_flow_is_rejected_before_every_run_reservation() {
+        let TaskFixture {
+            store,
+            mut task,
+            work,
+            ..
+        } = task_fixture("TEST-STALE", "retired-task-flow").await;
+
+        for _ in 0..2 {
+            let error = launch_task_process(&store, &mut task, None)
+                .await
+                .expect_err("the unavailable flow must fail startup validation");
+            assert!(error.to_string().contains(
+                "Task TEST-STALE cannot launch: pinned loop flow \"retired-task-flow\" is invalid: failed to load Task flow \"retired-task-flow\": flow not found: retired-task-flow"
+            ));
+            assert!(store.current_run(&work).await.unwrap().is_none());
+        }
+        assert!(store
+            .recent_task_events(&task.id, 10)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[cfg(unix)]
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn repaired_persisted_task_flows_launch_through_the_generic_path() {
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME", "LF_DB_PATH", "PATH"]);
+        let environment = tempfile::tempdir().unwrap();
+        let bin = environment.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let tmux = bin.join("tmux");
+        std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("LF_HOME", environment.path());
+        std::env::remove_var("LF_DB_PATH");
+        std::env::set_var("PATH", &bin);
+
+        for identifier in ["LOO-167", "LOO-193", "LOO-195"] {
+            let TaskFixture {
+                _database,
+                database_path,
+                store,
+                task,
+                work,
+                ..
+            } = task_fixture(identifier, "task").await;
+            rusqlite::Connection::open(database_path)
+                .unwrap()
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "repair_legacy_task_flow",
+                ))
+                .unwrap();
+            let mut repaired = store.get_task(&task.id).await.unwrap().unwrap();
+
+            assert_eq!(repaired.lifecycle.loop_.flow, "slice");
+            launch_task_process(&store, &mut repaired, None)
+                .await
+                .expect("a repaired Task reaches the generic launch boundary");
+            let run = store.current_run(&work).await.unwrap().unwrap();
+            assert!(matches!(run.trigger, RunTrigger::Input { .. }));
+            assert!(store
+                .open_invocation_for_run(&run.id)
+                .await
+                .unwrap()
+                .is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_task_relaunch_exhausts_until_durable_progress_or_user_input() {
+        let TaskFixture {
+            store, task, work, ..
+        } = task_fixture("TEST-RECOVERY", "slice").await;
+        let basis = store.current_epoch(&work).await.unwrap().current_basis;
+        let (initial, initial_lease) = store
+            .reserve_run(
+                &work,
+                RunTrigger::Input {
+                    basis: basis.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .append_task_event_for_run(&task.id, &initial_lease, &TaskEventKind::Started)
+            .await
+            .unwrap();
+        store
+            .fail_task_run(&task.id, &initial_lease, "always fails")
+            .await
+            .unwrap();
+
+        let mut prior_run_id = initial.id;
+        for recovery in 1..=MAX_AUTOMATIC_TASK_RECOVERY_RUNS {
+            let trigger = prepare_automatic_task_relaunch(&store, &task)
+                .await
+                .unwrap()
+                .expect("automatic recovery remains within its budget");
+            assert_eq!(
+                trigger,
+                RunTrigger::Recovery {
+                    prior_run_id: prior_run_id.clone()
+                }
+            );
+            let (run, lease) = store.reserve_run(&work, trigger).await.unwrap();
+            assert_eq!(run.retry_of, Some(prior_run_id));
+            store
+                .append_task_event_for_run(&task.id, &lease, &TaskEventKind::Started)
+                .await
+                .unwrap();
+            store
+                .fail_task_run(
+                    &task.id,
+                    &lease,
+                    &format!("automatic recovery {recovery} failed"),
+                )
+                .await
+                .unwrap();
+            prior_run_id = run.id;
+        }
+
+        assert!(prepare_automatic_task_relaunch(&store, &task)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            store.work_status(&work).await.unwrap(),
+            WorkStatus::Waiting { .. }
+        ));
+        let parked_run = store.latest_run(&work).await.unwrap().unwrap();
+        for _ in 0..10 {
+            assert!(prepare_automatic_task_relaunch(&store, &task)
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                store.latest_run(&work).await.unwrap().unwrap().id,
+                parked_run.id
+            );
+        }
+
+        let (user_run, user_lease) = store
+            .reserve_run(&work, RunTrigger::User)
+            .await
+            .expect("explicit User input clears the exhausted wait");
+        store
+            .append_task_event_for_run(&task.id, &user_lease, &TaskEventKind::Started)
+            .await
+            .unwrap();
+        store
+            .fail_task_run(&task.id, &user_lease, "User-started Run failed")
+            .await
+            .unwrap();
+        let trigger = prepare_automatic_task_relaunch(&store, &task)
+            .await
+            .unwrap()
+            .expect("User input starts a fresh recovery budget");
+        assert_eq!(
+            trigger,
+            RunTrigger::Recovery {
+                prior_run_id: user_run.id
+            }
+        );
+
+        let (_, progress_lease) = store.reserve_run(&work, trigger).await.unwrap();
+        store
+            .append_task_event_for_run(&task.id, &progress_lease, &TaskEventKind::Started)
+            .await
+            .unwrap();
+        store
+            .append_task_event_for_run(
+                &task.id,
+                &progress_lease,
+                &TaskEventKind::Progress {
+                    summary: "durable progress".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .fail_task_run(&task.id, &progress_lease, "failed after durable progress")
+            .await
+            .unwrap();
+        assert_eq!(
+            prepare_automatic_task_relaunch(&store, &task)
+                .await
+                .unwrap(),
+            Some(RunTrigger::Input { basis })
+        );
     }
 
     #[test]

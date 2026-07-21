@@ -143,6 +143,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.run_by_id(&run_id)).await
     }
 
+    pub(crate) async fn latest_run(&self, work: &WorkRef) -> StoreResult<Option<Run>> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| store.latest_run(&work)).await
+    }
+
     pub(crate) async fn resolve_run_lease(
         &self,
         token: crate::durable::RunLeaseToken,

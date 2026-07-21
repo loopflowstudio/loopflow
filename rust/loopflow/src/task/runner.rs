@@ -1445,29 +1445,28 @@ async fn record_unhandled_failure(
     lease: &RunLease,
     error: &anyhow::Error,
 ) {
-    let Ok(Some(task)) = store.get_task(task_id).await else {
-        return;
-    };
-    let Ok(work) = store.work_for_child(&ChildRef::Task(task.id.clone())).await else {
-        return;
-    };
-    if lease.work != work {
-        return;
+    match store.current_run(&lease.work).await {
+        Ok(Some(run)) if run.id == lease.run_id => {}
+        Ok(_) => return,
+        Err(store_error) => {
+            tracing::error!(
+                task = %task_id,
+                run = %lease.run_id,
+                error = %store_error,
+                "cannot inspect Task Run before recording its failure receipt"
+            );
+            return;
+        }
     }
     let message = format!("task process failed: {error}");
-    let _ = store
-        .append_task_event_for_run(
-            &task.id,
-            lease,
-            &TaskEventKind::Failed {
-                error: message.clone(),
-                resumable: true,
-            },
-        )
-        .await;
-    let _ = store
-        .finish_task_run(&task, lease, crate::durable::BoundaryState::Failed)
-        .await;
+    if let Err(persist_error) = store.fail_task_run(task_id, lease, &message).await {
+        tracing::error!(
+            task = %task_id,
+            run = %lease.run_id,
+            error = %persist_error,
+            "Task failure receipt did not persist; Run remains recoverable"
+        );
+    }
 }
 
 async fn apply_input(
@@ -1496,19 +1495,8 @@ async fn finish_failed(
 ) -> Result<()> {
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
-    store
-        .append_task_event_for_run(
-            &task.id,
-            lease,
-            &TaskEventKind::Failed {
-                error: error.to_string(),
-                resumable: true,
-            },
-        )
-        .await?;
-    store
-        .finish_task_run(task, lease, crate::durable::BoundaryState::Failed)
-        .await?;
+    store.update_task_for_run(task, lease).await?;
+    store.fail_task_run(&task.id, lease, error).await?;
     anyhow::bail!(error.to_string())
 }
 
@@ -1522,11 +1510,11 @@ fn infra_blocked_reason(capability: &str, detail: &str, pr_number: Option<u32>) 
     format!("ci-fix blocked by {capability}: {detail}.{pr_note}")
 }
 
-/// Stop the body and transition the Task to Blocked for an infrastructure
-/// failure (provider outage, GitHub observation failure), keeping the active PR
-/// attached so a resume after the capability recovers picks up the same PR.
-/// Returns `Ok(())` — a clean stop, not an error — so the runner does not also
-/// record an unhandled failure.
+/// Stop the body and record an infrastructure failure (provider outage, GitHub
+/// observation failure), keeping the active PR attached so a resume after the
+/// capability recovers picks up the same PR. Returns `Ok(())` after the atomic
+/// Task failure receipt settles the Run, so the outer boundary does not record
+/// the same failure twice.
 async fn finish_infra_blocked(
     store: &SharedStore,
     task: &mut Task,
@@ -1546,9 +1534,8 @@ async fn finish_infra_blocked(
             .mark_ci_incidents_blocked(&pr.id, time::OffsetDateTime::now_utc(), &reason)
             .await?;
     }
-    store
-        .finish_task_run(task, lease, crate::durable::BoundaryState::Failed)
-        .await?;
+    store.update_task_for_run(task, lease).await?;
+    store.fail_task_run(&task.id, lease, &reason).await?;
     Ok(())
 }
 
@@ -1987,7 +1974,8 @@ mod planning_tests {
     };
     use crate::chat::types::{ConversationEvent, Lifecycle};
     use crate::durable::{
-        AgentInvocationId, Basis, BoundarySeed, Containment, EpochId, RunAdvance, RunTrigger,
+        AgentInvocationId, Basis, BoundarySeed, Containment, EpochId, InvocationRoute, RunAdvance,
+        RunTrigger,
     };
     use crate::engine::agent::AgentConfig;
     use crate::harness::{Harness, SendCurrentOutcome};
@@ -1995,8 +1983,8 @@ mod planning_tests {
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, StorageConfig};
     use crate::task::{
-        Observation, PmWritebackState, Task, TaskGateProposal, TaskId, TaskLifecyclePhase,
-        TaskLifecyclePlan, TaskPr, TaskPrId,
+        Observation, PmWritebackState, Task, TaskEventKind, TaskGateProposal, TaskId,
+        TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
     };
     use crate::wave::playhead::{BodyProvenance, Playhead, QueuedInvocation};
     use crate::wave::Wave;
@@ -2044,6 +2032,299 @@ mod planning_tests {
                 if turn_id == format!("interactive:{invocation_id}")
                     && status == Lifecycle::Completed
         ));
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn pre_provider_failure_ends_prompt_only_invocation_and_records_task_failure() {
+        let repository =
+            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .unwrap();
+        let database = tempfile::tempdir().unwrap();
+        let database_path = database.path().join("registry.db");
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database_path.clone()))
+                .await
+                .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "prompt-only-failure".to_string(),
+            repository.display().to_string(),
+        );
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("prompt-only-project").unwrap(),
+                slug: "prompt-only-failure".to_string(),
+                name: "Prompt-only failure".to_string(),
+                prompt_context: "Preserve the exact terminal failure.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "unsupported".to_string(),
+            provider: "unsupported".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let mut task = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("prompt-only-issue").unwrap(),
+                identifier: "TEST-PROMPT".to_string(),
+                title: "Prompt-only failure".to_string(),
+                description: String::new(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: repository.clone(),
+            workspace_slug: "prompt-only-failure".to_string(),
+            lifecycle: TaskLifecyclePlan::defaults(),
+            lifecycle_phase: TaskLifecyclePhase::First,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "unsupported".to_string(),
+            provider: "unsupported".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "test/prompt-only-failure".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.unwrap();
+        store.create_project(&project).await.unwrap();
+        store.create_task(&task, &pr).await.unwrap();
+        let work = store
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "prompt-only-failure".to_string(),
+                    },
+                    cwd: repository.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let invocation = store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "unsupported".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let crate::durable::AdvanceReceipt::Invocation(invocation) = invocation else {
+            unreachable!("InvocationStarting returns an Invocation receipt")
+        };
+        let connection = rusqlite::Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_test_task_failure
+                 BEFORE INSERT ON task_events
+                 WHEN json_extract(NEW.kind_json, '$.kind') = 'failed'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected Task failure write');
+                 END;",
+            )
+            .unwrap();
+
+        let _env_lock = crate::journal::test_env_lock();
+        let inherited_invocation = std::env::var_os(crate::durable::AGENT_INVOCATION_ENV);
+        std::env::set_var(crate::durable::AGENT_INVOCATION_ENV, invocation.id.as_str());
+        let result = super::run(store.clone(), task.id.clone(), &lease).await;
+        match inherited_invocation {
+            Some(value) => std::env::set_var(crate::durable::AGENT_INVOCATION_ENV, value),
+            None => std::env::remove_var(crate::durable::AGENT_INVOCATION_ENV),
+        }
+        let error = result.expect_err("unsupported provider must fail before its first event");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported session harness: unsupported"),
+            "unexpected startup failure: {error:#}"
+        );
+
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TaskEventKind::Started);
+        assert!(store.current_run(&work).await.unwrap().is_some());
+        let unsettled: (String, bool) = connection
+            .query_row(
+                "SELECT outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unsettled, ("running".into(), false));
+
+        connection
+            .execute_batch("DROP TRIGGER reject_test_task_failure;")
+            .unwrap();
+        super::record_unhandled_failure(&store, &task.id, &lease, &error).await;
+
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed { error, resumable: true }
+                if error.contains("task process failed: unsupported session harness: unsupported")
+        ));
+        assert_eq!(events[1].kind, TaskEventKind::Started);
+        assert!(store.current_run(&work).await.unwrap().is_none());
+
+        let invocation: (String, String, bool) = connection
+            .query_row(
+                "SELECT capture_status, outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(invocation, ("prompt_only".into(), "failed".into(), true));
+
+        let (run, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "handled-provider-failure".to_string(),
+                    },
+                    cwd: repository.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationStarting {
+                    route: InvocationRoute {
+                        provider: "unsupported".to_string(),
+                        model: None,
+                        account_id: None,
+                    },
+                    surface: "headless".to_string(),
+                    resume_token: None,
+                    answer_ask_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .append_task_event_for_run(&task.id, &lease, &TaskEventKind::Started)
+            .await
+            .unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_test_task_failure
+                 BEFORE INSERT ON task_events
+                 WHEN json_extract(NEW.kind_json, '$.kind') = 'failed'
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected Task failure write');
+                 END;",
+            )
+            .unwrap();
+
+        let mut harness = UnusedHarness;
+        super::finish_failed(
+            &store,
+            &mut task,
+            &lease,
+            &mut harness,
+            "provider stream closed",
+            None,
+        )
+        .await
+        .expect_err("the rejected receipt keeps the handled failure recoverable");
+        assert!(store.current_run(&work).await.unwrap().is_some());
+        let unsettled: (String, bool) = connection
+            .query_row(
+                "SELECT outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unsettled, ("running".into(), false));
+
+        connection
+            .execute_batch("DROP TRIGGER reject_test_task_failure;")
+            .unwrap();
+        let handled_error = super::finish_failed(
+            &store,
+            &mut task,
+            &lease,
+            &mut harness,
+            "provider stream closed",
+            None,
+        )
+        .await
+        .expect_err("a handled failure returns its reason after settlement");
+        let event_count = store.recent_task_events(&task.id, 10).await.unwrap().len();
+        super::record_unhandled_failure(&store, &task.id, &lease, &handled_error).await;
+        let events = store.recent_task_events(&task.id, 10).await.unwrap();
+        assert_eq!(events.len(), event_count);
+        assert!(matches!(
+            &events[0].kind,
+            TaskEventKind::Failed { error, resumable: true }
+                if error == "provider stream closed"
+        ));
+        assert!(store.current_run(&work).await.unwrap().is_none());
+        let invocation: (String, String, bool) = connection
+            .query_row(
+                "SELECT capture_status, outcome, ended_at IS NOT NULL
+                 FROM agent_invocations WHERE supervising_run_id=?1",
+                [run.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(invocation, ("prompt_only".into(), "failed".into(), true));
     }
 
     #[test]

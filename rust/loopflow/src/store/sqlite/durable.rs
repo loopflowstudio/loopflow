@@ -1455,6 +1455,65 @@ impl SqliteStore {
         Ok(receipt)
     }
 
+    /// Every durable Steer recorded at or after `since`, newest first.
+    ///
+    /// This joins through historical Epochs so completed and reopened Work does
+    /// not lose its authored direction from inspection surfaces.
+    pub fn list_steers_since(&self, since: i64) -> StoreResult<Vec<Steer>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT s.id, s.epoch_id, s.rev, s.author_kind, s.author_run_id,
+                    s.text, s.issued_at, e.wave_id, e.project_id, e.task_id
+             FROM steers s
+             JOIN epochs e ON e.id=s.epoch_id
+             WHERE s.issued_at >= ?1
+             ORDER BY s.issued_at DESC, s.id DESC",
+        )?;
+        let rows = statement.query_map([since], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+            ))
+        })?;
+        let mut steers = Vec::new();
+        for row in rows {
+            let (
+                id,
+                epoch_id,
+                revision,
+                author_kind,
+                author_run_id,
+                text,
+                issued_at,
+                wave_id,
+                project_id,
+                task_id,
+            ) = row?;
+            let work = parse_work_columns(wave_id, project_id, task_id)?;
+            steers.push(decode_steer(
+                (
+                    id,
+                    epoch_id,
+                    revision,
+                    author_kind,
+                    author_run_id,
+                    text,
+                    issued_at,
+                ),
+                work,
+            )?);
+        }
+        Ok(steers)
+    }
+
     pub(crate) fn append_steer_in(
         tx: &Transaction<'_>,
         work: &WorkRef,
@@ -3407,7 +3466,7 @@ fn boundary_seed_for_epoch_in(
         .map(|basis| basis.revision as i64)
         .unwrap_or(-1);
     let mut statement = conn.prepare(
-        "SELECT id, rev, author_kind, author_run_id, text, issued_at
+        "SELECT id, epoch_id, rev, author_kind, author_run_id, text, issued_at
          FROM steers WHERE epoch_id=?1 AND rev > ?2 AND rev <= ?3 ORDER BY rev",
     )?;
     let rows = statement.query_map(
@@ -3415,43 +3474,18 @@ fn boundary_seed_for_epoch_in(
         |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
             ))
         },
     )?;
     let mut steers = Vec::new();
     for row in rows {
-        let (id, revision, author_kind, author_run_id, text, issued_at) = row?;
-        let author = match (author_kind.as_str(), author_run_id) {
-            ("user", None) => Author::User,
-            ("run", Some(id)) => Author::Run(RunId::parse(&id).map_err(|error| {
-                StoreError::InvalidData(format!("invalid stored Run id: {error}"))
-            })?),
-            _ => {
-                return Err(StoreError::InvalidData(
-                    "stored Steer author is inconsistent".to_string(),
-                ))
-            }
-        };
-        steers.push(Steer {
-            id: SteerId::parse(&id).map_err(|error| {
-                StoreError::InvalidData(format!("invalid stored Steer id: {error}"))
-            })?,
-            work: work.clone(),
-            basis: Basis {
-                epoch_id: epoch_id.clone(),
-                revision: revision as u64,
-            },
-            author,
-            text,
-            issued_at: OffsetDateTime::from_unix_timestamp(issued_at).map_err(|error| {
-                StoreError::InvalidData(format!("invalid Steer timestamp: {error}"))
-            })?,
-        });
+        steers.push(decode_steer(row?, work.clone())?);
     }
     Ok(BoundarySeed {
         basis: Basis { epoch_id, revision },
@@ -3512,18 +3546,52 @@ fn work_for_epoch(conn: &Connection, epoch_id: &EpochId) -> StoreResult<WorkRef>
             ))
         },
     )?;
-    match row {
-        (Some(id), None, None) => Ok(WorkRef::Wave(WaveId::parse(&id).map_err(|error| {
-            StoreError::InvalidData(format!("invalid stored Wave id: {error}"))
-        })?)),
-        (None, Some(id), None) => Ok(WorkRef::Project(ProjectId::parse(&id).map_err(
-            |error| StoreError::InvalidData(format!("invalid stored Project id: {error}")),
-        )?)),
-        (None, None, Some(id)) => Ok(WorkRef::Task(TaskId::parse(&id).map_err(|error| {
-            StoreError::InvalidData(format!("invalid stored Task id: {error}"))
-        })?)),
+    parse_work_columns(row.0, row.1, row.2)
+}
+
+type SteerFields = (String, String, i64, String, Option<String>, String, i64);
+
+fn decode_steer(fields: SteerFields, work: WorkRef) -> StoreResult<Steer> {
+    let (id, epoch_id, revision, author_kind, author_run_id, text, issued_at) = fields;
+    let author = match (author_kind.as_str(), author_run_id) {
+        ("user", None) => Author::User,
+        ("run", Some(id)) => Author::Run(RunId::parse(&id).map_err(invalid_durable)?),
+        _ => {
+            return Err(StoreError::InvalidData(
+                "stored Steer author is inconsistent".to_string(),
+            ))
+        }
+    };
+    Ok(Steer {
+        id: SteerId::parse(&id).map_err(invalid_durable)?,
+        work,
+        basis: Basis {
+            epoch_id: EpochId::parse(&epoch_id).map_err(invalid_durable)?,
+            revision: u64::try_from(revision).map_err(|_| {
+                StoreError::InvalidData(format!("invalid stored Steer revision: {revision}"))
+            })?,
+        },
+        author,
+        text,
+        issued_at: OffsetDateTime::from_unix_timestamp(issued_at).map_err(|error| {
+            StoreError::InvalidData(format!("invalid Steer timestamp: {error}"))
+        })?,
+    })
+}
+
+fn parse_work_columns(
+    wave_id: Option<String>,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> StoreResult<WorkRef> {
+    match (wave_id, project_id, task_id) {
+        (Some(id), None, None) => Ok(WorkRef::Wave(WaveId::parse(&id).map_err(invalid_durable)?)),
+        (None, Some(id), None) => Ok(WorkRef::Project(
+            ProjectId::parse(&id).map_err(invalid_durable)?,
+        )),
+        (None, None, Some(id)) => Ok(WorkRef::Task(TaskId::parse(&id).map_err(invalid_durable)?)),
         _ => Err(StoreError::InvalidData(
-            "stored Epoch owns an invalid Work reference".to_string(),
+            "stored Epoch Work identity is inconsistent".to_string(),
         )),
     }
 }
@@ -3619,7 +3687,7 @@ fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
 #[cfg(test)]
 mod durable_store_tests {
     use crate::durable::{
-        AdvanceReceipt, AnswerRoute, AskExchange, AskId, BoundaryState, Containment,
+        AdvanceReceipt, AnswerRoute, AskExchange, AskId, Author, BoundaryState, Containment,
         ContainmentObservation, EpochId, InvocationRoute, RunAdvance, RunControl, RunState,
         RunTrigger, StopCause, WorkRef,
     };
@@ -3655,6 +3723,67 @@ mod durable_store_tests {
         }
         let work = WorkRef::Wave(wave_id);
         (dir, store, work)
+    }
+
+    #[test]
+    fn activity_steers_span_historical_epochs() {
+        let (dir, store, work) = store_with_wave();
+        let first = store
+            .append_steer(&work, &Author::User, "first direction", None)
+            .unwrap();
+        let second_epoch = EpochId::new();
+        let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
+        conn.execute(
+            "UPDATE epochs SET state='done', terminal_at=1700000010
+             WHERE id=?1",
+            [first.steer.basis.epoch_id.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO epochs (
+                id, number, wave_id, project_id, task_id, state, current_rev,
+                created_at, terminal_at
+             ) VALUES (?1, 2, ?2, NULL, NULL, 'open', 0, 1700000020, NULL)",
+            rusqlite::params![second_epoch.as_str(), work.id()],
+        )
+        .unwrap();
+        drop(conn);
+        let second = store
+            .append_steer(&work, &Author::User, "second direction", None)
+            .unwrap();
+        let conn = rusqlite::Connection::open(dir.path().join("loopflow.db")).unwrap();
+        conn.execute(
+            "UPDATE steers SET issued_at=1700000001 WHERE id=?1",
+            [first.steer.id.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE steers SET issued_at=1700000021 WHERE id=?1",
+            [second.steer.id.as_str()],
+        )
+        .unwrap();
+
+        let steers = store.list_steers_since(0).unwrap();
+
+        assert_eq!(
+            steers
+                .iter()
+                .map(|steer| steer.text.as_str())
+                .collect::<Vec<_>>(),
+            ["second direction", "first direction"]
+        );
+        assert_eq!(steers[0].basis.epoch_id, second.steer.basis.epoch_id);
+        assert_eq!(steers[1].basis.epoch_id, first.steer.basis.epoch_id);
+        assert!(steers.iter().all(|steer| steer.work == work));
+        assert_eq!(
+            store
+                .list_steers_since(1_700_000_010)
+                .unwrap()
+                .into_iter()
+                .map(|steer| steer.id)
+                .collect::<Vec<_>>(),
+            [second.steer.id]
+        );
     }
 
     fn start_invocation(

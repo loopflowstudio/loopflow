@@ -12,6 +12,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::journal::open_ledger;
+use crate::lf::commands::WorkFilter;
 use crate::lf::output::{format_cost, truncate, Colors};
 use crate::store::sqlite::SqliteStore;
 use crate::store::{RunEventRow, TurnSpendRow};
@@ -20,35 +21,18 @@ use crate::wave::journal::short_id;
 const WINDOW_DAYS: i64 = 7;
 const MAX_RUNS: usize = 50;
 
-/// A drill filter over the run ledger. Every field scopes the same invocation
-/// set: `wave` narrows to one Wave, `project` to one roadmap Project by slug,
-/// and `task` to one roadmap Task by its Linear issue identifier.
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct RunFilter<'a> {
-    pub wave: Option<&'a str>,
-    pub project: Option<&'a str>,
-    pub task: Option<&'a str>,
-}
-
-impl RunFilter<'_> {
-    fn matches(&self, invocation: &crate::trace::AgentInvocationRow) -> bool {
-        self.wave
-            .is_none_or(|wave| invocation.wave.as_deref() == Some(wave))
-            && self
-                .project
-                .is_none_or(|project| invocation.project.as_deref() == Some(project))
-            && self
-                .task
-                .is_none_or(|task| invocation.task.as_deref() == Some(task))
-    }
-}
-
 /// The skill runs matching a filter, newest first, capped. One reader behind
 /// `lf runs`, its Work drills, and `lf status`'s Runs evidence, so the surfaces
 /// can never disagree on what a run is.
-pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, bool)> {
-    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
+pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SkillRunEntry>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let mut runs = collect_runs_started_since(filter, since)?;
+    let truncated = cap_runs(&mut runs);
+    Ok((runs, truncated))
+}
+
+fn collect_runs_started_since(filter: WorkFilter, since: i64) -> Result<Vec<SkillRunEntry>> {
+    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let events = store
         .list_run_events_since(since)
         .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
@@ -57,8 +41,49 @@ pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, boo
         .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
         .into_iter()
         .filter(|invocation| invocation.skill.is_some())
-        .filter(|invocation| filter.matches(invocation))
+        .filter(|invocation| {
+            filter.matches(
+                invocation.wave.as_deref(),
+                invocation.project.as_deref(),
+                invocation.task.as_deref(),
+            )
+        })
         .collect::<Vec<_>>();
+    summarize_filtered_runs(&store, events, invocations)
+}
+
+/// The filtered Run definition without a presentation cap. Compound activity
+/// surfaces include both starts and finishes inside their requested window,
+/// then cap only after joining Runs to their other durable facts.
+pub(crate) fn collect_run_activity_since(
+    store: &SqliteStore,
+    filter: WorkFilter,
+    since: i64,
+) -> Result<Vec<SkillRunEntry>> {
+    let events = store
+        .list_run_events_since(since)
+        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+    let invocations = store
+        .agent_invocations_with_activity_since(since)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
+        .into_iter()
+        .filter(|invocation| invocation.skill.is_some())
+        .filter(|invocation| {
+            filter.matches(
+                invocation.wave.as_deref(),
+                invocation.project.as_deref(),
+                invocation.task.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    summarize_filtered_runs(store, events, invocations)
+}
+
+fn summarize_filtered_runs(
+    store: &SqliteStore,
+    events: Vec<RunEventRow>,
+    invocations: Vec<crate::trace::AgentInvocationRow>,
+) -> Result<Vec<SkillRunEntry>> {
     let invocation_ids = invocations
         .iter()
         .map(|invocation| invocation.id.clone())
@@ -69,8 +94,7 @@ pub(crate) fn collect_runs(filter: RunFilter) -> Result<(Vec<SkillRunEntry>, boo
 
     let mut runs = summarize_runs(&events, &invocations, &turns);
     sort_runs(&mut runs);
-    let truncated = cap_runs(&mut runs);
-    Ok((runs, truncated))
+    Ok(runs)
 }
 
 /// `lf runs [--wave <name>] [--project <slug>] [--task <id>]`: recent
@@ -81,7 +105,7 @@ pub fn list(
     project: Option<&str>,
     task: Option<&str>,
 ) -> Result<()> {
-    let (runs, _truncated) = collect_runs(RunFilter {
+    let (runs, _truncated) = collect_runs(WorkFilter {
         wave,
         project,
         task,
@@ -1078,7 +1102,7 @@ pub struct ExecLedgerEntry {
 
 /// The skill runs one Wave produced, newest first.
 pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<SkillRunEntry>, bool)> {
-    collect_runs(RunFilter {
+    collect_runs(WorkFilter {
         wave: Some(wave),
         project: None,
         task: None,

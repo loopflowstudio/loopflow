@@ -34,6 +34,19 @@ they mean the Mac surface.
 
 ### Runtime boundary still open
 
+- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
+  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
+  short-lived Run while `task` was absent from the installed flow catalog,
+  producing hundreds of identical resumable failures. The shared action
+  surfaces still recommended `resume` or `no_action`, and no non-destructive
+  pause exists for ready Task Work. Flow resolution failure must become one
+  durable blocked/failed boundary with bounded retry and a legal next action.
+- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
+  LOO-207 and its owning Project reported `process_alive: true` while no exact
+  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
+  receipts contained no Turn ids and the residents immediately relaunched.
+  Supervisors must distinguish a live containment from an owned provider
+  process and an advancing Turn before recommending wait, interrupt, or retry.
 - `lf ask` now wakes a stopped parent idempotently, and a live Project or Wave
   Run retains an answer lane while owned child Work can still ask. The broader
   Home server design remains open for automatic backlog dispatch, remote
@@ -115,11 +128,13 @@ they mean the Mac surface.
   normal PM/Work mutations while cache-only reads and diagnostics remain.
   PRD-43 deliberately preserves Loopflow's checked-in/live legacy bindings;
   PRD-44 must run the consequential LOO migration from merged main.
-- The seven live bets (Linear Projects under the product Initiative): loopflow-api,
-  wave-chat, mac-surface-ux, ios-surface-ux, distributed-computing,
-  product-performance, auditability. The old Concerto project set
-  (session-lifecycle, attention-navigation, wave-conducting, remote-connection,
-  palette) was folded into these and deleted, not tombstoned.
+- The cache-only product snapshot on 2026-07-21 contains three linked Projects:
+  loopflow-api, mac-surface-ux, and auditability. The previously listed
+  wave-chat, ios-surface-ux, distributed-computing, and product-performance bets
+  are absent; do not select or mutate them unless a later synced snapshot
+  reintroduces them. The old Concerto project set (session-lifecycle,
+  attention-navigation, wave-conducting, remote-connection, palette) was folded
+  into the product portfolio and deleted, not tombstoned.
 
 ### The `lf` / Home spine (server topology not yet settled)
 

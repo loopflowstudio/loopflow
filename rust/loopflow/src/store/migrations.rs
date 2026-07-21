@@ -489,6 +489,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "release",
         sql: include_str!("migrations/0.12.3.001_release.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(4),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.4.001_release.sql"),
+    },
 ];
 
 /// The exact branch-local history that reached one production ledger before
@@ -1560,9 +1570,9 @@ mod tests {
     use super::{
         active_namespace, applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
         apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
-        latest_known_version, latest_version_sqlite, pending_migrations, product_schema,
-        validate_foreign_keys, validate_persisted_json, validate_set, validate_sqlite, Migration,
-        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        latest_known_version, latest_version_sqlite, migration_checksum, pending_migrations,
+        product_schema, validate_foreign_keys, validate_persisted_json, validate_set,
+        validate_sqlite, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
@@ -2337,6 +2347,19 @@ mod tests {
         let error = validate_sqlite(&conn).unwrap_err();
 
         assert!(error.to_string().contains("checksum does not match"));
+    }
+
+    #[test]
+    fn released_0_12_4_frontier_is_reconstructible() {
+        let migration = MIGRATIONS
+            .iter()
+            .find(|migration| migration.version() == "0.12.4.001_release")
+            .expect("the production frontier remains in source history");
+
+        assert_eq!(
+            migration_checksum(migration),
+            "6aa0076adfd1f115c8a473fd0403ede22d97d59d03a14bf234fad8170669a999"
+        );
     }
 
     #[test]

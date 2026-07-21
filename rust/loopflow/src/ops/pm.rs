@@ -2952,6 +2952,14 @@ async fn canonical_wave_title_path_with_store(
         let current_repo = std::fs::canonicalize(current.repo())
             .unwrap_or_else(|_| Path::new(current.repo()).to_path_buf());
         if current_repo != main {
+            // Root Wave names are repository-local PM identity. The runtime
+            // registry still has a legacy machine-global name index, so a
+            // same-named root Wave in another repository must not steal this
+            // repository's Project title path. Nested Waves still require
+            // durable ancestry because their parent path cannot be inferred.
+            if !wave.contains('/') && main.join("wave").join(wave).join("GOAL.md").is_file() {
+                return Ok(title_case(wave));
+            }
             return Err(OpsError::Message(format!(
                 "Wave ancestry for wave/{wave} crosses repositories at {} ({})",
                 current.name(),

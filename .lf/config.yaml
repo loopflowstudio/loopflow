@@ -1,32 +1,28 @@
 exclude:
-  - uv.lock
-
+- uv.lock
 branch_names:
-  schema: "{user}.{name}.{ts}"
-
+  schema: '{user}.{name}.{ts}'
 pm:
   provider: linear
-
+  linear_team: 3871bed0-8c95-4077-ab72-728327d615b3
 linear:
-  team: "60558c53-2169-49f8-a76a-1f4586705aa9"
-
+  team: 60558c53-2169-49f8-a76a-1f4586705aa9
 release:
   targets:
     default:
       workflow: .github/workflows/release.yml
       verify:
-        - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
+      - LOOPFLOW_REQUIRE_ORIGIN_MAIN=1 uv run python scripts/check_migrations.py
       prepare:
-        - uv run python scripts/canonicalize_migrations.py {version} --release-cut
+      - uv run python scripts/canonicalize_migrations.py {version} --release-cut
       completion: github-release
       publisher:
-        - doppler
-        - run
-        - --
-        - uv
-        - run
-        - python
-        - scripts/publish_release.py
-
+      - doppler
+      - run
+      - --
+      - uv
+      - run
+      - python
+      - scripts/publish_release.py
 internal:
   use_rust: true

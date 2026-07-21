@@ -138,6 +138,7 @@ fn seed_repository(repo: &Path) {
         "initiative-infrastructure",
         false,
     );
+    write_goal(repo, "intelligence", "initiative-intelligence", false);
     git(repo, &["init", "-b", "main"]);
     git(repo, &["config", "user.email", "matrix@loopflow.test"]);
     git(repo, &["config", "user.name", "Repository Team Matrix"]);
@@ -178,6 +179,14 @@ fn repository_team_matrix() {
     .with_parent(survival.id().clone());
     store.create_wave(&survival).unwrap();
     store.create_wave(&infrastructure).unwrap();
+    let foreign_repo = tempfile::tempdir().unwrap();
+    store
+        .create_wave(&Wave::new(
+            WaveId::new(),
+            "intelligence".to_string(),
+            foreign_repo.path().display().to_string(),
+        ))
+        .unwrap();
     put_snapshot(
         &store,
         &repo,
@@ -208,12 +217,27 @@ fn repository_team_matrix() {
             true,
         ),
     );
+    put_snapshot(
+        &store,
+        &repo,
+        "intelligence",
+        "initiative-intelligence",
+        snapshot(
+            "initiative-intelligence",
+            "project-trace",
+            "trace",
+            "Trace",
+            "issue-intelligence",
+            "LOO-3",
+            true,
+        ),
+    );
     drop(store);
 
     // Recursive discovery and durable ancestry make nested titles legible.
     assert_eq!(
         list_local_waves(&repo).unwrap(),
-        ["survival", "survival/infrastructure"]
+        ["intelligence", "survival", "survival/infrastructure"]
     );
     let old_home = std::env::var_os("LF_HOME");
     let old_db = std::env::var_os("LF_DB_PATH");
@@ -226,6 +250,10 @@ fn repository_team_matrix() {
     assert_eq!(
         canonical_wave_title_path(&repo, "survival/infrastructure").unwrap(),
         "Survival / Infrastructure"
+    );
+    assert_eq!(
+        canonical_wave_title_path(&repo, "intelligence").unwrap(),
+        "Intelligence"
     );
     // SAFETY: restore the process environment before exercising subprocesses.
     unsafe {
@@ -331,9 +359,9 @@ fn repository_team_matrix() {
         assert_eq!(&project.wave_id, wave_id);
     }
 
-    // Reopening the store preserves the one Team and both stable associations.
+    // Reopening the store preserves the local ancestry and foreign collision.
     let reopened = SqliteStore::new(&database).unwrap();
-    assert_eq!(reopened.list_waves(None).unwrap().len(), 2);
+    assert_eq!(reopened.list_waves(None).unwrap().len(), 3);
 
     // A duplicated Project/Issue association fails before Work or worktree creation.
     put_snapshot(
@@ -464,11 +492,12 @@ fn repository_team_matrix() {
     assert!(error.contains("lf pm reteam --apply"), "{error}");
     assert!(error.contains("PRD-44"), "{error}");
 
-    // PRD-43 must preserve Loopflow's checked-in legacy bindings verbatim.
+    // PRD-44 stages the repository target without deleting any legacy
+    // authority before the provider migration verifies successfully.
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let config = std::fs::read_to_string(source.join(".lf/config.yaml")).unwrap();
     assert!(config.contains("linear:\n  team:"));
-    assert!(!config.contains("linear_team:"));
+    assert!(config.contains("linear_team:"));
     let product = std::fs::read_to_string(source.join("wave/product/GOAL.md")).unwrap();
     assert!(product.contains("linear_team:"));
 

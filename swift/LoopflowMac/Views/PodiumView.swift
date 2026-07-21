@@ -8,7 +8,7 @@ struct PodiumView: View {
 
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
-    @AppStorage("podiumShowsWaveScore") private var showsWaveScore = true
+    @AppStorage("podiumShowsWaves") private var showsWaves = true
 
     init(
         portfolioService: PortfolioService,
@@ -17,7 +17,10 @@ struct PodiumView: View {
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
-        let model = PodiumModel(query: query)
+        let restoredRepoPath = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
+            ? loadLoopflowState()?.selectedRepoPath
+            : nil
+        let model = PodiumModel(query: query, repoPath: restoredRepoPath)
         PodiumFixture.applyIfRequested(to: model)
         _model = State(initialValue: model)
     }
@@ -25,11 +28,11 @@ struct PodiumView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            PodiumBar(model: model, showsWaveScore: $showsWaveScore)
+            PodiumBar(model: model, showsWaves: $showsWaves)
             Divider()
             HStack(spacing: 0) {
-                if showsWaveScore {
-                    WaveScore(model: model)
+                if showsWaves {
+                    WavesSidebar(model: model)
                         .frame(width: 224)
                     Divider()
                 }
@@ -87,19 +90,12 @@ struct PodiumView: View {
 
 private struct PodiumBar: View {
     @Bindable var model: PodiumModel
-    @Binding var showsWaveScore: Bool
-
-    private var scopeTitle: String {
-        guard let repoPath = model.repoPath else { return "All repositories" }
-        return model.allRepos.first {
-            model.repoIdentity($0.path) == model.repoIdentity(repoPath)
-        }?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
-    }
+    @Binding var showsWaves: Bool
 
     var body: some View {
         HStack(spacing: Spacing.lg) {
             Button {
-                showsWaveScore.toggle()
+                showsWaves.toggle()
             } label: {
                 Image(systemName: "sidebar.left")
                     .font(.system(size: 13, weight: .semibold))
@@ -107,10 +103,10 @@ private struct PodiumBar: View {
             .buttonStyle(.plain)
             .foregroundStyle(.white.opacity(0.84))
             .frame(width: HitTarget.comfortable, height: HitTarget.comfortable)
-            .background(Color.white.opacity(showsWaveScore ? 0.12 : 0.06), in: Circle())
-            .help(showsWaveScore ? "Close Wave score" : "Open Wave score")
-            .accessibilityLabel(showsWaveScore ? "Close Wave score" : "Open Wave score")
-            .accessibilityIdentifier("podium-wave-score-toggle")
+            .background(Color.white.opacity(showsWaves ? 0.12 : 0.06), in: Circle())
+            .help(showsWaves ? "Close Waves" : "Open Waves")
+            .accessibilityLabel(showsWaves ? "Close Waves" : "Open Waves")
+            .accessibilityIdentifier("podium-waves-toggle")
 
             VStack(alignment: .leading, spacing: 0) {
                 Text("CONDUCTING WAVES")
@@ -125,30 +121,6 @@ private struct PodiumBar: View {
             Rectangle()
                 .fill(Color.white.opacity(0.18))
                 .frame(width: 1, height: 30)
-
-            Menu {
-                Button("All repositories") { model.setRepoPath(nil) }
-                if !model.allRepos.isEmpty { Divider() }
-                ForEach(model.allRepos) { repo in
-                    Button(repo.displayName) { model.setRepoPath(repo.path) }
-                }
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    Text(scopeTitle)
-                        .font(Typography.body(11).weight(.semibold))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                }
-                .foregroundStyle(.white.opacity(0.86))
-                .padding(.horizontal, Spacing.sm)
-                .padding(.vertical, Spacing.xs)
-                .background(Color.black.opacity(0.13), in: Capsule())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .fixedSize()
-            .accessibilityIdentifier("podium-repo-scope")
 
             if let summary = model.waveSummary {
                 HStack(spacing: Spacing.md) {
@@ -373,7 +345,7 @@ private struct TokenOutputMeter: View {
     }
 }
 
-private struct WaveScore: View {
+private struct WavesSidebar: View {
     @Bindable var model: PodiumModel
     @State private var expandedWaves = Set<String>()
     @State private var expandedProjects = Set<String>()
@@ -383,15 +355,27 @@ private struct WaveScore: View {
         waveOutline(model.visibleWaves)
     }
 
+    private var repoTitle: String {
+        guard let repoPath = model.repoPath else { return "All repositories" }
+        return model.allRepos.first {
+            model.repoIdentity($0.path) == model.repoIdentity(repoPath)
+        }?.displayName ?? URL(fileURLWithPath: repoPath).lastPathComponent
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            repoSelector
+
+            Divider()
+                .overlay(Color.white.opacity(0.12))
+
             HStack {
-                Text("SCORE")
+                Text("WAVES")
                     .font(Typography.caption(9).weight(.bold))
                     .tracking(1.5)
                     .foregroundStyle(.white.opacity(0.68))
                 Spacer()
-                Text("\(model.visibleWaves.count.formatted()) WAVES")
+                Text(model.visibleWaves.count.formatted())
                     .font(Typography.code(9))
                     .foregroundStyle(.white.opacity(0.68))
             }
@@ -406,7 +390,7 @@ private struct WaveScore: View {
                     .padding(Spacing.md)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.white.opacity(0.08))
-                    .accessibilityIdentifier("podium-wave-score-error")
+                    .accessibilityIdentifier("podium-waves-error")
             }
 
             if model.waves.isLoading {
@@ -414,13 +398,13 @@ private struct WaveScore: View {
                     .controlSize(.small)
                     .foregroundStyle(.white.opacity(0.65))
                     .padding(Spacing.lg)
-                    .accessibilityIdentifier("podium-wave-score-loading")
+                    .accessibilityIdentifier("podium-waves-loading")
             } else if outlinedWaves.isEmpty {
                 Text(model.repoPath == nil ? "No Waves found." : "No Waves in this repository.")
                     .font(Typography.caption())
                     .foregroundStyle(.white.opacity(0.58))
                     .padding(Spacing.lg)
-                    .accessibilityIdentifier("podium-wave-score-empty")
+                    .accessibilityIdentifier("podium-waves-empty")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
@@ -438,8 +422,62 @@ private struct WaveScore: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.loopflowBurgundy)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Work score")
-        .accessibilityIdentifier("podium-wave-score")
+        .accessibilityLabel("Waves")
+        .accessibilityIdentifier("podium-waves")
+    }
+
+    private var repoSelector: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Text("REPOSITORY")
+                .font(Typography.caption(8).weight(.bold))
+                .tracking(1.4)
+                .foregroundStyle(.white.opacity(0.55))
+
+            Menu {
+                Button {
+                    selectRepo(nil)
+                } label: {
+                    Label("All repositories", systemImage: "square.stack.3d.up")
+                }
+                if !model.allRepos.isEmpty { Divider() }
+                ForEach(model.allRepos) { repo in
+                    Button {
+                        selectRepo(repo.path)
+                    } label: {
+                        Label(repo.displayName, systemImage: "folder")
+                    }
+                }
+            } label: {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.62))
+                    Text(repoTitle)
+                        .font(Typography.sectionTitle(15))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+        .accessibilityIdentifier("podium-repo-scope")
+        .accessibilityLabel("Repository: \(repoTitle)")
+    }
+
+    private func selectRepo(_ path: String?) {
+        model.setRepoPath(path)
+        Task.detached {
+            try? saveLoopflowState(LoopflowState(selectedRepoPath: path?.normalizedFilePath))
+        }
     }
 
     @ViewBuilder
@@ -447,7 +485,7 @@ private struct WaveScore: View {
         let roadmap = roadmap(for: wave)
         let projects = roadmap?.projects.items ?? []
         let nodes = outputNodes(wave: wave)
-        ScoreRow(
+        WaveTreeRow(
             identifier: "wave-\(wave.id)",
             kind: .wave,
             title: wave.displayName,
@@ -476,7 +514,7 @@ private struct WaveScore: View {
     ) -> some View {
         let key = "\(wave.id):\(project.id)"
         let nodes = outputNodes(wave: wave, project: project)
-        ScoreRow(
+        WaveTreeRow(
             identifier: "project-\(project.id)",
             kind: .project,
             title: project.project.name,
@@ -509,7 +547,7 @@ private struct WaveScore: View {
         let key = "\(wave.id):\(task.id)"
         let nodes = outputNodes(wave: wave, project: project, task: task)
         let execs = execNodes(for: nodes)
-        ScoreRow(
+        WaveTreeRow(
             identifier: "task-\(task.id)",
             kind: .task,
             title: task.task.name,
@@ -526,7 +564,7 @@ private struct WaveScore: View {
         if expandedTasks.contains(key) {
             ForEach(execs) { exec in
                 let providers = nodes.filter { $0.parentId == exec.id }
-                ScoreRow(
+                WaveTreeRow(
                     identifier: "exec-\(exec.id)",
                     kind: .exec,
                     title: exec.label,
@@ -600,7 +638,7 @@ private struct WaveScore: View {
     }
 }
 
-private enum ScoreRowKind: Equatable {
+private enum WaveTreeRowKind: Equatable {
     case wave
     case project
     case task
@@ -633,9 +671,9 @@ private enum ScoreRowKind: Equatable {
     }
 }
 
-private struct ScoreRow: View {
+private struct WaveTreeRow: View {
     let identifier: String
-    let kind: ScoreRowKind
+    let kind: WaveTreeRowKind
     let title: String
     let level: Int
     let outputNodes: [ActivityNode]
@@ -670,7 +708,7 @@ private struct ScoreRow: View {
                     .buttonStyle(.plain)
                     .help(isExpanded ? "Collapse \(kind.label)" : "Expand \(kind.label)")
                     .accessibilityLabel(isExpanded ? "Collapse \(title)" : "Expand \(title)")
-                    .accessibilityIdentifier("podium-score-\(identifier)-disclosure")
+                    .accessibilityIdentifier("podium-waves-\(identifier)-disclosure")
                 } else {
                     Color.clear
                 }
@@ -714,7 +752,7 @@ private struct ScoreRow: View {
             .onHover { isHovering = $0 }
             .help(title)
             .accessibilityLabel("\(kind.label): \(title)")
-            .accessibilityIdentifier("podium-score-\(identifier)")
+            .accessibilityIdentifier("podium-waves-\(identifier)")
             .accessibilityValue(
                 "\(fastRate.formatted(.number.precision(.fractionLength(1)))) tokens per second, \(state.label)"
             )

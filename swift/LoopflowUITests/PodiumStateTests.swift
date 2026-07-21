@@ -59,41 +59,66 @@ final class PodiumStateTests: XCTestCase {
     }
 
     @MainActor
-    func testScoreDisclosesWorkHierarchyWithOneOutputLanguage() {
+    func testWavesDiscloseWorkHierarchyWithOneOutputLanguage() {
         forEachWidth { app in
-            let wave = app.descendants(matching: .any)["podium-score-wave-wave-1"]
+            let wave = app.descendants(matching: .any)["podium-waves-wave-wave-1"]
             XCTAssertTrue(wave.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: wave.value).contains("tokens per second"))
 
-            app.descendants(matching: .any)["podium-score-wave-wave-1-disclosure"].click()
-            let project = app.descendants(matching: .any)["podium-score-project-project-1"]
+            app.descendants(matching: .any)["podium-waves-wave-wave-1-disclosure"].click()
+            let project = app.descendants(matching: .any)["podium-waves-project-project-1"]
             XCTAssertTrue(project.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: project.value).contains("tokens per second"))
 
-            app.descendants(matching: .any)["podium-score-project-project-1-disclosure"].click()
-            let task = app.descendants(matching: .any)["podium-score-task-issue-now"]
+            app.descendants(matching: .any)["podium-waves-project-project-1-disclosure"].click()
+            let task = app.descendants(matching: .any)["podium-waves-task-issue-now"]
             XCTAssertTrue(task.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: task.value).contains("tokens per second"))
 
-            app.descendants(matching: .any)["podium-score-task-issue-now-disclosure"].click()
-            let exec = app.descendants(matching: .any)["podium-score-exec-exec:exec-podium"]
+            app.descendants(matching: .any)["podium-waves-task-issue-now-disclosure"].click()
+            let exec = app.descendants(matching: .any)["podium-waves-exec-exec:exec-podium"]
             XCTAssertTrue(exec.waitForExistence(timeout: 8))
             XCTAssertTrue(String(describing: exec.value).contains("tokens per second"))
         }
     }
 
     @MainActor
-    func testWaveScoreClosesWithoutRemovingTheLiveSurface() {
+    func testWavesCloseWithoutRemovingTheLiveSurface() {
         forEachWidth { app in
-            ensureWaveScoreOpen(app)
-            app.descendants(matching: .any)["podium-wave-score-toggle"].click()
+            ensureWavesOpen(app)
+            app.descendants(matching: .any)["podium-waves-toggle"].click()
 
-            XCTAssertFalse(exists(app, id: "podium-wave-score"))
+            XCTAssertFalse(exists(app, id: "podium-waves"))
             XCTAssertTrue(exists(app, id: "podium-work"))
             XCTAssertTrue(exists(app, id: "podium-activity"))
 
-            app.descendants(matching: .any)["podium-wave-score-toggle"].click()
-            XCTAssertTrue(waitFor(app, id: "podium-wave-score"))
+            app.descendants(matching: .any)["podium-waves-toggle"].click()
+            XCTAssertTrue(waitFor(app, id: "podium-waves"))
+        }
+    }
+
+    @MainActor
+    func testWaveProjectAndTaskSelectionsZoomTheWorkPane() {
+        forEachWidth { app in
+            let wave = app.descendants(matching: .any)["podium-waves-wave-wave-1"]
+            XCTAssertTrue(wave.waitForExistence(timeout: 8))
+            wave.click()
+            XCTAssertTrue(waitFor(app, id: "podium-wave-wave-1"))
+            XCTAssertFalse(exists(app, id: "podium-wave-wave-2"))
+
+            app.descendants(matching: .any)["podium-waves-wave-wave-1-disclosure"].click()
+            let project = app.descendants(matching: .any)["podium-waves-project-project-1"]
+            XCTAssertTrue(project.waitForExistence(timeout: 8))
+            project.click()
+            XCTAssertTrue(waitFor(app, id: "podium-project-project-1"))
+            XCTAssertFalse(exists(app, id: "podium-wave-wave-1"))
+
+            app.descendants(matching: .any)["podium-waves-project-project-1-disclosure"].click()
+            let task = app.descendants(matching: .any)["podium-waves-task-issue-now"]
+            XCTAssertTrue(task.waitForExistence(timeout: 8))
+            task.click()
+            XCTAssertTrue(waitFor(app, id: "podium-task-issue-now"))
+            XCTAssertFalse(exists(app, id: "podium-project-project-1"))
         }
     }
 
@@ -120,7 +145,7 @@ final class PodiumStateTests: XCTestCase {
     @MainActor
     func testEmptyPodiumKeepsDistinctWaveWorkAndActivityStates() {
         forEachWidth(mode: "empty-workspaces") { app in
-            XCTAssertTrue(waitFor(app, id: "podium-wave-score-empty"))
+            XCTAssertTrue(waitFor(app, id: "podium-waves-empty"))
             XCTAssertTrue(waitFor(app, id: "podium-work-empty"))
             XCTAssertTrue(waitFor(app, id: "podium-activity-empty"))
             XCTAssertTrue(
@@ -144,20 +169,20 @@ final class PodiumStateTests: XCTestCase {
             let app = launch.makeApp()
             app.launch()
             XCTAssertTrue(app.windows.element(boundBy: 0).waitForExistence(timeout: 10))
-            ensureWaveScoreOpen(app)
+            ensureWavesOpen(app)
             assertions(app)
             app.terminate()
         }
     }
 
     @MainActor
-    private func ensureWaveScoreOpen(_ app: XCUIApplication) {
-        let score = app.descendants(matching: .any)["podium-wave-score"]
-        if !score.waitForExistence(timeout: 1) {
-            let toggle = app.descendants(matching: .any)["podium-wave-score-toggle"]
+    private func ensureWavesOpen(_ app: XCUIApplication) {
+        let waves = app.descendants(matching: .any)["podium-waves"]
+        if !waves.waitForExistence(timeout: 1) {
+            let toggle = app.descendants(matching: .any)["podium-waves-toggle"]
             XCTAssertTrue(toggle.waitForExistence(timeout: 8))
             toggle.click()
-            XCTAssertTrue(score.waitForExistence(timeout: 8))
+            XCTAssertTrue(waves.waitForExistence(timeout: 8))
         }
     }
 
@@ -165,7 +190,8 @@ final class PodiumStateTests: XCTestCase {
     private func assertPodiumRegions(_ app: XCUIApplication) {
         let podium = app.descendants(matching: .any)["podium"]
         XCTAssertTrue(podium.waitForExistence(timeout: 8))
-        XCTAssertTrue(waitFor(app, id: "podium-wave-score"))
+        XCTAssertTrue(waitFor(app, id: "podium-waves"))
+        XCTAssertTrue(waitFor(app, id: "podium-repo-scope"))
         XCTAssertTrue(waitFor(app, id: "podium-work"))
         XCTAssertTrue(waitFor(app, id: "podium-activity"))
         XCTAssertGreaterThan(

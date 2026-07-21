@@ -87,7 +87,7 @@ struct RoadmapView: View {
     // the first body pass and logs an AttributeGraph cycle at cold launch.
     @ObservedObject private var terminalStore = TaskTerminalStore.shared
     @State private var model: PodiumModel
-    @Binding private var selection: PodiumSelection?
+    @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
     @State private var activeControlId: String?
@@ -108,7 +108,7 @@ struct RoadmapView: View {
 
     init(
         model: PodiumModel,
-        selection: Binding<PodiumSelection?>,
+        selection: Binding<WorkReference?>,
         onOpenWave: @escaping (WaveSnapshot) -> Void = { _ in }
     ) {
         _model = State(initialValue: model)
@@ -189,7 +189,7 @@ struct RoadmapView: View {
                 Text("Work")
                     .font(Typography.sectionTitle(20))
                     .foregroundStyle(palette.text)
-                Text(repoPath == nil ? "All Waves" : "Waves in this repository")
+                Text(repoPath == nil ? "All planned Work" : "Planned Work in this repository")
                     .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
             }
@@ -236,8 +236,9 @@ struct RoadmapView: View {
             .accessibilityIdentifier("podium-work-unavailable")
         } else if visibleWaves.isEmpty {
             ContentUnavailableView(
-                repoPath == nil ? "No Waves yet" : "No Waves in this repository",
-                systemImage: "map"
+                repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
+                systemImage: "map",
+                description: Text("Waves without readable Projects remain in the score.")
             )
             .accessibilityIdentifier("podium-work-empty")
         } else {
@@ -269,7 +270,7 @@ struct RoadmapView: View {
                             selection: selection,
                             activeControlId: activeControlId,
                             onSelect: { row in
-                                selection = .task(waveId: row.wave.id, taskId: row.task.id)
+                                selection = .task(id: row.task.id)
                             },
                             onTaskAction: { row, action in
                                 perform(action, on: RoadmapTaskSelection(wave: row.wave, task: row.task))
@@ -300,7 +301,7 @@ struct RoadmapView: View {
                         activeControlId: activeControlId,
                         onSelect: { selected in selection = selected },
                         onOpen: {
-                            selection = .wave(waveId: roadmap.wave.id)
+                            selection = .wave(id: roadmap.wave.id)
                             openWave(roadmap.wave)
                         },
                         onRefresh: { await refresh() },
@@ -572,9 +573,9 @@ private struct HomeControl: View {
 
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
-    let selection: PodiumSelection?
+    let selection: WorkReference?
     let activeControlId: String?
-    let onSelect: (PodiumSelection) -> Void
+    let onSelect: (WorkReference) -> Void
     let onOpen: () -> Void
     let onRefresh: () async -> Void
     let onSetPaused: (Bool) async throws -> Void
@@ -622,9 +623,9 @@ private struct RoadmapWaveCard: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .onTapGesture { onSelect(.wave(waveId: roadmap.wave.id)) }
+                .onTapGesture { onSelect(.wave(id: roadmap.wave.id)) }
                 .accessibilityAddTraits(
-                    selection == .wave(waveId: roadmap.wave.id) ? [.isSelected] : []
+                    selection == .wave(id: roadmap.wave.id) ? [.isSelected] : []
                 )
                 Spacer()
                 HomeControl(
@@ -650,7 +651,6 @@ private struct RoadmapWaveCard: View {
                 } else {
                     ForEach(projects) { project in
                         RoadmapProjectCard(
-                            waveId: roadmap.wave.id,
                             project: project,
                             selection: selection,
                             activeControlId: activeControlId,
@@ -674,9 +674,9 @@ private struct RoadmapWaveCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.lg)
                 .stroke(
-                    selection == .wave(waveId: roadmap.wave.id)
+                    selection == .wave(id: roadmap.wave.id)
                         ? Color.loopflowBurgundy : palette.border,
-                    lineWidth: selection == .wave(waveId: roadmap.wave.id) ? 2 : 1
+                    lineWidth: selection == .wave(id: roadmap.wave.id) ? 2 : 1
                 )
         }
         .accessibilityIdentifier("podium-wave-\(roadmap.wave.id)")
@@ -684,11 +684,10 @@ private struct RoadmapWaveCard: View {
 }
 
 private struct RoadmapProjectCard: View {
-    let waveId: String
     let project: RoadmapProject
-    let selection: PodiumSelection?
+    let selection: WorkReference?
     let activeControlId: String?
-    let onSelect: (PodiumSelection) -> Void
+    let onSelect: (WorkReference) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onInterrupt: (RoadmapTask) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -709,7 +708,7 @@ private struct RoadmapProjectCard: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                onSelect(.project(waveId: waveId, projectId: project.id))
+                onSelect(.project(id: project.id))
             }
             if !project.project.definition.isEmpty {
                 Text(project.project.definition)
@@ -725,10 +724,10 @@ private struct RoadmapProjectCard: View {
                 ForEach(project.tasks) { task in
                     RoadmapTaskRow(
                         task: task,
-                        isSelected: selection == .task(waveId: waveId, taskId: task.id),
+                        isSelected: selection == .task(id: task.id),
                         activeControlId: activeControlId,
                         onSelect: {
-                            onSelect(.task(waveId: waveId, taskId: task.id))
+                            onSelect(.task(id: task.id))
                         },
                         onAction: { action in onTaskAction(task, action) },
                         onInterrupt: { onInterrupt(task) },
@@ -739,13 +738,13 @@ private struct RoadmapProjectCard: View {
         }
         .padding(Spacing.md)
         .background(
-            selection == .project(waveId: waveId, projectId: project.id)
+            selection == .project(id: project.id)
                 ? Color.loopflowBurgundy.opacity(0.08)
                 : palette.surfaceMuted.opacity(0.6)
         )
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
         .accessibilityAddTraits(
-            selection == .project(waveId: waveId, projectId: project.id) ? [.isSelected] : []
+            selection == .project(id: project.id) ? [.isSelected] : []
         )
         .accessibilityIdentifier("podium-project-\(project.id)")
     }
@@ -930,7 +929,7 @@ private struct TaskActionCluster: View {
 
 private struct NowSectionView: View {
     let section: NowSection
-    let selection: PodiumSelection?
+    let selection: WorkReference?
     let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
@@ -957,7 +956,7 @@ private struct NowSectionView: View {
             ForEach(section.rows) { row in
                 NowRowView(
                     row: row,
-                    isSelected: selection == .task(waveId: row.wave.id, taskId: row.task.id),
+                    isSelected: selection == .task(id: row.task.id),
                     activeControlId: activeControlId,
                     onSelect: { onSelect(row) },
                     onAction: { action in onTaskAction(row, action) },

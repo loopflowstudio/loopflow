@@ -30,7 +30,7 @@ struct PodiumView: View {
             HStack(spacing: 0) {
                 if showsWaveScore {
                     WaveScore(model: model)
-                        .frame(width: 190)
+                        .frame(width: 224)
                     Divider()
                 }
                 HSplitView {
@@ -41,13 +41,27 @@ struct PodiumView: View {
                             set: { model.select($0) }
                         )
                     )
-                    .frame(minWidth: 350, idealWidth: 660, maxWidth: .infinity)
+                    .frame(
+                        minWidth: 350,
+                        idealWidth: 660,
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: .top
+                    )
                     .accessibilityIdentifier("podium-work")
 
                     WorkActivityView(model: model)
-                        .frame(minWidth: 265, idealWidth: 390, maxWidth: 520)
+                        .frame(
+                            minWidth: 265,
+                            idealWidth: 390,
+                            maxWidth: 520,
+                            maxHeight: .infinity,
+                            alignment: .top
+                        )
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.background)
@@ -139,7 +153,7 @@ private struct PodiumBar: View {
 
             if let summary = model.waveSummary {
                 HStack(spacing: Spacing.md) {
-                    compactMetric(summary.registeredWaves == 1 ? "Wave" : "Waves", summary.registeredWaves)
+                    compactMetric(summary.waves == 1 ? "Wave" : "Waves", summary.waves)
                     compactMetric(summary.activeRuns == 1 ? "Run" : "Runs", summary.activeRuns)
                     if summary.unservedRuns > 0 {
                         Label(
@@ -187,13 +201,19 @@ enum PodiumSignalState: Equatable {
     case unknown
 
     static func from(_ snapshot: ActivitySnapshot) -> PodiumSignalState {
-        let providers = snapshot.nodes.filter { $0.kind == .providerLaunch }
+        let state = from(nodes: snapshot.nodes)
+        if state == .off, !snapshot.providerProcesses.isEmpty { return .waiting }
+        return state
+    }
+
+    static func from(nodes: [ActivityNode]) -> PodiumSignalState {
+        let providers = nodes.filter { $0.kind == .providerLaunch }
         if providers.contains(where: { $0.state == .stalled }) { return .blocked }
-        if snapshot.aggregate.outputTokensPerSecondFast > 0
+        if providers.contains(where: { $0.direct.outputTokensPerSecondFast > 0 })
             || providers.contains(where: { $0.state == .working }) {
             return .producing
         }
-        if !providers.isEmpty || !snapshot.providerProcesses.isEmpty { return .waiting }
+        if !providers.isEmpty { return .waiting }
         return .off
     }
 
@@ -247,7 +267,7 @@ private struct TokenOutputInstrument: View {
                     .lineLimit(1)
             }
 
-            TokenOutputRail(
+            TokenOutputMeter(
                 fastRate: snapshot?.aggregate.outputTokensPerSecondFast ?? 0,
                 slowRate: snapshot?.aggregate.outputTokensPerSecondSlow ?? 0,
                 state: state
@@ -291,10 +311,12 @@ private struct TokenOutputInstrument: View {
     }
 }
 
-private struct TokenOutputRail: View {
+private struct TokenOutputMeter: View {
     let fastRate: Double
     let slowRate: Double
     let state: PodiumSignalState
+    var width: CGFloat = 22
+    var height: CGFloat = 48
 
     var body: some View {
         Canvas { context, size in
@@ -348,12 +370,15 @@ private struct TokenOutputRail: View {
                 )
             }
         }
-        .frame(width: 22, height: 48)
+        .frame(width: width, height: height)
     }
 }
 
 private struct WaveScore: View {
     @Bindable var model: PodiumModel
+    @State private var expandedWaves = Set<String>()
+    @State private var expandedProjects = Set<String>()
+    @State private var expandedTasks = Set<String>()
 
     private var outlinedWaves: [(wave: WaveViewModel, indent: Int)] {
         waveOutline(model.visibleWaves)
@@ -362,12 +387,12 @@ private struct WaveScore: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("WAVES")
+                Text("SCORE")
                     .font(Typography.caption(9).weight(.bold))
                     .tracking(1.5)
                     .foregroundStyle(.white.opacity(0.68))
                 Spacer()
-                Text(model.visibleWaves.count.formatted())
+                Text("\(model.visibleWaves.count.formatted()) WAVES")
                     .font(Typography.code(9))
                     .foregroundStyle(.white.opacity(0.68))
             }
@@ -399,14 +424,9 @@ private struct WaveScore: View {
                     .accessibilityIdentifier("podium-wave-score-empty")
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                    LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(outlinedWaves, id: \.wave.id) { entry in
-                            WaveRow(
-                                wave: entry.wave,
-                                isSelected: model.selection?.waveId == entry.wave.id,
-                                onSelect: { model.select(.wave(waveId: entry.wave.id)) },
-                                indentLevel: entry.indent
-                            )
+                            waveBranch(entry.wave, baseLevel: entry.indent)
                         }
                     }
                     .padding(.horizontal, Spacing.sm)
@@ -419,8 +439,288 @@ private struct WaveScore: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.loopflowBurgundy)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Wave score")
+        .accessibilityLabel("Work score")
         .accessibilityIdentifier("podium-wave-score")
     }
 
+    @ViewBuilder
+    private func waveBranch(_ wave: WaveViewModel, baseLevel: Int) -> some View {
+        let roadmap = roadmap(for: wave)
+        let projects = roadmap?.projects.items ?? []
+        let nodes = outputNodes(wave: wave)
+        ScoreRow(
+            identifier: "wave-\(wave.id)",
+            kind: .wave,
+            title: wave.displayName,
+            level: baseLevel,
+            outputNodes: nodes,
+            state: outputState(nodes),
+            hasChildren: !projects.isEmpty,
+            isExpanded: expandedWaves.contains(wave.id),
+            isSelected: model.selection == .wave(id: wave.id),
+            onToggle: { toggle(wave.id, in: &expandedWaves) },
+            onSelect: { model.select(.wave(id: wave.id)) }
+        )
+
+        if expandedWaves.contains(wave.id) {
+            ForEach(projects) { project in
+                projectBranch(project, wave: wave, level: baseLevel + 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func projectBranch(
+        _ project: RoadmapProject,
+        wave: WaveViewModel,
+        level: Int
+    ) -> some View {
+        let key = "\(wave.id):\(project.id)"
+        let nodes = outputNodes(wave: wave, project: project)
+        ScoreRow(
+            identifier: "project-\(project.id)",
+            kind: .project,
+            title: project.project.name,
+            level: level,
+            outputNodes: nodes,
+            state: outputState(nodes),
+            hasChildren: !project.tasks.isEmpty,
+            isExpanded: expandedProjects.contains(key),
+            isSelected: model.selection == .project(id: project.id),
+            onToggle: { toggle(key, in: &expandedProjects) },
+            onSelect: {
+                model.select(.project(id: project.id))
+            }
+        )
+
+        if expandedProjects.contains(key) {
+            ForEach(project.tasks) { task in
+                taskBranch(task, project: project, wave: wave, level: level + 1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func taskBranch(
+        _ task: RoadmapTask,
+        project: RoadmapProject,
+        wave: WaveViewModel,
+        level: Int
+    ) -> some View {
+        let key = "\(wave.id):\(task.id)"
+        let nodes = outputNodes(wave: wave, project: project, task: task)
+        let execs = execNodes(for: nodes)
+        ScoreRow(
+            identifier: "task-\(task.id)",
+            kind: .task,
+            title: task.task.name,
+            level: level,
+            outputNodes: nodes,
+            state: outputState(nodes),
+            hasChildren: !execs.isEmpty,
+            isExpanded: expandedTasks.contains(key),
+            isSelected: model.selection == .task(id: task.id),
+            onToggle: { toggle(key, in: &expandedTasks) },
+            onSelect: { model.select(.task(id: task.id)) }
+        )
+
+        if expandedTasks.contains(key) {
+            ForEach(execs) { exec in
+                let providers = nodes.filter { $0.parentId == exec.id }
+                ScoreRow(
+                    identifier: "exec-\(exec.id)",
+                    kind: .exec,
+                    title: exec.label,
+                    level: level + 1,
+                    outputNodes: providers,
+                    state: outputState(providers),
+                    hasChildren: false,
+                    isExpanded: false,
+                    isSelected: false,
+                    onToggle: {},
+                    onSelect: { model.select(.task(id: task.id)) }
+                )
+            }
+        }
+    }
+
+    private func roadmap(for wave: WaveViewModel) -> WaveRoadmap? {
+        model.visibleRoadmaps.first { roadmap in
+            roadmap.wave.id == wave.id
+                || (
+                    roadmap.wave.name == wave.api.name
+                        && normalized(roadmap.wave.repo) == normalized(wave.api.repo)
+                )
+        }
+    }
+
+    private func outputNodes(
+        wave: WaveViewModel,
+        project: RoadmapProject? = nil,
+        task: RoadmapTask? = nil
+    ) -> [ActivityNode] {
+        guard let snapshot = model.processActivity.value else { return [] }
+        let projectNames = project.map { [$0.id, $0.project.slug] } ?? []
+        let taskNames = task.map { task in
+            [task.id, task.task.identifier, task.reference.workspace?.slug].compactMap { $0 }
+        } ?? []
+        return snapshot.nodes.filter { node in
+            guard node.kind == .providerLaunch,
+                  node.wave == wave.api.name,
+                  node.repo.map(normalized) == normalized(wave.api.repo) else {
+                return false
+            }
+            if !projectNames.isEmpty, !projectNames.contains(node.project ?? "") { return false }
+            if !taskNames.isEmpty, !taskNames.contains(node.task ?? "") { return false }
+            return true
+        }
+    }
+
+    private func execNodes(for providers: [ActivityNode]) -> [ActivityNode] {
+        guard let snapshot = model.processActivity.value else { return [] }
+        let ids = Set(providers.compactMap(\.parentId))
+        return snapshot.nodes
+            .filter { $0.kind == .exec && ids.contains($0.id) }
+            .sorted { $0.startedAt < $1.startedAt }
+    }
+
+    private func outputState(_ nodes: [ActivityNode]) -> PodiumSignalState {
+        model.processActivity.value == nil ? .unknown : .from(nodes: nodes)
+    }
+
+    private func normalized(_ path: String) -> String {
+        WaveOrigin.resolve(path).normalizedFilePath
+    }
+
+    private func toggle(_ id: String, in expanded: inout Set<String>) {
+        if expanded.contains(id) {
+            expanded.remove(id)
+        } else {
+            expanded.insert(id)
+        }
+    }
+}
+
+private enum ScoreRowKind: Equatable {
+    case wave
+    case project
+    case task
+    case exec
+
+    var label: String {
+        switch self {
+        case .wave: "Wave"
+        case .project: "Project"
+        case .task: "Task"
+        case .exec: "Exec"
+        }
+    }
+
+    var font: Font {
+        switch self {
+        case .wave: Typography.sectionTitle(14).weight(.semibold)
+        case .project: Typography.body(11).weight(.semibold)
+        case .task: Typography.body(10)
+        case .exec: Typography.code(9)
+        }
+    }
+
+    var rowHeight: CGFloat {
+        switch self {
+        case .wave: 38
+        case .project: 34
+        case .task, .exec: 30
+        }
+    }
+}
+
+private struct ScoreRow: View {
+    let identifier: String
+    let kind: ScoreRowKind
+    let title: String
+    let level: Int
+    let outputNodes: [ActivityNode]
+    let state: PodiumSignalState
+    let hasChildren: Bool
+    let isExpanded: Bool
+    let isSelected: Bool
+    let onToggle: () -> Void
+    let onSelect: () -> Void
+
+    @State private var isHovering = false
+
+    private var fastRate: Double {
+        outputNodes.reduce(0) { $0 + $1.direct.outputTokensPerSecondFast }
+    }
+
+    private var slowRate: Double {
+        outputNodes.reduce(0) { $0 + $1.direct.outputTokensPerSecondSlow }
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Group {
+                if hasChildren {
+                    Button(action: onToggle) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .help(isExpanded ? "Collapse \(kind.label)" : "Expand \(kind.label)")
+                    .accessibilityLabel(isExpanded ? "Collapse \(title)" : "Expand \(title)")
+                    .accessibilityIdentifier("podium-score-\(identifier)-disclosure")
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: 18, height: kind.rowHeight)
+
+            Button(action: onSelect) {
+                HStack(spacing: Spacing.xs) {
+                    Text(title)
+                        .font(kind.font)
+                        .foregroundStyle(.white.opacity(kind == .exec ? 0.68 : 0.92))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 2)
+                    TokenOutputMeter(
+                        fastRate: fastRate,
+                        slowRate: slowRate,
+                        state: state,
+                        width: 18,
+                        height: kind.rowHeight - 4
+                    )
+                    .help(
+                        "\(fastRate.formatted(.number.precision(.fractionLength(1)))) TOK/s · \(state.label)"
+                    )
+                    .accessibilityHidden(true)
+                }
+                .padding(.leading, 2)
+                .padding(.trailing, Spacing.xs)
+                .frame(maxWidth: .infinity, minHeight: kind.rowHeight, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: CornerRadius.sm)
+                        .fill(
+                            isSelected
+                                ? Color.white.opacity(0.18)
+                                : (isHovering ? Color.white.opacity(0.07) : Color.clear)
+                        )
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .help(title)
+            .accessibilityLabel("\(kind.label): \(title)")
+            .accessibilityIdentifier("podium-score-\(identifier)")
+            .accessibilityValue(
+                "\(fastRate.formatted(.number.precision(.fractionLength(1)))) tokens per second, \(state.label)"
+            )
+            .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        }
+        .padding(.leading, CGFloat(level) * 12)
+    }
 }

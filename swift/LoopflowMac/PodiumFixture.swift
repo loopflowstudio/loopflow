@@ -58,7 +58,7 @@ enum PodiumFixture {
                 )
                 if let requested = AppTestMode.selectBranch,
                    let wave = fixture.roadmap.waves.first(where: { $0.wave.name == requested }) {
-                    model.select(.wave(waveId: wave.wave.id))
+                    model.select(.wave(id: wave.wave.id))
                 }
             case .live:
                 break

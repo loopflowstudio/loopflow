@@ -109,6 +109,10 @@ pub struct ActivityNode {
     pub parent_id: Option<String>,
     pub kind: ActivityNodeKind,
     pub label: String,
+    pub repo: Option<String>,
+    pub wave: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
     pub pid: Option<u32>,
     pub started_at: i64,
     pub last_progress_at: Option<i64>,
@@ -216,6 +220,8 @@ struct ExecRecord {
     id: String,
     parent_id: Option<String>,
     label: String,
+    repo: Option<String>,
+    wave: Option<String>,
     started_at: i64,
 }
 
@@ -554,6 +560,10 @@ fn collect_activity(
                 .map(exec_node_id),
             kind: ActivityNodeKind::Exec,
             label: exec.label,
+            repo: exec.repo,
+            wave: exec.wave,
+            project: None,
+            task: None,
             pid: match evidence {
                 ReceiptEvidence::Present(pid) => Some(pid),
                 ReceiptEvidence::Absent | ReceiptEvidence::Missing => None,
@@ -585,6 +595,10 @@ fn collect_activity(
                 Some(pid) => format!("{} {pid}", launch.provider),
                 None => launch.provider.clone(),
             },
+            repo: Some(launch.repo.clone()),
+            wave: launch.wave.clone(),
+            project: launch.project.clone(),
+            task: launch.task.clone(),
             pid,
             started_at: launch.started_at,
             last_progress_at,
@@ -621,9 +635,17 @@ fn collect_execs(events: &[RunEventRow]) -> HashMap<String, ExecRecord> {
                 id: event.process_id.clone(),
                 parent_id: event.parent_process_id.clone(),
                 label: command_label(event.command.as_deref()),
+                repo: event.repo.clone(),
+                wave: event.wave.clone(),
                 started_at: event.ts,
             });
         entry.started_at = entry.started_at.min(event.ts);
+        if entry.repo.is_none() {
+            entry.repo.clone_from(&event.repo);
+        }
+        if entry.wave.is_none() {
+            entry.wave.clone_from(&event.wave);
+        }
         if entry.label == "lf" && event.command.is_some() {
             entry.label = command_label(event.command.as_deref());
         }
@@ -1250,6 +1272,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![ActivityState::Working, ActivityState::Stalled]
         );
+        assert!(snapshot.nodes.iter().all(|node| {
+            node.repo.as_deref() == Some("/src/loopflow") && node.wave.as_deref() == Some("product")
+        }));
+        assert!(snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.kind == ActivityNodeKind::ProviderLaunch)
+            .all(|node| {
+                node.project.as_deref() == Some("loopflow-api")
+                    && node.task.as_deref() == Some("W2-144")
+            }));
         assert_eq!(
             snapshot.provider_processes[0].claim,
             ProviderClaim::Orphaned
@@ -1278,7 +1311,7 @@ mod tests {
             ts: at,
             repo: Some("/src/loopflow".to_string()),
             worktree: Some("/src/loopflow".to_string()),
-            wave: None,
+            wave: Some("product".to_string()),
             node: "run".to_string(),
             event: event.to_string(),
             command: Some(serde_json::to_string(&["lf", command]).unwrap()),
@@ -1299,11 +1332,11 @@ mod tests {
             ended_at: None,
             repo: "/src/loopflow".to_string(),
             worktree: "/src/loopflow".to_string(),
-            wave: None,
+            wave: Some("product".to_string()),
             flow: None,
             skill: None,
-            project: None,
-            task: None,
+            project: Some("loopflow-api".to_string()),
+            task: Some("W2-144".to_string()),
             provider: provider.to_string(),
             model: None,
             surface: "cli".to_string(),
@@ -1402,6 +1435,10 @@ mod tests {
             parent_id: None,
             kind: ActivityNodeKind::Exec,
             label: id.to_string(),
+            repo: None,
+            wave: None,
+            project: None,
+            task: None,
             pid: None,
             started_at: 0,
             last_progress_at: None,
@@ -1478,6 +1515,15 @@ mod tests {
         assert_eq!(root.cumulative.output_tokens_slow, 900);
         assert_eq!(root.cumulative.unmeasured_turns, 1);
         assert_eq!(root.state, ActivityState::Working);
+        assert_eq!(root.repo.as_deref(), Some("/src/loopflow"));
+        assert_eq!(root.wave.as_deref(), Some("product"));
+        let provider = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == "launch:launch-implement")
+            .unwrap();
+        assert_eq!(provider.project.as_deref(), Some("loopflow-api"));
+        assert_eq!(provider.task.as_deref(), Some("W2-144"));
         assert_eq!(snapshot.aggregate.measured_output_tokens, 900);
         assert_eq!(snapshot.aggregate.unmeasured_turns, 1);
         assert!(!snapshot

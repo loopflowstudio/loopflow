@@ -19,6 +19,8 @@ struct ControlRoomModelTests {
         model.setRepoPath("/src/context")
 
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["context"])
+        #expect(model.fleetSummary?.registeredWaves == 1)
+        #expect(model.fleetSummary?.activeRuns == 0)
         #expect(model.selection == nil)
     }
 
@@ -61,6 +63,7 @@ struct ControlRoomModelTests {
         #expect(model.waves.errorMessage == "registry unavailable")
         #expect(model.activity.value == fixture.activity)
         #expect(model.activity.errorMessage == "registry unavailable")
+        #expect(model.fleetSummary?.registeredWaves == 2)
     }
 
     @Test("Activity summary counts providers once and preserves orphan evidence")
@@ -77,6 +80,45 @@ struct ControlRoomModelTests {
         #expect(summary.unclaimed == 0)
         #expect(summary.outputTokensPerSecond5m == 4.0)
         #expect(summary.measuredOutputTokens == 48_200)
+    }
+
+    @Test("Fleet summary keeps active Runs and answering listeners separate")
+    func fleetSummaryPreservesOrthogonalEvidence() async throws {
+        let fixture = try ControlRoomTestFixture.load()
+        let model = ControlRoomModel(query: fixture.query)
+
+        await model.refresh()
+        let summary = try #require(model.fleetSummary)
+
+        #expect(summary.registeredWaves == 2)
+        #expect(summary.activeRuns == 1)
+        #expect(summary.liveListeners == 1)
+        #expect(summary.unservedRuns == 0)
+        #expect(summary.activeProjects == 1)
+        #expect(summary.activeTasks == 2)
+
+        let unserved = fixture.waves.map { wave in
+            Wave(
+                id: wave.id,
+                name: wave.name,
+                repo: wave.repo,
+                status: wave.status,
+                live: false,
+                activeTasks: wave.activeTasks,
+                activeProjects: wave.activeProjects,
+                parentWaveId: wave.parentWaveId
+            )
+        }
+        model.applyFixture(
+            roadmap: .available(fixture.roadmap),
+            waves: .available(unserved),
+            activity: .available(fixture.activity),
+            repos: []
+        )
+
+        #expect(model.fleetSummary?.activeRuns == 1)
+        #expect(model.fleetSummary?.liveListeners == 0)
+        #expect(model.fleetSummary?.unservedRuns == 1)
     }
 }
 

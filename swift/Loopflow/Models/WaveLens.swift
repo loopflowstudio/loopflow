@@ -88,8 +88,8 @@ public struct WaveLens: Sendable, Hashable {
     /// no such reading; see `WaveViewModel.lens`, which shows it as unknown rather
     /// than guessing from a local session probe.
     ///
-    /// - green: a live body is advancing.
-    /// - red: no live body, but active work still expects execution.
+    /// - green: the Wave listener answered its health probe.
+    /// - red: an active Run or planned work has no answering listener.
     /// - black: off and clean — no live body, no active work.
     public static func forWave(
         live: Bool,
@@ -97,9 +97,11 @@ public struct WaveLens: Sendable, Hashable {
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
-        let hasLiveBody = live || status.isRunning
-        if hasLiveBody {
-            return WaveLens(color: .green, reason: "Running · a body is advancing")
+        if live {
+            return WaveLens(color: .green, reason: "Listening · Wave listener answered")
+        }
+        if status.isRunning {
+            return WaveLens(color: .red, reason: "Run active · Wave listener did not answer")
         }
         let outstanding = activeTasks + activeProjects
         if outstanding > 0 {

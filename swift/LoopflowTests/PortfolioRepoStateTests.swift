@@ -45,24 +45,11 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["idle", "paused", "running-a", "running-b"])
     }
 
-    @Test("wave agent session name mirrors lf tmux handle")
-    func waveAgentSessionNameMirrorsLfTmuxHandle() {
-        let name = PortfolioRepoState.waveAgentSessionName(
-            repoPath: "/Users/jack/src/loopflow",
-            waveName: "loopflow"
-        )
-
-        #expect(name == "lf-loopflow-loopflow")
-    }
-
-    @Test("a worktree path names the same tmux session the launcher creates")
-    func worktreePathUsesLaunchSessionName() throws {
-        // The launcher resolves a worktree to its origin before naming the
-        // session; launch guards and attach hints must land on that same name
-        // from the raw worktree path. Real git, like WaveOriginTests: the whole
-        // point is the origin resolution.
+    @Test("a development worktree sees the origin registry rows")
+    func worktreeSeesOriginRegistryRows() throws {
+        // Real git, like WaveOriginTests: the origin resolution is the point.
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("session-name-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("registry-origin-\(UUID().uuidString)", isDirectory: true)
         let origin = root.appendingPathComponent("repo", isDirectory: true)
         let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
         try FileManager.default.createDirectory(at: origin, withIntermediateDirectories: true)
@@ -85,15 +72,6 @@ struct PortfolioRepoStateTests {
             at: origin
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
-
-        let sessionName = PortfolioRepoState.waveAgentSessionName(
-            repoPath: worktree.path, waveName: "goals"
-        )
-        let launchName = PortfolioRepoState.waveAgentSessionName(
-            repoPath: WaveOrigin.resolve(worktree.path), waveName: "goals"
-        )
-        #expect(sessionName == launchName)
-        #expect(sessionName == "lf-repo-goals", "named after the origin, not the worktree")
 
         let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, lastOpened: Date())
         let state = PortfolioRepoState(repo: repo)

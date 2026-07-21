@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use secrecy::SecretString;
-use tokio::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{watch, Mutex};
 
 use crate::durable::{Containment, ContainmentObservation, HomeId, RunState, WorkRef};
 use crate::id::WaveId;
@@ -16,12 +17,40 @@ use crate::store::SharedStore;
 use crate::wave::{self, registry, Wave};
 
 pub(crate) const RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WaveStartup {
+    Starting,
+    Live(String),
+    Failed(String),
+}
+
+#[derive(Debug)]
+struct HostedWave {
+    task: tokio::task::JoinHandle<()>,
+    startup: watch::Receiver<WaveStartup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(crate) enum WaveStartState {
+    Live { endpoint: String },
+    Failed { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WaveStartOutcome {
+    pub wave_id: WaveId,
+    #[serde(flatten)]
+    pub state: WaveStartState,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct WaveHost {
     home_id: HomeId,
     store: SharedStore,
-    waves: Arc<Mutex<HashMap<WaveId, tokio::task::JoinHandle<Result<()>>>>>,
+    waves: Arc<Mutex<HashMap<WaveId, HostedWave>>>,
     suppressed: Arc<Mutex<HashSet<WaveId>>>,
     discord_token: Option<SecretString>,
 }
@@ -50,7 +79,7 @@ impl WaveHost {
             .lock()
             .await
             .values()
-            .filter(|task| !task.is_finished())
+            .filter(|wave| !wave.task.is_finished())
             .count()
     }
 
@@ -79,24 +108,24 @@ impl WaveHost {
         }
     }
 
-    pub(crate) async fn start_waves(&self, wave_ids: Vec<WaveId>) -> Result<()> {
+    pub(crate) async fn start_waves(&self, wave_ids: Vec<WaveId>) -> Vec<WaveStartOutcome> {
         {
             let mut suppressed = self.suppressed.lock().await;
             for wave_id in &wave_ids {
                 suppressed.remove(wave_id);
             }
         }
-        let mut errors = Vec::new();
+        let mut outcomes = Vec::with_capacity(wave_ids.len());
         for wave_id in wave_ids {
-            if let Err(error) = self.start_wave(&wave_id).await {
-                errors.push(error.to_string());
-            }
+            let state = match self.start_wave(&wave_id).await {
+                Ok(endpoint) => WaveStartState::Live { endpoint },
+                Err(error) => WaveStartState::Failed {
+                    reason: error.to_string(),
+                },
+            };
+            outcomes.push(WaveStartOutcome { wave_id, state });
         }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(anyhow!(errors.join("; ")))
-        }
+        outcomes
     }
 
     pub(crate) async fn stop_wave(&self, wave_id: &WaveId) -> Result<bool> {
@@ -107,19 +136,19 @@ impl WaveHost {
             .await?
             .ok_or_else(|| anyhow!("Wave {wave_id} was not found"))?;
         let requested = wave::request_stop(Path::new(wave.repo()), wave.name()).await?;
-        let task = self.waves.lock().await.remove(wave_id);
-        if let Some(mut task) = task {
-            if tokio::time::timeout(Duration::from_secs(1), &mut task)
+        let hosted = self.waves.lock().await.remove(wave_id);
+        if let Some(mut hosted) = hosted {
+            if tokio::time::timeout(Duration::from_secs(1), &mut hosted.task)
                 .await
                 .is_err()
             {
-                task.abort();
+                hosted.task.abort();
             }
         }
         Ok(requested)
     }
 
-    async fn start_wave(&self, wave_id: &WaveId) -> Result<()> {
+    async fn start_wave(&self, wave_id: &WaveId) -> Result<String> {
         let wave = self
             .store
             .get_wave(wave_id)
@@ -139,35 +168,33 @@ impl WaveHost {
         }
 
         let repo = PathBuf::from(wave.repo());
-        if wave::server::live_endpoint(&repo, wave.name())
-            .await
-            .is_some()
-        {
-            return Ok(());
+        if let Some(endpoint) = wave::server::live_endpoint(&repo, wave.name()).await {
+            drain_observations(&endpoint, wave.name()).await?;
+            return Ok(endpoint);
         }
+        crate::engine::process::resolve_current_home_lf_binary_checked().map_err(|error| {
+            anyhow!(
+                "Wave {} cannot start its resident on this Home: {error}",
+                wave.name()
+            )
+        })?;
 
         let mut tasks = self.waves.lock().await;
-        if tasks.get(wave_id).is_some_and(|task| !task.is_finished()) {
+        if let Some(hosted) = tasks
+            .get(wave_id)
+            .filter(|hosted| !hosted.task.is_finished())
+        {
+            let startup = hosted.startup.clone();
             drop(tasks);
-            if self
-                .wait_for_wave(wave_id, &repo, wave.name())
-                .await
-                .is_some()
-            {
-                return Ok(());
+            let endpoint = wait_for_startup(startup, wave.name()).await?;
+            if let Err(error) = drain_observations(&endpoint, wave.name()).await {
+                self.abort_failed_start(wave_id, &wave).await;
+                return Err(error);
             }
-            return Err(self
-                .startup_failure(wave_id, wave.name())
-                .await
-                .unwrap_or_else(|| {
-                    anyhow!(
-                        "Wave {} is starting but did not publish a live endpoint",
-                        wave.name()
-                    )
-                }));
+            return Ok(endpoint);
         }
-        if let Some(task) = tasks.remove(wave_id) {
-            task.abort();
+        if let Some(hosted) = tasks.remove(wave_id) {
+            hosted.task.abort();
         }
         self.reconcile_run_slot(&wave).await?;
         let config = registry::RegistryConfig {
@@ -178,31 +205,86 @@ impl WaveHost {
         let task_name = name.clone();
         let listener_repo = repo.clone();
         let discord_token = self.discord_token.clone();
+        let (published, published_rx) = tokio::sync::oneshot::channel();
+        let (startup_tx, startup_rx) = watch::channel(WaveStartup::Starting);
         let task = tokio::spawn(async move {
-            let result = wave::run_listener(
+            let listener = wave::run_listener_with_startup(
                 listener_repo,
                 task_name.clone(),
                 Some(config),
                 false,
                 true,
                 discord_token,
-                pending(),
-            )
-            .await;
-            if let Err(error) = &result {
-                tracing::error!(wave = task_name, %error, "Wave listener stopped");
+                wave::ListenerSignals::new(Some(published), pending()),
+            );
+            tokio::pin!(listener);
+            tokio::select! {
+                result = &mut listener => {
+                    let reason = match result {
+                        Ok(()) => format!("Wave {task_name} stopped before publishing a live endpoint"),
+                        Err(error) => format!("Wave {task_name} failed preflight: {error}"),
+                    };
+                    startup_tx.send_replace(WaveStartup::Failed(reason.clone()));
+                    tracing::error!(wave = task_name, error = reason, "Wave listener stopped during startup");
+                }
+                published = published_rx => {
+                    match published {
+                        Ok(endpoint) => {
+                            startup_tx.send_replace(WaveStartup::Live(endpoint));
+                            if let Err(error) = listener.await {
+                                tracing::error!(wave = task_name, %error, "Wave listener stopped");
+                            }
+                        }
+                        Err(_) => {
+                            startup_tx.send_replace(WaveStartup::Failed(format!(
+                                "Wave {task_name} stopped before publishing a live endpoint"
+                            )));
+                        }
+                    }
+                }
             }
-            result
         });
-        tasks.insert(wave_id.clone(), task);
+        tasks.insert(
+            wave_id.clone(),
+            HostedWave {
+                task,
+                startup: startup_rx.clone(),
+            },
+        );
         drop(tasks);
-        if self.wait_for_wave(wave_id, &repo, &name).await.is_some() {
-            return Ok(());
+        let endpoint = match wait_for_startup(startup_rx, &name).await {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                self.remove_failed_wave(wave_id).await;
+                return Err(error);
+            }
+        };
+        if let Err(error) = drain_observations(&endpoint, &name).await {
+            self.abort_failed_start(wave_id, &wave).await;
+            return Err(error);
         }
-        Err(self
-            .startup_failure(wave_id, &name)
-            .await
-            .unwrap_or_else(|| anyhow!("Wave {name} did not publish a live endpoint")))
+        Ok(endpoint)
+    }
+
+    async fn abort_failed_start(&self, wave_id: &WaveId, wave: &Wave) {
+        if let Err(error) = wave::request_stop(Path::new(wave.repo()), wave.name()).await {
+            tracing::warn!(wave = wave.name(), %error, "could not stop Wave after failed wake");
+        }
+        if let Some(hosted) = self.waves.lock().await.remove(wave_id) {
+            hosted.task.abort();
+        }
+    }
+
+    async fn remove_failed_wave(&self, wave_id: &WaveId) {
+        let mut waves = self.waves.lock().await;
+        let failed = waves.get(wave_id).is_some_and(|hosted| {
+            hosted.task.is_finished() || matches!(&*hosted.startup.borrow(), WaveStartup::Failed(_))
+        });
+        if failed {
+            if let Some(hosted) = waves.remove(wave_id) {
+                hosted.task.abort();
+            }
+        }
     }
 
     async fn reconcile_run_slot(&self, wave: &Wave) -> Result<()> {
@@ -243,41 +325,6 @@ impl WaveHost {
         Ok(())
     }
 
-    async fn startup_failure(&self, wave_id: &WaveId, name: &str) -> Option<anyhow::Error> {
-        let task = {
-            let mut tasks = self.waves.lock().await;
-            if tasks.get(wave_id).is_some_and(|task| task.is_finished()) {
-                tasks.remove(wave_id)
-            } else {
-                None
-            }
-        }?;
-        Some(match task.await {
-            Ok(Ok(())) => anyhow!("Wave {name} stopped before publishing a live endpoint"),
-            Ok(Err(error)) => anyhow!("Wave {name} failed to start: {error}"),
-            Err(error) => anyhow!("Wave {name} listener task failed: {error}"),
-        })
-    }
-
-    async fn wait_for_wave(&self, wave_id: &WaveId, repo: &Path, name: &str) -> Option<String> {
-        for _ in 0..40 {
-            if let Some(endpoint) = wave::server::live_endpoint(repo, name).await {
-                return Some(endpoint);
-            }
-            if self
-                .waves
-                .lock()
-                .await
-                .get(wave_id)
-                .is_some_and(|task| task.is_finished())
-            {
-                return None;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        None
-    }
-
     pub(crate) async fn shutdown(&self) {
         let wave_ids = self.waves.lock().await.keys().cloned().collect::<Vec<_>>();
         for wave_id in wave_ids {
@@ -289,12 +336,47 @@ impl WaveHost {
             }
         }
         let mut waves = self.waves.lock().await;
-        for task in waves.values_mut() {
-            if !task.is_finished() {
-                task.abort();
+        for hosted in waves.values_mut() {
+            if !hosted.task.is_finished() {
+                hosted.task.abort();
             }
         }
         waves.clear();
+    }
+}
+
+async fn wait_for_startup(mut startup: watch::Receiver<WaveStartup>, name: &str) -> Result<String> {
+    tokio::time::timeout(STARTUP_TIMEOUT, async {
+        loop {
+            let state = startup.borrow().clone();
+            match state {
+                WaveStartup::Starting => startup.changed().await.map_err(|_| {
+                    anyhow!("Wave {name} stopped before publishing a live endpoint")
+                })?,
+                WaveStartup::Live(endpoint) => return Ok(endpoint),
+                WaveStartup::Failed(reason) => return Err(anyhow!(reason)),
+            }
+        }
+    })
+    .await
+    .map_err(|_| anyhow!("Wave {name} did not publish a live endpoint within 10s"))?
+}
+
+async fn drain_observations(endpoint: &str, name: &str) -> Result<()> {
+    let response = reqwest::Client::new()
+        .post(format!("http://{endpoint}/observations"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .map_err(|error| anyhow!("Wave {name} became live but its durable wake failed: {error}"))?;
+    if response.status() == reqwest::StatusCode::NO_CONTENT {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Wave {name} became live but its durable wake was refused with HTTP {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ))
     }
 }
 
@@ -344,7 +426,7 @@ mod tests {
     use crate::store::{open_store, StorageConfig};
     use crate::wave::Wave;
 
-    use super::{waves_for_home, WaveHost};
+    use super::{waves_for_home, WaveHost, WaveStartState};
 
     struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
 
@@ -541,14 +623,14 @@ mod tests {
         store.create_wave(&wave).await.expect("create Wave");
         let host = WaveHost::new(local.id, store, None);
 
-        let error = host
-            .start_waves(vec![wave.id().clone()])
-            .await
-            .expect_err("Discord Wave without a token must fail");
+        let outcomes = host.start_waves(vec![wave.id().clone()]).await;
+        let WaveStartState::Failed { reason } = &outcomes[0].state else {
+            panic!("Discord Wave without a token must fail")
+        };
 
         assert!(
-            error.to_string().contains(crate::wave::discord::TOKEN_ENV),
-            "startup should preserve the actionable listener error: {error}"
+            reason.contains(crate::wave::discord::TOKEN_ENV),
+            "startup should preserve the actionable listener error: {reason}"
         );
     }
 

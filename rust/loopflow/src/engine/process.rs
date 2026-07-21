@@ -111,6 +111,26 @@ pub(crate) fn resolve_lfd_binary() -> PathBuf {
     )
 }
 
+pub(crate) fn resolve_lfd_binary_checked() -> Result<PathBuf> {
+    let candidate = resolve_lfd_binary();
+    if candidate.is_absolute() {
+        return if candidate.is_file() {
+            Ok(candidate)
+        } else {
+            Err(anyhow!(
+                "lfd binary {} does not exist; install the current Home control pair",
+                candidate.display()
+            ))
+        };
+    }
+    which_on_path(&candidate).ok_or_else(|| {
+        anyhow!(
+            "cannot resolve an absolute path for `{}`; install lfd beside the current Home lf",
+            candidate.display()
+        )
+    })
+}
+
 fn select_lfd_binary(
     provenance: crate::build_info::BuildProvenance,
     cargo_override: Option<PathBuf>,
@@ -221,7 +241,7 @@ pub(crate) fn pinned_execution_context() -> Result<crate::child::ChildExecutionC
 /// that is exactly the stranding this resolver exists to prevent, so the
 /// control override is deliberately skipped: `LF_BIN` (the current Home), then
 /// the installed `lf` on `PATH`, then this executable, then the bare name.
-fn resolve_current_home_lf_binary() -> PathBuf {
+pub(crate) fn resolve_current_home_lf_binary() -> PathBuf {
     if let Some(bin) = select_current_home_binary(std::env::var_os("LF_BIN")) {
         return bin;
     }
@@ -353,6 +373,14 @@ pub(crate) async fn start_lf_session(session: &str, cwd: &Path, argv: &[String])
     start_lf_session_with_env(session, cwd, argv, &[]).await
 }
 
+/// Start a machine-Home process through the current installed/dev control pair,
+/// ignoring a historical body's `LF_CONTROL_*` pins.
+pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
+    let context = current_home_execution_context()?;
+    let lf_bin = context.lf_bin.to_string_lossy().to_string();
+    start_session_with_context(session, cwd, argv, &[("LF_BIN", &lf_bin)], context).await
+}
+
 pub(crate) async fn start_lf_session_with_env(
     session: &str,
     cwd: &Path,
@@ -360,6 +388,16 @@ pub(crate) async fn start_lf_session_with_env(
     env: &[(&str, &str)],
 ) -> Result<()> {
     let context = pinned_execution_context()?;
+    start_session_with_context(session, cwd, argv, env, context).await
+}
+
+async fn start_session_with_context(
+    session: &str,
+    cwd: &Path,
+    argv: &[String],
+    env: &[(&str, &str)],
+    context: crate::child::ChildExecutionContext,
+) -> Result<()> {
     let inherited_context = ["LF_TRACE_ID", "LF_PROCESS_ID"]
         .into_iter()
         .filter(|key| !env.iter().any(|(explicit, _)| explicit == key))

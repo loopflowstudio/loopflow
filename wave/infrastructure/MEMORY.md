@@ -52,6 +52,17 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   deleted. Authored input is a durable Work Steer. Best-effort process nudges may
   reduce latency, but the server follow-up must make Home-owned Ready scanning
   the correctness path so a stopped Project cannot miss child Feedback.
+- **Supported Wave startup is one event-driven Home lifecycle** (decided
+  2026-07-21). `lf start` opens the selected Home registry and uses its current
+  `lf`/`lfd` control pair without promoting or replacing binaries. Daemon boot
+  publishes one attempt-scoped durable `live | failed` receipt and uses a
+  private socket only as the wake edge; `lfd` owns listeners and shares each
+  listener's `starting | live | failed` transition with concurrent callers.
+  Success drains the durable observation outbox before returning. Failure
+  compensates only registry state introduced by that attempt, and one failed
+  Wave never terminates successful siblings. The Mac app uses the same
+  `RegistryQuery.start` receipt path. Reconciliation polling remains recovery,
+  never startup acknowledgement.
 - **Controller evidence is not an agent Run** (learned 2026-07-20). When a
   merged PR or another controller fact completes a Task, persist the Task
   lifecycle, Work Epoch, and completion event in one transaction. Never mint a

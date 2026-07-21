@@ -618,6 +618,14 @@ public final class WaveChatConnection {
         loop = nil
     }
 
+    /// Rediscover immediately after `lf start` has published a live endpoint.
+    public func reconnect() {
+        stop()
+        currentEndpoint = nil
+        phase = .idle
+        start()
+    }
+
     /// POST a message with an explicit op; a created user turn is applied
     /// immediately and also arrives over the stream (deduped by id). The
     /// assistant reply streams later. Text may be empty only for `.interrupt`

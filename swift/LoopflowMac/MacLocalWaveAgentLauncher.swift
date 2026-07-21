@@ -1,23 +1,18 @@
-// Launches and probes the local `lf wave <name>` process backing a WaveChat pane.
+// Starts and controls the local Wave backing a WaveChat pane.
 //
-// Loopflow is a viewer, never a participant: launching a wave is the human's act
-// through the same door as a terminal — a detached tmux session running
-// `lf wave <name>` with the wave's repo as cwd. The session belongs to tmux, not
-// to Loopflow; quitting the app never kills a wave.
+// Loopflow uses the same `lf start <name>` lifecycle as the CLI. lfd owns the
+// detached listener; quitting the app never kills a wave.
 
 #if os(macOS)
 import Foundation
 import Loopflow
 
 enum WaveLaunchError: LocalizedError, Equatable {
-    case alreadyRunning(String)
     case noUsableLf(String)
     case launchFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .alreadyRunning(let reason):
-            return reason
         case .noUsableLf(let detail):
             return detail
         case .launchFailed(let detail):
@@ -34,50 +29,6 @@ struct TaskStartReceipt: Decodable, Sendable, Equatable {
 
 enum LocalWaveAgentLauncher {
     private static let resolutionCache = ResolvedLfCache()
-
-    static func sessionExists(repoPath: String, waveName: String) -> Bool {
-        runCommandSync(
-            [
-                "tmux",
-                "has-session",
-                "-t",
-                PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName),
-            ],
-            logFailure: false
-        ) != nil
-    }
-
-    /// Start `lf wave <name>` in a detached tmux session so it outlives Loopflow.
-    /// Refuses when the wave already has a tmux session or a live endpoint —
-    /// the server enforces one brain per wave; we just avoid the doomed spawn.
-    ///
-    /// Wave state lives at the wave's ORIGIN repo (`WaveOrigin`), so a worktree
-    /// `repoPath` resolves once up front and that one path feeds everything:
-    /// the session name, the endpoint guard, the launch cwd, and the dev-tree
-    /// lf candidate. Guard and discovery read the same file by construction.
-    static func launchWave(repoPath: String, waveName: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let sessionName = PortfolioRepoState.waveAgentSessionName(repoPath: origin, waveName: waveName)
-        if let reason = launchBlockReason(
-            sessionName: sessionName,
-            sessionExists: sessionExists(repoPath: origin, waveName: waveName),
-            endpoint: liveEndpoint(
-                recorded: WaveEndpoint.read(repoPath: origin, waveName: waveName),
-                waveName: waveName
-            )
-        ) {
-            throw WaveLaunchError.alreadyRunning(reason)
-        }
-        let lfPath = try resolveWaveCapableLf(originRepo: origin)
-        let args = waveLaunchCommand(
-            lfPath: lfPath,
-            sessionName: sessionName,
-            repoPath: origin,
-            waveName: waveName,
-            environment: ProcessInfo.processInfo.environment
-        )
-        try runChecked(args, cwd: origin)
-    }
 
     /// Stop the listener through the same `lf` lifecycle surface the CLI uses.
     /// The server performs resident, registry, and discovery-file cleanup.
@@ -189,79 +140,6 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    /// Why a launch must not happen, or nil when the way is clear. `endpoint`
-    /// must be a PROBED address (`liveEndpoint`), never the raw pointer file:
-    /// a SIGKILL or power loss leaves the file behind, and blocking on its
-    /// mere existence would refuse the Start button forever.
-    static func launchBlockReason(sessionName: String, sessionExists: Bool, endpoint: String?) -> String? {
-        if let endpoint {
-            return "Wave already has a live server at \(endpoint)."
-        }
-        if sessionExists {
-            return "tmux session '\(sessionName)' already exists — the wave may still be starting."
-        }
-        return nil
-    }
-
-    /// The recorded endpoint, but only when a live wave server for `waveName`
-    /// answers there. Mirrors Rust `server::live_endpoint`: a missing pointer,
-    /// a dead address, or an answer for a different wave is stale — nil, clear
-    /// to launch (the new server's own boot floor overwrites the file). Runs
-    /// only on the launch click path, never on the 1s status poll.
-    static func liveEndpoint(
-        recorded: String?,
-        waveName: String,
-        probe: (String) -> String? = healthWaveName
-    ) -> String? {
-        guard let recorded else { return nil }
-        return probe(recorded) == waveName ? recorded : nil
-    }
-
-    /// The `wave` a server at `endpoint` reports on `GET /health`, or nil when
-    /// nothing answers within 2s (mirrors Rust `ENDPOINT_PROBE_TIMEOUT`).
-    /// Probe contract: the guard keys on the `wave` field only. `/health`'s
-    /// `status` is listener liveness (`serving`) and `loop_state` is the resident's
-    /// state — a wave whose loop failed still answers here and still blocks a
-    /// second launch, which is correct: the listener is live.
-    static func healthWaveName(endpoint: String) -> String? {
-        guard let url = URL(string: "http://\(endpoint)/health") else { return nil }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 2
-        let semaphore = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var name: String?
-        URLSession.shared.dataTask(with: request) { data, response, _ in
-            defer { semaphore.signal() }
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-                  let data,
-                  let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return }
-            name = body["wave"] as? String
-        }.resume()
-        semaphore.wait()
-        return name
-    }
-
-    /// The detached tmux invocation: session named after the wave, cwd at the
-    /// wave's repo, running `lf wave <name>`.
-    static func waveLaunchCommand(
-        lfPath: String,
-        sessionName: String,
-        repoPath: String,
-        waveName: String,
-        environment: [String: String]
-    ) -> [String] {
-        var command = ["tmux", "new-session", "-d", "-s", sessionName, "-c", repoPath]
-        let registryEnvironment = ["LF_HOME", "LF_DB_PATH"].compactMap { key in
-            environment[key].map { "\(key)=\($0)" }
-        }
-        if !registryEnvironment.isEmpty {
-            command.append("/usr/bin/env")
-            command.append(contentsOf: registryEnvironment)
-        }
-        command.append(contentsOf: [lfPath, "wave", waveName])
-        return command
-    }
-
     /// Candidate lf binaries in trust order: the lf bundled inside Loopflow.app,
     /// each `lf` on the enriched PATH, then
     /// `<origin>/target/release/lf` — the dev-tree build, for a Loopflow pointed
@@ -294,11 +172,9 @@ enum LocalWaveAgentLauncher {
     /// unknown lifecycle verb as a skill would launch the wrong work, so every
     /// candidate is capability-probed before it's trusted.
     ///
-    /// The probe is `lf help wave`, NOT `lf wave --help`: lf's arg reorderer
-    /// treats an unknown `wave` as a skill name, so `lf wave --help` prints the
-    /// root help and exits 0 even on a build without the subcommand. `lf help
-    /// wave` exits 0 only when the subcommand exists, and clap answers it without touching
-    /// any wave state. The same holds for the other probed verbs.
+    /// The probes use `lf help <verb>`, not `<verb> --help`: lf's arg reorderer
+    /// may treat an unknown lifecycle verb as a skill name. Clap's help command
+    /// answers without touching wave state.
     static func resolveWaveCapableLf(
         originRepo: String,
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
@@ -333,14 +209,14 @@ enum LocalWaveAgentLauncher {
         }
         throw WaveLaunchError.noUsableLf(
             "No lf with the Wave control commands. Rejected (each failed at least one of "
-                + "`lf help wave`, `lf help stop`, `lf help pause`, or `lf help resume`): "
+                + "`lf help start`, `lf help stop`, `lf help pause`, or `lf help resume`): "
                 + candidates.joined(separator: ", ")
         )
     }
 
     /// Help probes parse without touching wave state.
     static func hasWaveCommands(lfPath: String) -> Bool {
-        run([lfPath, "help", "wave"])?.status == 0
+        run([lfPath, "help", "start"])?.status == 0
             && run([lfPath, "help", "stop"])?.status == 0
             && run([lfPath, "help", "pause"])?.status == 0
             && run([lfPath, "help", "resume"])?.status == 0
@@ -350,7 +226,7 @@ enum LocalWaveAgentLauncher {
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless `lf` over the local store, not by streaming
     /// a center. Resolves the same wave-capable `lf` the launcher trusts (a build
-    /// old enough to lack `lf wave` also lacks these verbs), then execs it with
+    /// old enough to lack `lf start` also lacks these verbs), then execs it with
     /// the enriched GUI PATH. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?) throws -> String {
         let origin = cwd.map(WaveOrigin.resolve) ?? FileManager.default.currentDirectoryPath
@@ -389,22 +265,6 @@ enum LocalWaveAgentLauncher {
             throw WaveLaunchError.launchFailed(
                 detail.isEmpty ? "Command failed (\(result.status)): \(args.joined(separator: " "))" : detail
             )
-        }
-        return result.stdout
-    }
-
-    private static func runCommandSync(
-        _ args: [String],
-        cwd: String? = nil,
-        logFailure: Bool = true
-    ) -> String? {
-        guard let result = run(args, cwd: cwd) else { return nil }
-        guard result.status == 0 else {
-            guard logFailure else { return nil }
-            LoggingService.wave(
-                "command failed: \(args.joined(separator: " ")) \(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
-            )
-            return nil
         }
         return result.stdout
     }

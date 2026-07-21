@@ -86,6 +86,18 @@ use crate::wave::runtime::WaveRuntime;
 pub(crate) const RESIDENT_SUBCOMMAND: &str = "__resident";
 pub(crate) const WAVE_SERVER_ENDPOINT_ENV: &str = "LF_WAVE_SERVER_ENDPOINT";
 
+#[derive(Debug)]
+pub(crate) struct ListenerSignals<F> {
+    startup: Option<tokio::sync::oneshot::Sender<String>>,
+    shutdown: F,
+}
+
+impl<F> ListenerSignals<F> {
+    pub(crate) fn new(startup: Option<tokio::sync::oneshot::Sender<String>>, shutdown: F) -> Self {
+        Self { startup, shutdown }
+    }
+}
+
 /// `lf wave <name>` — boot the named mind's listener and supervise its
 /// resident. The steerable half: an endpoint, a thread, a cadence.
 ///
@@ -299,6 +311,34 @@ pub(crate) async fn run_listener(
     discord_token: Option<SecretString>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
+    run_listener_with_startup(
+        repo_root,
+        wave,
+        registry_config,
+        force,
+        spawn_resident,
+        discord_token,
+        ListenerSignals::new(None, shutdown),
+    )
+    .await
+}
+
+/// Run a listener and publish the exact point at which its endpoint becomes
+/// attachable. The Home host uses this instead of polling the discovery file;
+/// direct `lf wave` callers need no startup receiver.
+pub(crate) async fn run_listener_with_startup<F>(
+    repo_root: PathBuf,
+    wave: String,
+    registry_config: Option<registry::RegistryConfig>,
+    force: bool,
+    spawn_resident: bool,
+    discord_token: Option<SecretString>,
+    signals: ListenerSignals<F>,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    let ListenerSignals { startup, shutdown } = signals;
     // File-level one-brain floor, before anything else: an existing pointer
     // that answers /health for this wave is a live server — refuse (unless
     // --force takes over and overwrites); a dead pointer is stale and gets
@@ -455,6 +495,9 @@ pub(crate) async fn run_listener(
     let supervisor_task = tokio::spawn(supervisor.run());
 
     server::write_endpoint(&repo_root, &wave, addr)?;
+    if let Some(startup) = startup {
+        let _ = startup.send(addr.to_string());
+    }
     // Ctrl+C exits the process before graceful shutdown runs, so clean up
     // from the interrupt handler too: SIGTERM the resident (its hooks stop
     // the vendor process group) and remove the discovery files — only while

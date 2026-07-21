@@ -72,7 +72,16 @@ public struct RegistryQuery: Sendable {
     /// Idempotently start a Wave on its placed Home and return its status row.
     public func start(wave: String, cwd: String?) async throws -> [WaveSnapshot] {
         let stdout = try await run(["start", wave, "--json"], cwd)
-        return try Self.decode([WaveSnapshot].self, from: stdout)
+        let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
+        guard snapshots.count == 1,
+              let snapshot = snapshots.first,
+              snapshot.name == wave,
+              snapshot.live,
+              snapshot.endpoint != nil
+        else {
+            throw RegistryQueryError("lf start \(wave) returned no live Wave receipt")
+        }
+        return snapshots
     }
 
     /// Pause or resume new Wave turns without changing listener residency.

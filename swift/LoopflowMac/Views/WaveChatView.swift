@@ -456,10 +456,9 @@ struct WaveChatView: View {
 
     // MARK: - Not running (start the wave)
     //
-    // The wave is a detached tmux session, launched here through the same door
-    // as a terminal: `lf wave <name>` at the wave's repo. Quitting Loopflow
-    // never touches it. After a launch, the connection's 1s endpoint poll picks
-    // the wave up on its own — this view just waits for the phase to move.
+    // The app and terminal share `lf start <name>`. lfd owns the detached
+    // listener, so quitting Loopflow never touches it. A successful command is
+    // the startup receipt; reconnecting only attaches the already-live chat.
 
     private var notRunningState: some View {
         VStack(spacing: Spacing.md) {
@@ -506,9 +505,7 @@ struct WaveChatView: View {
         .padding()
     }
 
-    /// Launch `lf wave` detached, then wait for the endpoint poll to attach.
-    /// The launch itself is quick (tmux returns immediately); the wave server
-    /// takes a few seconds to publish its endpoint.
+    /// Start through the synchronous Home lifecycle, then attach immediately.
     private func startWave() {
         guard startState != .starting else { return }
         startState = .starting
@@ -516,31 +513,14 @@ struct WaveChatView: View {
         let waveName = waveName
         Task {
             do {
-                try await Task.detached {
-                    try LocalWaveAgentLauncher.launchWave(repoPath: repoPath, waveName: waveName)
-                }.value
+                _ = try await RegistryQueryLocal.shared.start(wave: waveName, cwd: repoPath)
             } catch {
                 startState = .failed(error.localizedDescription)
                 return
             }
-            // The connection polls the endpoint pointer every second; give the
-            // wave server up to 20s to come up before calling it failed.
-            let deadline = Date().addingTimeInterval(20)
-            while Date() < deadline {
-                // Bail if the pane moved to a different wave mid-wait.
-                guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
-                let phase = conn.phase
-                if phase != .notRunning && phase != .idle {
-                    startState = .idle
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
             guard let conn = connection, conn.repoPath == repoPath, conn.waveName == waveName else { return }
-            startState = .failed(
-                "Wave didn't come up. Check the tmux session for what went wrong: "
-                    + "tmux attach -r -t \(PortfolioRepoState.waveAgentSessionName(repoPath: repoPath, waveName: waveName))"
-            )
+            conn.reconnect()
+            startState = .idle
         }
     }
 
@@ -842,7 +822,7 @@ private struct ChildControlActivityCard: View {
 /// The not-running hint, with the launch command as inline code so `lf` can't
 /// be misread as "If". Plain-string fallback only if markdown parsing fails.
 func waveStartHint(waveName: String) -> AttributedString {
-    let markdown = "Start it here, or run `lf wave \(waveName)` in a terminal — "
+    let markdown = "Start it here, or run `lf start \(waveName)` in a terminal — "
         + "its conversation appears here live."
     return (try? AttributedString(markdown: markdown))
         ?? AttributedString(markdown.replacingOccurrences(of: "`", with: ""))

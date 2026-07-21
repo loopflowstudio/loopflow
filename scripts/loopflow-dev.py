@@ -475,8 +475,26 @@ def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
         ]
         bin_dir = REPO_ROOT / "target" / "release"
     else:
-        cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf", "--bin", "lfd"]
-        bin_dir = REPO_ROOT / "target" / "debug"
+        # The app is a live operator surface even when its Swift shell is a dev
+        # build. Compile its bundled control binary against the installed Home,
+        # but never grant it migration authority. Ordinary development binaries
+        # keep their isolated `.lf-dev` stores.
+        target_dir = REPO_ROOT / "target" / "dev-app-control"
+        cargo_cmd = [
+            "/usr/bin/env",
+            "LOOPFLOW_BUILD_PROVENANCE=release",
+            "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
+            "cargo",
+            "build",
+            "--locked",
+            "--bin",
+            "lf",
+            "--bin",
+            "lfd",
+            "--target-dir",
+            str(target_dir),
+        ]
+        bin_dir = target_dir / "debug"
 
     result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
     if result.returncode != 0:

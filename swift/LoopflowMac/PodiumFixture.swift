@@ -87,7 +87,7 @@ enum PodiumFixture {
         let waves = roadmap.waves.map { $0.wave.toWave() }
         var seen = Set<String>()
         let repos = roadmap.waves.compactMap { roadmap -> PortfolioRepo? in
-            let path = WaveOrigin.resolve(roadmap.wave.repo).normalizedFilePath
+            let path = roadmap.wave.repo.normalizedFilePath
             guard seen.insert(path).inserted else { return nil }
             return PortfolioRepo(path: path, lastOpened: .distantPast)
         }

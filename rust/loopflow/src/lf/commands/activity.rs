@@ -9,10 +9,11 @@ use time::OffsetDateTime;
 use crate::durable::{Author, Steer, SteerId, WorkRef};
 use crate::lf::commands::runs::{collect_run_activity_since, SkillRunEntry};
 use crate::lf::commands::util::parse_since;
+use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::WorkFilter;
 use crate::project::Project;
 use crate::store::sqlite::SqliteStore;
-use crate::task::{GithubPr, PrMergeRequest, Task, TaskPr, TaskPrId};
+use crate::task::{GithubPr, Task, TaskPr, TaskPrId};
 use crate::wave::Wave;
 
 const MAX_LIMIT: usize = 200;
@@ -61,7 +62,7 @@ pub enum WorkActivityFact {
     },
     PrMergeRequested {
         id: TaskPrId,
-        request: PrMergeRequest,
+        request: PrMergeRequestSnapshot,
         github: Option<GithubPr>,
     },
     PrMerged {
@@ -420,7 +421,7 @@ fn pr_entries(pr: &TaskPr, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntr
             work,
             WorkActivityFact::PrMergeRequested {
                 id: pr.id.clone(),
-                request: request.clone(),
+                request: PrMergeRequestSnapshot::from(request),
                 github: github.cloned(),
             },
         ));
@@ -550,7 +551,7 @@ mod tests {
         let snapshot = serde_json::from_str::<WorkActivitySnapshot>(fixture).unwrap();
 
         assert_eq!(snapshot.limit, 50);
-        assert_eq!(snapshot.items.len(), 4);
+        assert_eq!(snapshot.items.len(), 5);
         assert!(matches!(
             snapshot.items[0].fact,
             WorkActivityFact::RunFinished { ref status, .. } if status == "ok"
@@ -559,6 +560,11 @@ mod tests {
             snapshot.items[1].fact,
             WorkActivityFact::PrMerged { ref github, .. }
                 if github.as_ref().map(|pr| pr.number) == Some(1144)
+        ));
+        assert!(matches!(
+            snapshot.items[2].fact,
+            WorkActivityFact::PrMergeRequested { ref request, .. }
+                if request.requested_at == "2026-07-21T18:35:51Z"
         ));
         assert_eq!(
             serde_json::from_str::<WorkActivitySnapshot>(
@@ -784,6 +790,11 @@ mod tests {
             entries[2].fact,
             WorkActivityFact::PrMergeRequested { .. }
         ));
+        let merge_request = serde_json::to_value(&entries[2]).unwrap();
+        assert_eq!(
+            merge_request["fact"]["request"]["requested_at"],
+            "1970-01-01T00:00:30Z"
+        );
         assert!(matches!(
             &entries[3].fact,
             WorkActivityFact::PrMerged {

@@ -232,6 +232,13 @@ fn repository_team_matrix() {
             true,
         ),
     );
+    put_snapshot(
+        &store,
+        foreign_repo.path(),
+        "intelligence",
+        "initiative-intelligence",
+        r#"{"projects":[],"items":[{"id":"stale"}]}"#.to_string(),
+    );
     drop(store);
 
     // Recursive discovery and durable ancestry make nested titles legible.
@@ -287,6 +294,8 @@ fn repository_team_matrix() {
     let status = assert_success(&run_lf(&home, &repo, &["pm", "status"]), "pm status");
     assert!(status.contains("survival"));
     assert!(status.contains("survival/infrastructure"));
+    // An unreadable snapshot remains visible as unavailable evidence for its
+    // Wave without blanking readable Work from another repository.
     let roadmap = assert_success(&run_lf(&home, &repo, &["roadmap", "--json"]), "roadmap");
     assert!(roadmap.contains("LOO-1"));
     assert!(roadmap.contains("LOO-2"));

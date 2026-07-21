@@ -120,6 +120,12 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
+The dev app bundles the current source `lf` with release Home selection and
+validation-only migration authority. Its operator views therefore read the
+real Home without allowing an unpromoted build to advance the shared database
+frontier. Ordinary source-built `lf` commands keep their isolated `.lf-dev`
+Home.
+
 | Command | What it does |
 | --- | --- |
 | `./dev run` | Build and launch |

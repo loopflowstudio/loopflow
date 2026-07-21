@@ -113,17 +113,17 @@ final class PodiumModel {
 
     var visibleRepos: [PortfolioRepo] {
         guard let repoPath else { return allRepos }
-        let target = WaveOrigin.resolve(repoPath).normalizedFilePath
-        return allRepos.filter { WaveOrigin.resolve($0.path).normalizedFilePath == target }
+        let target = repoIdentity(repoPath)
+        return allRepos.filter { repoIdentity($0.path) == target }
     }
 
     var allRepos: [PortfolioRepo] {
         var result = repos
-        var seen = Set(result.map { WaveOrigin.resolve($0.path).normalizedFilePath })
+        var seen = Set(result.map { repoIdentity($0.path) })
         for wave in waves.value ?? [] {
-            let path = WaveOrigin.resolve(wave.repo).normalizedFilePath
-            guard seen.insert(path).inserted else { continue }
-            result.append(PortfolioRepo(path: path, lastOpened: .distantPast))
+            let identity = repoIdentity(wave.repo)
+            guard seen.insert(identity).inserted else { continue }
+            result.append(PortfolioRepo(path: identity, lastOpened: .distantPast))
         }
         return result.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
@@ -166,6 +166,7 @@ final class PodiumModel {
             initialRepoPath: initialRepoPath,
             persistedRepos: persistedRepos
         )
+        await Self.resolveRepoOrigins(discovered.map(\.path))
         repos = discovered
         authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: discovered)
         if repoPath == nil, let initialRepoPath {
@@ -318,12 +319,25 @@ final class PodiumModel {
         repo: (Value) -> String
     ) -> [Value] {
         guard let repoPath else { return values }
-        let target = WaveOrigin.resolve(repoPath).normalizedFilePath
-        return values.filter { WaveOrigin.resolve(repo($0)).normalizedFilePath == target }
+        let target = repoIdentity(repoPath)
+        return values.filter { repoIdentity(repo($0)) == target }
     }
 
     private func waveIdentity(repo: String, name: String) -> String {
-        "\(WaveOrigin.resolve(repo).normalizedFilePath)#\(name)"
+        "\(repoIdentity(repo))#\(name)"
+    }
+
+    func repoIdentity(_ path: String) -> String {
+        let path = path.normalizedFilePath
+        return WaveOrigin.cached(path).normalizedFilePath
+    }
+
+    private nonisolated static func resolveRepoOrigins(_ paths: [String]) async {
+        await Task.detached {
+            for path in Set(paths.map(\.normalizedFilePath)) {
+                _ = WaveOrigin.resolve(path)
+            }
+        }.value
     }
 
     private func activityScope(for selection: WorkReference?) -> WorkActivityScope? {
@@ -385,7 +399,9 @@ final class PodiumModel {
 
     private func readWaves() async -> Result<[Wave], Error> {
         do {
-            return .success(try await query.allWaves())
+            let waves = try await query.allWaves()
+            await Self.resolveRepoOrigins(waves.map(\.repo))
+            return .success(waves)
         } catch {
             return .failure(error)
         }
@@ -393,7 +409,9 @@ final class PodiumModel {
 
     private func readProcessActivity() async -> Result<ActivitySnapshot, Error> {
         do {
-            return .success(try await query.processActivity())
+            let snapshot = try await query.processActivity()
+            await Self.resolveRepoOrigins(snapshot.nodes.compactMap(\.repo))
+            return .success(snapshot)
         } catch {
             return .failure(error)
         }

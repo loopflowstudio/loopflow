@@ -1,3 +1,6 @@
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -343,19 +346,46 @@ pub(crate) async fn start_tmux_window_with_env(
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect::<Vec<_>>();
     let shell_command = lf_session_shell_command(argv, &environment);
+    let launcher = write_tmux_launcher(&shell_command)?;
     let status = tokio::process::Command::new("tmux")
         .args(["new-window", "-d", "-t", session, "-n", window, "-c"])
         .arg(cwd)
-        .args(["/bin/zsh", "-lc", &shell_command])
+        .args(["/bin/zsh"])
+        .arg(&launcher)
         .status()
-        .await
-        .map_err(|error| anyhow!("tmux failed to spawn window: {error}"))?;
+        .await;
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = std::fs::remove_file(&launcher);
+            return Err(anyhow!("tmux failed to spawn window: {error}"));
+        }
+    };
     if !status.success() {
+        let _ = std::fs::remove_file(&launcher);
         return Err(anyhow!(
             "tmux failed to launch window '{window}' in session '{session}'"
         ));
     }
     Ok(())
+}
+
+fn write_tmux_launcher(shell_command: &str) -> Result<PathBuf> {
+    let path = std::env::temp_dir().join(format!(
+        "loopflow-tmux-{}.zsh",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)?;
+    writeln!(
+        file,
+        "#!/bin/zsh\nlauncher=$0\n/bin/rm -f -- \"$launcher\"\n{shell_command}"
+    )?;
+    file.sync_all()?;
+    Ok(path)
 }
 fn extend_session_control_context(
     child_env: &mut Vec<(String, String)>,

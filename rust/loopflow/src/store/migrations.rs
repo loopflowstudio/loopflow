@@ -6,6 +6,7 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT;
 use crate::store::{StoreError, StoreResult};
 use fs2::FileExt;
 use rusqlite::OptionalExtension;
@@ -765,7 +766,8 @@ pub(crate) fn apply_sqlite_with_backup(
     conn: &rusqlite::Connection,
     path: &Path,
 ) -> StoreResult<()> {
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")?;
+    conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+    conn.execute_batch("PRAGMA journal_mode = WAL;")?;
     let lock_path = path.with_file_name(format!(
         "{}.migration.lock",
         path.file_name()

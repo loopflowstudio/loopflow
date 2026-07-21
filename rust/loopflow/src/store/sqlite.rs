@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
@@ -24,6 +25,11 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod provider_deliveries;
+
+/// A fleet can legitimately queue longer than SQLite's common five-second
+/// default while every process opens and records its first receipt. Durable
+/// writes wait for that bounded local contention instead of dropping evidence.
+pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
@@ -361,9 +367,10 @@ impl SqliteStore {
         }
 
         let mut conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;",
-        )?;
+        // Install the handler before journal-mode negotiation: that pragma can
+        // itself meet another process opening the same WAL database.
+        conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
 
         if !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible

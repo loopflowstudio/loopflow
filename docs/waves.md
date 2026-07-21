@@ -96,7 +96,17 @@ craft — is covered in [Authoring → Goals](authoring.md#goals).
 
 ### Discord chat
 
-Bind one existing guild text channel to one Wave:
+Wave Chat is local by default. Omitting `chat` (or explicitly choosing
+`provider: local`) keeps messages in the Wave journal and exposes the local
+composer in Loopflow:
+
+```yaml
+chat:
+  provider: local
+```
+
+Bind one existing guild text channel to replace the local backing for future
+messages:
 
 ```yaml
 # wave/product/GOAL.md
@@ -116,13 +126,29 @@ doppler run -- lf wave product
 ```
 
 The bot needs only **View Channel**, **Read Message History**, and **Send
-Messages**, with Message Content enabled in the Discord developer portal. The
-first start attaches at the channel's current head; later starts resume from
-the journaled cursor. Discord remains the shared company transcript. Loopflow
-retains source-linked Wave inputs, answering turns, and send receipts as Run
-evidence. `home_id` is the binding's durable owner (`lf home id`). Another Home
-fails before contacting Discord, while an OS-held lease prevents another
+Messages**, with Message Content enabled in the Discord developer portal. A
+backing change takes effect when the listener restarts and starts one durable
+conversation epoch. Earlier local epochs stay selectable and read-only.
+
+Discord is the transcript authority while its epoch is active. Loopflow reads
+bounded history from Discord on demand and stores no duplicate presentation
+transcript. `lf chat "text"` returns an Open-in-Discord action as a rejection
+instead of appending a hidden local message. Agent speech appears only after
+Discord returns its provider message id. Every API message names its epoch and
+exact local journal event or Discord message source.
+
+Loopflow retains source-linked inputs until the resident consumes them,
+execution turns, deterministic send intents, cursors, and provider receipts as
+Run evidence. `home_id` is the binding's durable owner (`lf home id`). Another
+Home fails before contacting Discord, while an OS-held lease prevents another
 checkout on the owner Home from consuming the same channel.
+
+Read the active epoch or an earlier one explicitly:
+
+```bash
+lf chat --history --json --wave product
+lf chat --history --json --wave product --epoch chat-epoch-42
+```
 
 ### Memory
 

@@ -40,8 +40,10 @@ The journal rebuilds the thread, playhead, and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
 
-An optional Discord channel binding is also listener-owned. The listener
-preflights the binding before reserving a Run or opening the journal, then polls
+Wave Chat is local when `GOAL.md` has no `chat` block. A Discord channel binding
+replaces that backing on the next listener start. Each change appends one
+conversation epoch; reopening the same backing resumes its epoch. The listener
+preflights Discord before reserving a Run or opening the journal, then polls
 after the committed cursor, journals external inputs before advancing it, and
 journals deterministic send intents before posting. The resident receives only
 source-tagged authored input and never inherits `LF_DISCORD_TOKEN`. Binding
@@ -55,15 +57,17 @@ listener per Wave; `--force` explicitly takes over a live endpoint.
 
 ## Thread
 
-`lf chat` writes to the durable human thread. `--steer` injects into a compatible
-active provider turn and otherwise queues the message for the next pass.
-`lf chat --follow` replays the latest 12 turns and follows new turns. The
-conversation shows human and Wave prose plus human-level failures; commands and
-tools stay in the journal, which retains the complete thread.
-`lf chat --history --json -w <wave>` folds the latest saved turns directly from
-that journal, so a stopped listener does not make the conversation disappear.
-The response distinguishes missing, partial, and unavailable evidence from a
-valid empty thread.
+`lf chat` writes only when the active epoch is local. `--steer` injects into a
+compatible active provider turn and otherwise queues the message for the next
+pass. A Discord epoch rejects authored text with a typed Open-in-Discord action;
+it never writes a parallel local turn. A bare interrupt remains available.
+
+`lf chat --follow` replays the latest 12 source-bearing messages and follows new
+ones, printing epoch boundaries and local/Discord provenance. Local history
+folds from the journal even while stopped. Discord history is projected from
+the provider through the active listener without copying transcript pages into
+the journal. `lf chat --history --json -w <wave> --epoch <id>` reads one earlier
+epoch without stitching it into the active conversation.
 
 ## Listener HTTP surface
 
@@ -72,10 +76,10 @@ do not require the resident token:
 
 | Method and path | What it does |
 | --- | --- |
-| `GET /health` | Reports listener and resident state. |
-| `GET /conversation` | Returns the durable thread; `?limit=N` tails it. |
-| `GET /events` | Replays the latest 12 human-thread turns, then streams turn, turn-delta, state, and playhead events over SSE; `?limit=N` overrides the replay tail. |
-| `POST /messages` | Sends `message`, `steer`, or `interrupt`. |
+| `GET /health` | Reports listener/resident state plus the active chat epoch and backing health. |
+| `GET /conversation` | Returns one source-bearing epoch; `?limit=N` tails it and `?epoch=<id>` selects history. |
+| `GET /events` | Emits epoch and backing health, replays source-bearing messages, then streams message, local-only message-delta, state, and playhead events. |
+| `POST /messages` | Sends locally, or returns `409` with Open in Discord when Discord is active. |
 | `GET /playhead` | Returns the durable pass cursor. |
 | `POST /stop` | Gracefully stops the listener and resident. |
 

@@ -48,6 +48,7 @@ pub struct WavePmConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum WaveChatConfig {
+    Local,
     Discord {
         #[serde(deserialize_with = "deserialize_home_id")]
         home_id: HomeId,
@@ -389,6 +390,18 @@ mod tests {
         assert!(matches!(
             try_read_wave_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: local\n---\nDrive the work.\n",
+        )
+        .expect("write local chat");
+        assert!(matches!(
+            try_read_wave_config(temp.path(), "scan")
+                .expect("local config")
+                .and_then(|config| config.chat),
+            Some(WaveChatConfig::Local)
         ));
 
         fs::write(

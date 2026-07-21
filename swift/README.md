@@ -25,7 +25,7 @@ fleet.
 
 The previous Wave workspace remains available in repository and Portfolio
 windows while its proven inspectors and Chat surface move into the new root.
-Wave Chat paints the bounded local journal tail before SSE, keeps it visible
+Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;

@@ -326,7 +326,7 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     /// appends to `items`. The one exception is `commentary` — operational
     /// narration the provider tagged as process, not conclusion — which stays a
     /// discrete item so `turnPresentation` can curate it behind a disclosure.
-    /// The reader applies this to each `turn-delta` frame so its open-turn
+    /// The reader applies this to each incremental turn frame so its open-turn
     /// reconstruction matches the served turn without the whole turn crossing
     /// the wire per token.
     public func absorbing(_ item: ConversationItem) throws -> ChatTurn {
@@ -372,10 +372,10 @@ public struct ChatTurn: Codable, Sendable, Hashable, Identifiable {
     }()
 }
 
-/// One live increment to an open turn: the `turn-delta` SSE frame. Mirrors Rust
-/// `TurnDelta`. The listener sends one per in-turn content delta instead of the
-/// whole `ChatTurn`; the reader applies it with [`ChatTurn/absorbing(_:)`]
-/// against the turn named by `turnId`.
+/// One live increment to an open turn. Human chat carries it in
+/// `message-delta`; the resident stream uses `turn-delta`. Mirrors Rust
+/// `TurnDelta`; the reader applies it with [`ChatTurn/absorbing(_:)`] against
+/// the turn named by `turnId`.
 public struct TurnDelta: Codable, Sendable, Hashable {
     public let turnId: String
     public let item: ConversationItem

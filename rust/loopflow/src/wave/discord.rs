@@ -5,7 +5,7 @@
 //! delivery receipts through [`WaveRuntime`]. It never owns an inbox or writes
 //! the journal directly.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
@@ -18,8 +18,11 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::sync::watch;
 
+use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::durable::HomeId;
+use crate::wave::chat::{ChatBackingHealth, ChatMessageSource, ConversationEpoch, WaveChatMessage};
 use crate::wave::journal::{DiscordChatBinding, DiscordMessageSource};
 use crate::wave::runtime::WaveRuntime;
 
@@ -241,7 +244,17 @@ pub struct DiscordAdapter {
     binding: DiscordChatBinding,
     bot_user_id: String,
     initial_head: Option<String>,
+    health: watch::Sender<ChatBackingHealth>,
     _lease: Option<DiscordBindingLease>,
+}
+
+/// Cloneable, read-only provider projection used by product API reads.
+#[derive(Debug, Clone)]
+pub(crate) struct DiscordProjection {
+    client: DiscordClient,
+    binding: DiscordChatBinding,
+    bot_user_id: String,
+    health: watch::Receiver<ChatBackingHealth>,
 }
 
 impl DiscordAdapter {
@@ -297,13 +310,24 @@ impl DiscordAdapter {
                 binding.channel_id
             ))
             .await?;
+        let (health, _) = watch::channel(ChatBackingHealth::Ready);
         Ok(Self {
             client,
             binding,
             bot_user_id: bot.id,
             initial_head: channel.last_message_id,
+            health,
             _lease: None,
         })
+    }
+
+    pub fn projection(&self) -> DiscordProjection {
+        DiscordProjection {
+            client: self.client.clone(),
+            binding: self.binding.clone(),
+            bot_user_id: self.bot_user_id.clone(),
+            health: self.health.subscribe(),
+        }
     }
 
     pub fn attach(&self, runtime: &WaveRuntime) -> Result<()> {
@@ -320,17 +344,26 @@ impl DiscordAdapter {
     pub async fn run(self, runtime: std::sync::Arc<WaveRuntime>) {
         loop {
             match self.sync_once(&runtime).await {
-                Ok(()) => tokio::time::sleep(POLL_CADENCE).await,
+                Ok(()) => {
+                    self.health.send_replace(ChatBackingHealth::Ready);
+                    tokio::time::sleep(POLL_CADENCE).await;
+                }
                 Err(error)
                     if error
                         .downcast_ref::<DiscordError>()
                         .is_some_and(DiscordError::retryable) =>
                 {
                     tracing::warn!(%error, "Discord chat sync failed; retrying");
+                    self.health.send_replace(ChatBackingHealth::Retrying {
+                        detail: error.to_string(),
+                    });
                     tokio::time::sleep(ERROR_BACKOFF).await;
                 }
                 Err(error) => {
                     tracing::error!(%error, "Discord chat sync stopped; restart after correcting the binding or local journal");
+                    self.health.send_replace(ChatBackingHealth::Blocked {
+                        detail: error.to_string(),
+                    });
                     return;
                 }
             }
@@ -399,13 +432,18 @@ impl DiscordAdapter {
     }
 
     fn accept_message(&self, runtime: &WaveRuntime, message: Message) -> Result<()> {
+        if !message_in_epoch(&message, &runtime.active_conversation_epoch())
+            .context("validate Discord input epoch")?
+        {
+            return Ok(());
+        }
         if message.author.id == self.bot_user_id {
             self.reconcile_echo(runtime, &message)?;
             return Ok(());
         }
         if message.author.bot == Some(true)
             || message.webhook_id.is_some()
-            || message.kind != 0
+            || !matches!(message.kind, 0 | 19)
             || message.content.trim().is_empty()
         {
             return Ok(());
@@ -462,15 +500,10 @@ impl DiscordAdapter {
 
     async fn deliver_pending(&self, runtime: &WaveRuntime) -> Result<()> {
         for delivery in runtime.discord_snapshot().deliveries {
-            let reply_to = delivery.reply_to().ok_or_else(|| {
-                anyhow!(
-                    "Discord delivery {} has no authored source",
-                    delivery.delivery_id
-                )
-            })?;
-            if reply_to.binding != self.binding {
+            if delivery.binding != self.binding {
                 continue;
             }
+            let reply_to = delivery.reply_to();
             for part in &delivery.parts {
                 if delivery.confirmed.contains_key(&part.part_id) {
                     continue;
@@ -484,10 +517,10 @@ impl DiscordAdapter {
                             nonce: &part.nonce,
                             enforce_nonce: true,
                             allowed_mentions: AllowedMentions { parse: Vec::new() },
-                            message_reference: MessageReference {
-                                message_id: &reply_to.message_id,
+                            message_reference: reply_to.map(|source| MessageReference {
+                                message_id: &source.message_id,
                                 fail_if_not_exists: false,
-                            },
+                            }),
                         },
                     )
                     .await?;
@@ -498,6 +531,144 @@ impl DiscordAdapter {
         }
         Ok(())
     }
+}
+
+impl DiscordProjection {
+    pub fn health(&self) -> ChatBackingHealth {
+        self.health.borrow().clone()
+    }
+
+    pub async fn history(
+        &self,
+        runtime: &WaveRuntime,
+        epoch: &ConversationEpoch,
+        limit: Option<usize>,
+    ) -> Result<Vec<WaveChatMessage>> {
+        if epoch.backing.discord_binding().as_ref() != Some(&self.binding) {
+            return Err(anyhow!(
+                "chat epoch {} is not backed by Discord channel {}/{}",
+                epoch.id,
+                self.binding.guild_id,
+                self.binding.channel_id
+            ));
+        }
+        let requested = limit.unwrap_or(12);
+        if requested == 0 {
+            return Ok(Vec::new());
+        }
+        let confirmed = runtime
+            .discord_snapshot()
+            .deliveries
+            .into_iter()
+            .filter(|delivery| delivery.binding == self.binding)
+            .flat_map(|delivery| delivery.confirmed.into_values())
+            .collect::<HashSet<_>>();
+        // Discord pages may contain system or unrelated bot messages. Read at
+        // least one full provider page so those records cannot starve a small
+        // product history request.
+        let messages = self.latest_messages(requested.max(100)).await?;
+        let mut projected = messages
+            .into_iter()
+            .filter(|message| message_in_epoch(message, epoch).unwrap_or(false))
+            .filter_map(|message| {
+                if message.webhook_id.is_some()
+                    || !matches!(message.kind, 0 | 19)
+                    || message.content.trim().is_empty()
+                {
+                    return None;
+                }
+                let role = if message.author.id == self.bot_user_id {
+                    if !confirmed.contains(&message.id) {
+                        return None;
+                    }
+                    ChatRole::Assistant
+                } else {
+                    if message.author.bot == Some(true) {
+                        return None;
+                    }
+                    ChatRole::User
+                };
+                let created_at = snowflake_timestamp(&message.id)
+                    .and_then(|timestamp| {
+                        timestamp
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .map_err(anyhow::Error::from)
+                    })
+                    .ok()?;
+                let mut turn = ChatTurn::user(format!("discord-{}", message.id), message.content);
+                turn.role = role;
+                turn.created_at = created_at;
+                Some(WaveChatMessage {
+                    epoch_id: epoch.id.clone(),
+                    source: ChatMessageSource::Discord {
+                        guild_id: self.binding.guild_id.clone(),
+                        channel_id: self.binding.channel_id.clone(),
+                        message_id: message.id.clone(),
+                        author_id: message.author.id,
+                        url: self.binding.message_url(&message.id),
+                    },
+                    turn,
+                })
+            })
+            .collect::<Vec<_>>();
+        if projected.len() > requested {
+            projected.drain(..projected.len() - requested);
+        }
+        Ok(projected)
+    }
+
+    async fn latest_messages(&self, limit: usize) -> Result<Vec<Message>> {
+        let mut messages = Vec::new();
+        let mut before: Option<String> = None;
+        while messages.len() < limit {
+            let page_limit = (limit - messages.len()).min(100);
+            let before_query = before
+                .as_deref()
+                .map(|id| format!("&before={id}"))
+                .unwrap_or_default();
+            let page: Vec<Message> = self
+                .client
+                .get(&format!(
+                    "/channels/{}/messages?limit={page_limit}{before_query}",
+                    self.binding.channel_id
+                ))
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+            before = page.last().map(|message| message.id.clone());
+            let page_len = page.len();
+            messages.extend(page);
+            if page_len < page_limit {
+                break;
+            }
+        }
+        messages.reverse();
+        Ok(messages)
+    }
+}
+
+fn message_in_epoch(message: &Message, epoch: &ConversationEpoch) -> Result<bool> {
+    let timestamp = snowflake_timestamp(&message.id)?;
+    let started_at = time::OffsetDateTime::parse(
+        &epoch.started_at,
+        &time::format_description::well_known::Rfc3339,
+    )?;
+    let ended_at = epoch
+        .ended_at
+        .as_deref()
+        .map(|value| {
+            time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        })
+        .transpose()?;
+    Ok(timestamp >= started_at && ended_at.is_none_or(|ended_at| timestamp < ended_at))
+}
+
+fn snowflake_timestamp(value: &str) -> Result<time::OffsetDateTime> {
+    const DISCORD_EPOCH_MILLIS: i128 = 1_420_070_400_000;
+    let snowflake = parse_snowflake(value)?;
+    let millis = i128::from(snowflake >> 22) + DISCORD_EPOCH_MILLIS;
+    time::OffsetDateTime::from_unix_timestamp_nanos(millis * 1_000_000).map_err(anyhow::Error::from)
 }
 
 fn require_permissions(
@@ -670,7 +841,8 @@ struct CreateMessage<'a> {
     nonce: &'a str,
     enforce_nonce: bool,
     allowed_mentions: AllowedMentions,
-    message_reference: MessageReference<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_reference: Option<MessageReference<'a>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -697,6 +869,7 @@ mod tests {
     use serde_json::json;
 
     use crate::chat::types::Lifecycle;
+    use crate::wave::chat::ChatBacking;
     use crate::wave::wire::ResidentDelta;
 
     #[derive(Debug)]
@@ -707,6 +880,7 @@ mod tests {
         messages: Vec<Message>,
         posts: usize,
         lose_next_post_response: bool,
+        channel_status: Option<u16>,
     }
 
     impl Fixture {
@@ -778,6 +952,12 @@ mod tests {
             }
             ("GET", "/channels/channel") => {
                 let fixture = fixture.lock().expect("fixture");
+                if let Some(status) = fixture.channel_status {
+                    return json_response(
+                        StatusCode::from_u16(status).expect("fixture status"),
+                        json!({"message": "fixture channel failure"}),
+                    );
+                }
                 json_response(
                     StatusCode::OK,
                     json!({
@@ -881,7 +1061,15 @@ mod tests {
             messages,
             posts: 0,
             lose_next_post_response: false,
+            channel_status: None,
         }))
+    }
+
+    fn snowflake_at_offset(seconds: i64, increment: u64) -> u64 {
+        const DISCORD_EPOCH_MILLIS: i128 = 1_420_070_400_000;
+        let timestamp = time::OffsetDateTime::now_utc() + time::Duration::seconds(seconds);
+        let millis = timestamp.unix_timestamp_nanos() / 1_000_000;
+        (((millis - DISCORD_EPOCH_MILLIS) as u64) << 22) | increment
     }
 
     #[test]
@@ -926,8 +1114,8 @@ mod tests {
     #[tokio::test]
     async fn discord_chat_starts_at_head_catches_up_in_order_and_reconciles_a_lost_send() {
         let fixture = fixture(vec![
-            Fixture::human_message(99),
-            Fixture::human_message(100),
+            Fixture::human_message(snowflake_at_offset(-1, 99)),
+            Fixture::human_message(snowflake_at_offset(-1, 100)),
         ]);
         let (base_url, server) = fixture_server(fixture.clone()).await;
         let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
@@ -936,7 +1124,12 @@ mod tests {
             .await
             .expect("preflight");
         let temp = tempfile::tempdir().expect("tempdir");
-        let runtime = WaveRuntime::open("ship".into(), temp.path().to_path_buf()).expect("runtime");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            crate::wave::chat::ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
         adapter.attach(&runtime).expect("attach at head");
         adapter.sync_once(&runtime).await.expect("initial sync");
         assert!(
@@ -944,16 +1137,21 @@ mod tests {
             "history was not imported"
         );
 
+        let catch_up_ids: Vec<_> = (101..=205)
+            .map(|increment| snowflake_at_offset(1, increment))
+            .collect();
+        let first_id = catch_up_ids.first().expect("first catch-up id").to_string();
+        let newest_id = catch_up_ids.last().expect("newest catch-up id").to_string();
         fixture
             .lock()
             .expect("fixture")
             .messages
-            .extend((101..=205).map(Fixture::human_message));
+            .extend(catch_up_ids.into_iter().map(Fixture::human_message));
         adapter.sync_once(&runtime).await.expect("paged catch-up");
         let pending = runtime.pending_messages();
         assert_eq!(pending.len(), 105);
-        assert!(pending[0].text.ends_with("message 101"));
-        assert!(pending[104].text.ends_with("message 205"));
+        assert!(pending[0].text.ends_with(&format!("message {first_id}")));
+        assert!(pending[104].text.ends_with(&format!("message {newest_id}")));
         adapter.sync_once(&runtime).await.expect("duplicate fetch");
         assert_eq!(runtime.pending_messages().len(), 105);
 
@@ -971,7 +1169,7 @@ mod tests {
             runtime.discord_snapshot().deliveries[0]
                 .reply_to()
                 .map(|source| source.message_id.as_str()),
-            Some("205"),
+            Some(newest_id.as_str()),
             "the ordered source list makes the newest claim the reply target"
         );
         fixture.lock().expect("fixture").lose_next_post_response = true;
@@ -987,8 +1185,12 @@ mod tests {
         let adapter = DiscordAdapter::preflight_with_client(client, binding())
             .await
             .expect("restart preflight");
-        let runtime =
-            WaveRuntime::open("ship".into(), temp.path().to_path_buf()).expect("restart runtime");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            crate::wave::chat::ChatBacking::discord(&binding()),
+        )
+        .expect("restart runtime");
         adapter.attach(&runtime).expect("reattach after restart");
         adapter
             .sync_once(&runtime)
@@ -1003,6 +1205,306 @@ mod tests {
         assert!(
             runtime.pending_messages().is_empty(),
             "self echo is not input"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn discord_projection_reads_normal_and_reply_messages_without_copying_history() {
+        let fixture = fixture(Vec::new());
+        let (base_url, server) = fixture_server(fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let projection = adapter.projection();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            crate::wave::chat::ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        adapter.attach(&runtime).expect("attach");
+
+        let normal_id = snowflake_at_offset(1, 1);
+        let reply_id = snowflake_at_offset(2, 2);
+        let unrelated_bot_id = snowflake_at_offset(3, 3);
+        let mut reply = Fixture::human_message(reply_id);
+        reply.kind = 19;
+        fixture.lock().expect("fixture").messages.extend([
+            Fixture::human_message(normal_id),
+            reply,
+            Message {
+                id: unrelated_bot_id.to_string(),
+                author: User {
+                    id: "another-bot".into(),
+                    bot: Some(true),
+                },
+                content: "not this Wave".into(),
+                kind: 0,
+                webhook_id: None,
+                message_reference: None,
+            },
+        ]);
+
+        adapter
+            .sync_once(&runtime)
+            .await
+            .expect("ingest provider head");
+        assert_eq!(
+            runtime.pending_messages().len(),
+            2,
+            "normal and reply messages both reach the resident inbox"
+        );
+        adapter
+            .sync_once(&runtime)
+            .await
+            .expect("repeat sync stays idempotent");
+        assert_eq!(
+            runtime.pending_messages().len(),
+            2,
+            "provider messages reach the resident exactly once"
+        );
+        let journal_before = crate::wave::journal::read_events(
+            &crate::wave::journal::journal_path(temp.path(), "ship"),
+        );
+        let epoch = runtime.active_conversation_epoch();
+        let messages = projection
+            .history(&runtime, &epoch, Some(12))
+            .await
+            .expect("project provider history");
+        let journal_after = crate::wave::journal::read_events(&crate::wave::journal::journal_path(
+            temp.path(),
+            "ship",
+        ));
+
+        assert_eq!(
+            journal_before, journal_after,
+            "history reads append nothing"
+        );
+        assert_eq!(messages.len(), 2, "unrelated bot speech stays out");
+        assert_eq!(messages[0].turn.id, format!("discord-{normal_id}"));
+        assert_eq!(messages[1].turn.id, format!("discord-{reply_id}"));
+        assert!(messages
+            .iter()
+            .all(|message| matches!(message.source, ChatMessageSource::Discord { .. })));
+
+        let answers = runtime
+            .pending_messages()
+            .into_iter()
+            .map(|message| message.id.0)
+            .collect();
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened { answers });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "provider-committed answer".into(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: None,
+            reason: None,
+        });
+        assert_eq!(
+            projection
+                .history(&runtime, &epoch, Some(12))
+                .await
+                .expect("history before provider receipt")
+                .len(),
+            2,
+            "the internal assistant turn is not a chat preview"
+        );
+        adapter
+            .deliver_pending(&runtime)
+            .await
+            .expect("provider accepts answer");
+        let committed = projection
+            .history(&runtime, &epoch, Some(12))
+            .await
+            .expect("history after provider receipt");
+        assert_eq!(committed.len(), 3);
+        assert_eq!(
+            committed.last().expect("assistant message").turn.role,
+            ChatRole::Assistant
+        );
+        assert_eq!(
+            committed.last().expect("assistant message").turn.text,
+            "provider-committed answer"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn discord_input_starts_at_the_durable_epoch_boundary() {
+        let fixture = fixture(Vec::new());
+        let (base_url, server) = fixture_server(fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let projection = adapter.projection();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        adapter.attach(&runtime).expect("attach");
+
+        let before_epoch = snowflake_at_offset(-1, 1);
+        fixture
+            .lock()
+            .expect("fixture")
+            .messages
+            .push(Fixture::human_message(before_epoch));
+        adapter
+            .sync_once(&runtime)
+            .await
+            .expect("advance past pre-epoch input");
+        assert!(
+            runtime.pending_messages().is_empty(),
+            "a provider message before the durable epoch is not resident input"
+        );
+        assert!(
+            projection
+                .history(&runtime, &runtime.active_conversation_epoch(), Some(12))
+                .await
+                .expect("project history")
+                .is_empty(),
+            "the inbox and provider projection share one epoch boundary"
+        );
+
+        let inside_epoch = snowflake_at_offset(1, 2);
+        fixture
+            .lock()
+            .expect("fixture")
+            .messages
+            .push(Fixture::human_message(inside_epoch));
+        adapter
+            .sync_once(&runtime)
+            .await
+            .expect("ingest active-epoch input");
+        assert_eq!(runtime.pending_messages().len(), 1);
+        let messages = projection
+            .history(&runtime, &runtime.active_conversation_epoch(), Some(12))
+            .await
+            .expect("project active history");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].turn.id, format!("discord-{inside_epoch}"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn discord_adapter_publishes_retrying_and_blocked_health() {
+        async fn wait_for(
+            projection: &DiscordProjection,
+            expected: fn(&ChatBackingHealth) -> bool,
+        ) {
+            for _ in 0..100 {
+                if expected(&projection.health()) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            panic!("Discord health did not reach the expected state");
+        }
+
+        let retry_fixture = fixture(Vec::new());
+        let (base_url, retry_server) = fixture_server(retry_fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let projection = adapter.projection();
+        let retry_temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            retry_temp.path().to_path_buf(),
+            ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        adapter.attach(&runtime).expect("attach");
+        retry_fixture.lock().expect("fixture").channel_status = Some(500);
+        let retry_task = tokio::spawn(adapter.run(runtime));
+        wait_for(&projection, |health| {
+            matches!(health, ChatBackingHealth::Retrying { .. })
+        })
+        .await;
+        retry_task.abort();
+        retry_server.abort();
+
+        let blocked_fixture = fixture(Vec::new());
+        let (base_url, blocked_server) = fixture_server(blocked_fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let projection = adapter.projection();
+        let blocked_temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            blocked_temp.path().to_path_buf(),
+            ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        adapter.attach(&runtime).expect("attach");
+        blocked_fixture.lock().expect("fixture").channel_status = Some(403);
+        adapter.run(runtime).await;
+        wait_for(&projection, |health| {
+            matches!(health, ChatBackingHealth::Blocked { .. })
+        })
+        .await;
+        assert!(matches!(
+            projection.health(),
+            ChatBackingHealth::Blocked { .. }
+        ));
+        blocked_server.abort();
+    }
+
+    #[tokio::test]
+    async fn discord_adapter_never_sends_another_epochs_delivery() {
+        let fixture = fixture(Vec::new());
+        let (base_url, server) = fixture_server(fixture.clone()).await;
+        let client = DiscordClient::from_token(Some("fixture-token".into()), &base_url)
+            .expect("fixture client");
+        let adapter = DiscordAdapter::preflight_with_client(client, binding())
+            .await
+            .expect("preflight");
+        let other_binding = DiscordChatBinding {
+            guild_id: "other-guild".into(),
+            channel_id: "other-channel".into(),
+        };
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            ChatBacking::discord(&other_binding),
+        )
+        .expect("runtime");
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: Vec::new(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "belongs to the earlier channel".into(),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            cost_usd: None,
+            reason: None,
+        });
+
+        adapter
+            .deliver_pending(&runtime)
+            .await
+            .expect("foreign delivery is ignored");
+        assert_eq!(fixture.lock().expect("fixture").posts, 0);
+        assert_eq!(
+            runtime.discord_snapshot().deliveries[0].binding,
+            other_binding
         );
         server.abort();
     }

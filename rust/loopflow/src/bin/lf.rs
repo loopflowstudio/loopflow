@@ -1479,9 +1479,19 @@ fn main() -> anyhow::Result<()> {
                 history,
                 json,
                 limit,
+                epoch,
                 target,
             }) => loopflow::lf::commands::chat::run(
-                text, *follow, *steer, *history, *json, *limit, target,
+                text,
+                loopflow::lf::commands::chat::ChatOptions {
+                    follow: *follow,
+                    steer: *steer,
+                    history: *history,
+                    json: *json,
+                    limit: *limit,
+                    epoch: epoch.as_deref(),
+                },
+                target,
             ),
             Some(Commands::Install { .. }) => {
                 unreachable!("install dispatches before home routing")

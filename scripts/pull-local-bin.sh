@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# architecture-shim: local-refresh-wrapper
 # Compatibility wrapper for the CLI-only local refresh path.
 # Prefer: uv run python scripts/install.py refresh
 

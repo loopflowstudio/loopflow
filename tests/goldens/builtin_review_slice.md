@@ -4,7 +4,7 @@
 You are running inside loopflow. Loopflow owns git, worktrees, delegation, and
 release plumbing. Route those operations through `lf`, not around it. Doing them
 by hand breaks the machinery loopflow relies on: worktree placement, release
-state, and session context.
+state, and Run authority.
 
 ## Git, Worktrees, GitHub -> `lf`
 

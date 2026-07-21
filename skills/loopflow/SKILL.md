@@ -1,6 +1,6 @@
 ---
 name: loopflow
-description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and the agent bus. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
+description: Operate a repository through loopflow (`lf`) — persistent Wave, Project, and Task Work, PRs, and typed control. Use when a repo contains `.lf/` or `wave/`, or when the human mentions loopflow, waves, or `lf`.
 ---
 
 # Operating Through Loopflow
@@ -14,7 +14,7 @@ Loopflow is one binary, `lf`: the command humans type and the API agents call
 to launch, steer, and observe other agents. It owns git, worktrees,
 delegation, and release plumbing in repos that use it. Route those operations
 through `lf`, not around it — doing them by hand breaks worktree placement,
-release state, and session context.
+release state, and Run authority.
 
 Check availability; install only if the human asks:
 
@@ -29,9 +29,9 @@ An external harness opened by a person acts as a Loopflow **User**. It may read
 status and use `lf chat` when the human asks it to inspect or steer a Wave. It
 does not become a Wave, Project, or Task worker.
 
-An agent launched by Loopflow is an internal participant. It receives
-`LOOPFLOW.md` automatically, reports through an established `lf radio` channel,
-and never impersonates the User in chat.
+An agent launched by Loopflow is a Loopflow-launched internal participant. It
+receives `LOOPFLOW.md` automatically, writes through its exact Work/Run
+authority, and never impersonates the User in chat.
 
 ## Git, Worktrees, GitHub → `lf`
 
@@ -114,20 +114,14 @@ on their machine.
 
 ## Speak
 
-`lf chat` is the User surface. An external harness acting for the human may use
-it; Loopflow-launched agents never post there. Internal participants report on
-the bus only when the prompt establishes an exact wave or channel — never guess
-one:
+Answer a human message in turn text. Tasks, Projects, and Waves communicate
+through typed Work observations and targeted Ask/Answer exchanges.
 
-```bash
-lf radio pub --channel <channel> "landed PR #91, tests green"
-```
-
-Outside any wave, a publish prints a drop note and exits 0. When the active
-skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md` through
-the ordinary repository workflow. Keep it curated rather than appending a
-transcript. `update-wave` owns deliberate end-of-work memory curation; no live
-Wave is required.
+`lf chat` is the User surface. Work Steer is the live correction path. When the
+active skill calls for a durable Wave learning, edit `wave/<name>/MEMORY.md`
+through the ordinary repository workflow. Keep it curated rather than appending
+a transcript. `update-wave` owns deliberate end-of-work memory curation; no
+live Wave is required.
 
 ## Where To Write
 

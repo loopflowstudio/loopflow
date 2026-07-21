@@ -7,6 +7,14 @@ on:
   merge_group:
 
 jobs:
+  architecture-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Verify the architecture map
+        run: uv run python scripts/check_architecture.py
+
   scratch-clear:
     runs-on: ubuntu-latest
     steps:
@@ -175,6 +183,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     needs:
+      - architecture-check
       - scratch-clear
       - rust-lint
       - rust-test
@@ -187,6 +196,7 @@ jobs:
     steps:
       - name: Aggregate test results
         env:
+          ARCHITECTURE_CHECK: ${{ needs.architecture-check.result }}
           SCRATCH_CLEAR: ${{ needs.scratch-clear.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
           RUST_TEST: ${{ needs.rust-test.result }}
@@ -216,6 +226,7 @@ jobs:
             esac
           }
 
+          check_result "architecture-check" "$ARCHITECTURE_CHECK"
           check_result "scratch-clear" "$SCRATCH_CLEAR"
           check_result "rust-lint" "$RUST_LINT"
           check_result "rust-test" "$RUST_TEST"

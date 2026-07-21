@@ -7,6 +7,7 @@ proof that can change the next decision.
 
 ```bash
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
+uv run python scripts/check_architecture.py            # architecture owners and vocabulary
 uv run pytest python/tests/test_test_time.py           # trace timing toolkit
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
@@ -153,11 +154,12 @@ See `release/UI_HOST_GATE.md`.
 
 ## What CI Runs
 
-See `.github/workflows/ci.yml`. Nine proof jobs run in parallel and feed the
+See `.github/workflows/ci.yml`. Ten proof jobs run in parallel and feed the
 aggregate `tests-result` check:
 
 | Job | Runner | Command |
 |-----|--------|---------|
+| `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
 | `scratch-clear` | ubuntu-latest | reject landing-only scratch artifacts |
 | `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy` |
 | `rust-test` | ubuntu-latest | `cargo nextest run --all` |
@@ -168,7 +170,9 @@ aggregate `tests-result` check:
 | `swift-test` | macos-15 | package tests, boundary check, Wave-state render proof |
 | `loopflow-ui-test` | macos-15 | xcodegen + app/test-runner compile |
 
-All nine must pass for `tests-result` to pass.
+All ten must pass for `tests-result` to pass. `.github/workflows/architecture-drift.yml`
+runs the same architecture command every Monday and retains its JSON report for
+90 days; four consecutive runs are the time-based architecture KR evidence.
 
 ## Dependabot workflow
 

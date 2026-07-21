@@ -29,9 +29,11 @@ pub struct WaveCronDef {
     pub schedule: String,
 }
 
-/// The Linear Initiative and team representing a wave, from `pm.*` in GOAL.md.
-/// The Initiative is the durable middle tier; the team owns the Task prefix
-/// (`PRD-*`, `INF-*`, …). Both store stable provider ids, not presentation.
+/// The Linear Initiative representing a wave, from `pm.*` in GOAL.md.
+///
+/// `provider` and `linear_team` remain decodable only as repository-Team
+/// migration sentinels. Normal PM authority reads provider and Team from the
+/// repository's `.lf/config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq)]
 pub struct WavePmConfig {
     #[serde(default)]

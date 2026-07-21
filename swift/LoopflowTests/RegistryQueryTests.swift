@@ -367,8 +367,8 @@ struct RegistryQueryTests {
     func planDecodesProjects() async throws {
         let json = """
         {"wave":"goals","provider":"linear","initiative":"init-1","project":null,"synced_at":1,"projects":[
-          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"first":null,"loop":null,"finally":null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"]}
-        ],"items":[]}
+          {"id":"project-1","slug":"runtime","name":"Runtime","summary":"Run reliably.","definition":"Run reliably.","flows":{"first":null,"loop":null,"finally":null},"krs":[{"text":"Survives restart","holds":true}],"initiative_ids":["init-1"],"team_ids":["team-loo"]}
+        ],"items":[{"id":"issue-1","identifier":"LOO-1","url":null,"name":"Wire runtime","description":"","rank":1,"completed":false,"project_id":"project-1","project":"runtime","team_id":"team-loo","assignee":null}]}
         """
         let query = RegistryQuery { args, cwd in
             #expect(args == ["pm", "show", "--wave", "goals", "--json", "--no-sync"])

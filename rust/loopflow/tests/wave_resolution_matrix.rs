@@ -14,10 +14,8 @@
 use std::collections::HashSet;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use clap::{ArgAction, CommandFactory};
 use loopflow::id::WaveId;
@@ -54,10 +52,6 @@ struct Special {
     /// `NoContext` → exit 0 "dropped" (publish-to-no-subscriber). `chat post`
     /// drops silently instead of erroring.
     silent_drop: bool,
-    /// Blocks (server or subscriber); needs a kill timeout.
-    long_running: bool,
-    /// Needs `LF_LINEAR_WEBHOOK_SECRET` to reach wave resolution.
-    needs_secret: bool,
     /// Pipes this text to stdin (for commands whose `trailing_var_arg` would
     /// swallow `--wave` if text were on the command line).
     stdin: Option<&'static str>,
@@ -67,8 +61,6 @@ impl Special {
     const NONE: Self = Self {
         global_default: false,
         silent_drop: false,
-        long_running: false,
-        needs_secret: false,
         stdin: None,
     };
 }
@@ -206,14 +198,6 @@ const COMMANDS: &[Cmd] = &[
         special: Special::NONE,
     },
     Cmd {
-        id: "pm reteam",
-        path: &["pm", "reteam"],
-        base_args: &["pm", "reteam"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special::NONE,
-    },
-    Cmd {
         id: "pm task create",
         path: &["pm", "task", "create"],
         base_args: &["pm", "task", "create", "--project", "test", "--title", "T"],
@@ -288,35 +272,6 @@ const COMMANDS: &[Cmd] = &[
         wave_form: WaveForm::Flag,
         kind: Kind::Mutation,
         special: Special::NONE,
-    },
-    Cmd {
-        id: "pm webhook serve",
-        path: &["pm", "webhook", "serve"],
-        base_args: &["pm", "webhook", "serve", "--addr", "127.0.0.1:0"],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special {
-            needs_secret: true,
-            long_running: true,
-            ..Special::NONE
-        },
-    },
-    Cmd {
-        id: "pm webhook register",
-        path: &["pm", "webhook", "register"],
-        base_args: &[
-            "pm",
-            "webhook",
-            "register",
-            "--url",
-            "https://example.com/wh",
-        ],
-        wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
-        special: Special {
-            needs_secret: true,
-            ..Special::NONE
-        },
     },
     Cmd {
         id: "cron add",
@@ -496,6 +451,10 @@ fn classify(output: &std::process::Output) -> Outcome {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
+fn open_test_store(path: &Path) -> SqliteStore {
+    SqliteStore::new(path).expect("open store")
+}
+
 /// Seed a machine home with one registered wave ("product"), a PM snapshot,
 /// a wave directory with MEMORY.md, and a git repo on a clean `main` branch.
 fn seed(home: &Path, repo: &Path) -> Wave {
@@ -527,7 +486,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         git(&["config", "user.name", "Matrix Test"]);
     }
 
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store = open_test_store(&home.join("loopflow.db"));
     let wave = Wave::new(
         WaveId::new(),
         "product".to_string(),
@@ -612,10 +571,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
     if let Some(id) = &env.wave_id {
         command.env("LF_WAVE_ID", id);
     }
-    if cmd.special.needs_secret {
-        command.env("LF_LINEAR_WEBHOOK_SECRET", "test");
-    }
-
     if let Some(stdin_text) = cmd.special.stdin {
         command
             .stdin(Stdio::piped())
@@ -635,32 +590,6 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
         let output = child.wait_with_output().expect("wait");
         let _ = handle.join();
         return output;
-    }
-
-    if cmd.special.long_running {
-        command
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0);
-        let mut child = command.spawn().expect("spawn");
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => return child.wait_with_output().expect("wait"),
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                _ => {
-                    // SAFETY: the child created its own process group above,
-                    // and its pid is therefore the group id. A negative pid
-                    // targets only that test-owned group and its descendants.
-                    unsafe {
-                        libc::kill(-(child.id() as i32), libc::SIGKILL);
-                    }
-                    return child.wait_with_output().expect("wait after kill");
-                }
-            }
-        }
     }
 
     command.output().expect("lf runs")
@@ -877,7 +806,7 @@ fn cache_mutations_target_the_resolved_wave() {
     git(&["add", "."]);
     git(&["commit", "-m", "init"]);
 
-    let store = SqliteStore::new(&home.join("loopflow.db")).expect("open store");
+    let store = open_test_store(&home.join("loopflow.db"));
     let alpha = Wave::new(
         WaveId::new(),
         "alpha".to_string(),

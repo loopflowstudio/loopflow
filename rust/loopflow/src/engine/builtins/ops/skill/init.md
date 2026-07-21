@@ -147,11 +147,14 @@ lf pm show --wave <wave> --no-sync
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf pm init --wave <wave> --team-key <KEY>
+lf pm init --wave <wave>
 ```
 
-Creating or rebinding Linear state requires the human's choice. Do not infer a
-team key, Initiative, Project, or KR.
+The first Wave establishes the repository Team and defaults its key from the
+repository name; `--team-key <KEY>` is an explicit override. Later Waves must
+reuse that binding. Choosing the initial repository Team requires the human's
+choice. Do not invent another Team, Initiative, Project, or KR; an existing
+repository binding changes only through the repository-wide migration.
 
 ### New durable Wave
 
@@ -173,7 +176,7 @@ Projects carry definitions and KRs, while Tasks carry concrete work.
 ### Existing Linear Task
 
 Require its exact issue identifier. If Linear is connected and the Task belongs
-to a Wave-owned Project, the durable execution path is:
+to the repository Team and one Wave-owned Project, the durable execution path is:
 
 ```bash
 lf task run <ISSUE-ID>

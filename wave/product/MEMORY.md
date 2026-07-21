@@ -94,6 +94,27 @@ they mean the Mac surface.
   tolerate failure — drop the PM section rather than block. The scheduled
   `lf pm sync` cron keeps the snapshot warm for cross-machine readers.
 - **task = one Linear issue** under a Project. Linear is the only roadmap.
+- **Linear Team ownership moves to repository scope in PRD-43 (capability branch,
+  2026-07-20).** Repo-only `.lf/config.yaml` owns `pm.provider` plus the stable
+  `pm.linear_team`; each `GOAL.md` retains only its Initiative. A managed Team's
+  description carries one canonical Git-origin claim marker, validated before
+  every networked mutation. This is a cross-machine collision detector, not a
+  distributed lock (Linear exposes no compare-and-swap update).
+- **PM ownership follows stable provider edges.** Required snapshot fields are
+  Project `initiative_ids` + `team_ids` and Task `project_id` + `team_id`.
+  Reads and mutations resolve Issue → exactly one Project → exactly one
+  Initiative → exactly one local Wave; shared Issue prefixes and
+  ancestry-qualified Project titles are presentation only. Rust and Swift pin
+  this in the shared `pm_show.json` fixture; legacy payloads invalidate rather
+  than silently default.
+- **Repository-wide `lf pm reteam` is the only migration path.** It preflights
+  every linked Wave before provider writes, expands Project Team sets, moves all
+  open and completed Issues by UUID, reconciles durable identifiers, narrows
+  Projects, verifies/refills every snapshot, then removes legacy sentinels and
+  commits. Any Wave-level Team/provider or repo `linear.team` sentinel blocks
+  normal PM/Work mutations while cache-only reads and diagnostics remain.
+  PRD-43 deliberately preserves Loopflow's checked-in/live legacy bindings;
+  PRD-44 must run the consequential LOO migration from merged main.
 - The seven live bets (Linear Projects under the product Initiative): loopflow-api,
   wave-chat, mac-surface-ux, ios-surface-ux, distributed-computing,
   product-performance, auditability. The old Concerto project set

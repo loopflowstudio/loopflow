@@ -165,7 +165,17 @@ when to design first, what never to touch.
 | `agent` | Preferred agent harness/model |
 | `crons` | Supplementary flow schedules, fired by the wave's resident loop |
 | `pm.linear_initiative` | Linear Initiative id backing the wave (written by `lf pm init`) |
-| `pm.linear_team` | Linear team id owning the Wave's Project and Task prefixes |
+
+The repository owns PM provider and Team authority in `.lf/config.yaml`:
+
+```yaml
+pm:
+  provider: linear
+  linear_team: "stable-team-uuid"
+```
+
+Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
+the repository Team and owns only its Initiative.
 
 `owner` and `home` say where automatic startup is wanted. Both are optional and
 independent. They are policy, not authorization or observed runtime state.

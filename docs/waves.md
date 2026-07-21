@@ -236,16 +236,23 @@ carries the craft and examples.
 
 Tasks live in Linear; there are no local task lists. A wave maps to an
 Initiative, each project to a Linear Project, each task to an Issue. Connect
-once — `lf pm init` links or creates the Initiative and wave-owned team and
-writes both ids into `GOAL.md` frontmatter. Don't paste ids by hand.
+once — `lf pm init` links or creates the Wave Initiative and establishes one
+repository Team in `.lf/config.yaml`. Every Wave reuses that Team and issue-key
+namespace. Don't paste ids by hand.
 
 ```bash
-lf pm init --wave infra --team-key INF     # connect or rebind
+lf pm init --wave infra --team-key LOO     # first Wave establishes the repo Team
+lf pm init --all                           # all nested Waves reuse it
 lf pm sync --wave infra                    # refresh the local SQLite snapshot
 lf pm show --wave infra --no-sync          # deterministic cache-only read
 lf pm task create --wave infra --project stability --title "Daemon data integrity"
 lf pm task done --id 1207... --pr "https://github.com/acme/app/pull/42"
 ```
+
+A managed Project belongs to exactly one Initiative and exactly the repository
+Team. Project titles include the canonical Wave ancestry for orientation
+(`Survival / Infrastructure — Gmail`), but stable ids and Project membership —
+never titles or issue prefixes — resolve Work.
 
 ## Tasks
 

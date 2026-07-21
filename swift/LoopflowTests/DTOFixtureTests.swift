@@ -7,6 +7,25 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("PM snapshot fixture preserves repository Team and Project ownership")
+    func pmShowFixturePreservesOwnership() async throws {
+        let data = try loadFixtureData("pm_show.json")
+        let json = String(decoding: data, as: UTF8.self)
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["pm", "show", "--wave", "survival/infrastructure", "--json", "--no-sync"])
+            return json
+        }
+
+        let plan = try await query.plan(
+            wave: "survival/infrastructure",
+            objective: "Keep mail flowing.",
+            cwd: "/fixture"
+        )
+        #expect(plan.projects.map(\.id) == ["gmail"])
+        #expect(plan.projects[0].title == "Gmail")
+        #expect(plan.projects[0].krs[0].proof == .holds)
+    }
+
     @Test("Turn spend fixture preserves additive identity and absent measurements")
     func turnSpendFixtureRoundTrips() throws {
         let data = try loadFixtureData("turn_spend.json")

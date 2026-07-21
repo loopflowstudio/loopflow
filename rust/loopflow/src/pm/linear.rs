@@ -17,7 +17,7 @@ const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
 const LIST_ITEMS_PAGE_SIZE: u32 = 50;
 const LIST_PROJECTS_PAGE_SIZE: u32 = 50;
 const COMPLETED_STATE_TYPE: &str = "completed";
-const DEFAULT_LOOPFLOW_TEAM_NAME: &str = "Loopflow";
+const REPOSITORY_CLAIM_PREFIX: &str = "<!-- loopflow-repository:";
 
 const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
   teams {
@@ -25,12 +25,21 @@ const LIST_TEAMS_QUERY: &str = r#"query ListTeams {
       id
       name
       key
+      description
     }
   }
 }"#;
 
-const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: String!) {
-  teamCreate(input: { name: $name, key: $key }) {
+const CREATE_TEAM_MUTATION: &str = r#"mutation CreateTeam($name: String!, $key: String!, $description: String!) {
+  teamCreate(input: { name: $name, key: $key, description: $description }) {
+    team {
+      id
+    }
+  }
+}"#;
+
+const UPDATE_TEAM_DESCRIPTION_MUTATION: &str = r#"mutation UpdateTeamDescription($id: String!, $description: String!) {
+  teamUpdate(id: $id, input: { description: $description }) {
     team {
       id
     }
@@ -111,10 +120,18 @@ const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $n
 }"#;
 
 // Sets the Project's teams to exactly `[$teamId]` — a replacement, not an add —
-// so a Project stranded on the shared team lands on the wave's team. Projects
+// so a Project stranded on legacy Teams lands on the repository Team. Projects
 // keep their id/slug across a team move (only issues renumber).
 const MOVE_PROJECT_TO_TEAM_MUTATION: &str = r#"mutation MoveProjectToTeam($id: String!, $teamId: String!) {
   projectUpdate(id: $id, input: { teamIds: [$teamId] }) {
+    project {
+      id
+    }
+  }
+}"#;
+
+const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String!, $teamIds: [String!]!) {
+  projectUpdate(id: $id, input: { teamIds: $teamIds }) {
     project {
       id
     }
@@ -152,12 +169,53 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         state {
           type
         }
+        project {
+          id
+          name
+        }
+        team {
+          id
+        }
       }
       pageInfo {
         hasNextPage
         endCursor
       }
     }
+  }
+}"#;
+
+const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    url
+    title
+    description
+    prioritySortOrder
+    sortOrder
+    assignee { id }
+    state { type }
+    team { id }
+    project {
+      id
+      name
+      description
+      content
+      initiatives(first: 50) { nodes { id } }
+      teams(first: 50) { nodes { id } }
+    }
+  }
+}"#;
+
+const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
+  project(id: $id) {
+    id
+    name
+    description
+    content
+    initiatives(first: 50) { nodes { id } }
+    teams(first: 50) { nodes { id } }
   }
 }"#;
 
@@ -237,11 +295,10 @@ const VIEWER_QUERY: &str = r#"query Viewer {
   }
 }"#;
 
-// Register the webhook that streams issue/comment changes to a Loopflow receiver.
-// `allPublicTeams: true` covers every team the token can see; the caller owns the
-// signing secret (from Doppler) and the public URL.
-const CREATE_WEBHOOK_MUTATION: &str = r#"mutation CreateWebhook($url: String!, $secret: String!, $resourceTypes: [String!]!) {
-  webhookCreate(input: { url: $url, secret: $secret, resourceTypes: $resourceTypes, allPublicTeams: true }) {
+// Register the webhook that streams issue/comment changes for this repository's
+// one Team. The caller owns the signing secret and public URL.
+const CREATE_WEBHOOK_MUTATION: &str = r#"mutation CreateWebhook($url: String!, $secret: String!, $resourceTypes: [String!]!, $teamId: String!) {
+  webhookCreate(input: { url: $url, secret: $secret, resourceTypes: $resourceTypes, teamId: $teamId }) {
     webhook {
       id
     }
@@ -360,13 +417,18 @@ impl LinearClient {
         }
     }
 
-    /// Adopt or create the team a wave should own, keyed by `key`. Returns the
-    /// stable team id. Diagnoses conflicts instead of guessing:
+    /// Adopt or create the team a repository should own, keyed by `key`.
+    /// Diagnoses conflicts and claims the Team with the canonical Git origin:
     /// - the requested key already belongs to a team with the same name → adopt;
     /// - the requested key belongs to a *different*-named team → refuse;
     /// - the name exists under a different key → refuse (name the existing key);
     /// - neither exists → create.
-    pub async fn ensure_team(&self, name: &str, key: &str) -> PmResult<TeamBinding> {
+    pub async fn ensure_team(
+        &self,
+        name: &str,
+        key: &str,
+        repository: &str,
+    ) -> PmResult<TeamBinding> {
         let requested_key = key.trim().to_ascii_uppercase();
         if requested_key.is_empty() {
             return Err(PmError::Message(
@@ -382,11 +444,7 @@ impl LinearClient {
             .find(|team| team.key.eq_ignore_ascii_case(&requested_key))
         {
             if team.name.eq_ignore_ascii_case(name) {
-                return Ok(TeamBinding {
-                    id: team.id.clone(),
-                    key: team.key.clone(),
-                    created: false,
-                });
+                return self.claim_team(team, repository).await;
             }
             return Err(PmError::Message(format!(
                 "Linear team key {requested_key:?} already belongs to team {:?} (id {}). \
@@ -399,6 +457,9 @@ impl LinearClient {
             .iter()
             .find(|team| team.name.eq_ignore_ascii_case(name))
         {
+            if team.key.eq_ignore_ascii_case(&requested_key) {
+                return self.claim_team(team, repository).await;
+            }
             return Err(PmError::Message(format!(
                 "a Linear team named {name:?} already exists with key {:?} (id {}). \
                  Pass --team-key {} to adopt it, or rename the team.",
@@ -406,44 +467,124 @@ impl LinearClient {
             )));
         }
 
-        let response: TeamCreateData = self
-            .graphql(
-                CREATE_TEAM_MUTATION,
-                json!({ "name": name, "key": requested_key }),
-            )
-            .await?;
-        Ok(TeamBinding {
-            id: response.team_create.team.id,
-            key: requested_key,
-            created: true,
-        })
-    }
-
-    async fn resolve_team_id(&self) -> PmResult<String> {
-        if let Some(team_id) = &self.team_id {
-            return Ok(team_id.clone());
-        }
-
-        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
-        if let Some(team) = response
-            .teams
-            .nodes
-            .iter()
-            .find(|team| team.name.eq_ignore_ascii_case(DEFAULT_LOOPFLOW_TEAM_NAME))
-        {
-            return Ok(team.id.clone());
-        }
-
+        let description = repository_claim_marker(repository);
         let response: TeamCreateData = self
             .graphql(
                 CREATE_TEAM_MUTATION,
                 json!({
-                    "name": DEFAULT_LOOPFLOW_TEAM_NAME,
-                    "key": team_key_from_name(DEFAULT_LOOPFLOW_TEAM_NAME),
+                    "name": name,
+                    "key": requested_key,
+                    "description": description,
                 }),
             )
             .await?;
-        Ok(response.team_create.team.id)
+        let team_id = response.team_create.team.id;
+        let binding = self.validate_team_claim(&team_id, repository).await?;
+        Ok(TeamBinding {
+            created: true,
+            ..binding
+        })
+    }
+
+    async fn claim_team(&self, team: &TeamNode, repository: &str) -> PmResult<TeamBinding> {
+        match repository_claim(team.description.as_deref().unwrap_or_default())? {
+            Some(claimed) if claimed == repository => {}
+            Some(claimed) => {
+                return Err(PmError::Message(format!(
+                    "Linear team {} ({}, key {}) is claimed by repository {claimed}; \
+                     repository {repository} cannot use it",
+                    team.name, team.id, team.key
+                )))
+            }
+            None => {
+                let description = description_with_repository_claim(
+                    team.description.as_deref().unwrap_or_default(),
+                    repository,
+                );
+                let _: Value = self
+                    .graphql(
+                        UPDATE_TEAM_DESCRIPTION_MUTATION,
+                        json!({ "id": team.id, "description": description }),
+                    )
+                    .await?;
+            }
+        }
+        let mut binding = self.validate_team_claim(&team.id, repository).await?;
+        binding.created = false;
+        Ok(binding)
+    }
+
+    pub async fn claim_configured_team(
+        &self,
+        team_id: &str,
+        repository: &str,
+        expected_name: Option<&str>,
+        expected_key: Option<&str>,
+    ) -> PmResult<TeamBinding> {
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        let team = response
+            .teams
+            .nodes
+            .into_iter()
+            .find(|team| team.id == team_id)
+            .ok_or_else(|| PmError::Message(format!("no Linear team with id {team_id}")))?;
+        if let Some(name) = expected_name.filter(|name| !team.name.eq_ignore_ascii_case(name)) {
+            return Err(PmError::Message(format!(
+                "repository {repository} is already bound to Linear Team {} ({}, key {}); \
+                 it cannot rebind through --team-name {name:?}. Run repository-wide `lf pm reteam` instead.",
+                team.name, team.id, team.key
+            )));
+        }
+        if let Some(key) = expected_key.filter(|key| !team.key.eq_ignore_ascii_case(key.trim())) {
+            return Err(PmError::Message(format!(
+                "repository {repository} is already bound to Linear Team {} ({}, key {}); \
+                 it cannot rebind through --team-key {key:?}. Run repository-wide `lf pm reteam` instead.",
+                team.name, team.id, team.key
+            )));
+        }
+        self.claim_team(&team, repository).await
+    }
+
+    /// Validate that a stable Team id is claimed by this repository.
+    pub async fn validate_team_claim(
+        &self,
+        team_id: &str,
+        repository: &str,
+    ) -> PmResult<TeamBinding> {
+        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+        let team = response
+            .teams
+            .nodes
+            .into_iter()
+            .find(|team| team.id == team_id)
+            .ok_or_else(|| PmError::Message(format!("no Linear team with id {team_id}")))?;
+        match repository_claim(team.description.as_deref().unwrap_or_default())? {
+            Some(claimed) if claimed == repository => Ok(TeamBinding {
+                id: team.id,
+                key: team.key,
+                created: false,
+            }),
+            Some(claimed) => Err(PmError::Message(format!(
+                "Linear team {} ({}, key {}) is claimed by repository {claimed}; \
+                 configured repository {repository} must choose another Team",
+                team.name, team.id, team.key
+            ))),
+            None => Err(PmError::Message(format!(
+                "Linear team {} ({}, key {}) has no Loopflow repository claim; \
+                 run `lf pm init --team-key {}` to claim it for {repository}",
+                team.name, team.id, team.key, team.key
+            ))),
+        }
+    }
+
+    fn require_team_id(&self) -> PmResult<String> {
+        self.team_id.clone().ok_or_else(|| {
+            PmError::Message(
+                "Linear write requires repository `pm.linear_team` in .lf/config.yaml; \
+                 run `lf pm init --wave <wave> --team-key <KEY>`"
+                    .to_string(),
+            )
+        })
     }
 
     async fn graphql<T>(&self, query: &str, variables: Value) -> PmResult<T>
@@ -590,16 +731,15 @@ impl LinearClient {
         &self,
         initiative_id: &str,
         name: &str,
-        summary: &str,
         content: &ProjectContent,
     ) -> PmResult<String> {
-        let team_id = self.resolve_team_id().await?;
+        let team_id = self.require_team_id()?;
         let response: ProjectCreateData = self
             .graphql(
                 CREATE_PROJECT_MUTATION,
                 json!({
                     "name": name,
-                    "description": linear_description(summary),
+                    "description": project_description(content),
                     "content": render_project_content(content),
                     "teamId": team_id,
                 }),
@@ -622,7 +762,6 @@ impl LinearClient {
         &self,
         project_id: &str,
         name: &str,
-        summary: &str,
         content: &ProjectContent,
     ) -> PmResult<()> {
         let _: Value = self
@@ -631,7 +770,7 @@ impl LinearClient {
                 json!({
                     "id": project_id,
                     "name": name,
-                    "description": linear_description(summary),
+                    "description": project_description(content),
                     "content": render_project_content(content),
                 }),
             )
@@ -680,13 +819,12 @@ impl LinearClient {
     }
 
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
-        Ok(self
-            .list_issue_nodes(project_id)
+        self.list_issue_nodes(project_id)
             .await?
             .into_iter()
             .enumerate()
             .map(|(rank, issue)| issue.into_pm_item(rank as u32))
-            .collect())
+            .collect()
     }
 
     async fn list_issue_nodes(&self, project_id: &str) -> PmResult<Vec<IssueNode>> {
@@ -722,7 +860,7 @@ impl LinearClient {
     }
 
     pub async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-        let team_id = self.resolve_team_id().await?;
+        let team_id = self.require_team_id()?;
         let state_id = self.unstarted_state_id(&team_id).await?;
         let response: IssueCreateData = self
             .graphql(
@@ -795,7 +933,7 @@ impl LinearClient {
 
     /// Reassign a Project to exactly one team. `teamIds` is a set replacement, so
     /// this pulls the Project off whatever team(s) it was on (e.g. the shared
-    /// team) and onto the wave's team. Unlike issues, a Project keeps its id and
+    /// teams) and onto the repository Team. Unlike issues, a Project keeps its id and
     /// slug across the move.
     pub async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
         let _: Value = self
@@ -810,17 +948,36 @@ impl LinearClient {
         Ok(())
     }
 
-    /// The key (Task prefix) of a team by its id, e.g. `PRD` for the product
-    /// team. Errors if no team carries that id.
-    pub async fn team_key(&self, team_id: &str) -> PmResult<String> {
-        let response: TeamsData = self.graphql(LIST_TEAMS_QUERY, json!({})).await?;
+    pub async fn set_project_teams(&self, project_id: &str, team_ids: &[String]) -> PmResult<()> {
+        let _: Value = self
+            .graphql(
+                SET_PROJECT_TEAMS_MUTATION,
+                json!({ "id": project_id, "teamIds": team_ids }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Resolve one Issue directly by UUID or identifier, including its owning
+    /// Project and Team. This is the online Task-to-Wave ownership edge.
+    pub async fn issue_ownership(&self, issue_id: &str) -> PmResult<(PmItem, PmProject)> {
+        let response: IssueOwnershipData = self
+            .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
+            .await?;
+        let issue = response.issue.ok_or_else(|| {
+            PmError::Message(format!("no Linear issue with id or identifier {issue_id}"))
+        })?;
+        issue.into_ownership()
+    }
+
+    pub async fn project_ownership(&self, project_id: &str) -> PmResult<PmProject> {
+        let response: ProjectOwnershipData = self
+            .graphql(PROJECT_OWNERSHIP_QUERY, json!({ "id": project_id }))
+            .await?;
         response
-            .teams
-            .nodes
-            .into_iter()
-            .find(|team| team.id == team_id)
-            .map(|team| team.key)
-            .ok_or_else(|| PmError::Message(format!("no Linear team with id {team_id}")))
+            .project
+            .map(ProjectNode::into_pm_project)
+            .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
     }
 
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
@@ -984,6 +1141,7 @@ impl LinearClient {
     /// Register a webhook for `Issue` and `Comment` changes, signed with `secret`.
     /// Returns the created webhook id.
     pub async fn create_webhook(&self, url: &str, secret: &str) -> PmResult<String> {
+        let team_id = self.require_team_id()?;
         let response: WebhookCreateData = self
             .graphql(
                 CREATE_WEBHOOK_MUTATION,
@@ -991,6 +1149,7 @@ impl LinearClient {
                     "url": url,
                     "secret": secret,
                     "resourceTypes": ["Issue", "Comment"],
+                    "teamId": team_id,
                 }),
             )
             .await?;
@@ -1242,10 +1401,14 @@ struct IssueNode {
     assignee: Option<IdNode>,
     #[serde(default)]
     state: Option<WorkflowStateRef>,
+    #[serde(default)]
+    project: Option<ProjectRef>,
+    #[serde(default)]
+    team: Option<IdNode>,
 }
 
 impl IssueNode {
-    fn into_pm_item(self, rank: u32) -> PmItem {
+    fn into_pm_item(self, rank: u32) -> PmResult<PmItem> {
         let completed = self
             .state
             .as_ref()
@@ -1256,7 +1419,13 @@ impl IssueNode {
         } else {
             self.identifier
         };
-        PmItem {
+        let project = self
+            .project
+            .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Project")))?;
+        let team = self
+            .team
+            .ok_or_else(|| PmError::Message(format!("Linear issue {identifier} has no Team")))?;
+        Ok(PmItem {
             id: self.id,
             identifier,
             url: self.url,
@@ -1264,9 +1433,72 @@ impl IssueNode {
             description: self.description.unwrap_or_default(),
             rank,
             completed,
-            project: None,
+            project_id: project.id,
+            project: project_slug(&project.name),
+            team_id: team.id,
             assignee: self.assignee.map(|assignee| assignee.id),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct ProjectRef {
+    id: String,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct IssueOwnershipData {
+    issue: Option<OwnedIssueNode>,
+}
+
+#[derive(Deserialize)]
+struct OwnedIssueNode {
+    id: String,
+    #[serde(default)]
+    identifier: String,
+    url: Option<String>,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(rename = "prioritySortOrder", default)]
+    priority_sort_order: f64,
+    #[serde(rename = "sortOrder", default)]
+    sort_order: f64,
+    #[serde(default)]
+    assignee: Option<IdNode>,
+    #[serde(default)]
+    state: Option<WorkflowStateRef>,
+    #[serde(default)]
+    team: Option<IdNode>,
+    #[serde(default)]
+    project: Option<ProjectNode>,
+}
+
+impl OwnedIssueNode {
+    fn into_ownership(self) -> PmResult<(PmItem, PmProject)> {
+        let project = self.project.ok_or_else(|| {
+            PmError::Message(format!("Linear issue {} has no Project", self.identifier))
+        })?;
+        let item = IssueNode {
+            id: self.id,
+            identifier: self.identifier,
+            url: self.url,
+            title: self.title,
+            description: self.description,
+            priority_sort_order: self.priority_sort_order,
+            sort_order: self.sort_order,
+            assignee: self.assignee,
+            state: self.state,
+            project: Some(ProjectRef {
+                id: project.id.clone(),
+                name: project.name.clone(),
+            }),
+            team: self.team,
         }
+        .into_pm_item(0)?;
+        Ok((item, project.into_pm_project()))
     }
 }
 
@@ -1333,6 +1565,8 @@ struct TeamNode {
     id: String,
     name: String,
     key: String,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1377,9 +1611,14 @@ impl ProjectNode {
                 .into_iter()
                 .map(|initiative| initiative.id)
                 .collect(),
-            team_ids: Some(self.teams.nodes.into_iter().map(|team| team.id).collect()),
+            team_ids: self.teams.nodes.into_iter().map(|team| team.id).collect(),
         }
     }
+}
+
+#[derive(Deserialize)]
+struct ProjectOwnershipData {
+    project: Option<ProjectNode>,
 }
 
 #[derive(Default, Deserialize)]
@@ -1464,16 +1703,46 @@ async fn parse_graphql_response<T: DeserializeOwned>(response: reqwest::Response
         .map_err(|err| PmError::Message(format!("failed to decode Linear response: {err}")))
 }
 
-fn team_key_from_name(name: &str) -> String {
-    let key: String = name
-        .split_whitespace()
-        .filter_map(|word| word.chars().next())
-        .map(|ch| ch.to_ascii_uppercase())
-        .collect();
-    if key.is_empty() {
-        "LF".to_string()
+fn repository_claim_marker(repository: &str) -> String {
+    format!("{REPOSITORY_CLAIM_PREFIX} {repository} -->")
+}
+
+fn repository_claim(description: &str) -> PmResult<Option<String>> {
+    let mut claims = Vec::new();
+    for line in description.lines() {
+        if !line.contains(REPOSITORY_CLAIM_PREFIX) {
+            continue;
+        }
+        let trimmed = line.trim();
+        let Some(value) = trimmed
+            .strip_prefix(REPOSITORY_CLAIM_PREFIX)
+            .and_then(|value| value.strip_suffix("-->"))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Err(PmError::Message(format!(
+                "Linear Team has a malformed Loopflow repository marker: {trimmed:?}"
+            )));
+        };
+        claims.push(value.to_string());
+    }
+    match claims.as_slice() {
+        [] => Ok(None),
+        [claim] => Ok(Some(claim.clone())),
+        _ => Err(PmError::Message(format!(
+            "Linear Team has multiple Loopflow repository markers: {}",
+            claims.join(", ")
+        ))),
+    }
+}
+
+fn description_with_repository_claim(description: &str, repository: &str) -> String {
+    let human = description.trim_end();
+    let marker = repository_claim_marker(repository);
+    if human.is_empty() {
+        marker
     } else {
-        key[..key.len().min(5)].to_string()
+        format!("{human}\n\n{marker}")
     }
 }
 
@@ -1485,6 +1754,16 @@ fn linear_description(description: &str) -> String {
 
     const MAX_DESCRIPTION_LEN: usize = 255;
     summary.chars().take(MAX_DESCRIPTION_LEN).collect()
+}
+
+fn project_description(content: &ProjectContent) -> String {
+    let summary = content
+        .definition
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .find(|paragraph| !paragraph.is_empty())
+        .unwrap_or_default();
+    linear_description(&summary)
 }
 
 fn first_meaningful_paragraph(description: &str) -> String {
@@ -1567,7 +1846,11 @@ mod tests {
             json!({ "data": { "webhookCreate": { "webhook": { "id": "wh-1" } } } }),
         )])
         .await;
-        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-loo".to_string()),
+            base_url,
+        );
 
         let id = client
             .create_webhook("https://loopflow.example/linear/webhook", "whsec")
@@ -1585,6 +1868,8 @@ mod tests {
             body["variables"]["resourceTypes"],
             json!(["Issue", "Comment"])
         );
+        assert_eq!(body["variables"]["teamId"], "team-loo");
+        assert!(!CREATE_WEBHOOK_MUTATION.contains("allPublicTeams"));
         // Webhook input ids are String!, never ID! (see the position-sensitive
         // Linear id trap).
         assert!(CREATE_WEBHOOK_MUTATION.contains("$url: String!"));
@@ -1691,21 +1976,27 @@ mod tests {
                             "nodes": [
                                 {
                                     "id": "issue-1",
+                                    "identifier": "LOO-1",
                                     "url": "https://linear.app/loopflow/issue/INF-1/first",
                                     "title": "First",
                                     "description": "one",
                                     "prioritySortOrder": 10.0,
                                     "sortOrder": 10.0,
                                     "assignee": { "id": "user-1" },
-                                    "state": { "type": "unstarted" }
+                                    "state": { "type": "unstarted" },
+                                    "project": { "id": "project-123", "name": "Scan" },
+                                    "team": { "id": "team-9" }
                                 },
                                 {
                                     "id": "issue-2",
+                                    "identifier": "LOO-2",
                                     "title": "Second",
                                     "description": "two",
                                     "prioritySortOrder": 0.0,
                                     "sortOrder": 0.0,
-                                    "state": { "type": "completed" }
+                                    "state": { "type": "completed" },
+                                    "project": { "id": "project-123", "name": "Scan" },
+                                    "team": { "id": "team-9" }
                                 }
                             ],
                             "pageInfo": {
@@ -1779,10 +2070,7 @@ mod tests {
             .expect("list projects");
 
         assert_eq!(projects.len(), 1);
-        assert_eq!(
-            projects[0].team_ids.as_deref(),
-            Some(["team-cadenza".to_string()].as_slice())
-        );
+        assert_eq!(projects[0].team_ids, ["team-cadenza".to_string()]);
         let request: Value =
             serde_json::from_str(&requests.lock().await[0].body).expect("query json");
         assert!(request["query"]
@@ -1814,7 +2102,6 @@ mod tests {
             .create_project(
                 "initiative-1",
                 "Wave Chat",
-                "Conversation stays in flow.",
                 &ProjectContent {
                     definition: "Conversation stays in flow.".to_string(),
                     flows: crate::pm::ProjectFlowPlan::empty(),
@@ -1857,7 +2144,6 @@ mod tests {
             .update_project(
                 "project-1",
                 "Wave Chat",
-                "Conversation stays in flow.",
                 &ProjectContent {
                     definition: "Conversation stays in flow.".to_string(),
                     flows: crate::pm::ProjectFlowPlan {
@@ -1965,26 +2251,11 @@ mod tests {
         let body: Value = serde_json::from_str(&requests[0].body).expect("move json");
         let query = body["query"].as_str().expect("query");
         assert!(query.contains("projectUpdate"));
-        // teamIds is a set replacement: exactly the wave's team, pulling the
-        // Project off the shared team.
+        // teamIds is a set replacement: exactly the repository Team, pulling
+        // the Project off legacy Wave Teams.
         assert!(query.contains("teamIds: [$teamId]"));
         assert_eq!(body["variables"]["id"], "project-1");
         assert_eq!(body["variables"]["teamId"], "team-cadenza");
-    }
-
-    #[tokio::test]
-    async fn team_key_resolves_the_prefix_for_a_team_id() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "teams": { "nodes": [
-                { "id": "team-w2", "name": "Wave 2", "key": "W2" },
-                { "id": "team-prd", "name": "Product", "key": "PRD" }
-            ] } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
-
-        assert_eq!(client.team_key("team-prd").await.expect("key"), "PRD");
     }
 
     #[tokio::test]
@@ -2212,18 +2483,19 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_team_adopts_matching_key_without_creating() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
+        let claimed = "<!-- loopflow-repository: loopflowstudio/loopflow -->";
+        let teams = json_response(
             StatusCode::OK,
             json!({ "data": { "teams": { "nodes": [
-                { "id": "team-prd", "name": "Product", "key": "PRD" },
-                { "id": "team-inf", "name": "Infrastructure", "key": "INF" },
+                { "id": "team-prd", "name": "Product", "key": "PRD", "description": claimed },
+                { "id": "team-inf", "name": "Infrastructure", "key": "INF", "description": null },
             ] } } }),
-        )])
-        .await;
+        );
+        let (base_url, requests) = test_server::spawn(vec![teams.clone(), teams]).await;
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let binding = client
-            .ensure_team("Product", "PRD")
+            .ensure_team("Product", "PRD", "loopflowstudio/loopflow")
             .await
             .expect("adopt existing team");
 
@@ -2235,8 +2507,7 @@ mod tests {
                 created: false,
             }
         );
-        // Only the list query fired — no team was created.
-        assert_eq!(requests.lock().await.len(), 1);
+        assert_eq!(requests.lock().await.len(), 2);
     }
 
     #[tokio::test]
@@ -2250,12 +2521,19 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "teamCreate": { "team": { "id": "team-new" } } } }),
             ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teams": { "nodes": [{
+                    "id": "team-new", "name": "Product", "key": "PRD",
+                    "description": "<!-- loopflow-repository: loopflowstudio/loopflow -->"
+                }] } } }),
+            ),
         ])
         .await;
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let binding = client
-            .ensure_team("Product", "prd")
+            .ensure_team("Product", "prd", "loopflowstudio/loopflow")
             .await
             .expect("create team");
 
@@ -2272,6 +2550,10 @@ mod tests {
             serde_json::from_str(&requests[1].body).expect("create body is json");
         assert_eq!(create_body["variables"]["key"], "PRD");
         assert_eq!(create_body["variables"]["name"], "Product");
+        assert_eq!(
+            create_body["variables"]["description"],
+            "<!-- loopflow-repository: loopflowstudio/loopflow -->"
+        );
     }
 
     #[tokio::test]
@@ -2286,7 +2568,7 @@ mod tests {
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let err = client
-            .ensure_team("Product", "PRD")
+            .ensure_team("Product", "PRD", "loopflowstudio/loopflow")
             .await
             .expect_err("conflicting key is refused");
         let message = err.to_string();
@@ -2306,16 +2588,136 @@ mod tests {
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let err = client
-            .ensure_team("Product", "PRD")
+            .ensure_team("Product", "PRD", "loopflowstudio/loopflow")
             .await
             .expect_err("name reused under a different key is refused");
         assert!(err.to_string().contains("PROD"), "{err}");
     }
 
     #[tokio::test]
+    async fn ensure_team_claims_unmarked_team_without_erasing_human_description() {
+        let (base_url, requests) = test_server::spawn(vec![
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teams": { "nodes": [{
+                    "id": "team-loo", "name": "Loopflow", "key": "LOO",
+                    "description": "Human-owned team notes."
+                }] } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teamUpdate": { "team": { "id": "team-loo" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "teams": { "nodes": [{
+                    "id": "team-loo", "name": "Loopflow", "key": "LOO",
+                    "description": "Human-owned team notes.\n\n<!-- loopflow-repository: loopflowstudio/loopflow -->"
+                }] } } }),
+            ),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let binding = client
+            .ensure_team("Loopflow", "LOO", "loopflowstudio/loopflow")
+            .await
+            .expect("claim unmarked Team");
+        assert_eq!(binding.id, "team-loo");
+
+        let requests = requests.lock().await;
+        let update: Value = serde_json::from_str(&requests[1].body).unwrap();
+        let description = update["variables"]["description"].as_str().unwrap();
+        assert!(description.starts_with("Human-owned team notes."));
+        assert!(description.contains("loopflowstudio/loopflow"));
+    }
+
+    #[tokio::test]
+    async fn ensure_team_refuses_a_foreign_repository_claim_before_mutation() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "teams": { "nodes": [{
+                "id": "team-loo", "name": "Loopflow", "key": "LOO",
+                "description": "<!-- loopflow-repository: acme/other -->"
+            }] } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let error = client
+            .ensure_team("Loopflow", "LOO", "loopflowstudio/loopflow")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("acme/other"));
+        assert!(error.to_string().contains("loopflowstudio/loopflow"));
+        assert_eq!(requests.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn configured_team_rebind_is_refused_before_claiming_another_team() {
+        let (base_url, requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "teams": { "nodes": [{
+                "id": "team-loo", "name": "Loopflow", "key": "LOO",
+                "description": "Human-owned team notes."
+            }] } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
+
+        let error = client
+            .claim_configured_team("team-loo", "loopflowstudio/loopflow", None, Some("HOO"))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("already bound"));
+        assert!(error.to_string().contains("lf pm reteam"));
+        assert_eq!(requests.lock().await.len(), 1);
+    }
+
+    #[test]
+    fn repository_claim_rejects_ambiguous_markers() {
+        let description =
+            "<!-- loopflow-repository: acme/one -->\n<!-- loopflow-repository: acme/two -->";
+        assert!(repository_claim(description).is_err());
+    }
+
+    #[tokio::test]
+    async fn issue_ownership_resolves_project_and_team_by_stable_ids() {
+        let (base_url, _requests) = test_server::spawn(vec![json_response(
+            StatusCode::OK,
+            json!({ "data": { "issue": {
+                "id": "issue-uuid", "identifier": "LOO-42", "url": null,
+                "title": "Resolve ownership", "description": "",
+                "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                "assignee": null, "state": { "type": "unstarted" },
+                "team": { "id": "team-loo" },
+                "project": {
+                    "id": "project-api", "name": "Product — Loopflow API",
+                    "description": "", "content": "## Definition\n\nOne model.\n\n## KRs\n",
+                    "initiatives": { "nodes": [{ "id": "initiative-product" }] },
+                    "teams": { "nodes": [{ "id": "team-loo" }] }
+                }
+            } } }),
+        )])
+        .await;
+        let client = LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-loo".to_string()),
+            base_url,
+        );
+
+        let (item, project) = client.issue_ownership("LOO-42").await.unwrap();
+        assert_eq!(item.project_id, "project-api");
+        assert_eq!(item.team_id, "team-loo");
+        assert_eq!(project.initiative_ids, ["initiative-product"]);
+        assert_eq!(project.team_ids, ["team-loo"]);
+    }
+
+    #[tokio::test]
     async fn complete_item_resolves_state_from_the_issue_team_not_the_wave_team() {
-        // The client is bound to the wave's team, but the issue lives in a
-        // *different* team (the ENG-*/W2-* split). The completed state must be
+        // The client is bound to the repository Team, but this fixture puts the
+        // issue in a different Team. The completed state must be
         // resolved from the issue's own team or Linear rejects the transition.
         let (base_url, requests) = test_server::spawn(vec![
             json_response(

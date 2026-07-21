@@ -1,5 +1,6 @@
 pub mod linear;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -25,17 +26,9 @@ impl PmProviderKind {
             Self::Linear => "linear_initiative",
         }
     }
-
-    /// GOAL.md frontmatter key binding a wave to its provider team — the team
-    /// whose key prefixes every Task identifier (`PRD-*`, `INF-*`, …).
-    pub fn team_key(self) -> &'static str {
-        match self {
-            Self::Linear => "linear_team",
-        }
-    }
 }
 
-/// The result of adopting or creating a provider team for a wave. The stable
+/// The result of adopting or creating a provider team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamBinding {
@@ -106,12 +99,9 @@ pub struct PmProject {
     pub flows: Option<ProjectFlowPlan>,
     pub krs: Vec<PmKr>,
     pub initiative_ids: Vec<String>,
-    /// Stable ids of the Linear teams this Project belongs to. `None` when the
-    /// read did not resolve teams (a snapshot written before the field existed);
-    /// `Some(vec)` is authoritative. Team ownership drives `doctor`/`reteam`
-    /// repair; a Project's team is otherwise invisible to the team-agnostic read
-    /// path. Optional so an older cached snapshot still decodes.
-    pub team_ids: Option<Vec<String>>,
+    /// Stable ids of the Linear teams this Project belongs to. A managed Project
+    /// must carry exactly the repository Team.
+    pub team_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,9 +123,160 @@ pub struct PmItem {
     pub description: String,
     pub rank: u32,
     pub completed: bool,
-    pub project: Option<String>,
+    /// Stable owning Project id. Task-to-Wave resolution follows this edge.
+    pub project_id: String,
+    /// Canonical Project slug for display only.
+    pub project: String,
+    /// Stable owning repository Team id.
+    pub team_id: String,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PmSnapshot {
+    pub(crate) projects: Vec<PmProject>,
+    pub(crate) items: Vec<PmItem>,
+}
+
+/// Validates provider ownership across cached Wave snapshots presented together.
+#[derive(Debug, Default)]
+pub(crate) struct PmPortfolioValidator {
+    initiative_owners: BTreeMap<String, String>,
+    project_owners: BTreeMap<String, String>,
+    task_owners: BTreeMap<String, String>,
+}
+
+impl PmPortfolioValidator {
+    pub(crate) fn validate(
+        &mut self,
+        wave: &str,
+        initiative_id: &str,
+        expected_team_id: Option<&str>,
+        projects: &[PmProject],
+        items: &[PmItem],
+    ) -> PmResult<()> {
+        validate_snapshot_ownership(wave, initiative_id, expected_team_id, projects, items)?;
+
+        if let Some(owner) = self
+            .initiative_owners
+            .insert(initiative_id.to_string(), wave.to_string())
+        {
+            return Err(PmError::Message(format!(
+                "Linear Initiative {initiative_id} is bound by both wave/{owner} and wave/{wave} snapshots"
+            )));
+        }
+        for project in projects {
+            if let Some(owner) = self
+                .project_owners
+                .insert(project.id.clone(), wave.to_string())
+            {
+                return Err(PmError::Message(format!(
+                    "Linear Project {} belongs to both wave/{owner} and wave/{wave} snapshots",
+                    project.id
+                )));
+            }
+        }
+        for item in items {
+            if let Some(owner) = self.task_owners.insert(item.id.clone(), wave.to_string()) {
+                return Err(PmError::Message(format!(
+                    "Linear task {} belongs to both wave/{owner} and wave/{wave} snapshots",
+                    item.identifier
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_snapshot_ownership(
+    wave: &str,
+    initiative_id: &str,
+    expected_team_id: Option<&str>,
+    projects: &[PmProject],
+    items: &[PmItem],
+) -> PmResult<()> {
+    let mut projects_by_id = BTreeMap::new();
+    for project in projects {
+        if projects_by_id
+            .insert(project.id.as_str(), project)
+            .is_some()
+        {
+            return Err(PmError::Message(format!(
+                "Linear Project {} appears more than once in wave/{wave}",
+                project.id
+            )));
+        }
+        validate_project_ownership(wave, initiative_id, expected_team_id, project)?;
+    }
+
+    let mut issue_ids = BTreeSet::new();
+    for item in items {
+        if !issue_ids.insert(item.id.as_str()) {
+            return Err(PmError::Message(format!(
+                "Linear task {} appears more than once in wave/{wave}",
+                item.identifier
+            )));
+        }
+        let project = projects_by_id
+            .get(item.project_id.as_str())
+            .ok_or_else(|| {
+                PmError::Message(format!(
+                    "Linear task {} in wave/{wave} points to missing Project {}",
+                    item.identifier, item.project_id
+                ))
+            })?;
+        if item.project != project.slug {
+            return Err(PmError::Message(format!(
+                "Linear task {} in wave/{wave} names Project slug `{}`, but Project {} has slug `{}`",
+                item.identifier, item.project, project.id, project.slug
+            )));
+        }
+        if project.team_ids.as_slice() != [item.team_id.as_str()] {
+            return Err(PmError::Message(format!(
+                "Linear task {} in wave/{wave} belongs to Team {}, but Project {} belongs to Teams [{}]",
+                item.identifier,
+                item.team_id,
+                project.id,
+                project.team_ids.join(", ")
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_project_ownership(
+    wave: &str,
+    initiative_id: &str,
+    expected_team_id: Option<&str>,
+    project: &PmProject,
+) -> PmResult<()> {
+    if project.initiative_ids.as_slice() != [initiative_id] {
+        return Err(PmError::Message(format!(
+            "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; expected exactly {initiative_id}",
+            project.name,
+            project.id,
+            project.initiative_ids.join(", ")
+        )));
+    }
+    let [team_id] = project.team_ids.as_slice() else {
+        return Err(PmError::Message(format!(
+            "Linear Project `{}` ({}) in wave/{wave} belongs to {} Teams [{}]; expected exactly one repository Team",
+            project.name,
+            project.id,
+            project.team_ids.len(),
+            project.team_ids.join(", ")
+        )));
+    };
+    if expected_team_id.is_some_and(|expected| expected != team_id) {
+        return Err(PmError::Message(format!(
+            "Linear Project `{}` ({}) in wave/{wave} belongs to Team {team_id}; expected repository Team {}",
+            project.name,
+            project.id,
+            expected_team_id.expect("checked as Some")
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -521,7 +662,7 @@ mod tests {
                 "definition":"Incidents are resolved at every causal layer.",
                 "krs":[],
                 "initiative_ids":["initiative-1"],
-                "team_ids":null
+                "team_ids":["team-1"]
             }"#,
         )
         .expect("legacy project snapshot");

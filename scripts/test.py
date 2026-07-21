@@ -193,7 +193,18 @@ def _rust_commands(_changed: list[str]) -> list[Command]:
             REPO_ROOT,
             "clippy",
         ),
-        Command(test_argv, REPO_ROOT, "rust"),
+        Command(
+            [
+                "uv",
+                "run",
+                "python",
+                "scripts/materialize_rust_tests.py",
+                "--",
+                *test_argv,
+            ],
+            REPO_ROOT,
+            "rust",
+        ),
     ]
 
 

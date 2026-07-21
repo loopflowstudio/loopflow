@@ -30,3 +30,9 @@ reimplementing prompt transformations in Swift.
 Turn, AgentInvocation, trace, and exec; the second row proves a cache-only measurement
 survives while absent token and cost fields remain explicit nulls. Rust and
 Swift both round-trip it.
+
+`pm_show.json` pins the repository-owned Linear hierarchy read by `lf pm show`
+and the app: a Project carries exactly one Wave Initiative and the repository
+Team; its Task carries the stable Project and Team ids used for ownership.
+The shared `LOO-*` identifier and canonical Project name remain presentation;
+the provider's Wave-qualified title is normalized before this wire boundary.

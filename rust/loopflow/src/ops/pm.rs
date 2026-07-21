@@ -11,31 +11,32 @@ use std::path::Path;
 
 use futures_util::future::try_join_all;
 
-use crate::engine::config::load_config_or_default;
+use crate::engine::config::load_repo_config;
 use crate::engine::wave_config::{read_wave_config, update_wave_goal_config, WavePmConfig};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmProject, PmProviderKind, PmResult, PmWave,
-    ProjectContent, ProjectFlowPlan, TeamBinding,
+    PmError, PmItem, PmItemCreate, PmItemUpdate, PmKr, PmPortfolioValidator, PmProject,
+    PmProviderKind, PmSnapshot, PmWave, ProjectContent, ProjectFlowPlan,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
-use crate::store::{open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState};
-#[cfg(test)]
-use crate::task::Task;
+use crate::repository::RepoId;
+use crate::store::{
+    open_existing_store, open_store, PmSnapshotRow, ProviderToken, Store, TaskWriterState,
+};
 
 // ── Options and results ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
 pub struct PmInitOptions {
     pub wave: Option<String>,
-    /// Team key (Task prefix, e.g. `PRD`). Defaults to one derived from the wave.
+    /// Repository Team key (Task prefix, e.g. `LOO`). Defaults from the repository name.
     pub team_key: Option<String>,
-    /// Team display name. Defaults to the title-cased wave name.
+    /// Repository Team display name. Defaults to the repository name.
     pub team_name: Option<String>,
 }
 
@@ -44,10 +45,10 @@ pub struct PmInitResult {
     pub wave: String,
     pub initiative_id: String,
     pub created: bool,
-    /// Stable id of the wave's team (owns the Task prefix).
+    /// Stable id of the repository Team (owns the Task prefix).
     pub team_id: String,
-    /// The team's key, when this run resolved it (`None` on a full no-op re-init).
-    pub team_key: Option<String>,
+    /// The repository Team's current display key (Task prefix).
+    pub team_key: String,
     /// Whether this run created the team (vs. adopted an existing one).
     pub team_created: bool,
 }
@@ -71,7 +72,7 @@ pub enum PmRefresh {
     Never,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PmShowResult {
     pub wave: String,
     pub provider: PmProviderKind,
@@ -137,15 +138,16 @@ pub struct PmSyncResult {
 
 #[derive(Debug, Clone, Default)]
 pub struct PmReteamOptions {
-    pub wave: Option<String>,
     /// Execute the moves. Without it, `reteam` only prints the plan (dry run).
     pub apply: bool,
 }
 
-/// One issue that moves into the wave's team. `new_identifier` is filled only
+/// One issue that moves into the repository Team. `new_identifier` is filled only
 /// after an applied move (Linear assigns the number then).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamMove {
+    pub wave: String,
+    pub project_id: String,
     pub id: String,
     pub old_identifier: String,
     pub title: String,
@@ -155,34 +157,38 @@ pub struct PmReteamMove {
 /// One issue left in place while a Task Run can still write its old id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamDeferral {
+    pub wave: String,
     pub identifier: String,
     pub title: String,
     pub reason: String,
 }
 
-/// One Project narrowed onto the wave's team. Projects keep their id and slug on
+/// One Project narrowed onto the repository Team. Projects keep their id and slug on
 /// a team move (Linear only renumbers issues), so there is no new identifier to
 /// carry — `from_teams` records where it came from for the plan output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamProjectMove {
+    pub wave: String,
     pub id: String,
     pub name: String,
+    pub target_name: String,
     pub from_teams: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmReteamResult {
-    pub wave: String,
+    pub repository: String,
+    pub waves: Vec<String>,
     pub team_id: String,
     pub team_key: String,
     /// True when moves were executed; false for a dry run.
     pub applied: bool,
-    /// Projects narrowed onto the wave's team (narrowed after their issues moved
+    /// Projects narrowed onto the repository Team (after their issues moved
     /// off the legacy team).
     pub project_moves: Vec<PmReteamProjectMove>,
     pub moves: Vec<PmReteamMove>,
     pub deferrals: Vec<PmReteamDeferral>,
-    /// Issues already carrying the target team key (skipped — idempotency).
+    /// Issues already carrying the target Team id (skipped — idempotency).
     pub already: usize,
     /// Durable Tasks whose cached display identifier was reconciled.
     pub task_updates: usize,
@@ -277,9 +283,8 @@ async fn pm_create_project_async(
     title: &str,
 ) -> OpsResult<PmResolvedProject> {
     let wave = resolve_wave(wave)?;
-    require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
     let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    let projects = checked_projects(repo, &ctx, &wave).await?;
     if let Some(project) = projects
         .into_iter()
         .find(|project| project.name.eq_ignore_ascii_case(title))
@@ -298,7 +303,7 @@ async fn pm_create_project_async(
         flows: ProjectFlowPlan::empty(),
         krs: Vec::new(),
     };
-    let linear_name = linear_project_name(&wave, &seed.name);
+    let linear_name = linear_project_name(repo, &wave, &seed.name).await?;
     let id = match ctx
         .client
         .create_project(
@@ -313,7 +318,7 @@ async fn pm_create_project_async(
         .await
     {
         Ok(id) => id,
-        Err(create_error) => checked_projects(&ctx.client, &ctx.initiative, &wave)
+        Err(create_error) => checked_projects(repo, &ctx, &wave)
             .await?
             .into_iter()
             .find(|project| project.name.eq_ignore_ascii_case(title))
@@ -331,18 +336,12 @@ async fn pm_create_project_async(
             definition: seed.definition,
             flows: Some(seed.flows),
             krs: seed.krs,
-            initiative_ids: vec![ctx.initiative],
+            initiative_ids: vec![ctx.initiative.clone()],
             // The create result is transient — the next sync resolves the
             // authoritative teams from Linear.
-            team_ids: None,
+            team_ids: vec![ctx.team_id.clone()],
         },
     })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct PmSnapshot {
-    projects: Vec<PmProject>,
-    items: Vec<PmItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,189 +356,25 @@ struct LocalProject {
 
 // ── Client + Linear project resolution ──────────────────────────────
 
-/// A wave's PM client bound to its provider Linear Initiative.
-pub(crate) struct PmContext {
-    pub client: PmClient,
+#[derive(Clone)]
+pub(crate) struct RepositoryPmContext {
+    pub client: LinearClient,
     pub provider: PmProviderKind,
+    pub repo_id: RepoId,
+    pub team_id: String,
+}
+
+/// A Wave's Initiative inside its repository-owned PM authority.
+pub(crate) struct PmContext {
+    pub repository: RepositoryPmContext,
     pub initiative: String,
 }
 
-#[derive(Clone)]
-pub(crate) enum PmClient {
-    Linear(LinearClient),
-}
+impl std::ops::Deref for PmContext {
+    type Target = RepositoryPmContext;
 
-impl PmClient {
-    async fn create_wave(&self, name: &str, summary: &str) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => client.create_wave(name, summary).await,
-        }
-    }
-
-    async fn ensure_team(&self, name: &str, key: &str) -> PmResult<TeamBinding> {
-        match self {
-            Self::Linear(client) => client.ensure_team(name, key).await,
-        }
-    }
-
-    async fn rename_wave(&self, initiative_id: &str, name: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.rename_wave(initiative_id, name).await,
-        }
-    }
-
-    async fn list_waves(&self) -> PmResult<Vec<PmWave>> {
-        match self {
-            Self::Linear(client) => client.list_waves().await,
-        }
-    }
-
-    async fn list_projects(&self, initiative_id: &str) -> PmResult<Vec<PmProject>> {
-        match self {
-            Self::Linear(client) => client.list_projects(initiative_id).await,
-        }
-    }
-
-    async fn create_project(
-        &self,
-        initiative_id: &str,
-        name: &str,
-        content: &ProjectContent,
-    ) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => {
-                client
-                    .create_project(
-                        initiative_id,
-                        name,
-                        &first_paragraph(&content.definition),
-                        content,
-                    )
-                    .await
-            }
-        }
-    }
-
-    async fn update_project(
-        &self,
-        project_id: &str,
-        name: &str,
-        content: &ProjectContent,
-    ) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => {
-                client
-                    .update_project(
-                        project_id,
-                        name,
-                        &first_paragraph(&content.definition),
-                        content,
-                    )
-                    .await
-            }
-        }
-    }
-
-    async fn archive_project(&self, project_id: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.archive_project(project_id).await,
-        }
-    }
-
-    async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
-        match self {
-            Self::Linear(client) => client.list_items(project_id).await,
-        }
-    }
-
-    async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => client.create_item(project_id, item).await,
-        }
-    }
-
-    async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.update_item(item_id, update).await,
-        }
-    }
-
-    async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.move_item_to_project(item_id, project_id).await,
-        }
-    }
-
-    async fn move_item_to_team(&self, item_id: &str, team_id: &str) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => client.move_item_to_team(item_id, team_id).await,
-        }
-    }
-
-    async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.move_project_to_team(project_id, team_id).await,
-        }
-    }
-
-    async fn team_key(&self, team_id: &str) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => client.team_key(team_id).await,
-        }
-    }
-
-    async fn complete_item(&self, item_id: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.complete_item(item_id).await,
-        }
-    }
-
-    async fn comment(&self, item_id: &str, body: &str) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => client.comment(item_id, body).await,
-        }
-    }
-
-    /// The bodies of an issue's existing comments, newest page first. `reteam`
-    /// reads these to make its traceability comment idempotent: it re-posts only
-    /// when this migration's marker is absent.
-    async fn issue_comment_bodies(&self, item_id: &str) -> PmResult<Vec<String>> {
-        match self {
-            Self::Linear(client) => Ok(client
-                .observe_issue(item_id)
-                .await?
-                .comments
-                .into_iter()
-                .map(|comment| comment.body)
-                .collect()),
-        }
-    }
-
-    async fn update_comment(&self, comment_id: &str, body: &str) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => client.update_comment(comment_id, body).await,
-        }
-    }
-
-    async fn link_attachment(&self, issue_id: &str, url: &str, title: &str) -> PmResult<String> {
-        match self {
-            Self::Linear(client) => client.link_attachment(issue_id, url, title).await,
-        }
-    }
-
-    async fn update_attachment(
-        &self,
-        attachment_id: &str,
-        title: &str,
-        subtitle: &str,
-    ) -> PmResult<()> {
-        match self {
-            Self::Linear(client) => {
-                client
-                    .update_attachment(attachment_id, title, subtitle)
-                    .await
-            }
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.repository
     }
 }
 
@@ -556,16 +391,10 @@ fn parse_provider(value: &str) -> OpsResult<PmProviderKind> {
     value.parse::<PmProviderKind>().map_err(pm_to_ops)
 }
 
-fn resolve_provider(repo: &Path, wave: &str) -> OpsResult<PmProviderKind> {
-    let config = load_config_or_default(Some(repo));
-    let wave_pm = read_wave_pm_config(repo, wave);
-    if let Some(provider) = wave_pm
-        .as_ref()
-        .and_then(|pm| pm.provider.as_deref())
-        .filter(|provider| !provider.trim().is_empty())
-    {
-        return parse_provider(provider);
-    }
+fn resolve_provider(repo: &Path) -> OpsResult<PmProviderKind> {
+    let config = load_repo_config(repo)
+        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
+        .unwrap_or_default();
     if let Some(provider) = config
         .pm
         .as_ref()
@@ -585,71 +414,137 @@ fn read_initiative(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<
     Some(initiative).filter(|initiative| !initiative.trim().is_empty())
 }
 
-/// The team id bound to a wave in GOAL.md, if any (`pm.linear_team`).
-fn read_team(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
-    let pm = read_wave_pm_config(repo, wave)?;
+fn read_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<Option<String>> {
+    let config = load_repo_config(repo)
+        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
+        .unwrap_or_default();
     let team = match provider {
-        PmProviderKind::Linear => pm.linear_team,
-    }?;
-    Some(team).filter(|team| !team.trim().is_empty())
+        PmProviderKind::Linear => config.pm.and_then(|pm| pm.linear_team),
+    };
+    Ok(team.filter(|team| !team.trim().is_empty()))
 }
 
-/// The team a wave's PM client should act in: its own `pm.linear_team` binding,
-/// falling back to the machine-global `config.linear.team` for waves not yet
-/// bound (keeps unmigrated waves working on the shared team). Reads follow
-/// Initiative → Project → Issue and ignore the team, so an unbound wave still
-/// syncs its existing issues; the team only steers *creation*.
-fn resolve_team(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
-    read_team(repo, wave, provider)
-        .or_else(|| load_config_or_default(Some(repo)).linear.team.clone())
-}
-
-/// The team *creation* must act in. Fail closed: creation resolves a wave's
-/// explicit `pm.linear_team` binding and never borrows `config.linear.team` or
-/// Linear's auto-created default team, so a Project/Task cannot silently land
-/// on a foreign team. An unbound wave errors with the exact recovery and no
-/// Linear side effect; reads keep [`resolve_team`]'s fallback so an unbound
-/// wave still syncs its existing issues.
-fn require_creation_team(repo: &Path, wave: &str, provider: PmProviderKind) -> OpsResult<String> {
-    read_team(repo, wave, provider).ok_or_else(|| {
-        OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `pm.{key}`, so creating work would fall \
-             back to the shared team. Bind the wave's team first: \
-             `lf pm init --wave {wave} --team-key <KEY>`.",
-            key = provider.team_key()
-        ))
+fn require_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<String> {
+    read_repository_team(repo, provider)?.ok_or_else(|| {
+        OpsError::Message(
+            ".lf/config.yaml has no repository `pm.linear_team`. \
+             Run `lf pm init --wave <wave> --team-key <KEY>` before creating or mutating work."
+                .to_string(),
+        )
     })
 }
 
 /// Whether a wave has a Linear Initiative pinned for its resolved provider.
 fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
-    resolve_provider(repo, wave)
+    resolve_provider(repo)
         .ok()
         .is_some_and(|provider| read_initiative(repo, wave, provider).is_some())
+}
+
+fn legacy_pm_sentinels(repo: &Path) -> OpsResult<Vec<String>> {
+    let config = load_repo_config(repo)
+        .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
+        .unwrap_or_default();
+    let mut sentinels = Vec::new();
+    if config.linear.team.is_some() {
+        sentinels.push(".lf/config.yaml `linear.team`".to_string());
+    }
+    for wave in list_local_waves(repo)? {
+        let Some(pm) = read_wave_pm_config(repo, &wave) else {
+            continue;
+        };
+        if pm.provider.is_some() {
+            sentinels.push(format!("wave/{wave}/GOAL.md `pm.provider`"));
+        }
+        if pm.linear_team.is_some() {
+            sentinels.push(format!("wave/{wave}/GOAL.md `pm.linear_team`"));
+        }
+    }
+    Ok(sentinels)
+}
+
+pub(crate) fn require_repository_pm_ready(repo: &Path) -> OpsResult<()> {
+    let sentinels = legacy_pm_sentinels(repo)?;
+    if sentinels.is_empty() {
+        return Ok(());
+    }
+    Err(OpsError::Message(format!(
+        "repository PM migration is required before this mutation; legacy authority remains at {}. \
+         Run `lf pm reteam` to inspect the repository-wide plan, then `lf pm reteam --apply`. \
+         Loopflow's live migration is owned by PRD-44.",
+        sentinels.join(", ")
+    )))
+}
+
+pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
+    require_repository_pm_ready(repo)?;
+    let provider = resolve_provider(repo)?;
+    require_repository_team(repo, provider)
+}
+
+/// Expected Team for strict cached reads after migration. During the deliberate
+/// PRD-43/PRD-44 mixed state, legacy snapshots remain inspectable and validate
+/// their own singular Team rather than pretending they already carry the new one.
+pub(crate) fn repository_team_for_snapshot_validation(repo: &Path) -> OpsResult<Option<String>> {
+    if !legacy_pm_sentinels(repo)?.is_empty() {
+        return Ok(None);
+    }
+    let provider = resolve_provider(repo)?;
+    read_repository_team(repo, provider)
 }
 
 async fn build_client(
     _repo: &Path,
     provider: PmProviderKind,
     team: Option<String>,
-) -> OpsResult<PmClient> {
+) -> OpsResult<LinearClient> {
     let token = resolve_pm_token(provider).await?;
     match provider {
-        PmProviderKind::Linear => Ok(PmClient::Linear(LinearClient::new(token, team))),
+        PmProviderKind::Linear => Ok(LinearClient::new(token, team)),
     }
 }
 
-/// A configured Linear client for a wave, for webhook serve/register. Resolves
-/// and refreshes the wave's OAuth token exactly like every other `lf pm` read.
-pub async fn linear_client(repo: &Path, wave: &str) -> OpsResult<LinearClient> {
-    let provider = resolve_provider(repo, wave)?;
-    let PmClient::Linear(client) =
-        build_client(repo, provider, resolve_team(repo, wave, provider)).await?;
-    Ok(client)
+fn repository_id(repo: &Path) -> OpsResult<RepoId> {
+    RepoId::discover(repo).map_err(|error| {
+        OpsError::Message(format!(
+            "cannot establish repository PM identity from Git origin: {error}. \
+             Configure an origin before running `lf pm init`."
+        ))
+    })
+}
+
+async fn resolve_repository_context(repo: &Path) -> OpsResult<RepositoryPmContext> {
+    require_repository_pm_ready(repo)?;
+    let provider = resolve_provider(repo)?;
+    let team_id = require_repository_team(repo, provider)?;
+    let repo_id = repository_id(repo)?;
+    let client = build_client(repo, provider, Some(team_id.clone())).await?;
+    client
+        .validate_team_claim(&team_id, repo_id.as_str())
+        .await
+        .map_err(pm_to_ops)?;
+    Ok(RepositoryPmContext {
+        client,
+        provider,
+        repo_id,
+        team_id: team_id.clone(),
+    })
+}
+
+/// A configured Linear client for repository-scoped webhook and exact-Issue operations.
+pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
+    Ok(resolve_repository_context(repo).await?.client)
+}
+
+pub(crate) async fn linear_issue_client(repo: &Path, issue_id: &str) -> OpsResult<LinearClient> {
+    let context = resolve_repository_context(repo).await?;
+    resolve_owned_issue(repo, &context, issue_id).await?;
+    Ok(context.client)
 }
 
 async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
-    let provider = resolve_provider(repo, wave)?;
+    let repository = resolve_repository_context(repo).await?;
+    let provider = repository.provider;
     let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
         OpsError::Message(format!(
             "wave/{wave}/GOAL.md has no `pm.{}`. \
@@ -657,10 +552,8 @@ async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
             provider.initiative_key()
         ))
     })?;
-    let client = build_client(repo, provider, resolve_team(repo, wave, provider)).await?;
     Ok(PmContext {
-        client,
-        provider,
+        repository,
         initiative,
     })
 }
@@ -828,7 +721,7 @@ async fn read_pm_snapshot(repo: &Path, wave: &str) -> OpsResult<PmSnapshotRow> {
 fn decode_snapshot(wave: &str, payload: &str) -> OpsResult<PmSnapshot> {
     serde_json::from_str(payload).map_err(|err| {
         OpsError::Message(format!(
-            "invalid PM snapshot for wave/{wave}; run `lf pm sync`: {err}"
+            "PM snapshot schema changed for wave/{wave}; run `lf pm sync`: {err}"
         ))
     })
 }
@@ -934,8 +827,15 @@ async fn load_show_snapshot(
     }
 }
 
-async fn fetch_pm_snapshot(wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
-    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
+async fn fetch_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
+    let projects = checked_projects(repo, ctx, wave).await?;
+    fetch_pm_snapshot_for_projects(ctx, projects).await
+}
+
+async fn fetch_pm_snapshot_for_projects(
+    ctx: &PmContext,
+    projects: Vec<PmProject>,
+) -> OpsResult<PmSnapshot> {
     let project_items = try_join_all(projects.iter().cloned().map(|project| async move {
         let mut items = ctx
             .client
@@ -943,7 +843,8 @@ async fn fetch_pm_snapshot(wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot>
             .await
             .map_err(pm_to_ops)?;
         for item in &mut items {
-            item.project = Some(project.slug.clone());
+            item.project_id = project.id.clone();
+            item.project = project.slug.clone();
         }
         Ok::<_, OpsError>(items)
     }))
@@ -990,7 +891,7 @@ async fn store_pm_snapshot_with_store(
 }
 
 async fn refresh_pm_snapshot(repo: &Path, wave: &str, ctx: &PmContext) -> OpsResult<PmSnapshot> {
-    let snapshot = fetch_pm_snapshot(wave, ctx).await?;
+    let snapshot = fetch_pm_snapshot(repo, wave, ctx).await?;
     store_pm_snapshot(repo, wave, ctx, &snapshot).await?;
     Ok(snapshot)
 }
@@ -1018,35 +919,39 @@ async fn pm_init_async(
         )));
     }
 
-    let provider = resolve_provider(repo, &wave)?;
+    let provider = resolve_provider(repo)?;
+    let repo_id = repository_id(repo)?;
     let existing_initiative = read_initiative(repo, &wave, provider);
-    let existing_team = read_team(repo, &wave, provider);
-
-    let explicit_team = options.team_key.is_some() || options.team_name.is_some();
-
-    // Full no-op fast path: both bindings present and the caller did not ask
-    // to adopt a different team. An explicit team selection is a rebind.
-    if let (Some(initiative_id), Some(team_id)) =
-        (existing_initiative.as_ref(), existing_team.as_ref())
-    {
-        if !explicit_team {
-            progress.status(&format!(
-                "wave/{wave} already linked to {provider} Initiative {initiative_id} and team {team_id}"
-            ));
-            return Ok(PmInitResult {
-                wave,
-                initiative_id: initiative_id.clone(),
-                created: false,
-                team_id: team_id.clone(),
-                team_key: None,
-                team_created: false,
-            });
-        }
-    }
+    let existing_team = read_repository_team(repo, provider)?;
 
     let summary = wave_summary(repo, &wave)?;
     let title = title_case(&wave);
-    let client = build_client(repo, provider, resolve_team(repo, &wave, provider)).await?;
+    let client = build_client(repo, provider, existing_team.clone()).await?;
+
+    let team_name = options
+        .team_name
+        .clone()
+        .unwrap_or_else(|| title_case(repo_id.name()));
+    let team_key = options
+        .team_key
+        .clone()
+        .unwrap_or_else(|| default_team_key(repo_id.name()));
+    let team = match existing_team.as_deref() {
+        Some(team_id) => client
+            .claim_configured_team(
+                team_id,
+                repo_id.as_str(),
+                options.team_name.as_deref(),
+                options.team_key.as_deref(),
+            )
+            .await
+            .map_err(pm_to_ops)?,
+        None => client
+            .ensure_team(&team_name, &team_key, repo_id.as_str())
+            .await
+            .map_err(pm_to_ops)?,
+    };
+    let team_changed = existing_team.as_deref() != Some(team.id.as_str());
 
     // Initiative: keep an existing binding, else find or create it.
     let initiative_missing = existing_initiative.is_none();
@@ -1079,39 +984,8 @@ async fn pm_init_async(
     if initiative_missing {
         write_initiative_to_goal(repo, &wave, provider, &initiative_id)?;
     }
-
-    // Team: an explicit key/name rebinds an existing Wave; otherwise keep its
-    // binding or create the default one when missing.
-    let resolve_requested_team = explicit_team || existing_team.is_none();
-    let (team_id, team_key, team_created) = if resolve_requested_team {
-        let name = options.team_name.clone().unwrap_or_else(|| title.clone());
-        let key = options
-            .team_key
-            .clone()
-            .unwrap_or_else(|| default_team_key(&wave));
-        progress.status(&format!(
-            "resolving {provider} team `{name}` (key {key}) for wave/{wave}"
-        ));
-        let team = client.ensure_team(&name, &key).await.map_err(pm_to_ops)?;
-        progress.status(&format!(
-            "{} {provider} team {} (key {})",
-            if team.created { "created" } else { "adopted" },
-            team.id,
-            team.key
-        ));
-        (team.id, Some(team.key), team.created)
-    } else {
-        (
-            existing_team
-                .clone()
-                .expect("an unrequested existing team was checked above"),
-            None,
-            false,
-        )
-    };
-    let team_changed = existing_team.as_deref() != Some(team_id.as_str());
     if team_changed {
-        write_team_to_goal(repo, &wave, provider, &team_id)?;
+        write_repository_pm_config(repo, provider, &team.id)?;
     }
 
     if initiative_missing || team_changed {
@@ -1130,9 +1004,9 @@ async fn pm_init_async(
         wave,
         initiative_id,
         created,
-        team_id,
-        team_key,
-        team_created,
+        team_id: team.id,
+        team_key: team.key,
+        team_created: team.created,
     })
 }
 
@@ -1165,11 +1039,7 @@ pub(crate) async fn pm_show_async(
     let items = snapshot
         .items
         .into_iter()
-        .filter(|item| {
-            item.project
-                .as_deref()
-                .is_some_and(|project| slugs.contains(project))
-        })
+        .filter(|item| slugs.contains(item.project.as_str()))
         .collect();
     Ok(PmShowResult {
         wave,
@@ -1221,9 +1091,8 @@ async fn pm_create_task_idempotent_async(
     marker: &str,
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
-    require_creation_team(repo, wave, resolve_provider(repo, wave)?)?;
     let ctx = resolve_context(repo, wave).await?;
-    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
+    let projects = checked_projects(repo, &ctx, wave).await?;
     let project = find_project(&projects, wave, project_slug)?;
     let find_existing = |items: Vec<PmItem>| {
         items
@@ -1294,19 +1163,31 @@ pub(crate) async fn pm_update_async(
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
-    // A create (no `--id`) must bind an explicit team; an update on an existing
-    // issue does not attach to a team, so it stays team-agnostic.
-    if options.id.is_none() {
-        require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
-    }
     let ctx = resolve_context(repo, &wave).await?;
-    let result = apply_update(&wave, options.project.as_deref(), &ctx, options, progress).await?;
+    if let Some(issue_id) = options.id.as_deref() {
+        let (owning_wave, _, _, _) = resolve_owned_issue(repo, &ctx.repository, issue_id).await?;
+        if owning_wave != wave {
+            return Err(OpsError::Message(format!(
+                "Linear task {issue_id} belongs to wave/{owning_wave}, not wave/{wave}"
+            )));
+        }
+    }
+    let result = apply_update(
+        repo,
+        &wave,
+        options.project.as_deref(),
+        &ctx,
+        options,
+        progress,
+    )
+    .await?;
     progress.status(&format!("refreshing local PM snapshot for wave/{wave}"));
     refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(result)
 }
 
 async fn apply_update(
+    repo: &Path,
     wave: &str,
     project_slug: Option<&str>,
     ctx: &PmContext,
@@ -1314,7 +1195,7 @@ async fn apply_update(
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
     let mark_done = parse_done_status(options.status.as_deref())?;
-    let projects = checked_projects(&ctx.client, &ctx.initiative, wave).await?;
+    let projects = checked_projects(repo, ctx, wave).await?;
     let project = project_slug
         .map(|slug| find_project(&projects, wave, slug))
         .transpose()?;
@@ -1458,11 +1339,29 @@ pub(crate) async fn pm_link_pr_async(
             }
         }
     };
+    match resolve_owned_issue(repo, &ctx.repository, &request.issue_id).await {
+        Ok((owning_wave, _, _, _)) if owning_wave == wave => {}
+        Ok((owning_wave, _, _, _)) => {
+            return PrLinkageOutcome {
+                ids: prior.clone(),
+                error: Some(format!(
+                    "Linear issue {} belongs to wave/{owning_wave}, not wave/{wave}",
+                    request.issue_id
+                )),
+            }
+        }
+        Err(error) => {
+            return PrLinkageOutcome {
+                ids: prior.clone(),
+                error: Some(error.to_string()),
+            }
+        }
+    }
     link_pr_with_client(&ctx.client, request, prior).await
 }
 
 async fn link_pr_with_client(
-    client: &PmClient,
+    client: &LinearClient,
     request: &PrLinkRequest,
     prior: &PrLinkageIds,
 ) -> PrLinkageOutcome {
@@ -1555,10 +1454,21 @@ async fn pm_status_async(
         list_pm_waves(repo)?
     };
 
+    let expected_team = repository_team_for_snapshot_validation(repo)?;
+    let mut ownership = PmPortfolioValidator::default();
     let mut results = Vec::new();
     for wave in waves {
         let row = read_pm_snapshot(repo, &wave).await?;
         let snapshot = decode_snapshot(&wave, &row.payload)?;
+        ownership
+            .validate(
+                &wave,
+                &row.initiative,
+                expected_team.as_deref(),
+                &snapshot.projects,
+                &snapshot.items,
+            )
+            .map_err(pm_to_ops)?;
         let total = snapshot.items.len();
         let open = snapshot.items.iter().filter(|item| !item.completed).count();
         let mut open_by_project = BTreeMap::new();
@@ -1566,9 +1476,7 @@ async fn pm_status_async(
             let project_open = snapshot
                 .items
                 .iter()
-                .filter(|item| {
-                    !item.completed && item.project.as_deref() == Some(project.slug.as_str())
-                })
+                .filter(|item| !item.completed && item.project == project.slug)
                 .count();
             open_by_project.insert(project.slug, project_open);
         }
@@ -1597,36 +1505,42 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
 }
 
 async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
-    let mut matches = Vec::new();
-    for wave in list_pm_waves(repo)? {
-        let ctx = resolve_context(repo, &wave).await?;
-        for project in checked_projects(&ctx.client, &ctx.initiative, &wave).await? {
-            let items = ctx
-                .client
-                .list_items(&project.id)
-                .await
-                .map_err(pm_to_ops)?;
-            for item in items {
-                if item.id == issue || item.identifier.eq_ignore_ascii_case(issue) {
-                    matches.push(PmResolvedTask {
-                        wave: wave.clone(),
-                        initiative_id: ctx.initiative.clone(),
-                        project: project.clone(),
-                        item,
-                    });
-                }
-            }
-        }
+    let repository = resolve_repository_context(repo).await?;
+    let (wave, initiative_id, mut item, mut project) =
+        resolve_owned_issue(repo, &repository, issue).await?;
+    let title_path = canonical_wave_title_path_async(repo, &wave).await?;
+    project.name = canonical_project_name(&title_path, &wave, &project.name)?;
+    project.slug = crate::pm::project_slug(&project.name);
+    item.project_id = project.id.clone();
+    item.project = project.slug.clone();
+    Ok(PmResolvedTask {
+        wave,
+        initiative_id,
+        project,
+        item,
+    })
+}
+
+async fn resolve_owned_issue(
+    repo: &Path,
+    repository: &RepositoryPmContext,
+    issue: &str,
+) -> OpsResult<(String, String, PmItem, PmProject)> {
+    let (item, project) = repository
+        .client
+        .issue_ownership(issue)
+        .await
+        .map_err(pm_to_ops)?;
+    if item.team_id != repository.team_id {
+        return Err(OpsError::Message(format!(
+            "Linear task {} belongs to Team {}, not repository {} Team {}",
+            item.identifier, item.team_id, repository.repo_id, repository.team_id
+        )));
     }
-    match matches.len() {
-        0 => Err(OpsError::Message(format!(
-            "Linear task {issue:?} does not belong to a known Loopflow Project and Wave"
-        ))),
-        1 => Ok(matches.pop().expect("one task match")),
-        count => Err(OpsError::Message(format!(
-            "Linear task {issue:?} belongs to {count} known Loopflow Waves; repair PM ownership before running it"
-        ))),
-    }
+    let initiative_id = singular_project_initiative(&project)?;
+    let wave = wave_for_initiative(repo, &initiative_id)?;
+    validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
+    Ok((wave, initiative_id, item, project))
 }
 
 pub fn pm_resolve_project(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
@@ -1634,42 +1548,63 @@ pub fn pm_resolve_project(repo: &Path, project_id: &str) -> OpsResult<PmResolved
 }
 
 async fn pm_resolve_project_async(repo: &Path, project_id: &str) -> OpsResult<PmResolvedProject> {
-    let mut matches = Vec::new();
-    for wave in list_pm_waves(repo)? {
-        let ctx = resolve_context(repo, &wave).await?;
-        for project in checked_projects(&ctx.client, &ctx.initiative, &wave).await? {
-            if project.id == project_id {
-                matches.push(PmResolvedProject {
-                    wave: wave.clone(),
-                    initiative_id: ctx.initiative.clone(),
-                    project,
-                });
-            }
-        }
-    }
-    match matches.len() {
-        0 => Err(OpsError::Message(format!(
-            "Linear Project {project_id:?} does not belong to a known Loopflow Wave"
+    let repository = resolve_repository_context(repo).await?;
+    let mut project = repository
+        .client
+        .project_ownership(project_id)
+        .await
+        .map_err(pm_to_ops)?;
+    let initiative_id = singular_project_initiative(&project)?;
+    let wave = wave_for_initiative(repo, &initiative_id)?;
+    validate_project_ownership(&project, &wave, &initiative_id, &repository.team_id)?;
+    let title_path = canonical_wave_title_path_async(repo, &wave).await?;
+    project.name = canonical_project_name(&title_path, &wave, &project.name)?;
+    project.slug = crate::pm::project_slug(&project.name);
+    Ok(PmResolvedProject {
+        wave,
+        initiative_id,
+        project,
+    })
+}
+
+fn singular_project_initiative(project: &PmProject) -> OpsResult<String> {
+    match project.initiative_ids.as_slice() {
+        [initiative] => Ok(initiative.clone()),
+        initiatives => Err(OpsError::Message(format!(
+            "Linear Project `{}` ({}) belongs to {} Initiatives [{}]; expected exactly one",
+            project.name,
+            project.id,
+            initiatives.len(),
+            project.initiative_ids.join(", ")
         ))),
-        1 => Ok(matches.pop().expect("one project match")),
-        count => Err(OpsError::Message(format!(
-            "Linear Project {project_id:?} belongs to {count} known Loopflow Waves; each Project must belong to exactly one Wave"
+    }
+}
+
+fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult<String> {
+    let provider = resolve_provider(repo)?;
+    let matches = list_local_waves(repo)?
+        .into_iter()
+        .filter(|wave| read_initiative(repo, wave, provider).as_deref() == Some(initiative_id))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [wave] => Ok(wave.clone()),
+        [] => Err(OpsError::Message(format!(
+            "Linear Initiative {initiative_id} is not bound by any local Wave"
+        ))),
+        waves => Err(OpsError::Message(format!(
+            "Linear Initiative {initiative_id} is bound by multiple local Waves: {}; repair GOAL.md ownership",
+            waves.join(", ")
         ))),
     }
 }
 
 // ── reteam ──────────────────────────────────────────────────────────
 
-/// How `reteam` treats one issue. Pure classification, so it is unit-tested
-/// without a live Linear.
+/// How repository-wide `reteam` treats one issue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReteamClass {
-    /// Already carries the target team key → skip the move; only reconcile a
-    /// stale cached Task identifier.
     Already,
-    /// An active Task Run owns it → defer until the Run stops.
     Defer(String),
-    /// On the legacy team and not being written → move onto the wave's team.
     Move,
 }
 
@@ -1694,18 +1629,12 @@ impl ReteamWriterState<'_> {
     }
 }
 
-/// Every foreign-team issue moves — completed included — unless a Task Run can
-/// still write the old identifier back. Completion is not a shield: a Project
-/// cannot narrow to one team while any of its issues (completed or not) stay on
-/// the legacy team, so completed issues migrate like the rest. Protection keys on
-/// an active Run, not on Linear completion. Open Work without a Run is safe to
-/// renumber once its cached identifier is reconciled.
 fn classify_reteam_item(
     item: &PmItem,
-    team_key: &str,
+    team_id: &str,
     writer: Option<ReteamWriterState<'_>>,
 ) -> ReteamClass {
-    let already = identifier_has_team_prefix(&item.identifier, team_key);
+    let already = item.team_id == team_id;
     let identifier_needs_update = writer.is_some_and(|writer| writer.identifier != item.identifier);
     if let Some(reason) = writer
         .filter(|_| !already || identifier_needs_update)
@@ -1719,23 +1648,8 @@ fn classify_reteam_item(
     ReteamClass::Move
 }
 
-/// Whether an identifier already belongs to the team keyed by `team_key`. The
-/// trailing `-` guards against a prefix collision (`PRD-` must not match a
-/// `PRODUCT-1` identifier).
-fn identifier_has_team_prefix(identifier: &str, team_key: &str) -> bool {
-    let prefix = format!("{}-", team_key.trim().to_ascii_uppercase());
-    identifier.trim().to_ascii_uppercase().starts_with(&prefix)
-}
-
-/// Whether a Project's resolved ownership differs from exactly the wave's team.
-/// `None` means the read did not resolve teams (an older snapshot) — unknown,
-/// not a mismatch, so no false positive. Empty, foreign, and multi-team sets all
-/// need repair because one Project belongs to one Wave-owned team.
-fn project_needs_reteam(bound_team: &str, project_team_ids: Option<&[String]>) -> bool {
-    match project_team_ids {
-        None => false,
-        Some(team_ids) => team_ids.len() != 1 || team_ids[0] != bound_team,
-    }
+fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
+    project_team_ids.len() != 1 || project_team_ids[0] != bound_team
 }
 
 /// Refuse the whole apply when any Task Run can still write the old identifier.
@@ -1750,8 +1664,8 @@ fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
         .iter()
         .map(|deferral| {
             format!(
-                "{} `{}` ({})",
-                deferral.identifier, deferral.title, deferral.reason
+                "{} `{}` (wave/{}; {})",
+                deferral.identifier, deferral.title, deferral.wave, deferral.reason
             )
         })
         .collect::<Vec<_>>()
@@ -1759,37 +1673,6 @@ fn ensure_reteam_apply_safe(deferrals: &[PmReteamDeferral]) -> OpsResult<()> {
     Err(OpsError::Message(format!(
         "cannot apply reteam while {} Task Run(s) can still write the old identifier: {protected}. No Projects or Tasks were moved; stop those Runs and rerun the dry-run.",
         deferrals.len()
-    )))
-}
-
-/// Moving an issue to `target_team` keeps it in its Project only when that
-/// Project already carries the target team. Refuse unresolved and missing-team
-/// Projects before the first store or provider mutation.
-fn ensure_move_projects_carry_target_team(
-    projects: &[PmProject],
-    moving_project_ids: &BTreeSet<String>,
-    target_team: &str,
-) -> OpsResult<()> {
-    let unsafe_projects = projects
-        .iter()
-        .filter(|project| moving_project_ids.contains(&project.id))
-        .filter_map(|project| match project.team_ids.as_deref() {
-            Some(team_ids) if team_ids.iter().any(|team| team == target_team) => None,
-            Some(team_ids) => Some(format!(
-                "`{}` (teams [{}])",
-                project.name,
-                team_ids.join(", ")
-            )),
-            None => Some(format!("`{}` (teams unresolved)", project.name)),
-        })
-        .collect::<Vec<_>>();
-    if unsafe_projects.is_empty() {
-        return Ok(());
-    }
-
-    Err(OpsError::Message(format!(
-        "cannot apply reteam because Project(s) containing issues to move do not already carry target team {target_team}: {}. No Projects or Tasks were moved; attach the target team and rerun the dry-run.",
-        unsafe_projects.join("; ")
     )))
 }
 
@@ -1801,11 +1684,15 @@ struct ReteamIdentifierUpdate {
 }
 
 struct ResolvedReteamContext {
-    wave: String,
-    team_id: String,
+    repository: RepositoryPmContext,
     team_key: String,
-    pm: PmContext,
     store: Store,
+}
+
+#[derive(Debug, Clone)]
+struct ReteamProjectState {
+    project: PmProject,
+    target_name: String,
 }
 
 fn reteam_comment_marker(old_identifier: &str, team_key: &str) -> String {
@@ -1819,41 +1706,33 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
     )
 }
 
-async fn resolve_reteam_context(
-    repo: &Path,
-    wave: Option<&str>,
-) -> OpsResult<ResolvedReteamContext> {
-    let wave = resolve_wave(wave)?;
-    let provider = resolve_provider(repo, &wave)?;
-    let team_id = read_team(repo, &wave, provider).ok_or_else(|| {
-        OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf pm init --wave {wave} --team-key <KEY>` to bind its team first.",
-            provider.team_key()
-        ))
+async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
+    let provider = resolve_provider(repo)?;
+    let team_id = read_repository_team(repo, provider)?.ok_or_else(|| {
+        OpsError::Message(
+            ".lf/config.yaml has no repository `pm.linear_team`. \
+             Run `lf pm init --wave <wave> --team-key <KEY>` to establish the migration target."
+                .to_string(),
+        )
     })?;
-    let initiative = read_initiative(repo, &wave, provider).ok_or_else(|| {
-        OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf pm init --wave {wave}` to connect its Linear Initiative.",
-            provider.initiative_key()
-        ))
-    })?;
+    let repo_id = repository_id(repo)?;
     let client = build_client(repo, provider, Some(team_id.clone())).await?;
-    let team_key = client.team_key(&team_id).await.map_err(pm_to_ops)?;
+    let binding = client
+        .validate_team_claim(&team_id, repo_id.as_str())
+        .await
+        .map_err(pm_to_ops)?;
     let store = open_store(&storage_config_from_env()?)
         .await
         .map_err(|err| OpsError::Message(format!("failed to open task registry: {err}")))?;
 
     Ok(ResolvedReteamContext {
-        wave,
-        team_id,
-        team_key,
-        pm: PmContext {
+        repository: RepositoryPmContext {
             client,
             provider,
-            initiative,
+            repo_id,
+            team_id,
         },
+        team_key: binding.key,
         store,
     })
 }
@@ -1871,110 +1750,175 @@ async fn pm_reteam_async(
     options: &PmReteamOptions,
     progress: &impl Progress,
 ) -> OpsResult<PmReteamResult> {
-    let resolved = resolve_reteam_context(repo, options.wave.as_deref()).await?;
-    apply_or_plan_reteam(
-        &resolved.pm,
-        &resolved.store,
-        repo,
-        &resolved.wave,
-        &resolved.team_id,
-        &resolved.team_key,
-        options.apply,
-        progress,
-    )
-    .await
+    let resolved = resolve_reteam_context(repo).await?;
+    apply_or_plan_repository_reteam(&resolved, repo, options.apply, progress).await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn apply_or_plan_reteam(
-    ctx: &PmContext,
-    store: &Store,
+async fn apply_or_plan_repository_reteam(
+    resolved: &ResolvedReteamContext,
     repo: &Path,
-    wave: &str,
-    team_id: &str,
-    team_key: &str,
     apply: bool,
     progress: &impl Progress,
 ) -> OpsResult<PmReteamResult> {
-    progress.status(&format!(
-        "listing wave/{wave} issues under {} Initiative {}",
-        ctx.provider, ctx.initiative
-    ));
-    let projects = ctx
-        .client
-        .list_projects(&ctx.initiative)
-        .await
-        .map_err(pm_to_ops)?;
-
+    let team_id = &resolved.repository.team_id;
+    let team_key = &resolved.team_key;
+    let store = &resolved.store;
+    let waves = list_pm_waves(repo)?;
+    if waves.is_empty() {
+        return Err(OpsError::Message(
+            "repository has no Waves linked to Linear Initiatives".to_string(),
+        ));
+    }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
     let mut deferrals = Vec::new();
-    let mut moving_project_ids = BTreeSet::new();
     let mut identifier_updates = Vec::new();
+    let mut states = Vec::new();
+    let mut seen_initiatives = BTreeMap::new();
+    let mut seen_projects = BTreeSet::new();
     let mut already = 0usize;
     let mut task_updates = 0usize;
 
-    for project in &projects {
-        // A Project without exactly the wave's team is moved onto it. A
-        // multi-team Project is repaired too: ownership is singular, not merely
-        // membership. An unresolved team set (`None`, older snapshot) is skipped,
-        // never guessed.
-        if project_needs_reteam(team_id, project.team_ids.as_deref()) {
-            project_moves.push(PmReteamProjectMove {
-                id: project.id.clone(),
-                name: project.name.clone(),
-                from_teams: project.team_ids.clone().unwrap_or_default(),
-            });
+    if apply && repo.join(".git").exists() && !crate::engine::git::is_clean(repo)? {
+        return Err(OpsError::Message(
+            "`lf pm reteam --apply` requires a clean Git checkout so its repository PM config and Wave bindings can commit atomically; commit or stash existing changes, then rerun the dry-run"
+                .to_string(),
+        ));
+    }
+
+    for wave in &waves {
+        let initiative =
+            read_initiative(repo, wave, resolved.repository.provider).ok_or_else(|| {
+                OpsError::Message(format!(
+                    "wave/{wave} has no Linear Initiative; initialize every Wave before reteam"
+                ))
+            })?;
+        if let Some(owner) = seen_initiatives.insert(initiative.clone(), wave.clone()) {
+            return Err(OpsError::Message(format!(
+                "Linear Initiative {initiative} is bound by both wave/{owner} and wave/{wave}; repair GOAL.md ownership before reteam"
+            )));
         }
-        let items = ctx
+        progress.status(&format!("preflighting wave/{wave} Initiative {initiative}"));
+        let projects = resolved
+            .repository
             .client
-            .list_items(&project.id)
+            .list_projects(&initiative)
             .await
             .map_err(pm_to_ops)?;
-        for item in items {
-            // Resolve protection from stable Task Work and its active Run.
-            let writer = store
-                .task_writer_state(&item.id)
+        let title_path = canonical_wave_title_path_with_store(repo, wave, store).await?;
+        for project in projects {
+            if !seen_projects.insert(project.id.clone()) {
+                return Err(OpsError::Message(format!(
+                    "Linear Project `{}` ({}) appears under multiple Wave Initiatives",
+                    project.name, project.id
+                )));
+            }
+            if project.initiative_ids.as_slice() != [initiative.as_str()] {
+                return Err(OpsError::Message(format!(
+                    "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; \
+                     reteam requires exactly {initiative} before any provider mutation",
+                    project.name,
+                    project.id,
+                    project.initiative_ids.join(", ")
+                )));
+            }
+            let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
+            let target_name = format!("{title_path} — {canonical_name}");
+            if project_needs_reteam(team_id, &project.team_ids) || project.name != target_name {
+                project_moves.push(PmReteamProjectMove {
+                    wave: wave.clone(),
+                    id: project.id.clone(),
+                    name: project.name.clone(),
+                    target_name: target_name.clone(),
+                    from_teams: project.team_ids.clone(),
+                });
+            }
+            let items = resolved
+                .repository
+                .client
+                .list_items(&project.id)
                 .await
-                .map_err(|err| OpsError::Message(format!("failed to read task registry: {err}")))?;
-            match classify_reteam_item(
-                &item,
-                team_key,
-                writer.as_ref().map(ReteamWriterState::from),
-            ) {
-                ReteamClass::Already => {
-                    already += 1;
-                    if let Some(writer) =
-                        writer.filter(|writer| writer.identifier != item.identifier)
-                    {
-                        identifier_updates.push(ReteamIdentifierUpdate {
-                            issue_id: item.id,
-                            old_identifier: writer.identifier,
-                            new_identifier: item.identifier,
-                        });
-                    }
+                .map_err(pm_to_ops)?;
+            for item in items {
+                if item.project_id != project.id {
+                    return Err(OpsError::Message(format!(
+                        "Linear task {} resolves to Project {}, expected {}",
+                        item.identifier, item.project_id, project.id
+                    )));
                 }
-                ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
-                    identifier: item.identifier,
-                    title: item.name,
-                    reason,
-                }),
-                ReteamClass::Move => {
-                    moving_project_ids.insert(project.id.clone());
-                    moves.push(PmReteamMove {
+                if !project.team_ids.iter().any(|team| team == &item.team_id) {
+                    return Err(OpsError::Message(format!(
+                        "Linear task {} belongs to Team {}, but Project {} carries teams [{}]",
+                        item.identifier,
+                        item.team_id,
+                        project.id,
+                        project.team_ids.join(", ")
+                    )));
+                }
+                let writer = store.task_writer_state(&item.id).await.map_err(|error| {
+                    OpsError::Message(format!("failed to read task registry: {error}"))
+                })?;
+                match classify_reteam_item(
+                    &item,
+                    team_id,
+                    writer.as_ref().map(ReteamWriterState::from),
+                ) {
+                    ReteamClass::Already => {
+                        already += 1;
+                        if let Some(writer) =
+                            writer.filter(|writer| writer.identifier != item.identifier)
+                        {
+                            identifier_updates.push(ReteamIdentifierUpdate {
+                                issue_id: item.id,
+                                old_identifier: writer.identifier,
+                                new_identifier: item.identifier,
+                            });
+                        }
+                    }
+                    ReteamClass::Defer(reason) => deferrals.push(PmReteamDeferral {
+                        wave: wave.clone(),
+                        identifier: item.identifier,
+                        title: item.name,
+                        reason,
+                    }),
+                    ReteamClass::Move => moves.push(PmReteamMove {
+                        wave: wave.clone(),
+                        project_id: project.id.clone(),
                         id: item.id,
                         old_identifier: item.identifier,
                         title: item.name,
                         new_identifier: None,
-                    });
+                    }),
                 }
             }
+            states.push(ReteamProjectState {
+                project,
+                target_name,
+            });
         }
     }
 
     if apply {
         ensure_reteam_apply_safe(&deferrals)?;
-        ensure_move_projects_carry_target_team(&projects, &moving_project_ids, team_id)?;
+
+        // Linear requires the destination Team on a Project before its Issues
+        // can move. Expand first; narrowing is the final provider phase.
+        for state in &states {
+            if !state.project.team_ids.iter().any(|team| team == team_id) {
+                let mut teams = state.project.team_ids.clone();
+                teams.push(team_id.clone());
+                progress.status(&format!(
+                    "attaching team {team_key} to Project `{}`",
+                    state.project.name
+                ));
+                resolved
+                    .repository
+                    .client
+                    .set_project_teams(&state.project.id, &teams)
+                    .await
+                    .map_err(pm_to_ops)?;
+            }
+        }
 
         for update in identifier_updates {
             task_updates += usize::from(
@@ -1996,13 +1940,20 @@ async fn apply_or_plan_reteam(
 
         for mv in &mut moves {
             let marker = reteam_comment_marker(&mv.old_identifier, team_key);
-            let comment_bodies = ctx
+            let comment_bodies = resolved
+                .repository
                 .client
-                .issue_comment_bodies(&mv.id)
+                .observe_issue(&mv.id)
                 .await
-                .map_err(pm_to_ops)?;
+                .map_err(pm_to_ops)?
+                .comments
+                .into_iter()
+                .map(|comment| comment.body)
+                .collect::<Vec<_>>();
             if !comment_bodies.iter().any(|body| body.contains(&marker)) {
-                ctx.client
+                resolved
+                    .repository
+                    .client
                     .comment(&mv.id, &reteam_comment_body(&mv.old_identifier, team_key))
                     .await
                     .map_err(pm_to_ops)?;
@@ -2011,7 +1962,8 @@ async fn apply_or_plan_reteam(
                 "moving {} into team {team_key}",
                 mv.old_identifier
             ));
-            let new_identifier = ctx
+            let new_identifier = resolved
+                .repository
                 .client
                 .move_item_to_team(&mv.id, team_id)
                 .await
@@ -2030,30 +1982,73 @@ async fn apply_or_plan_reteam(
             mv.new_identifier = Some(new_identifier);
         }
 
-        // Linear refuses to remove a team from a Project while that team's
-        // issues remain in it, so narrowing is necessarily the final provider
-        // phase. `teamIds` is a set replacement: exactly the wave's team.
-        for pm in &project_moves {
-            progress.status(&format!(
-                "narrowing Project `{}` onto team {team_key}",
-                pm.name
-            ));
-            ctx.client
-                .move_project_to_team(&pm.id, team_id)
-                .await
-                .map_err(pm_to_ops)?;
+        for state in &states {
+            if project_needs_reteam(team_id, &state.project.team_ids) {
+                progress.status(&format!(
+                    "narrowing Project `{}` onto team {team_key}",
+                    state.project.name
+                ));
+                resolved
+                    .repository
+                    .client
+                    .move_project_to_team(&state.project.id, team_id)
+                    .await
+                    .map_err(pm_to_ops)?;
+            }
+            if state.project.name != state.target_name {
+                let flows = state.project.flows.clone().ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "Project {} has no flow payload; refresh before reteam",
+                        state.project.id
+                    ))
+                })?;
+                resolved
+                    .repository
+                    .client
+                    .update_project(
+                        &state.project.id,
+                        &state.target_name,
+                        &ProjectContent {
+                            definition: state.project.definition.clone(),
+                            flows,
+                            krs: state.project.krs.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(pm_to_ops)?;
+            }
         }
 
-        // Always refresh after a successful explicit apply. A prior run may have
-        // completed every provider mutation and then failed while refreshing;
-        // its retry classifies everything as Already and must still repair the
-        // local snapshot.
-        let snapshot = fetch_pm_snapshot(wave, ctx).await?;
-        store_pm_snapshot_with_store(repo, wave, ctx, &snapshot, store).await?;
+        // Re-fetch and validate the complete repository before deleting any
+        // migration sentinel. A crash before cleanup remains loudly resumable.
+        for wave in &waves {
+            let initiative = read_initiative(repo, wave, resolved.repository.provider)
+                .expect("preflight required every Initiative");
+            let ctx = PmContext {
+                repository: resolved.repository.clone(),
+                initiative,
+            };
+            let projects = checked_projects_with_store(repo, &ctx, wave, store).await?;
+            let snapshot = fetch_pm_snapshot_for_projects(&ctx, projects).await?;
+            store_pm_snapshot_with_store(repo, wave, &ctx, &snapshot, store).await?;
+        }
+        remove_legacy_pm_sentinels(repo, &waves)?;
+        if repo.join(".git").exists() {
+            let _ = crate::ops::commit_workflow(
+                repo,
+                &crate::ops::CommitOptions {
+                    add: true,
+                    message: Some("lf pm: migrate repository to one Linear Team".to_string()),
+                    ..crate::ops::CommitOptions::for_task("pm")
+                },
+                progress,
+            )?;
+        }
     }
 
     Ok(PmReteamResult {
-        wave: wave.to_string(),
+        repository: resolved.repository.repo_id.to_string(),
+        waves,
         team_id: team_id.to_string(),
         team_key: team_key.to_string(),
         applied: apply,
@@ -2087,40 +2082,81 @@ async fn pm_sync_async(
     };
     let mut actions = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut blocking = Vec::new();
+    let provider = resolve_provider(repo)?;
+    let team_id = read_repository_team(repo, provider)?;
 
-    let mut linked_initiative_ids = BTreeSet::new();
-    let mut provider_by_kind = BTreeMap::new();
-    for wave in &all_waves {
-        let provider = resolve_provider(repo, wave)?;
-        provider_by_kind.insert(provider.as_str().to_string(), provider);
-        if let Some(initiative) = read_initiative(repo, wave, provider) {
-            linked_initiative_ids.insert(initiative);
-        } else {
-            diagnostics.push(format!("wave/{wave} has no Linear Initiative"));
-        }
-        // Every wave must bind a team explicitly so creation never falls back to
-        // the shared team. Sharing one team across a product's waves (each with
-        // its own Initiative, as Cadenza does) is allowed — the Task prefix is
-        // per team, not per wave — so no "waves share a team" diagnostic here.
-        if read_team(repo, wave, provider).is_none() {
-            diagnostics.push(format!(
-                "wave/{wave} has no `pm.{}`; run `lf pm init --wave {wave} --team-key <KEY>` \
-                 so its work lands on an explicit team",
-                provider.team_key()
-            ));
+    if let Some(store) = open_existing_store().await {
+        let origin = crate::engine::wave_context::wave_origin(repo);
+        for wave in store
+            .list_waves(Some(&origin.display().to_string()))
+            .await
+            .map_err(|error| {
+                OpsError::Message(format!("failed to inspect Wave registry: {error}"))
+            })?
+        {
+            if wave.parent_wave_id().is_some()
+                && wave.promoted_at().is_none()
+                && !origin
+                    .join("wave")
+                    .join(wave.name())
+                    .join("GOAL.md")
+                    .is_file()
+            {
+                diagnostics.push(format!(
+                    "prepared child wave/{} has no GOAL.md; resume or abandon its promotion",
+                    wave.name()
+                ));
+            }
         }
     }
 
-    let provider = provider_by_kind
-        .values()
-        .next()
-        .copied()
-        .unwrap_or(PmProviderKind::Linear);
-    // Machine-wide diff over many waves; reads follow Initiative → Project →
-    // Issue and are team-agnostic, so no per-wave team is resolved here.
-    let client = build_client(repo, provider, None).await?;
+    for sentinel in legacy_pm_sentinels(repo)? {
+        diagnostics.push(format!(
+            "legacy PM authority remains at {sentinel}; run repository-wide `lf pm reteam`"
+        ));
+    }
+    if !options.plan {
+        require_repository_pm_ready(repo)?;
+    }
+    if team_id.is_none() {
+        let message = ".lf/config.yaml has no repository `pm.linear_team`; run `lf pm init --wave <wave> --team-key <KEY>`".to_string();
+        diagnostics.push(message.clone());
+        blocking.push(message);
+    }
+
+    let mut initiative_waves: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for wave in &all_waves {
+        if let Some(initiative) = read_initiative(repo, wave, provider) {
+            initiative_waves
+                .entry(initiative)
+                .or_default()
+                .push(wave.clone());
+        } else {
+            diagnostics.push(format!("wave/{wave} has no Linear Initiative"));
+        }
+    }
+    for (initiative, owners) in &initiative_waves {
+        if owners.len() > 1 {
+            let message = format!(
+                "Linear Initiative {initiative} is bound by multiple local Waves: {}",
+                owners.join(", ")
+            );
+            diagnostics.push(message.clone());
+            blocking.push(message);
+        }
+    }
+
+    let client = build_client(repo, provider, team_id.clone()).await?;
+    let repo_id = repository_id(repo)?;
+    if let Some(team_id) = &team_id {
+        client
+            .validate_team_claim(team_id, repo_id.as_str())
+            .await
+            .map_err(pm_to_ops)?;
+    }
     progress.status(&format!(
-        "checking {provider} Linear Initiatives and Projects"
+        "checking {provider} repository Initiatives, Projects, and Tasks"
     ));
     let linear_waves = client.list_waves().await.map_err(pm_to_ops)?;
     let linear_waves_by_id: BTreeMap<String, String> = linear_waves
@@ -2128,7 +2164,7 @@ async fn pm_sync_async(
         .map(|wave| (wave.id.clone(), wave.name.clone()))
         .collect();
     for linear_wave in &linear_waves {
-        if !linked_initiative_ids.contains(&linear_wave.id) {
+        if !initiative_waves.contains_key(&linear_wave.id) {
             diagnostics.push(format!(
                 "Linear Initiative `{}` ({}) is not linked by any local wave",
                 linear_wave.name, linear_wave.id
@@ -2136,9 +2172,10 @@ async fn pm_sync_async(
         }
     }
 
+    let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
-        let provider = resolve_provider(repo, wave)?;
         let Some(initiative_id) = read_initiative(repo, wave, provider) else {
+            blocking.push(format!("wave/{wave} has no Linear Initiative"));
             continue;
         };
         let expected_initiative_name = title_case(wave);
@@ -2147,85 +2184,170 @@ async fn pm_sync_async(
                 let message = format!(
                     "rename Linear Initiative `{actual}` ({initiative_id}) to `{expected_initiative_name}` for wave/{wave}"
                 );
-                if !options.plan {
-                    client
-                        .rename_wave(&initiative_id, &expected_initiative_name)
-                        .await
-                        .map_err(pm_to_ops)?;
-                }
                 actions.push(message);
             }
-            None => diagnostics.push(format!(
-                "wave/{wave} points at missing Linear Initiative {initiative_id}"
-            )),
+            None => {
+                let message =
+                    format!("wave/{wave} points at missing Linear Initiative {initiative_id}");
+                diagnostics.push(message.clone());
+                blocking.push(message);
+                continue;
+            }
             _ => {}
         }
 
-        let ctx = PmContext {
-            client: client.clone(),
-            provider,
-            initiative: initiative_id.clone(),
-        };
-        let snapshot = fetch_pm_snapshot(wave, &ctx).await?;
-        let bound_team = read_team(repo, wave, provider);
-        for project in &snapshot.projects {
-            let managed_initiatives = project
-                .initiative_ids
-                .iter()
-                .filter(|id| linked_initiative_ids.contains(*id))
-                .count();
-            if managed_initiatives != 1 {
-                diagnostics.push(format!(
-                    "Linear Project `{}` ({}) belongs to {managed_initiatives} Loopflow-managed Initiatives; expected exactly one",
+        let title_path = canonical_wave_title_path_async(repo, wave).await?;
+        let projects = client
+            .list_projects(&initiative_id)
+            .await
+            .map_err(pm_to_ops)?;
+        let mut slugs = BTreeMap::new();
+        for project in projects {
+            if let Some(existing_wave) = seen_projects.insert(project.id.clone(), wave.clone()) {
+                let message = format!(
+                    "Linear Project `{}` ({}) appears under both wave/{existing_wave} and wave/{wave}",
                     project.name, project.id
-                ));
+                );
+                diagnostics.push(message.clone());
+                blocking.push(message);
             }
-            // A Project stranded on a foreign team (or simultaneously attached
-            // to the bound and a legacy team) violates singular Wave ownership.
-            if let Some(team_id) = &bound_team {
-                if project_needs_reteam(team_id, project.team_ids.as_deref()) {
-                    let teams = project.team_ids.as_deref().unwrap_or_default().join(", ");
-                    diagnostics.push(format!(
-                        "Linear Project `{}` ({}) in wave/{wave} belongs to team(s) [{teams}], \
-                         not the wave's team {team_id}; run `lf pm reteam --wave {wave}` to move it",
+            if project.initiative_ids.as_slice() != [initiative_id.as_str()] {
+                let message = format!(
+                    "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; expected exactly {initiative_id}",
+                    project.name,
+                    project.id,
+                    project.initiative_ids.join(", ")
+                );
+                diagnostics.push(message.clone());
+                blocking.push(message);
+            }
+            if let Some(team_id) = &team_id {
+                if project.team_ids.as_slice() != [team_id.as_str()] {
+                    let message = format!(
+                        "Linear Project `{}` ({}) in wave/{wave} belongs to Teams [{}]; expected exactly repository Team {team_id}. Run `lf pm reteam`.",
+                        project.name,
+                        project.id,
+                        project.team_ids.join(", ")
+                    );
+                    diagnostics.push(message.clone());
+                    blocking.push(message);
+                }
+            }
+            let canonical_name = match canonical_project_name(&title_path, wave, &project.name) {
+                Ok(name) => name,
+                Err(error) => {
+                    let message = error.to_string();
+                    diagnostics.push(message.clone());
+                    blocking.push(message);
+                    continue;
+                }
+            };
+            let slug = crate::pm::project_slug(&canonical_name);
+            if let Some(existing) = slugs.insert(slug.clone(), canonical_name.clone()) {
+                let message = format!(
+                    "Linear Projects `{existing}` and `{canonical_name}` in wave/{wave} both derive slug `{slug}`"
+                );
+                diagnostics.push(message.clone());
+                blocking.push(message);
+            }
+            let expected_project_name = format!("{title_path} — {canonical_name}");
+            if project.name != expected_project_name {
+                if project.flows.is_none() {
+                    let message = format!(
+                        "Linear Project `{}` ({}) has no flow payload, so its title cannot be repaired safely",
+                        project.name, project.id
+                    );
+                    diagnostics.push(message.clone());
+                    blocking.push(message);
+                } else {
+                    actions.push(format!(
+                        "rename Linear Project `{}` ({}) to `{expected_project_name}`",
                         project.name, project.id
                     ));
                 }
             }
-            let items: Vec<_> = snapshot
-                .items
-                .iter()
-                .filter(|item| item.project.as_deref() == Some(project.slug.as_str()))
-                .collect();
+
+            let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
             if items.iter().all(|item| item.completed) {
                 diagnostics.push(format!(
-                    "Linear Project `{}` ({}) in wave/{wave} has no open tasks",
-                    project.name, project.id
+                    "Linear Project `{canonical_name}` ({}) in wave/{wave} has no open tasks",
+                    project.id
                 ));
             }
-        }
-        // Stranded issues: a team-bound wave whose open issues still carry a
-        // foreign prefix are `reteam` candidates not yet moved.
-        if let Some(team_id) = &bound_team {
-            let team_key = client.team_key(team_id).await.map_err(pm_to_ops)?;
-            let stranded = snapshot
-                .items
-                .iter()
-                .filter(|item| {
-                    !item.completed && !identifier_has_team_prefix(&item.identifier, &team_key)
-                })
-                .count();
-            if stranded > 0 {
-                diagnostics.push(format!(
-                    "wave/{wave} has {stranded} open issue(s) not in team {team_key}; \
-                     run `lf pm reteam --wave {wave}` to plan their migration"
-                ));
+            for item in items {
+                if item.project_id != project.id {
+                    let message = format!(
+                        "Linear task {} resolves to Project {}, expected {}",
+                        item.identifier, item.project_id, project.id
+                    );
+                    diagnostics.push(message.clone());
+                    blocking.push(message);
+                }
+                if let Some(team_id) = &team_id {
+                    if item.team_id != *team_id {
+                        let message = format!(
+                            "Linear task {} belongs to Team {}, expected repository Team {team_id}. Run `lf pm reteam`.",
+                            item.identifier, item.team_id
+                        );
+                        diagnostics.push(message.clone());
+                        blocking.push(message);
+                    }
+                }
             }
         }
         actions.push(format!(
             "refresh wave/{wave} PM snapshot from Linear Initiative {initiative_id}"
         ));
-        if !options.plan {
+    }
+
+    if !options.plan && !blocking.is_empty() {
+        return Err(OpsError::Message(format!(
+            "PM ownership validation failed before mutation: {}",
+            blocking.join("; ")
+        )));
+    }
+
+    if !options.plan {
+        let team_id = team_id.expect("non-plan sync requires repository Team");
+        for wave in &waves {
+            let initiative = read_initiative(repo, wave, provider)
+                .expect("preflight required every selected Initiative");
+            let expected_initiative_name = title_case(wave);
+            if linear_waves_by_id.get(&initiative) != Some(&expected_initiative_name) {
+                client
+                    .rename_wave(&initiative, &expected_initiative_name)
+                    .await
+                    .map_err(pm_to_ops)?;
+            }
+            let title_path = canonical_wave_title_path_async(repo, wave).await?;
+            for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
+                let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
+                let expected_name = format!("{title_path} — {canonical_name}");
+                if project.name != expected_name {
+                    client
+                        .update_project(
+                            &project.id,
+                            &expected_name,
+                            &ProjectContent {
+                                definition: project.definition.clone(),
+                                flows: project.flows.clone().expect("preflight required flows"),
+                                krs: project.krs.clone(),
+                            },
+                        )
+                        .await
+                        .map_err(pm_to_ops)?;
+                }
+            }
+            let ctx = PmContext {
+                repository: RepositoryPmContext {
+                    client: client.clone(),
+                    provider,
+                    repo_id: repo_id.clone(),
+                    team_id: team_id.clone(),
+                },
+                initiative,
+            };
+            let snapshot = fetch_pm_snapshot(repo, wave, &ctx).await?;
             store_pm_snapshot(repo, wave, &ctx, &snapshot).await?;
         }
     }
@@ -2261,7 +2383,7 @@ async fn pm_project_archive_async(
 ) -> OpsResult<PmProjectArchiveResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    let projects = checked_projects(repo, &ctx, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;
     progress.status(&format!("archiving Linear Project `{}`", project.name));
     ctx.client
@@ -2285,9 +2407,6 @@ async fn pm_project_write_async(
     let wave = resolve_wave(options.wave.as_deref())?;
     // Creating a Project (no `--project` slug to update) must bind an explicit
     // team; updating an existing Project does not move it between teams.
-    if options.project.is_none() {
-        require_creation_team(repo, &wave, resolve_provider(repo, &wave)?)?;
-    }
     let ctx = resolve_context(repo, &wave).await?;
     let requested_krs = options
         .krs
@@ -2313,7 +2432,7 @@ async fn pm_project_write_async(
         ));
     }
 
-    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    let projects = checked_projects(repo, &ctx, &wave).await?;
     let (id, slug, created) = if let Some(slug) = options.project.as_deref() {
         let project = find_project(&projects, &wave, slug)?;
         let name = options
@@ -2330,7 +2449,7 @@ async fn pm_project_write_async(
             )));
         }
         progress.status(&format!("updating Linear Project `{}`", project.name));
-        let linear_name = linear_project_name(&wave, &name);
+        let linear_name = linear_project_name(repo, &wave, &name).await?;
         let content = ProjectContent {
             definition: options
                 .definition
@@ -2374,7 +2493,7 @@ async fn pm_project_write_async(
             )));
         }
         progress.status(&format!("creating Linear Project `{name}`"));
-        let linear_name = linear_project_name(&wave, &name);
+        let linear_name = linear_project_name(repo, &wave, &name).await?;
         let content = ProjectContent {
             definition: options.definition.clone().ok_or_else(|| {
                 OpsError::Message("`lf pm project create --definition` is required".to_string())
@@ -2450,8 +2569,9 @@ async fn pm_task_move_async(
 ) -> OpsResult<PmTaskMoveResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
-    let projects = checked_projects(&ctx.client, &ctx.initiative, &wave).await?;
+    let projects = checked_projects(repo, &ctx, &wave).await?;
     let project = find_project(&projects, &wave, &options.project)?;
+    resolve_owned_issue(repo, &ctx.repository, &options.id).await?;
     progress.status(&format!(
         "moving {} task {} to wave/{wave} Linear Project {}",
         ctx.provider, options.id, project.id
@@ -2475,17 +2595,30 @@ pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
         return Ok(Vec::new());
     }
     let mut waves = Vec::new();
-    for entry in std::fs::read_dir(&wave_dir)? {
+    collect_local_waves(&wave_dir, &wave_dir, &mut waves)?;
+    waves.sort();
+    Ok(waves)
+}
+
+fn collect_local_waves(root: &Path, directory: &Path, waves: &mut Vec<String>) -> OpsResult<()> {
+    for entry in std::fs::read_dir(directory)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
         }
-        if let Some(name) = entry.file_name().to_str() {
-            waves.push(name.to_string());
+        let path = entry.path();
+        if path.join("GOAL.md").is_file() {
+            let relative = path.strip_prefix(root).expect("walk remains below wave/");
+            let name = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            waves.push(name);
         }
+        collect_local_waves(root, &path, waves)?;
     }
-    waves.sort();
-    Ok(waves)
+    Ok(())
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -2504,10 +2637,6 @@ fn write_initiative_to_goal(
             .cloned()
             .unwrap_or_default();
         pm_map.insert(
-            serde_yaml_ng::Value::String("provider".to_string()),
-            serde_yaml_ng::Value::String(provider.as_str().to_string()),
-        );
-        pm_map.insert(
             serde_yaml_ng::Value::String(provider.initiative_key().to_string()),
             serde_yaml_ng::Value::String(initiative_id.to_string()),
         );
@@ -2517,37 +2646,121 @@ fn write_initiative_to_goal(
     .map_err(OpsError::Message)
 }
 
-fn write_team_to_goal(
+fn write_repository_pm_config(
     repo: &Path,
-    wave: &str,
     provider: PmProviderKind,
     team_id: &str,
 ) -> OpsResult<()> {
-    update_wave_goal_config(repo, wave, |map| {
-        let pm_key = serde_yaml_ng::Value::String("pm".to_string());
-        let mut pm_map = map
-            .get(&pm_key)
-            .and_then(serde_yaml_ng::Value::as_mapping)
-            .cloned()
-            .unwrap_or_default();
-        pm_map.insert(
-            serde_yaml_ng::Value::String("provider".to_string()),
-            serde_yaml_ng::Value::String(provider.as_str().to_string()),
-        );
-        pm_map.insert(
-            serde_yaml_ng::Value::String(provider.team_key().to_string()),
-            serde_yaml_ng::Value::String(team_id.to_string()),
-        );
-        map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
-        Ok(())
-    })
-    .map_err(OpsError::Message)
+    let path = repo.join(".lf/config.yaml");
+    let mut root = match std::fs::read_to_string(&path) {
+        Ok(content) if !content.trim().is_empty() => {
+            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&content).map_err(|error| {
+                OpsError::Message(format!(
+                    "invalid repository config {}: {error}",
+                    path.display()
+                ))
+            })?
+        }
+        Ok(_) => serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            serde_yaml_ng::Value::Mapping(serde_yaml_ng::Mapping::new())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let root_map = root.as_mapping_mut().ok_or_else(|| {
+        OpsError::Message(format!(
+            "repository config {} must be a YAML mapping",
+            path.display()
+        ))
+    })?;
+    let pm_key = serde_yaml_ng::Value::String("pm".to_string());
+    let mut pm = root_map
+        .get(&pm_key)
+        .and_then(serde_yaml_ng::Value::as_mapping)
+        .cloned()
+        .unwrap_or_default();
+    pm.insert(
+        serde_yaml_ng::Value::String("provider".to_string()),
+        serde_yaml_ng::Value::String(provider.as_str().to_string()),
+    );
+    pm.insert(
+        serde_yaml_ng::Value::String("linear_team".to_string()),
+        serde_yaml_ng::Value::String(team_id.to_string()),
+    );
+    root_map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm));
+    std::fs::create_dir_all(path.parent().expect("config path has parent"))?;
+    std::fs::write(
+        &path,
+        serde_yaml_ng::to_string(&root).map_err(|error| {
+            OpsError::Message(format!("failed to encode {}: {error}", path.display()))
+        })?,
+    )?;
+    Ok(())
 }
 
-/// A default team key (Task prefix) derived from the wave name: the first three
+fn remove_legacy_pm_sentinels(repo: &Path, waves: &[String]) -> OpsResult<()> {
+    for wave in waves {
+        update_wave_goal_config(repo, wave, |root| {
+            let pm_key = serde_yaml_ng::Value::String("pm".to_string());
+            let Some(mut pm) = root
+                .get(&pm_key)
+                .and_then(serde_yaml_ng::Value::as_mapping)
+                .cloned()
+            else {
+                return Ok(());
+            };
+            pm.remove(serde_yaml_ng::Value::String("provider".to_string()));
+            pm.remove(serde_yaml_ng::Value::String("linear_team".to_string()));
+            if pm.is_empty() {
+                root.remove(&pm_key);
+            } else {
+                root.insert(pm_key, serde_yaml_ng::Value::Mapping(pm));
+            }
+            Ok(())
+        })
+        .map_err(OpsError::Message)?;
+    }
+
+    let path = repo.join(".lf/config.yaml");
+    let content = std::fs::read_to_string(&path)?;
+    let mut root: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content).map_err(|error| {
+        OpsError::Message(format!(
+            "invalid repository config {}: {error}",
+            path.display()
+        ))
+    })?;
+    let root_map = root.as_mapping_mut().ok_or_else(|| {
+        OpsError::Message(format!(
+            "repository config {} must be a YAML mapping",
+            path.display()
+        ))
+    })?;
+    let linear_key = serde_yaml_ng::Value::String("linear".to_string());
+    if let Some(mut linear) = root_map
+        .get(&linear_key)
+        .and_then(serde_yaml_ng::Value::as_mapping)
+        .cloned()
+    {
+        linear.remove(serde_yaml_ng::Value::String("team".to_string()));
+        if linear.is_empty() {
+            root_map.remove(&linear_key);
+        } else {
+            root_map.insert(linear_key, serde_yaml_ng::Value::Mapping(linear));
+        }
+    }
+    std::fs::write(
+        &path,
+        serde_yaml_ng::to_string(&root).map_err(|error| {
+            OpsError::Message(format!("failed to encode {}: {error}", path.display()))
+        })?,
+    )?;
+    Ok(())
+}
+
+/// A default team key (Task prefix) derived from the repository name: the first three
 /// alphanumeric characters, uppercased. `--team-key` overrides it.
-fn default_team_key(wave: &str) -> String {
-    let key: String = wave
+fn default_team_key(repository: &str) -> String {
+    let key: String = repository
         .chars()
         .filter(char::is_ascii_alphanumeric)
         .take(3)
@@ -2562,14 +2775,6 @@ fn default_team_key(wave: &str) -> String {
 
 fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
     Ok(crate::engine::wave_config::read_wave_summary(repo, wave)?)
-}
-
-fn first_paragraph(content: &str) -> String {
-    content
-        .split("\n\n")
-        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
-        .find(|paragraph| !paragraph.is_empty())
-        .unwrap_or_default()
 }
 
 fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> {
@@ -2606,19 +2811,46 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
     Ok(())
 }
 
-/// List an initiative's Linear Projects and validate their slugs are unique.
-async fn checked_projects(
-    client: &PmClient,
-    initiative: &str,
+/// List a Wave's Projects and enforce repository Team + singular Initiative ownership.
+async fn checked_projects(repo: &Path, ctx: &PmContext, wave: &str) -> OpsResult<Vec<PmProject>> {
+    let store = pm_store().await?;
+    checked_projects_with_store(repo, ctx, wave, &store).await
+}
+
+async fn checked_projects_with_store(
+    repo: &Path,
+    ctx: &PmContext,
     wave: &str,
+    store: &Store,
 ) -> OpsResult<Vec<PmProject>> {
-    let mut projects = client.list_projects(initiative).await.map_err(pm_to_ops)?;
+    let title_path = canonical_wave_title_path_with_store(repo, wave, store).await?;
+    let mut projects = ctx
+        .client
+        .list_projects(&ctx.initiative)
+        .await
+        .map_err(pm_to_ops)?;
     for project in &mut projects {
-        project.name = canonical_project_name(wave, &project.name).to_string();
+        validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
+        project.name = canonical_project_name(&title_path, wave, &project.name)?;
         project.slug = crate::pm::project_slug(&project.name);
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
+}
+
+fn validate_project_ownership(
+    project: &PmProject,
+    wave: &str,
+    initiative_id: &str,
+    team_id: &str,
+) -> OpsResult<()> {
+    crate::pm::validate_project_ownership(wave, initiative_id, Some(team_id), project).map_err(
+        |error| {
+            OpsError::Message(format!(
+                "{error}. Repair the associations and run `lf pm sync --wave {wave}`."
+            ))
+        },
+    )
 }
 
 fn find_project<'a>(projects: &'a [PmProject], wave: &str, slug: &str) -> OpsResult<&'a PmProject> {
@@ -2649,16 +2881,100 @@ fn title_case(slug: &str) -> String {
         .join(" ")
 }
 
-fn linear_project_name(wave: &str, canonical_name: &str) -> String {
-    format!("{} — {}", title_case(wave), canonical_name.trim())
+async fn linear_project_name(repo: &Path, wave: &str, canonical_name: &str) -> OpsResult<String> {
+    Ok(format!(
+        "{} — {}",
+        canonical_wave_title_path_async(repo, wave).await?,
+        canonical_name.trim()
+    ))
 }
 
-fn canonical_project_name<'a>(wave: &str, linear_name: &'a str) -> &'a str {
-    let prefix = format!("{} — ", title_case(wave));
-    linear_name
-        .strip_prefix(&prefix)
-        .unwrap_or(linear_name)
-        .trim()
+fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> OpsResult<String> {
+    let expected = format!("{title_path} — ");
+    if let Some(name) = linear_name.strip_prefix(&expected) {
+        return Ok(name.trim().to_string());
+    }
+    let leaf = wave.rsplit('/').next().unwrap_or(wave);
+    for legacy in [title_case(wave), title_case(leaf)] {
+        let prefix = format!("{legacy} — ");
+        if let Some(name) = linear_name.strip_prefix(&prefix) {
+            return Ok(name.trim().to_string());
+        }
+    }
+    if linear_name.contains(" — ") {
+        return Err(OpsError::Message(format!(
+            "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
+             run `lf pm project update --wave {wave} --project <slug> --title <name>` explicitly"
+        )));
+    }
+    Ok(linear_name.trim().to_string())
+}
+
+pub fn canonical_wave_title_path(repo: &Path, wave: &str) -> OpsResult<String> {
+    block_on_pm(canonical_wave_title_path_async(repo, wave))
+}
+
+async fn canonical_wave_title_path_async(repo: &Path, wave: &str) -> OpsResult<String> {
+    let store = pm_store().await?;
+    canonical_wave_title_path_with_store(repo, wave, &store).await
+}
+
+async fn canonical_wave_title_path_with_store(
+    repo: &Path,
+    wave: &str,
+    store: &Store,
+) -> OpsResult<String> {
+    let Some(mut current) = store
+        .get_wave_by_name(wave)
+        .await
+        .map_err(|error| OpsError::Message(format!("failed to read Wave ancestry: {error}")))?
+    else {
+        if wave.contains('/') {
+            return Err(OpsError::Message(format!(
+                "nested wave/{wave} has no durable registry ancestry; start or prepare its promotion first"
+            )));
+        }
+        return Ok(title_case(wave));
+    };
+
+    let main =
+        crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let main = std::fs::canonicalize(&main).unwrap_or(main);
+    let mut seen = BTreeSet::new();
+    let mut segments = Vec::new();
+    loop {
+        if !seen.insert(current.id().as_str().to_string()) {
+            return Err(OpsError::Message(format!(
+                "Wave ancestry for wave/{wave} contains a cycle at {}",
+                current.id()
+            )));
+        }
+        let current_repo = std::fs::canonicalize(current.repo())
+            .unwrap_or_else(|_| Path::new(current.repo()).to_path_buf());
+        if current_repo != main {
+            return Err(OpsError::Message(format!(
+                "Wave ancestry for wave/{wave} crosses repositories at {} ({})",
+                current.name(),
+                current.repo()
+            )));
+        }
+        let leaf = current.name().rsplit('/').next().unwrap_or(current.name());
+        segments.push(title_case(leaf));
+        let Some(parent_id) = current.parent_wave_id().cloned() else {
+            break;
+        };
+        current = store
+            .get_wave(&parent_id)
+            .await
+            .map_err(|error| OpsError::Message(format!("failed to read Wave ancestry: {error}")))?
+            .ok_or_else(|| {
+                OpsError::Message(format!(
+                    "Wave ancestry for wave/{wave} is incomplete: parent {parent_id} is missing"
+                ))
+            })?;
+    }
+    segments.reverse();
+    Ok(segments.join(" / "))
 }
 
 fn block_on_pm<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
@@ -2676,19 +2992,10 @@ mod tests {
     use super::*;
     use crate::id::WaveId;
     use crate::ops::NullProgress;
-    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::project::{Project, ProjectId};
-    use crate::task::{
-        Observation, PmWritebackState, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
-        TaskPrId,
-    };
-
     use crate::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
-    use std::path::PathBuf;
-    use time::OffsetDateTime;
 
     #[test]
     fn idempotent_task_description_preserves_the_report() {
@@ -2705,12 +3012,16 @@ mod tests {
 
     fn linear_test_ctx(base_url: String, initiative: &str) -> PmContext {
         PmContext {
-            client: PmClient::Linear(crate::pm::linear::LinearClient::with_base_url(
-                "linear-secret".to_string(),
-                Some("team-9".to_string()),
-                base_url,
-            )),
-            provider: PmProviderKind::Linear,
+            repository: RepositoryPmContext {
+                client: crate::pm::linear::LinearClient::with_base_url(
+                    "linear-secret".to_string(),
+                    Some("team-123".to_string()),
+                    base_url,
+                ),
+                provider: PmProviderKind::Linear,
+                repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
+                team_id: "team-123".to_string(),
+            },
             initiative: initiative.to_string(),
         }
     }
@@ -2756,23 +3067,25 @@ mod tests {
         )
     }
 
-    fn reteam_project_node(id: &str, name: &str, team_ids: &[&str]) -> serde_json::Value {
+    fn migration_project_node(id: &str, name: &str, initiative: &str, teams: &[&str]) -> Value {
         json!({
             "id": id,
             "name": name,
-            "description": "",
-            "content": "## Definition\n\nA measured bet.\n\n## KRs\n",
-            "initiatives": { "nodes": [{ "id": "initiative-123" }] },
-            "teams": {
-                "nodes": team_ids
-                    .iter()
-                    .map(|id| json!({ "id": id }))
-                    .collect::<Vec<_>>()
-            }
+            "description": "A measured bet.",
+            "content": "## Definition\n\nA measured bet.\n\n## Flows\n\n- first: (none)\n- loop: (none)\n- finally: (none)\n\n## KRs\n\n- [ ] Ownership holds",
+            "initiatives": { "nodes": [{ "id": initiative }] },
+            "teams": { "nodes": teams.iter().map(|id| json!({ "id": id })).collect::<Vec<_>>() }
         })
     }
 
-    fn reteam_issue_node(id: &str, identifier: &str, completed: bool) -> serde_json::Value {
+    fn migration_issue_node(
+        id: &str,
+        identifier: &str,
+        project_id: &str,
+        project_name: &str,
+        team_id: &str,
+        completed: bool,
+    ) -> Value {
         json!({
             "id": id,
             "identifier": identifier,
@@ -2781,345 +3094,44 @@ mod tests {
             "description": "",
             "prioritySortOrder": 0.0,
             "sortOrder": 0.0,
-            "state": { "type": if completed { "completed" } else { "unstarted" } }
+            "assignee": null,
+            "state": { "type": if completed { "completed" } else { "unstarted" } },
+            "project": { "id": project_id, "name": project_name },
+            "team": { "id": team_id }
         })
     }
 
-    fn issue_observation_response(comments: &[&str]) -> QueuedResponse {
+    fn issue_comments_response() -> QueuedResponse {
+        issue_comments_response_with(None)
+    }
+
+    fn issue_comments_response_with(body: Option<&str>) -> QueuedResponse {
+        let nodes = body
+            .map(|body| vec![json!({ "id": "comment-reteam", "body": body, "user": null })])
+            .unwrap_or_default();
         json_response(
             StatusCode::OK,
             json!({ "data": { "issue": {
-                "updatedAt": "2026-07-17T00:00:00.000Z",
-                "title": "Legacy task",
-                "description": "",
-                "comments": {
-                    "nodes": comments
-                        .iter()
-                        .enumerate()
-                        .map(|(index, body)| json!({
-                            "id": format!("comment-{index}"),
-                            "body": body,
-                            "user": null
-                        }))
-                        .collect::<Vec<_>>()
-                }
+                "updatedAt": "2026-07-20T00:00:00.000Z",
+                "title": "Task", "description": "",
+                "comments": { "nodes": nodes }
             } } }),
         )
     }
 
-    fn reteam_comment_create_response(id: &str) -> QueuedResponse {
-        json_response(
-            StatusCode::OK,
-            json!({ "data": { "commentCreate": { "comment": { "id": id } } } }),
-        )
-    }
-
-    fn issue_team_move_response(id: &str, identifier: &str) -> QueuedResponse {
-        json_response(
-            StatusCode::OK,
-            json!({ "data": { "issueUpdate": { "issue": {
-                "id": id,
-                "identifier": identifier
-            } } } }),
-        )
-    }
-
-    fn project_team_move_response(id: &str) -> QueuedResponse {
+    fn project_update_response(id: &str) -> QueuedResponse {
         json_response(
             StatusCode::OK,
             json!({ "data": { "projectUpdate": { "project": { "id": id } } } }),
         )
     }
 
-    async fn reteam_test_store() -> (tempfile::TempDir, Store) {
-        let directory = tempfile::tempdir().expect("temp store directory");
-        let store = open_store(&crate::store::StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .expect("open reteam store");
-        (directory, store)
+    fn write_repo_config(repo: &Path, content: &str) {
+        std::fs::create_dir_all(repo.join(".lf")).unwrap();
+        std::fs::write(repo.join(".lf/config.yaml"), content).unwrap();
     }
 
-    async fn seed_reteam_task(store: &Store, issue_id: &str, identifier: &str) -> TaskId {
-        let now = OffsetDateTime::now_utc();
-        let wave = Wave::new(
-            WaveId::new(),
-            "infrastructure".to_string(),
-            "/repo".to_string(),
-        );
-        store.create_wave(&wave).await.expect("create wave");
-        let project_definition = ProjectPlan {
-            id: LinearProjectId::new("project-uuid").expect("project id"),
-            slug: "developer-efficiency".to_string(),
-            name: "Developer Efficiency".to_string(),
-            prompt_context: "Keep development fast.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
-        };
-        let project = Project {
-            id: ProjectId::new(),
-            plan: project_definition,
-            wave_id: wave.id().clone(),
-            iteration: 1,
-            observation_cursor: 0,
-            last_state_fingerprint: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .create_project(&project)
-            .await
-            .expect("create Project Work");
-
-        let task_id = TaskId::new();
-        let task = Task {
-            id: task_id.clone(),
-            plan: TaskPlan {
-                id: LinearIssueId::new(issue_id).expect("issue id"),
-                identifier: identifier.to_string(),
-                title: format!("Task {identifier}"),
-                description: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: wave.id().clone(),
-            project_id: project.id,
-            worktree: PathBuf::from(format!("/repo.{identifier}")),
-            workspace_slug: identifier.to_ascii_lowercase(),
-            lifecycle: TaskLifecyclePlan::defaults(),
-            lifecycle_phase: TaskLifecyclePhase::Loop,
-            phase_epoch: 1,
-            phase_cursor: 0,
-            phase_iteration: 0,
-            gate_cycle: 0,
-            gate_proposal: None,
-            agent: "codex".to_string(),
-            provider: "codex".to_string(),
-            provider_session_id: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 1,
-            slug: task.workspace_slug.clone(),
-            branch: format!("jack/{}", task.workspace_slug),
-            base_commit: "deadbeef".to_string(),
-            parent_pr_id: None,
-            publication: None,
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        store
-            .create_task(&task, &pr)
-            .await
-            .expect("create Task Work");
-        task_id
-    }
-
-    #[test]
-    fn resolve_provider_defaults_to_linear() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(repo.path(), "goals", "pm:\n  provider: \"\"\n");
-        assert_eq!(
-            resolve_provider(repo.path(), "goals").unwrap(),
-            PmProviderKind::Linear
-        );
-    }
-
-    #[test]
-    fn resolve_provider_selects_linear_from_frontmatter() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(
-            repo.path(),
-            "scan",
-            "pm:\n  provider: linear\n  linear_initiative: \"lin-1\"\n",
-        );
-        assert_eq!(
-            resolve_provider(repo.path(), "scan").unwrap(),
-            PmProviderKind::Linear
-        );
-    }
-
-    #[test]
-    fn title_case_humanizes_wave_slug() {
-        assert_eq!(title_case("wave-repo-split"), "Wave Repo Split");
-        assert_eq!(title_case("concerto"), "Concerto");
-    }
-
-    #[test]
-    fn initiative_title_discovery_requires_an_exact_unique_match() {
-        let waves = vec![
-            PmWave {
-                id: "product-1".to_string(),
-                name: "Product".to_string(),
-                summary: String::new(),
-            },
-            PmWave {
-                id: "lowercase".to_string(),
-                name: "product".to_string(),
-                summary: String::new(),
-            },
-        ];
-
-        assert_eq!(
-            matching_wave_id(&waves, "Product").expect("unique match"),
-            Some("product-1".to_string())
-        );
-        assert_eq!(matching_wave_id(&waves, "Missing").expect("no match"), None);
-
-        let duplicates = vec![waves[0].clone(), waves[0].clone()];
-        let error = matching_wave_id(&duplicates, "Product").expect_err("duplicates must fail");
-        assert!(error.to_string().contains("product-1, product-1"));
-    }
-
-    #[test]
-    fn initiative_write_persists_only_the_stable_binding() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(repo.path(), "product", "pm:\n  provider: linear\n");
-
-        write_initiative_to_goal(
-            repo.path(),
-            "product",
-            PmProviderKind::Linear,
-            "initiative-1",
-        )
-        .expect("write initiative");
-
-        let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
-        assert_eq!(pm.provider.as_deref(), Some("linear"));
-        assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
-    }
-
-    #[test]
-    fn team_write_persists_alongside_the_initiative_binding() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(
-            repo.path(),
-            "product",
-            "pm:\n  provider: linear\n  linear_initiative: \"initiative-1\"\n",
-        );
-
-        write_team_to_goal(repo.path(), "product", PmProviderKind::Linear, "team-prd")
-            .expect("write team");
-
-        let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
-        // Both bindings coexist; the team write never disturbs the Initiative.
-        assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
-        assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
-        assert_eq!(
-            read_team(repo.path(), "product", PmProviderKind::Linear).as_deref(),
-            Some("team-prd")
-        );
-    }
-
-    #[test]
-    fn team_write_rebinds_without_disturbing_the_initiative() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(
-            repo.path(),
-            "product",
-            "pm:\n  provider: linear\n  linear_initiative: \"initiative-1\"\n  linear_team: \"team-shared\"\n",
-        );
-
-        write_team_to_goal(repo.path(), "product", PmProviderKind::Linear, "team-prd")
-            .expect("replace team");
-
-        let pm = read_wave_pm_config(repo.path(), "product").expect("pm config");
-        assert_eq!(pm.linear_initiative.as_deref(), Some("initiative-1"));
-        assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
-    }
-
-    #[test]
-    fn resolve_team_prefers_wave_binding_over_config() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(
-            repo.path(),
-            "product",
-            "pm:\n  provider: linear\n  linear_team: \"team-prd\"\n",
-        );
-
-        // A wave with its own binding ignores any global fallback.
-        assert_eq!(
-            resolve_team(repo.path(), "product", PmProviderKind::Linear).as_deref(),
-            Some("team-prd")
-        );
-        // An unbound wave has no team here (no global config in the temp repo),
-        // which is safe: reads are team-agnostic and only creation needs one.
-        assert_eq!(
-            resolve_team(repo.path(), "unbound", PmProviderKind::Linear),
-            None
-        );
-    }
-
-    #[test]
-    fn require_creation_team_fails_closed_on_an_unbound_wave() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        write_goal(
-            repo.path(),
-            "product",
-            "pm:\n  provider: linear\n  linear_team: \"team-prd\"\n",
-        );
-
-        // A bound wave yields its explicit team — never a fallback.
-        assert_eq!(
-            require_creation_team(repo.path(), "product", PmProviderKind::Linear)
-                .expect("bound wave resolves a team"),
-            "team-prd"
-        );
-
-        // An unbound wave errors with the `lf pm init` recovery instead of
-        // silently borrowing the shared team.
-        let err = require_creation_team(repo.path(), "unbound", PmProviderKind::Linear)
-            .expect_err("unbound wave fails closed");
-        let message = err.to_string();
-        assert!(message.contains("lf pm init --wave unbound"));
-        assert!(message.contains("linear_team"));
-    }
-
-    #[test]
-    fn default_team_key_derives_from_wave_name() {
-        assert_eq!(default_team_key("product"), "PRO");
-        assert_eq!(default_team_key("infrastructure"), "INF");
-        assert_eq!(default_team_key("intelligence"), "INT");
-        assert_eq!(default_team_key("x"), "LF");
-    }
-
-    #[test]
-    fn linear_project_prefix_is_presentation_only() {
-        assert_eq!(
-            linear_project_name("product", "Loopflow API"),
-            "Product — Loopflow API"
-        );
-        assert_eq!(
-            canonical_project_name("product", "Product — Loopflow API"),
-            "Loopflow API"
-        );
-        assert_eq!(
-            crate::pm::project_slug(canonical_project_name("product", "Product — Loopflow API")),
-            "loopflow-api"
-        );
-        assert_eq!(
-            canonical_project_name("product", "Unprefixed migration input"),
-            "Unprefixed migration input"
-        );
-    }
-
-    fn reteam_item(identifier: &str, completed: bool) -> PmItem {
+    fn reteam_item(identifier: &str, team_id: &str, completed: bool) -> PmItem {
         PmItem {
             id: format!("uuid-of-{identifier}"),
             identifier: identifier.to_string(),
@@ -3128,7 +3140,9 @@ mod tests {
             description: String::new(),
             rank: 0,
             completed,
-            project: None,
+            project_id: "project-1".to_string(),
+            project: "project-one".to_string(),
+            team_id: team_id.to_string(),
             assignee: None,
         }
     }
@@ -3138,502 +3152,389 @@ mod tests {
     }
 
     #[test]
-    fn identifier_prefix_needs_the_trailing_dash() {
-        assert!(identifier_has_team_prefix("PRD-4", "PRD"));
-        assert!(identifier_has_team_prefix("prd-4", "prd"));
-        // A shared leading substring must not false-match.
-        assert!(!identifier_has_team_prefix("PRODUCT-1", "PRD"));
-        assert!(!identifier_has_team_prefix("W2-155", "PRD"));
-    }
-
-    #[test]
-    fn project_needs_reteam_requires_exactly_one_bound_team() {
-        // Unknown teams (older snapshot) → never a mismatch.
-        assert!(!project_needs_reteam("team-prd", None));
-        // Exactly the bound team → owned.
-        assert!(!project_needs_reteam(
-            "team-prd",
-            Some(&["team-prd".to_string()])
-        ));
-        // The bound team plus a legacy team still violates one-team ownership.
-        assert!(project_needs_reteam(
-            "team-prd",
-            Some(&["team-prd".to_string(), "team-shared".to_string()])
-        ));
-        // Bound team absent → stranded.
-        assert!(project_needs_reteam(
-            "team-prd",
-            Some(&["team-shared".to_string()])
-        ));
-        // Belongs to no team at all → stranded.
-        assert!(project_needs_reteam("team-prd", Some(&[])));
-    }
-
-    #[test]
-    fn reteam_apply_stops_before_mutation_when_any_task_run_is_active() {
-        let deferrals = vec![
-            PmReteamDeferral {
-                identifier: "W2-157".to_string(),
-                title: "Unify practice targets".to_string(),
-                reason: "active Run run-one".to_string(),
-            },
-            PmReteamDeferral {
-                identifier: "W2-166".to_string(),
-                title: "Resolve team ownership".to_string(),
-                reason: "active Run run-two".to_string(),
-            },
-        ];
-
-        let error = ensure_reteam_apply_safe(&deferrals).expect_err("apply must stop");
-        let message = error.to_string();
-        assert!(message.contains("W2-157 `Unify practice targets` (active Run run-one)"));
-        assert!(message.contains("W2-166 `Resolve team ownership` (active Run run-two)"));
-        assert!(message.contains("No Projects or Tasks were moved"));
-    }
-
-    #[test]
-    fn reteam_classifies_completed_move_defer_and_skip() {
-        // Completion does not exempt a foreign-team issue from migration.
-        assert_eq!(
-            classify_reteam_item(&reteam_item("W2-1", true), "PRD", None),
-            ReteamClass::Move
+    fn repository_team_config_is_the_only_normal_authority() {
+        let repo = tempfile::tempdir().unwrap();
+        write_repo_config(
+            repo.path(),
+            "pm:\n  provider: linear\n  linear_team: team-loo\n",
         );
-        // A completed issue with an active Run remains protected.
-        assert!(matches!(
-            classify_reteam_item(
-                &reteam_item("W2-5", true),
-                "PRD",
-                Some(reteam_writer("W2-5", Some("run-one")))
-            ),
-            ReteamClass::Defer(_)
-        ));
-        // Already in the target team → skip (idempotency).
-        assert_eq!(
-            classify_reteam_item(&reteam_item("PRD-7", false), "PRD", None),
-            ReteamClass::Already
-        );
-        // Open with an active Run → defer with the Run as reason.
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("W2-2", false),
-                "PRD",
-                Some(reteam_writer("W2-2", Some("run-two")))
-            ),
-            ReteamClass::Defer("active Run run-two".to_string())
-        );
-        // Open Work without a Run → move and reconcile its display id.
-        assert_eq!(
-            classify_reteam_item(
-                &reteam_item("W2-3", false),
-                "PRD",
-                Some(reteam_writer("W2-3", None))
-            ),
-            ReteamClass::Move
-        );
-        // Open with no active Work → move.
-        assert_eq!(
-            classify_reteam_item(&reteam_item("W2-4", false), "PRD", None),
-            ReteamClass::Move
-        );
-    }
-
-    #[test]
-    fn reteam_moving_issues_requires_the_target_team_on_every_project() {
-        let project = |id: &str, name: &str, team_ids: Option<Vec<&str>>| PmProject {
-            id: id.to_string(),
-            slug: crate::pm::project_slug(name),
-            name: name.to_string(),
-            summary: String::new(),
-            definition: String::new(),
-            flows: Some(ProjectFlowPlan::empty()),
-            krs: Vec::new(),
-            initiative_ids: vec!["initiative-1".to_string()],
-            team_ids: team_ids.map(|ids| ids.into_iter().map(str::to_string).collect()),
-        };
-        let projects = vec![
-            project("safe", "Safe", Some(vec!["team-prd", "team-shared"])),
-            project("missing", "Missing target", Some(vec!["team-shared"])),
-            project("unknown", "Unknown teams", None),
-        ];
-
-        ensure_move_projects_carry_target_team(
-            &projects,
-            &BTreeSet::from(["safe".to_string()]),
-            "team-prd",
-        )
-        .expect("safe Project carries target team");
-
-        let error = ensure_move_projects_carry_target_team(
-            &projects,
-            &BTreeSet::from(["missing".to_string(), "unknown".to_string()]),
-            "team-prd",
-        )
-        .expect_err("missing and unresolved target teams fail closed");
-        let message = error.to_string();
-        assert!(message.contains("`Missing target` (teams [team-shared])"));
-        assert!(message.contains("`Unknown teams` (teams unresolved)"));
-        assert!(message.contains("No Projects or Tasks were moved"));
-    }
-
-    #[tokio::test]
-    async fn reteam_apply_moves_completed_issues_before_narrowing_projects() {
-        let initial_project = reteam_project_node(
-            "project-1",
-            "Developer Efficiency",
-            &["team-prd", "team-shared"],
-        );
-        let completed_issue = reteam_issue_node("issue-1", "W2-41", true);
-        let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([initial_project])),
-            issues_response(json!([completed_issue])),
-            issue_observation_response(&[]),
-            reteam_comment_create_response("comment-1"),
-            issue_team_move_response("issue-1", "PRD-7"),
-            project_team_move_response("project-1"),
-            projects_response(json!([reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-prd"],
-            )])),
-            issues_response(json!([reteam_issue_node("issue-1", "PRD-7", true)])),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let (_directory, store) = reteam_test_store().await;
-
-        let result = apply_or_plan_reteam(
-            &ctx,
-            &store,
-            Path::new("/repo"),
+        write_goal(
+            repo.path(),
             "product",
-            "team-prd",
-            "PRD",
-            true,
-            &NullProgress,
-        )
-        .await
-        .expect("reteam apply succeeds");
-
-        assert_eq!(result.moves.len(), 1);
-        assert_eq!(result.moves[0].old_identifier, "W2-41");
-        assert_eq!(result.moves[0].new_identifier.as_deref(), Some("PRD-7"));
-
-        let requests = requests.lock().await;
-        let bodies = requests
-            .iter()
-            .map(|request| {
-                serde_json::from_str::<serde_json::Value>(&request.body)
-                    .expect("GraphQL request body")
-            })
-            .collect::<Vec<_>>();
-        let comment = bodies
-            .iter()
-            .position(|body| {
-                body["query"]
-                    .as_str()
-                    .is_some_and(|query| query.contains("mutation CreateComment"))
-            })
-            .expect("traceability comment");
-        let issue_move = bodies
-            .iter()
-            .position(|body| {
-                body["query"]
-                    .as_str()
-                    .is_some_and(|query| query.contains("mutation MoveIssueToTeam"))
-            })
-            .expect("completed issue move");
-        let project_move = bodies
-            .iter()
-            .position(|body| {
-                body["query"]
-                    .as_str()
-                    .is_some_and(|query| query.contains("mutation MoveProjectToTeam"))
-            })
-            .expect("Project narrow");
-        assert!(
-            comment < issue_move,
-            "old identifier is recorded before move"
+            "pm:\n  linear_initiative: initiative-product\n",
         );
-        assert!(
-            issue_move < project_move,
-            "every issue moves before Project narrowing"
+
+        assert_eq!(
+            read_repository_team(repo.path(), PmProviderKind::Linear)
+                .unwrap()
+                .as_deref(),
+            Some("team-loo")
         );
-        assert_eq!(bodies[issue_move]["variables"]["id"], "issue-1");
-        assert!(bodies[comment]["variables"]["body"]
-            .as_str()
-            .expect("comment body")
-            .contains("was W2-41; moving onto team PRD"));
+        assert_eq!(
+            read_initiative(repo.path(), "product", PmProviderKind::Linear).as_deref(),
+            Some("initiative-product")
+        );
+        assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
     }
 
-    #[tokio::test]
-    async fn reteam_apply_refuses_unsafe_project_before_any_mutation() {
-        let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-shared"],
-            )])),
-            issues_response(json!([reteam_issue_node("issue-1", "W2-41", false)])),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let (_directory, store) = reteam_test_store().await;
-
-        let error = apply_or_plan_reteam(
-            &ctx,
-            &store,
-            Path::new("/repo"),
+    #[test]
+    fn legacy_wave_team_authority_blocks_mutations_with_prd_44_recovery() {
+        let repo = tempfile::tempdir().unwrap();
+        write_repo_config(
+            repo.path(),
+            "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+        );
+        write_goal(
+            repo.path(),
             "product",
-            "team-prd",
-            "PRD",
-            true,
-            &NullProgress,
-        )
-        .await
-        .expect_err("missing target team refuses apply");
+            "pm:\n  provider: linear\n  linear_initiative: initiative-product\n  linear_team: team-old\n",
+        );
 
-        assert!(error.to_string().contains("Developer Efficiency"));
-        let requests = requests.lock().await;
-        assert_eq!(requests.len(), 2);
-        assert!(requests
-            .iter()
-            .all(|request| !request.body.contains("mutation")));
+        let error = require_repository_pm_ready(repo.path()).unwrap_err();
+        assert!(error.to_string().contains("lf pm reteam --apply"));
+        assert!(error.to_string().contains("PRD-44"));
     }
 
-    #[tokio::test]
-    async fn reteam_apply_refuses_completed_issue_with_an_active_run() {
-        let (_directory, store) = reteam_test_store().await;
-        let task_id = seed_reteam_task(&store, "issue-live", "W2-42").await;
-        let task = store
-            .get_task(&task_id)
-            .await
-            .expect("read task")
-            .expect("task exists");
-        let work = store
-            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
-            .await
-            .expect("resolve Task Work");
-        store
-            .reserve_run(&work, crate::durable::RunTrigger::User)
-            .await
-            .expect("reserve active Run");
-        let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-prd", "team-shared"],
-            )])),
-            issues_response(json!([reteam_issue_node("issue-live", "W2-42", true)])),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-
-        let error = apply_or_plan_reteam(
-            &ctx,
-            &store,
-            Path::new("/repo"),
-            "product",
-            "team-prd",
-            "PRD",
-            true,
-            &NullProgress,
-        )
-        .await
-        .expect_err("active Run refuses the whole apply");
-
-        assert!(error.to_string().contains("W2-42"));
-        assert!(error
-            .to_string()
-            .contains("No Projects or Tasks were moved"));
-        let requests = requests.lock().await;
-        assert_eq!(requests.len(), 2);
-        assert!(requests
-            .iter()
-            .all(|request| !request.body.contains("mutation")));
-    }
-
-    #[tokio::test]
-    async fn reteam_retry_reuses_pre_move_comment_then_moves_and_rebinds() {
-        let (_directory, store) = reteam_test_store().await;
-        let task_id = seed_reteam_task(&store, "issue-legacy", "W2-9").await;
-        let initial_project = || {
-            reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-prd", "team-shared"],
+    #[test]
+    fn project_titles_strip_only_recognized_wave_paths() {
+        assert_eq!(
+            canonical_project_name("Survival", "survival", "Survival — A real task").unwrap(),
+            "A real task"
+        );
+        assert_eq!(
+            canonical_project_name(
+                "Survival / Infrastructure",
+                "infrastructure",
+                "Infrastructure — Gmail",
             )
-        };
-        let legacy_issue = || reteam_issue_node("issue-legacy", "W2-9", false);
+            .unwrap(),
+            "Gmail"
+        );
+        assert!(canonical_project_name(
+            "Survival / Infrastructure",
+            "infrastructure",
+            "Another Wave — Gmail",
+        )
+        .is_err());
+        assert_eq!(default_team_key("loopflow"), "LOO");
+    }
 
-        let (base_url, first_requests) = test_server::spawn(vec![
-            projects_response(json!([initial_project()])),
-            issues_response(json!([legacy_issue()])),
-            issue_observation_response(&[]),
-            reteam_comment_create_response("comment-1"),
+    #[tokio::test]
+    async fn repository_team_reteam_migrates_open_and_completed_issues_before_cleanup() {
+        let repo = tempfile::tempdir().unwrap();
+        write_repo_config(
+            repo.path(),
+            "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+        );
+        write_goal(
+            repo.path(),
+            "survival",
+            "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
+        );
+        write_goal(
+            repo.path(),
+            "infrastructure",
+            "pm:\n  provider: linear\n  linear_initiative: initiative-infrastructure\n  linear_team: team-old\n",
+        );
+
+        let database = repo.path().join("registry.db");
+        let store = open_store(&crate::store::StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let survival = Wave::new(
+            WaveId::new(),
+            "survival".to_string(),
+            repo.path().display().to_string(),
+        );
+        let infrastructure = Wave::new(
+            WaveId::new(),
+            "infrastructure".to_string(),
+            repo.path().display().to_string(),
+        )
+        .with_parent(survival.id().clone());
+        store.create_wave(&survival).await.unwrap();
+        store.create_wave(&infrastructure).await.unwrap();
+
+        let old_survival = migration_project_node(
+            "project-survival",
+            "Survival — A real task reaches done",
+            "initiative-survival",
+            &["team-old"],
+        );
+        let old_infrastructure = migration_project_node(
+            "project-infrastructure",
+            "Infrastructure — Gmail",
+            "initiative-infrastructure",
+            &["team-old"],
+        );
+        let new_survival = migration_project_node(
+            "project-survival",
+            "Survival — A real task reaches done",
+            "initiative-survival",
+            &["team-loo"],
+        );
+        let new_infrastructure = migration_project_node(
+            "project-infrastructure",
+            "Survival / Infrastructure — Gmail",
+            "initiative-infrastructure",
+            &["team-loo"],
+        );
+        let responses = vec![
+            projects_response(json!([old_infrastructure])),
+            issues_response(json!([migration_issue_node(
+                "issue-done",
+                "OLD-2",
+                "project-infrastructure",
+                "Infrastructure — Gmail",
+                "team-old",
+                true,
+            )])),
+            projects_response(json!([old_survival])),
+            issues_response(json!([migration_issue_node(
+                "issue-open",
+                "OLD-1",
+                "project-survival",
+                "Survival — A real task reaches done",
+                "team-old",
+                false,
+            )])),
+            project_update_response("project-survival"),
+            project_update_response("project-infrastructure"),
+            issue_comments_response(),
             json_response(
                 StatusCode::OK,
-                json!({ "errors": [{ "message": "issue move failed" }] }),
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-done" } } } }),
             ),
-        ])
-        .await;
-        let first_ctx = linear_test_ctx(base_url, "initiative-123");
-        let error = apply_or_plan_reteam(
-            &first_ctx,
-            &store,
-            Path::new("/repo"),
-            "product",
-            "team-prd",
-            "PRD",
-            true,
-            &NullProgress,
-        )
-        .await
-        .expect_err("first move fails after comment");
-        assert!(error.to_string().contains("issue move failed"));
-        assert_eq!(
-            store
-                .get_task(&task_id)
-                .await
-                .expect("read task")
-                .expect("task exists")
-                .plan
-                .identifier,
-            "W2-9"
-        );
-
-        let existing_comment = reteam_comment_body("W2-9", "PRD");
-        let (base_url, second_requests) = test_server::spawn(vec![
-            projects_response(json!([initial_project()])),
-            issues_response(json!([legacy_issue()])),
-            issue_observation_response(&[&existing_comment]),
-            issue_team_move_response("issue-legacy", "PRD-9"),
-            project_team_move_response("project-1"),
-            projects_response(json!([reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-prd"],
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
+            ),
+            issue_comments_response(),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-open" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
+            ),
+            project_update_response("project-survival"),
+            project_update_response("project-infrastructure"),
+            project_update_response("project-infrastructure"),
+            projects_response(json!([new_infrastructure])),
+            issues_response(json!([migration_issue_node(
+                "issue-done",
+                "LOO-2",
+                "project-infrastructure",
+                "Survival / Infrastructure — Gmail",
+                "team-loo",
+                true,
             )])),
-            issues_response(json!([reteam_issue_node("issue-legacy", "PRD-9", false,)])),
-        ])
-        .await;
-        let second_ctx = linear_test_ctx(base_url, "initiative-123");
-        let result = apply_or_plan_reteam(
-            &second_ctx,
-            &store,
-            Path::new("/repo"),
-            "product",
-            "team-prd",
-            "PRD",
-            true,
-            &NullProgress,
-        )
-        .await
-        .expect("retry succeeds");
+            projects_response(json!([new_survival])),
+            issues_response(json!([migration_issue_node(
+                "issue-open",
+                "LOO-1",
+                "project-survival",
+                "Survival — A real task reaches done",
+                "team-loo",
+                false,
+            )])),
+        ];
+        let (base_url, requests) = test_server::spawn(responses).await;
+        let client = crate::pm::linear::LinearClient::with_base_url(
+            "linear-secret".to_string(),
+            Some("team-loo".to_string()),
+            base_url,
+        );
+        let resolved = ResolvedReteamContext {
+            repository: RepositoryPmContext {
+                client,
+                provider: PmProviderKind::Linear,
+                repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
+                team_id: "team-loo".to_string(),
+            },
+            team_key: "LOO".to_string(),
+            store,
+        };
 
-        assert_eq!(result.task_updates, 1);
+        let result = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+            .await
+            .unwrap();
+
+        assert!(result.applied);
+        assert_eq!(result.moves.len(), 2);
+        let identifiers = result
+            .moves
+            .iter()
+            .filter_map(|item| item.new_identifier.as_deref())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(identifiers, BTreeSet::from(["LOO-1", "LOO-2"]));
+        assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
         assert_eq!(
-            store
-                .get_task(&task_id)
-                .await
-                .expect("read task")
-                .expect("task exists")
-                .plan
-                .identifier,
-            "PRD-9"
+            read_repository_team(repo.path(), PmProviderKind::Linear)
+                .unwrap()
+                .as_deref(),
+            Some("team-loo")
         );
-        let first_requests = first_requests.lock().await;
-        let second_requests = second_requests.lock().await;
-        assert_eq!(
-            first_requests
-                .iter()
-                .filter(|request| request.body.contains("mutation CreateComment"))
-                .count(),
-            1
-        );
-        assert_eq!(
-            second_requests
-                .iter()
-                .filter(|request| request.body.contains("mutation CreateComment"))
-                .count(),
-            0,
-            "retry must reuse this migration's existing comment"
-        );
+        for wave in ["survival", "infrastructure"] {
+            let pm = read_wave_pm_config(repo.path(), wave).unwrap();
+            assert!(pm.provider.is_none());
+            assert!(pm.linear_team.is_none());
+            assert!(pm.linear_initiative.is_some());
+        }
+
+        let requests = requests.lock().await;
+        let first_move = requests
+            .iter()
+            .position(|request| request.body.contains("MoveIssueToTeam"))
+            .unwrap();
+        let attached_before_move = requests[..first_move]
+            .iter()
+            .filter(|request| request.body.contains("SetProjectTeams"))
+            .count();
+        assert_eq!(attached_before_move, 2);
+        assert!(requests
+            .iter()
+            .any(|request| { request.body.contains("Survival / Infrastructure — Gmail") }));
     }
 
     #[tokio::test]
-    async fn reteam_already_moved_issue_only_rebinds_a_stale_task() {
-        let (_directory, store) = reteam_test_store().await;
-        let task_id = seed_reteam_task(&store, "issue-moved", "W2-10").await;
-        let (base_url, requests) = test_server::spawn(vec![
-            projects_response(json!([reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-prd"],
-            )])),
-            issues_response(json!([
-                reteam_issue_node("issue-moved", "PRD-10", false),
-                reteam_issue_node("issue-direct", "PRD-11", false)
-            ])),
-            projects_response(json!([reteam_project_node(
-                "project-1",
-                "Developer Efficiency",
-                &["team-prd"],
-            )])),
-            issues_response(json!([
-                reteam_issue_node("issue-moved", "PRD-10", false),
-                reteam_issue_node("issue-direct", "PRD-11", false)
-            ])),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-
-        let result = apply_or_plan_reteam(
-            &ctx,
-            &store,
-            Path::new("/repo"),
-            "product",
-            "team-prd",
-            "PRD",
-            true,
-            &NullProgress,
-        )
-        .await
-        .expect("already-moved reconciliation succeeds");
-
-        assert_eq!(result.already, 2);
-        assert_eq!(result.task_updates, 1);
-        assert!(result.moves.is_empty());
-        assert_eq!(
-            store
-                .get_task(&task_id)
-                .await
-                .expect("read task")
-                .expect("task exists")
-                .plan
-                .identifier,
-            "PRD-10"
+    async fn repository_team_reteam_resumes_after_an_interrupted_issue_move() {
+        let repo = tempfile::tempdir().unwrap();
+        write_repo_config(
+            repo.path(),
+            "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
         );
+        write_goal(
+            repo.path(),
+            "survival",
+            "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
+        );
+
+        let database = repo.path().join("registry.db");
+        let store = open_store(&crate::store::StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        store
+            .create_wave(&Wave::new(
+                WaveId::new(),
+                "survival".to_string(),
+                repo.path().display().to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let old_project = migration_project_node(
+            "project-survival",
+            "Survival — A real task reaches done",
+            "initiative-survival",
+            &["team-old"],
+        );
+        let expanded_project = migration_project_node(
+            "project-survival",
+            "Survival — A real task reaches done",
+            "initiative-survival",
+            &["team-old", "team-loo"],
+        );
+        let migrated_project = migration_project_node(
+            "project-survival",
+            "Survival — A real task reaches done",
+            "initiative-survival",
+            &["team-loo"],
+        );
+        let old_issue = migration_issue_node(
+            "issue-open",
+            "OLD-1",
+            "project-survival",
+            "Survival — A real task reaches done",
+            "team-old",
+            false,
+        );
+        let migrated_issue = migration_issue_node(
+            "issue-open",
+            "LOO-1",
+            "project-survival",
+            "Survival — A real task reaches done",
+            "team-loo",
+            false,
+        );
+        let marker = reteam_comment_body("OLD-1", "LOO");
+        let responses = vec![
+            projects_response(json!([old_project])),
+            issues_response(json!([old_issue.clone()])),
+            project_update_response("project-survival"),
+            issue_comments_response(),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "commentCreate": { "comment": { "id": "comment-reteam" } } } }),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({ "errors": [{ "message": "move interrupted" }] }),
+            ),
+            projects_response(json!([expanded_project])),
+            issues_response(json!([old_issue])),
+            issue_comments_response_with(Some(&marker)),
+            json_response(
+                StatusCode::OK,
+                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
+            ),
+            project_update_response("project-survival"),
+            projects_response(json!([migrated_project])),
+            issues_response(json!([migrated_issue])),
+        ];
+        let (base_url, requests) = test_server::spawn(responses).await;
+        let resolved = ResolvedReteamContext {
+            repository: RepositoryPmContext {
+                client: crate::pm::linear::LinearClient::with_base_url(
+                    "linear-secret".to_string(),
+                    Some("team-loo".to_string()),
+                    base_url,
+                ),
+                provider: PmProviderKind::Linear,
+                repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
+                team_id: "team-loo".to_string(),
+            },
+            team_key: "LOO".to_string(),
+            store,
+        };
+
+        let first = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+            .await
+            .unwrap_err();
+        assert!(first.to_string().contains("move interrupted"));
+        assert!(!legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+
+        let resumed = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+            .await
+            .unwrap();
+        assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
+        assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
         let requests = requests.lock().await;
-        assert_eq!(requests.len(), 4);
-        assert!(requests
-            .iter()
-            .all(|request| !request.body.contains("mutation")));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.body.contains("commentCreate"))
+                .count(),
+            1,
+            "the resumed migration reuses its first traceability comment"
+        );
     }
 
     #[test]
     fn reteam_protects_only_tasks_with_an_active_run() {
         assert_eq!(
             classify_reteam_item(
-                &reteam_item("W2-9", false),
-                "PRD",
+                &reteam_item("W2-9", "team-old", false),
+                "team-loo",
                 Some(reteam_writer("W2-9", None))
             ),
             ReteamClass::Move
         );
         assert_eq!(
             classify_reteam_item(
-                &reteam_item("W2-9", false),
-                "PRD",
+                &reteam_item("W2-9", "team-old", false),
+                "team-loo",
                 Some(reteam_writer("W2-9", Some("run-active")))
             ),
             ReteamClass::Defer("active Run run-active".to_string())
@@ -3644,16 +3545,16 @@ mod tests {
     fn reteam_reconciles_only_when_already_moved_work_has_no_run() {
         assert_eq!(
             classify_reteam_item(
-                &reteam_item("PRD-8", false),
-                "PRD",
+                &reteam_item("LOO-8", "team-loo", false),
+                "team-loo",
                 Some(reteam_writer("W2-9", None))
             ),
             ReteamClass::Already
         );
         assert!(matches!(
             classify_reteam_item(
-                &reteam_item("PRD-8", false),
-                "PRD",
+                &reteam_item("LOO-8", "team-loo", false),
+                "team-loo",
                 Some(reteam_writer("W2-9", Some("run-active")))
             ),
             ReteamClass::Defer(_)
@@ -3671,7 +3572,7 @@ mod tests {
             flows: Some(ProjectFlowPlan::empty()),
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
-            team_ids: None,
+            team_ids: vec!["team-loo".to_string()],
         };
         let projects = vec![project("one", "Wave Chat"), project("two", "Wave-Chat")];
 
@@ -3704,7 +3605,7 @@ mod tests {
                     holds: true,
                 }],
                 initiative_ids: vec!["initiative-1".to_string()],
-                team_ids: Some(vec!["team-prd".to_string()]),
+                team_ids: vec!["team-prd".to_string()],
             }],
             items: Vec::new(),
         };
@@ -3751,21 +3652,25 @@ mod tests {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
-                { "id": "issue-1", "title": "First", "description": "one",
+                { "id": "issue-1", "identifier": "LOO-1", "url": null,
+                  "title": "First", "description": "one",
                   "prioritySortOrder": 0.0, "sortOrder": 0.0,
-                  "state": { "type": "unstarted" } }
+                  "state": { "type": "unstarted" },
+                  "project": { "id": "project-123", "name": "Scan" },
+                  "team": { "id": "team-123" } }
             ])),
         ])
         .await;
         let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
 
-        let result = fetch_pm_snapshot("scan", &ctx)
+        let result = fetch_pm_snapshot(repo.path(), "scan", &ctx)
             .await
             .expect("fetch succeeds");
         assert_eq!(result.projects.len(), 1);
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0].name, "First");
-        assert_eq!(result.items[0].project.as_deref(), Some("scan"));
+        assert_eq!(result.items[0].project, "scan");
         assert_eq!(
             requests.lock().await[1].authorization.as_deref(),
             Some("Bearer linear-secret")
@@ -3776,6 +3681,7 @@ mod tests {
     async fn apply_update_requires_a_project_when_creating() {
         let (base_url, _requests) = test_server::spawn(vec![projects_response(json!([]))]).await;
         let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
             project: None,
@@ -3786,7 +3692,7 @@ mod tests {
             pr: None,
         };
 
-        let error = apply_update("goals", None, &ctx, &options, &NullProgress)
+        let error = apply_update(repo.path(), "goals", None, &ctx, &options, &NullProgress)
             .await
             .expect_err("project is required");
         assert!(error.to_string().contains("--project <slug>"));
@@ -3807,6 +3713,7 @@ mod tests {
         ])
         .await;
         let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
             project: Some("wave-chat".to_string()),
@@ -3817,9 +3724,16 @@ mod tests {
             pr: None,
         };
 
-        let result = apply_update("product", Some("wave-chat"), &ctx, &options, &NullProgress)
-            .await
-            .expect("update succeeds");
+        let result = apply_update(
+            repo.path(),
+            "product",
+            Some("wave-chat"),
+            &ctx,
+            &options,
+            &NullProgress,
+        )
+        .await
+        .expect("update succeeds");
 
         assert!(result.created);
         let requests = requests.lock().await;
@@ -3850,6 +3764,7 @@ mod tests {
         ])
         .await;
         let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
             project: None,
@@ -3860,7 +3775,7 @@ mod tests {
             pr: None,
         };
 
-        let result = apply_update("goals", None, &ctx, &options, &NullProgress)
+        let result = apply_update(repo.path(), "goals", None, &ctx, &options, &NullProgress)
             .await
             .expect("update succeeds");
         assert!(!result.created);
@@ -3900,6 +3815,7 @@ mod tests {
         ])
         .await;
         let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
         let options = PmUpdateOptions {
             wave: None,
             project: None,
@@ -3910,7 +3826,7 @@ mod tests {
             pr: Some("https://github.com/acme/repo/pull/42".to_string()),
         };
 
-        let result = apply_update("goals", None, &ctx, &options, &NullProgress)
+        let result = apply_update(repo.path(), "goals", None, &ctx, &options, &NullProgress)
             .await
             .expect("update succeeds");
         assert!(result.completed);
@@ -3980,7 +3896,7 @@ mod tests {
             comment_create_response("comment-1"),
         ])
         .await;
-        let client = linear_test_ctx(base_url, "initiative-1").client;
+        let client = linear_test_ctx(base_url, "initiative-1").client.clone();
 
         let outcome = link_pr_with_client(
             &client,
@@ -4017,7 +3933,7 @@ mod tests {
             comment_update_response("comment-1"),
         ])
         .await;
-        let client = linear_test_ctx(base_url, "initiative-1").client;
+        let client = linear_test_ctx(base_url, "initiative-1").client.clone();
         let prior = PrLinkageIds {
             attachment_id: Some("att-1".to_string()),
             comment_id: Some("comment-1".to_string()),
@@ -4064,7 +3980,7 @@ mod tests {
             ),
         ])
         .await;
-        let client = linear_test_ctx(base_url, "initiative-1").client;
+        let client = linear_test_ctx(base_url, "initiative-1").client.clone();
 
         let degraded = link_pr_with_client(
             &client,
@@ -4085,7 +4001,7 @@ mod tests {
             comment_create_response("comment-1"),
         ])
         .await;
-        let client = linear_test_ctx(base_url, "initiative-1").client;
+        let client = linear_test_ctx(base_url, "initiative-1").client.clone();
 
         let healed =
             link_pr_with_client(&client, &link_request("Open · published"), &degraded.ids).await;

@@ -1154,20 +1154,20 @@ pub enum CronCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum PmCommand {
-    /// Connect a wave to its Linear Initiative and team (Task prefix)
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Init {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
         /// Wave name (flag form; same as positional wave)
         #[arg(short = 'w', long = "wave", conflicts_with_all = ["wave", "all"])]
         wave_flag: Option<String>,
-        /// Initialize all waves under wave/
+        /// Recursively initialize every Wave under wave/
         #[arg(long, conflicts_with_all = ["wave", "wave_flag"])]
         all: bool,
-        /// Team key = Task prefix (e.g. PRD). Defaults from the wave name.
+        /// Repository Team key = Task prefix (e.g. LOO). Defaults from the repository name.
         #[arg(long = "team-key")]
         team_key: Option<String>,
-        /// Team display name. Defaults to the title-cased wave name.
+        /// Repository Team display name. Defaults to the repository name.
         #[arg(long = "team-name")]
         team_name: Option<String>,
     },
@@ -1197,11 +1197,8 @@ pub enum PmCommand {
     },
     /// Compare Linear with local wave bindings
     Doctor,
-    /// Move a wave's existing settled issues into its own Linear team
+    /// Move every linked wave onto the repository's one Linear team
     Reteam {
-        /// Wave name (auto-detected if omitted)
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
         /// Execute the moves; without it, `reteam` only prints the plan (dry run)
         #[arg(long)]
         apply: bool,
@@ -1249,9 +1246,6 @@ pub enum PmWebhookCommand {
         /// Address to bind (a reverse proxy gives Linear the public HTTPS URL)
         #[arg(long, default_value = "127.0.0.1:8899")]
         addr: String,
-        /// Wave whose Linear token identifies Loopflow's own actor
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
     },
     /// Register the Issue/Comment webhook with Linear (one-time). Reads the
     /// signing secret from LF_LINEAR_WEBHOOK_SECRET.
@@ -1259,9 +1253,6 @@ pub enum PmWebhookCommand {
         /// Public HTTPS URL Linear will POST deliveries to
         #[arg(long)]
         url: String,
-        /// Wave whose Linear token authorizes the registration
-        #[arg(short = 'w', long = "wave")]
-        wave: Option<String>,
     },
 }
 
@@ -2731,19 +2722,18 @@ mod tests {
 
     #[test]
     fn pm_reteam_defaults_to_dry_run() {
-        let cli = Cli::try_parse_from(["lf", "pm", "reteam", "--wave", "product"]).expect("parse");
+        let cli = Cli::try_parse_from(["lf", "pm", "reteam"]).expect("parse");
         let Some(Commands::Pm {
-            cmd: PmCommand::Reteam { wave, apply },
+            cmd: PmCommand::Reteam { apply },
         }) = cli.command
         else {
             panic!("expected pm reteam command");
         };
-        assert_eq!(wave.as_deref(), Some("product"));
         assert!(!apply);
 
         let cli = Cli::try_parse_from(["lf", "pm", "reteam", "--apply"]).expect("parse apply");
         let Some(Commands::Pm {
-            cmd: PmCommand::Reteam { apply, .. },
+            cmd: PmCommand::Reteam { apply },
         }) = cli.command
         else {
             panic!("expected pm reteam command");

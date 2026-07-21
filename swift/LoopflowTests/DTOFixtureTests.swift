@@ -47,6 +47,24 @@ struct DTOFixtureTests {
         #expect(decoded == turns)
     }
 
+    @Test("Activity fixture preserves process state and exact output evidence")
+    func activityFixtureRoundTrips() throws {
+        let data = try loadFixtureData("activity_snapshot.json")
+        let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: data)
+
+        #expect(snapshot.schemaVersion == 1)
+        #expect(snapshot.fastWindowSeconds == 300)
+        #expect(snapshot.aggregate.measuredOutputTokens == 48_200)
+        #expect(snapshot.aggregate.outputTokensPerSecondFast == 4.0)
+        #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.state)
+            == [.working, .stalled])
+        #expect(snapshot.providerProcesses[0].claim == .orphaned)
+
+        let encoded = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(ActivitySnapshot.self, from: encoded)
+        #expect(decoded == snapshot)
+    }
+
     @Test("Context Lab fixture preserves missing coverage and trace identity")
     func contextLabFixturePreservesResearchTruth() throws {
         let data = try loadFixtureData("context_lab_snapshot.json")

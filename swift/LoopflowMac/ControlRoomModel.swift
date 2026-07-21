@@ -42,6 +42,33 @@ enum ControlRoomReading<Value> {
     }
 }
 
+struct ControlRoomActivitySummary: Equatable {
+    let activeAgents: Int
+    let working: Int
+    let waiting: Int
+    let stalled: Int
+    let orphaned: Int
+    let unclaimed: Int
+    let outputTokensPerSecond5m: Double
+    let measuredOutputTokens: UInt64
+}
+
+extension ActivitySnapshot {
+    var controlRoomSummary: ControlRoomActivitySummary {
+        let providers = nodes.filter { $0.kind == .providerLaunch }
+        return ControlRoomActivitySummary(
+            activeAgents: providers.count + providerProcesses.count,
+            working: providers.count { $0.state == .working },
+            waiting: providers.count { $0.state == .waiting },
+            stalled: providers.count { $0.state == .stalled },
+            orphaned: providerProcesses.count { $0.claim == .orphaned },
+            unclaimed: providerProcesses.count { $0.claim == .unclaimed },
+            outputTokensPerSecond5m: aggregate.outputTokensPerSecondFast,
+            measuredOutputTokens: aggregate.measuredOutputTokens
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class ControlRoomModel {
@@ -49,6 +76,7 @@ final class ControlRoomModel {
     var selection: ControlRoomSelection?
     private(set) var roadmap: ControlRoomReading<RoadmapSnapshot> = .loading
     private(set) var waves: ControlRoomReading<[Wave]> = .loading
+    private(set) var activity: ControlRoomReading<ActivitySnapshot> = .loading
     private(set) var repos: [PortfolioRepo] = []
     private(set) var authoredWavesByRepo: [String: [String]] = [:]
     private(set) var isRefreshing = false
@@ -121,13 +149,17 @@ final class ControlRoomModel {
 
         let previousRoadmap = roadmap.value
         let previousWaves = waves.value
+        let previousActivity = activity.value
         if previousRoadmap == nil { roadmap = .loading }
         if previousWaves == nil { waves = .loading }
+        if previousActivity == nil { activity = .loading }
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
+        async let activityResult = readActivity()
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         waves = reading(from: await wavesResult, lastGood: previousWaves)
+        activity = reading(from: await activityResult, lastGood: previousActivity)
         selectRequestedWaveIfNeeded()
         clearSelectionIfOutsideScope()
     }
@@ -206,11 +238,13 @@ final class ControlRoomModel {
     func applyFixture(
         roadmap: ControlRoomReading<RoadmapSnapshot>,
         waves: ControlRoomReading<[Wave]>,
+        activity: ControlRoomReading<ActivitySnapshot>,
         repos: [PortfolioRepo],
         fixed: Bool = false
     ) {
         self.roadmap = roadmap
         self.waves = waves
+        self.activity = activity
         self.repos = repos
         authoredWavesByRepo = [:]
         usesFixedFixture = fixed
@@ -247,6 +281,14 @@ final class ControlRoomModel {
     private func readWaves() async -> Result<[Wave], Error> {
         do {
             return .success(try await query.allWaves())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func readActivity() async -> Result<ActivitySnapshot, Error> {
+        do {
+            return .success(try await query.activity())
         } catch {
             return .failure(error)
         }

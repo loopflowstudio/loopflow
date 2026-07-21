@@ -31,6 +31,11 @@ Turn, AgentInvocation, trace, and exec; the second row proves a cache-only measu
 survives while absent token and cost fields remain explicit nulls. Rust and
 Swift both round-trip it.
 
+`activity_snapshot.json` pins `lf ps --json`: attributed Exec and provider
+nodes retain working/stalled state and exact token rates, while a registered
+orphan stays separate from the counted call tree. Rust and Swift both
+round-trip it; the control room derives no process state of its own.
+
 `pm_show.json` pins the repository-owned Linear hierarchy read by `lf pm show`
 and the app: a Project carries exactly one Wave Initiative and the repository
 Team; its Task carries the stable Project and Team ids used for ownership.

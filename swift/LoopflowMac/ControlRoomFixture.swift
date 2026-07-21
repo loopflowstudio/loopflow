@@ -15,26 +15,35 @@ enum ControlRoomFixture {
                 model.applyFixture(
                     roadmap: .available(snapshot),
                     waves: .available([]),
+                    activity: .available(try emptyActivity()),
                     repos: [],
                     fixed: true
                 )
             case .mockWaves:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
                 let reading: ControlRoomReading<RoadmapSnapshot>
+                let activity: ControlRoomReading<ActivitySnapshot>
                 switch MockWaveFixture.detailState {
                 case .selected:
                     reading = .available(fixture.roadmap)
+                    activity = .available(try loadActivity(sourceFile: sourceFile))
                 case .loading:
                     reading = .loading
+                    activity = .loading
                 case .error:
                     reading = .unavailable(
                         lastGood: nil,
                         reason: "the local registry is unreachable"
                     )
+                    activity = .unavailable(
+                        lastGood: nil,
+                        reason: "live process evidence is unavailable"
+                    )
                 }
                 model.applyFixture(
                     roadmap: reading,
                     waves: .available(fixture.waves),
+                    activity: activity,
                     repos: fixture.repos,
                     fixed: true
                 )
@@ -52,6 +61,7 @@ enum ControlRoomFixture {
                     reason: "Control-room fixture unavailable: \(error.localizedDescription)"
                 ),
                 waves: .unavailable(lastGood: nil, reason: error.localizedDescription),
+                activity: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 repos: [],
                 fixed: true
             )
@@ -61,7 +71,7 @@ enum ControlRoomFixture {
     private static func loadRoadmap(
         sourceFile: String
     ) throws -> (roadmap: RoadmapSnapshot, waves: [Wave], repos: [PortfolioRepo]) {
-        let url = try roadmapFixtureURL(sourceFile: sourceFile)
+        let url = try fixtureURL(named: "roadmap_snapshot.json", sourceFile: sourceFile)
         let data = try Data(contentsOf: url)
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
         let waves = roadmap.waves.map { snapshot in
@@ -85,7 +95,17 @@ enum ControlRoomFixture {
         return (roadmap, waves, repos)
     }
 
-    private static func roadmapFixtureURL(sourceFile: String) throws -> URL {
+    private static func loadActivity(sourceFile: String) throws -> ActivitySnapshot {
+        let url = try fixtureURL(named: "activity_snapshot.json", sourceFile: sourceFile)
+        return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(contentsOf: url))
+    }
+
+    private static func emptyActivity() throws -> ActivitySnapshot {
+        let json = #"{"schema_version":1,"observed_at":1784606400,"fast_window_seconds":300,"slow_window_seconds":1800,"aggregate":{"measured_output_tokens":0,"output_tokens_fast":0,"output_tokens_slow":0,"output_tokens_per_second_fast":0.0,"output_tokens_per_second_slow":0.0,"measured_turns":0,"unmeasured_turns":0},"nodes":[],"provider_processes":[]}"#
+        return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(json.utf8))
+    }
+
+    private static func fixtureURL(named name: String, sourceFile: String) throws -> URL {
         let fileManager = FileManager.default
         var roots = [URL(fileURLWithPath: fileManager.currentDirectoryPath, isDirectory: true)]
         if let executableURL = Bundle.main.executableURL {
@@ -100,7 +120,8 @@ enum ControlRoomFixture {
             var directory = root.standardizedFileURL
             while visited.insert(directory.path).inserted {
                 let candidate = directory
-                    .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+                    .appendingPathComponent("tests/fixtures/dto")
+                    .appendingPathComponent(name)
                 if fileManager.fileExists(atPath: candidate.path) {
                     return candidate
                 }
@@ -112,7 +133,7 @@ enum ControlRoomFixture {
 
         throw CocoaError(
             .fileNoSuchFile,
-            userInfo: [NSFilePathErrorKey: "tests/fixtures/dto/roadmap_snapshot.json"]
+            userInfo: [NSFilePathErrorKey: "tests/fixtures/dto/\(name)"]
         )
     }
 }

@@ -265,6 +265,22 @@ struct RegistryQueryTests {
         #expect(runs[1].task == nil)
     }
 
+    @Test("lf ps decodes the shared live activity snapshot")
+    func activityDecodes() async throws {
+        let fixture = try String(contentsOf: activityFixtureURL(), encoding: .utf8)
+        let query = RegistryQuery { args, cwd in
+            #expect(args == ["ps", "--json"])
+            #expect(cwd == nil)
+            return fixture
+        }
+
+        let snapshot = try await query.activity()
+
+        #expect(snapshot.nodes.count == 3)
+        #expect(snapshot.aggregate.outputTokensPerSecondFast == 4.0)
+        #expect(snapshot.providerProcesses[0].claim == .orphaned)
+    }
+
     @Test("lf usage --json decodes one additive Turn row")
     func spendDecodes() async throws {
         let json = """
@@ -416,6 +432,14 @@ private func contextLabFixtureURL(sourceFile: String = #filePath) -> URL {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .appendingPathComponent("tests/fixtures/dto/context_lab_snapshot.json")
+}
+
+private func activityFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/activity_snapshot.json")
 }
 
 private actor CallCounter {

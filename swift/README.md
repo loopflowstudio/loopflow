@@ -9,9 +9,12 @@
 
 Loopflow opens on the control room: repository and Wave scope on the left,
 machine-wide Now/Roadmap work in the center, and selected Work evidence on the
-right. Selecting a Wave, Project, or Task preserves the surrounding live view.
-The control room reads `lf roadmap --json` and `lf ls --json` once per refresh;
-repository scope filters those shared snapshots locally.
+right. The strip above them shows active agents, attributed motion,
+five-minute output, measured tokens, and orphaned or unclaimed providers from
+`lf ps --json`. Selecting a Wave, Project, or Task preserves the surrounding
+live view. The control room reads `lf roadmap --json`, `lf ls --json`, and
+`lf ps --json` once per refresh; repository scope filters the Work snapshots
+locally while activity remains machine-wide.
 
 Loading, empty, stale-last-good, and unavailable reads stay distinct. A failed
 refresh keeps the last useful Work visible with its failure reason rather than
@@ -65,7 +68,7 @@ and observation spans.
   Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
   are answered through the explicit `lf work asks/answer` CLI.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/runs/usage/doctor/tokens/context/trace --json`; the app
+  `lf ls/status/roadmap/ps/runs/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
   roadmap or selected Wave detail visible.
@@ -76,6 +79,7 @@ and observation spans.
 ## Code map
 
 - `LoopflowMac/Views/ControlRoomView.swift` — primary scope, live Work, and selected detail
+- `LoopflowMac/Views/ControlRoomActivityStrip.swift` — machine-wide agent motion and output
 - `LoopflowMac/ControlRoomModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls

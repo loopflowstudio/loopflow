@@ -17,6 +17,7 @@ from typing import Literal, NoReturn
 
 APP = "loopflow-website"
 PRODUCTION_URL = "https://loopflow.studio"
+HEALTH_USER_AGENT = "loopflow-release-health/1"
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,8 @@ def _run(
 
 def _fetch_json(url: str) -> dict[str, object] | None:
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
+        request = urllib.request.Request(url, headers={"User-Agent": HEALTH_USER_AGENT})
+        with urllib.request.urlopen(request, timeout=10) as response:
             if response.status != 200:
                 return None
             value = json.loads(response.read())
@@ -57,7 +59,10 @@ def _fetch_json(url: str) -> dict[str, object] | None:
 
 def _root_is_healthy() -> bool:
     try:
-        with urllib.request.urlopen(f"{PRODUCTION_URL}/", timeout=10) as response:
+        request = urllib.request.Request(
+            f"{PRODUCTION_URL}/", headers={"User-Agent": HEALTH_USER_AGENT}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
             return response.status == 200
     except (OSError, urllib.error.HTTPError):
         return False

@@ -47,35 +47,57 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 }
 
 pub(crate) fn resolve_lfd_binary() -> PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_lfd") {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
-        }
-    }
+    let cargo_override = std::env::var("CARGO_BIN_EXE_lfd")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from);
     let lf = resolve_lf_binary();
-    if let Some(parent) = lf.parent() {
-        let sibling = parent.join("lfd");
-        if sibling.exists() {
-            return sibling;
-        }
-    }
-    if let Ok(current) = std::env::current_exe() {
-        if current
-            .file_name()
+    let lf_sibling = lf
+        .parent()
+        .map(|parent| parent.join("lfd"))
+        .filter(|path| path.is_file());
+    let invoked_sibling = std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .and_then(|invoked| invoked.parent().map(|parent| parent.join("lfd")))
+        .filter(|path| path.is_file());
+    let path_binary = which_on_path(Path::new("lfd"));
+    let current = std::env::current_exe().ok().filter(|path| {
+        path.file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name == "lfd")
-        {
-            return current;
-        }
-        if let Some(parent) = current.parent() {
-            let sibling = parent.join("lfd");
-            if sibling.exists() {
-                return sibling;
-            }
+    });
+
+    select_lfd_binary(
+        crate::build_info::provenance(),
+        cargo_override,
+        lf_sibling,
+        invoked_sibling,
+        path_binary,
+        current,
+    )
+}
+
+fn select_lfd_binary(
+    provenance: crate::build_info::BuildProvenance,
+    cargo_override: Option<PathBuf>,
+    lf_sibling: Option<PathBuf>,
+    invoked_sibling: Option<PathBuf>,
+    path_binary: Option<PathBuf>,
+    current_lfd: Option<PathBuf>,
+) -> PathBuf {
+    if let Some(path) = cargo_override {
+        return path;
+    }
+    if provenance == crate::build_info::BuildProvenance::Development {
+        if let Some(path) = lf_sibling {
+            return path;
         }
     }
-    PathBuf::from("lfd")
+    invoked_sibling
+        .or(path_binary)
+        .or(current_lfd)
+        .unwrap_or_else(|| PathBuf::from("lfd"))
 }
 
 fn select_binary_override(
@@ -529,7 +551,8 @@ mod tests {
 
     use super::{
         extend_session_control_context, forwarded_authority_env_names, lf_session_shell_command,
-        pin_control_binary, select_binary_override, select_current_home_binary, tmux_installed,
+        pin_control_binary, select_binary_override, select_current_home_binary, select_lfd_binary,
+        tmux_installed,
     };
     use crate::build_info::BuildProvenance;
     use crate::child::ChildExecutionContext;
@@ -573,6 +596,32 @@ mod tests {
                 Some("/ambient/lf".into()),
             ),
             Some(PathBuf::from("/production/lf"))
+        );
+    }
+
+    #[test]
+    fn release_daemon_resolution_prefers_the_promoted_target_over_a_stale_store_sibling() {
+        assert_eq!(
+            select_lfd_binary(
+                BuildProvenance::Release,
+                None,
+                Some(PathBuf::from("/home/op/.lf/bin/lfd")),
+                None,
+                Some(PathBuf::from("/home/op/.local/bin/lfd")),
+                None,
+            ),
+            PathBuf::from("/home/op/.local/bin/lfd")
+        );
+        assert_eq!(
+            select_lfd_binary(
+                BuildProvenance::Development,
+                None,
+                Some(PathBuf::from("/repo/target/debug/lfd")),
+                None,
+                Some(PathBuf::from("/home/op/.local/bin/lfd")),
+                None,
+            ),
+            PathBuf::from("/repo/target/debug/lfd")
         );
     }
 

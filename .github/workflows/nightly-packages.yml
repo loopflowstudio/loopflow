@@ -48,12 +48,14 @@ jobs:
         with:
           shared-key: nightly-packages-${{ matrix.target }}
       - name: Build package binaries
-        run: cargo build --release --target ${{ matrix.target }} -p loopflow --bin lf
+        run: >-
+          cargo build --release --target ${{ matrix.target }} -p loopflow
+          --bin lf --bin lfd
       - name: Package binaries
         run: |
           set -euo pipefail
           cd target/${{ matrix.target }}/release
-          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf
+          tar czf ../../../lf-${{ matrix.target }}.tar.gz lf lfd
       - name: Smoke test package
         run: |
           set -euo pipefail
@@ -62,6 +64,8 @@ jobs:
           package-smoke/lf --version
           package-smoke/lf --help > /dev/null
           package-smoke/lf --list > /dev/null
+          package-smoke/lfd --version
+          package-smoke/lfd --help > /dev/null
       - uses: actions/upload-artifact@v7
         with:
           name: nightly-${{ matrix.target }}

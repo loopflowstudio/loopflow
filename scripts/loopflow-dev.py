@@ -463,17 +463,26 @@ def _apply_dev_identity(plist: Path) -> None:
 
 def _copy_bundled_tools(app_macos_dir: Path, profile: str) -> None:
     if profile == "release":
-        cargo_cmd = ["cargo", "build", "--locked", "--release", "--bin", "lf"]
+        cargo_cmd = [
+            "cargo",
+            "build",
+            "--locked",
+            "--release",
+            "--bin",
+            "lf",
+            "--bin",
+            "lfd",
+        ]
         bin_dir = REPO_ROOT / "target" / "release"
     else:
-        cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf"]
+        cargo_cmd = ["cargo", "build", "--locked", "--bin", "lf", "--bin", "lfd"]
         bin_dir = REPO_ROOT / "target" / "debug"
 
     result = run(cargo_cmd, cwd=REPO_ROOT, check=False)
     if result.returncode != 0:
-        raise RuntimeError("Failed to build bundled lf binary")
+        raise RuntimeError("Failed to build bundled control binaries")
 
-    for binary in ("lf",):
+    for binary in ("lf", "lfd"):
         source = bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")

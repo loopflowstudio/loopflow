@@ -40,6 +40,23 @@ def test_release_bundle_renames_swift_product_to_bundle_executable(tmp_path: Pat
     assert not (app_macos_dir / "LoopflowMac").exists()
 
 
+def test_release_bundle_carries_the_control_plane_pair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    for name in ("lf", "lfd"):
+        (release_dir / name).write_bytes(f"release-{name}".encode())
+    app_macos_dir = tmp_path / "Loopflow.app/Contents/MacOS"
+    app_macos_dir.mkdir(parents=True)
+    monkeypatch.setenv("LF_RELEASE_BINARY", str(release_dir / "lf"))
+
+    release_loopflow._copy_bundled_tools(app_macos_dir)
+
+    assert (app_macos_dir / "lf").read_bytes() == b"release-lf"
+    assert (app_macos_dir / "lfd").read_bytes() == b"release-lfd"
+
+
 def test_release_command_reports_timeout(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

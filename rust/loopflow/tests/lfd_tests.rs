@@ -111,6 +111,20 @@ fn spawn_lfd(repo: &std::path::Path, db_path: &std::path::Path, addr: SocketAddr
     ChildGuard(child)
 }
 
+#[test]
+fn lfd_reports_the_control_plane_build_version() {
+    let output = Command::new(env!("CARGO_BIN_EXE_lfd"))
+        .arg("--version")
+        .output()
+        .expect("run lfd --version");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("lfd {}\n", loopflow::build_info::BUILD_VERSION)
+    );
+}
+
 #[tokio::test]
 async fn lfd_dedups_signed_deliveries_across_restart() {
     let repo = tempfile::tempdir().expect("repo tempdir");

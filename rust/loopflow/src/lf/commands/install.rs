@@ -683,7 +683,7 @@ fn binary_digest(path: &Path) -> Result<String> {
 /// refused rather than overwrite a retained (possibly rollback) artifact. The
 /// staged file is read-only (`0o555`), fsynced, digested from the copied bytes,
 /// and published by atomic rename.
-fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
+fn stage_binary_as(source: &Path, bin_dir: &Path, name: &str) -> Result<PathBuf> {
     fs::create_dir_all(bin_dir).with_context(|| format!("create {}", bin_dir.display()))?;
     let tmp = bin_dir.join(format!(
         ".lf-stage-{}-{}",
@@ -697,7 +697,7 @@ fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
         fs::File::open(&tmp).and_then(|file| file.sync_all())?;
 
         let digest = binary_digest(&tmp)?;
-        let dest = bin_dir.join(format!("lf-{digest}"));
+        let dest = bin_dir.join(format!("{name}-{digest}"));
         if dest.exists() {
             if binary_digest(&dest)? != digest {
                 return Err(anyhow!(
@@ -722,41 +722,56 @@ fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
     result
 }
 
+fn stage_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
+    stage_binary_as(source, bin_dir, "lf")
+}
+
+fn stage_daemon_binary(source: &Path, bin_dir: &Path) -> Result<PathBuf> {
+    stage_binary_as(source, bin_dir, "lfd")
+}
+
 /// Copy the prior global executable into immutable content-addressed storage.
 /// Symlink targets are resolved relative to the link's parent; regular files are
 /// copied directly. The returned path owns rollback bytes independently of a
 /// mutable worktree or a target that is about to be replaced.
 fn preserve_prior_binary(cli_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
-    let metadata = match fs::symlink_metadata(cli_target) {
+    preserve_prior_binary_as(cli_target, bin_dir, "lf")
+}
+
+fn preserve_prior_daemon(daemon_target: &Path, bin_dir: &Path) -> Result<Option<PathBuf>> {
+    preserve_prior_binary_as(daemon_target, bin_dir, "lfd")
+}
+
+fn preserve_prior_binary_as(target: &Path, bin_dir: &Path, name: &str) -> Result<Option<PathBuf>> {
+    let metadata = match fs::symlink_metadata(target) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("inspect prior CLI {}", cli_target.display()))
+            return Err(error).with_context(|| format!("inspect prior {name} {}", target.display()))
         }
     };
     let source = if metadata.file_type().is_symlink() {
-        let target = fs::read_link(cli_target)
-            .with_context(|| format!("read prior CLI symlink {}", cli_target.display()))?;
-        if target.is_absolute() {
-            target
+        let linked = fs::read_link(target)
+            .with_context(|| format!("read prior {name} symlink {}", target.display()))?;
+        if linked.is_absolute() {
+            linked
         } else {
-            cli_target
+            target
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
-                .join(target)
+                .join(linked)
         }
     } else if metadata.is_file() {
-        cli_target.to_path_buf()
+        target.to_path_buf()
     } else {
         return Err(anyhow!(
-            "prior CLI {} is neither a file nor a symlink",
-            cli_target.display()
+            "prior {name} {} is neither a file nor a symlink",
+            target.display()
         ));
     };
-    stage_binary(&source, bin_dir)
+    stage_binary_as(&source, bin_dir, name)
         .map(Some)
-        .with_context(|| format!("preserve prior compatible binary from {}", source.display()))
+        .with_context(|| format!("preserve prior {name} binary from {}", source.display()))
 }
 
 /// Point `cli_target` at `dest_binary` by an atomic temp-symlink + rename, so the
@@ -772,13 +787,16 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
     let _ = fs::remove_file(&tmp);
     std::os::unix::fs::symlink(dest_binary, &tmp)
         .with_context(|| format!("stage symlink {}", tmp.display()))?;
-    fs::rename(&tmp, cli_target).with_context(|| {
-        format!(
-            "commit {} -> {}",
-            cli_target.display(),
-            dest_binary.display()
-        )
-    })?;
+    if let Err(error) = fs::rename(&tmp, cli_target) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error).with_context(|| {
+            format!(
+                "commit {} -> {}",
+                cli_target.display(),
+                dest_binary.display()
+            )
+        });
+    }
     fs::File::open(parent)
         .and_then(|directory| directory.sync_all())
         .with_context(|| format!("persist CLI commit in {}", parent.display()))?;
@@ -843,6 +861,13 @@ struct AppPromotion<'a> {
     legacy_target: Option<&'a Path>,
     expected_candidate: &'a CandidateIdentity,
     expected_verdict: &'a Verdict,
+}
+
+struct DaemonPromotion<'a> {
+    source: &'a Path,
+    target: &'a Path,
+    bin_dir: &'a Path,
+    expected_candidate: &'a CandidateIdentity,
 }
 
 fn stage_app_bundle(plan: &AppPromotion<'_>) -> Result<PathBuf> {
@@ -952,33 +977,41 @@ fn publish_cli(verdict: &Verdict, plan: &CliPromotion) -> Result<(PathBuf, Optio
     Ok((dest, rollback))
 }
 
-fn activate_cli_then_advance(
-    verdict: &Verdict,
-    plan: &CliPromotion,
-    advance_frontier: impl FnOnce() -> Result<()>,
-) -> Result<(PathBuf, Option<PathBuf>)> {
-    let published = publish_cli(verdict, plan)?;
-    if matches!(verdict, Verdict::PromoteAndMigrate) {
-        advance_frontier()?;
-    }
-    Ok(published)
-}
-
 fn activate_install_then_advance(
     verdict: &Verdict,
     cli: &CliPromotion<'_>,
+    daemon: Option<&DaemonPromotion<'_>>,
     app: Option<&AppPromotion<'_>>,
     advance_frontier: impl FnOnce() -> Result<()>,
-) -> Result<(PathBuf, Option<PathBuf>)> {
+) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>)> {
     if matches!(verdict, Verdict::Reject { .. }) {
-        return publish_cli(verdict, cli);
+        return publish_cli(verdict, cli).map(|(dest, rollback)| (dest, rollback, None));
     }
 
-    // Stage every fallible app copy before the safety-critical CLI commit. A
-    // missing or unreadable bundle therefore leaves every global target old.
+    // Stage every fallible artifact before either control-plane target moves.
+    // A missing, unreadable, or mismatched daemon/app leaves the global pair
+    // untouched.
     let staged_app = app.map(stage_app_bundle).transpose()?;
-    let published = match activate_cli_then_advance(verdict, cli, advance_frontier) {
-        Ok(published) => published,
+    let staged_daemon = match daemon
+        .map(|plan| {
+            validate_daemon_candidate(plan.source, plan.expected_candidate)?;
+            stage_daemon_binary(plan.source, plan.bin_dir)
+        })
+        .transpose()
+    {
+        Ok(staged) => staged,
+        Err(error) => {
+            if let Some(staged) = &staged_app {
+                let _ = remove_path(staged);
+            }
+            return Err(error);
+        }
+    };
+    let prior_daemon = match daemon
+        .map(|plan| preserve_prior_daemon(plan.target, plan.bin_dir))
+        .transpose()
+    {
+        Ok(prior) => prior.flatten(),
         Err(error) => {
             if let Some(staged) = &staged_app {
                 let _ = remove_path(staged);
@@ -987,13 +1020,51 @@ fn activate_install_then_advance(
         }
     };
 
+    if let (Some(plan), Some(staged)) = (daemon, staged_daemon.as_deref()) {
+        if let Err(error) = commit_cli_symlink(plan.target, staged) {
+            if let Some(staged) = &staged_app {
+                let _ = remove_path(staged);
+            }
+            return Err(error);
+        }
+    }
+    let published = match publish_cli(verdict, cli) {
+        Ok(published) => published,
+        Err(error) => {
+            if let Some(plan) = daemon {
+                let restored = match prior_daemon.as_deref() {
+                    Some(prior) => commit_cli_symlink(plan.target, prior),
+                    None => remove_path(plan.target),
+                };
+                if let Err(restore_error) = restored {
+                    return Err(anyhow!(
+                        "{error}; restoring prior lfd target also failed: {restore_error}"
+                    ));
+                }
+            }
+            if let Some(staged) = &staged_app {
+                let _ = remove_path(staged);
+            }
+            return Err(error);
+        }
+    };
+
+    if matches!(verdict, Verdict::PromoteAndMigrate) {
+        if let Err(error) = advance_frontier() {
+            if let Some(staged) = &staged_app {
+                let _ = remove_path(staged);
+            }
+            return Err(error);
+        }
+    }
+
     if let (Some(staged), Some(app)) = (staged_app.as_deref(), app) {
         if let Err(error) = commit_app_bundle(staged, app) {
             let _ = remove_path(staged);
             return Err(error);
         }
     }
-    Ok(published)
+    Ok((published.0, published.1, prior_daemon))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1035,6 +1106,29 @@ fn validate_staged_app_helper(
             preflight.verdict
         ));
     }
+    validate_daemon_candidate(&staged_app.join("Contents/MacOS/lfd"), expected_candidate)
+}
+
+fn validate_daemon_candidate(daemon: &Path, expected_candidate: &CandidateIdentity) -> Result<()> {
+    let output = Command::new(daemon)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("run daemon candidate {}", daemon.display()))?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "daemon candidate {} did not report its version: {}",
+            daemon.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let actual = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let expected = format!("lfd {}", expected_candidate.display_version());
+    if actual != expected {
+        return Err(anyhow!(
+            "daemon candidate {} is not the promoted candidate: expected {expected:?}, got {actual:?}",
+            daemon.display()
+        ));
+    }
     Ok(())
 }
 
@@ -1056,7 +1150,7 @@ fn activate_rollback(cli_target: &Path, candidate: &Path, verdict: &Verdict) -> 
     commit_cli_symlink(cli_target, candidate)
 }
 
-fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
+fn retained_binary_path_as(candidate: &Path, bin_dir: &Path, name: &str) -> Result<PathBuf> {
     let candidate = fs::canonicalize(candidate)
         .with_context(|| format!("resolve retained executable {}", candidate.display()))?;
     let bin_dir = fs::canonicalize(bin_dir)
@@ -1069,7 +1163,7 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
         ));
     }
     let digest = binary_digest(&candidate)?;
-    let expected = format!("lf-{digest}");
+    let expected = format!("{name}-{digest}");
     if candidate.file_name().and_then(|name| name.to_str()) != Some(expected.as_str()) {
         return Err(anyhow!(
             "retained executable {} does not match its content address {expected}",
@@ -1079,19 +1173,39 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
     Ok(candidate)
 }
 
-fn render_retained_prior(prior: &Path, cli_target: &Path) {
-    match read_binary_preflight(prior).and_then(|preflight| {
+fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
+    retained_binary_path_as(candidate, bin_dir, "lf")
+}
+
+fn retained_daemon_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
+    retained_binary_path_as(candidate, bin_dir, "lfd")
+}
+
+fn render_retained_pair(
+    prior_cli: Option<&Path>,
+    prior_daemon: Option<&Path>,
+    cli_target: &Path,
+    daemon_target: &Path,
+) {
+    let (Some(prior_cli), Some(prior_daemon)) = (prior_cli, prior_daemon) else {
+        println!("no complete prior control-plane pair retained; rollback is unavailable");
+        return;
+    };
+    match read_binary_preflight(prior_cli).and_then(|preflight| {
         validate_rollback_verdict(&preflight.verdict)?;
-        Ok(preflight.verdict)
+        validate_daemon_candidate(prior_daemon, &preflight.candidate)
     }) {
         Ok(_) => println!(
-            "rollback available: lf install rollback --cli-target {} --candidate {}",
+            "rollback available: lf install rollback --cli-target {} --candidate {} --daemon-target {} --daemon-candidate {}",
             cli_target.display(),
-            prior.display()
+            prior_cli.display(),
+            daemon_target.display(),
+            prior_daemon.display()
         ),
         Err(error) => println!(
-            "prior executable retained as historical bytes (not rollback-compatible): {} ({error})",
-            prior.display()
+            "prior control-plane bytes retained but not rollback-compatible: {}, {} ({error})",
+            prior_cli.display(),
+            prior_daemon.display()
         ),
     }
 }
@@ -1101,17 +1215,24 @@ fn render_retained_prior(prior: &Path, cli_target: &Path) {
 /// count, decides via the merged `decide()`, and — unless refused or preview —
 /// content-addresses itself into `~/.lf/bin` and atomically repoints `cli_target`.
 /// A refusal leaves every target unchanged.
+#[derive(Debug)]
+pub struct PromotionArtifacts<'a> {
+    pub cli_target: &'a Path,
+    pub daemon_source: &'a Path,
+    pub daemon_target: &'a Path,
+    pub app_source: Option<&'a Path>,
+    pub app_target: Option<&'a Path>,
+    pub legacy_app_target: Option<&'a Path>,
+}
+
 pub fn promote(
-    cli_target: &Path,
-    app_source: Option<&Path>,
-    app_target: Option<&Path>,
-    legacy_app_target: Option<&Path>,
+    artifacts: PromotionArtifacts<'_>,
     sync_skills: bool,
     preview_only: bool,
 ) -> Result<()> {
-    let app_paths = match (app_source, app_target) {
-        (Some(source), Some(target)) => Some((source, target, legacy_app_target)),
-        (None, None) if legacy_app_target.is_none() => None,
+    let app_paths = match (artifacts.app_source, artifacts.app_target) {
+        (Some(source), Some(target)) => Some((source, target, artifacts.legacy_app_target)),
+        (None, None) if artifacts.legacy_app_target.is_none() => None,
         _ => {
             return Err(anyhow!(
                 "--app-source and --app-target must be supplied together; --legacy-app-target requires both"
@@ -1134,7 +1255,7 @@ pub fn promote(
 
     if let Verdict::Reject { reasons } = &preview.verdict {
         return Err(anyhow!(
-            "promotion refused; ~/.local/bin/lf and the app are unchanged:\n  - {}",
+            "promotion refused; lf, lfd, and the app are unchanged:\n  - {}",
             reasons.join("\n  - ")
         ));
     }
@@ -1149,13 +1270,20 @@ pub fn promote(
     // both the current and pending frontiers, so every later failure leaves a
     // compatible machine-global command. The exclusive lock keeps reservations
     // out through the under-lock recount, activation, and migration.
-    let (dest, rollback) = activate_install_then_advance(
+    let daemon = DaemonPromotion {
+        source: artifacts.daemon_source,
+        target: artifacts.daemon_target,
+        bin_dir: bin_dir.as_path(),
+        expected_candidate: &preview.candidate,
+    };
+    let (dest, rollback, daemon_rollback) = activate_install_then_advance(
         &preview.verdict,
         &CliPromotion {
             candidate_binary: candidate.as_path(),
-            cli_target,
+            cli_target: artifacts.cli_target,
             bin_dir: bin_dir.as_path(),
         },
+        Some(&daemon),
         app.as_ref(),
         || {
             crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store_path)
@@ -1169,13 +1297,26 @@ pub fn promote(
     println!(
         "promoted {}: {} -> {}",
         preview.candidate.display_version(),
-        cli_target.display(),
+        artifacts.cli_target.display(),
         dest.display()
     );
-    match rollback {
-        Some(prior) => render_retained_prior(&prior, cli_target),
-        None => println!("no prior binary retained (target did not exist)"),
-    }
+    let active_daemon = fs::canonicalize(artifacts.daemon_target).with_context(|| {
+        format!(
+            "resolve promoted daemon {}",
+            artifacts.daemon_target.display()
+        )
+    })?;
+    println!(
+        "promoted lfd: {} -> {}",
+        artifacts.daemon_target.display(),
+        active_daemon.display()
+    );
+    render_retained_pair(
+        rollback.as_deref(),
+        daemon_rollback.as_deref(),
+        artifacts.cli_target,
+        artifacts.daemon_target,
+    );
     if let Some(app) = &app {
         println!(
             "installed app: {} -> {}",
@@ -1197,32 +1338,71 @@ pub fn promote(
 /// Activate retained immutable bytes only when that binary's own preflight
 /// recognizes the current store exactly. The exclusive lock keeps the frontier
 /// and active-Run set stable between the preflight and symlink commit.
-pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
+pub fn rollback(
+    cli_target: &Path,
+    candidate: &Path,
+    daemon_target: &Path,
+    daemon_candidate: &Path,
+) -> Result<()> {
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
-    let candidate = rollback_from_store(cli_target, candidate, &lf_bin_dir())?;
+    let (candidate, daemon_candidate) = rollback_from_store(
+        cli_target,
+        candidate,
+        daemon_target,
+        daemon_candidate,
+        &lf_bin_dir(),
+    )?;
     println!(
         "rolled back: {} -> {}",
         cli_target.display(),
         candidate.display()
     );
+    println!(
+        "rolled back lfd: {} -> {}",
+        daemon_target.display(),
+        daemon_candidate.display()
+    );
     Ok(())
 }
 
-fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
+fn rollback_from_store(
+    cli_target: &Path,
+    candidate: &Path,
+    daemon_target: &Path,
+    daemon_candidate: &Path,
+    bin_dir: &Path,
+) -> Result<(PathBuf, PathBuf)> {
     let candidate = retained_binary_path(candidate, bin_dir)?;
+    let daemon_candidate = retained_daemon_path(daemon_candidate, bin_dir)?;
     let preflight = read_binary_preflight(&candidate)?;
-    activate_rollback(cli_target, &candidate, &preflight.verdict)?;
-    Ok(candidate)
+    validate_rollback_verdict(&preflight.verdict)?;
+    validate_daemon_candidate(&daemon_candidate, &preflight.candidate)?;
+
+    let current_daemon = preserve_prior_daemon(daemon_target, bin_dir)?;
+    commit_cli_symlink(daemon_target, &daemon_candidate)?;
+    if let Err(error) = activate_rollback(cli_target, &candidate, &preflight.verdict) {
+        let restored = match current_daemon.as_deref() {
+            Some(current) => commit_cli_symlink(daemon_target, current),
+            None => remove_path(daemon_target),
+        };
+        if let Err(restore_error) = restored {
+            return Err(anyhow!(
+                "{error}; restoring current lfd target also failed: {restore_error}"
+            ));
+        }
+        return Err(error);
+    }
+    Ok((candidate, daemon_candidate))
 }
 
 #[cfg(test)]
 mod promote_tests {
     use super::{
-        activate_cli_then_advance, activate_install_then_advance, commit_app_bundle,
-        commit_cli_symlink, copy_tree, preserve_prior_binary, publish_cli, retained_binary_path,
-        rollback_from_store, stage_binary, validate_rollback_verdict, AppPromotion,
-        CandidateIdentity, CliPromotion, Verdict,
+        activate_install_then_advance, commit_app_bundle, commit_cli_symlink, copy_tree,
+        preserve_prior_binary, publish_cli, retained_binary_path, rollback_from_store,
+        stage_binary, stage_daemon_binary, validate_rollback_verdict, AppPromotion,
+        CandidateIdentity, CliPromotion, DaemonPromotion, Verdict,
     };
     use anyhow::anyhow;
     use std::fs;
@@ -1242,7 +1422,17 @@ mod promote_tests {
         let helpers = root.join("Contents/MacOS");
         fs::create_dir_all(&helpers).unwrap();
         write_preflight_binary(&helpers.join("lf"), candidate, verdict);
+        write_daemon_binary(&helpers.join("lfd"), candidate);
         fs::write(root.join("new-app"), b"new").unwrap();
+    }
+
+    fn write_daemon_binary(path: &std::path::Path, candidate: &CandidateIdentity) {
+        fs::write(
+            path,
+            format!("#!/bin/sh\necho 'lfd {}'\n", candidate.display_version()),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
@@ -1392,6 +1582,131 @@ mod promote_tests {
     }
 
     #[test]
+    fn promotion_advances_cli_and_daemon_as_one_validated_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("immutable");
+        let cli_source = dir.path().join("candidate-lf");
+        let daemon_source = dir.path().join("candidate-lfd");
+        let cli_target = dir.path().join("bin/lf");
+        let daemon_target = dir.path().join("bin/lfd");
+        fs::create_dir_all(cli_target.parent().unwrap()).unwrap();
+        fs::write(&cli_source, b"candidate-cli").unwrap();
+        fs::write(&cli_target, b"prior-cli").unwrap();
+        fs::write(&daemon_target, b"prior-daemon").unwrap();
+        let identity = CandidateIdentity::current();
+        write_daemon_binary(&daemon_source, &identity);
+
+        let (active_cli, prior_cli, prior_daemon) = activate_install_then_advance(
+            &Verdict::Promote,
+            &CliPromotion {
+                candidate_binary: &cli_source,
+                cli_target: &cli_target,
+                bin_dir: &bin_dir,
+            },
+            Some(&DaemonPromotion {
+                source: &daemon_source,
+                target: &daemon_target,
+                bin_dir: &bin_dir,
+                expected_candidate: &identity,
+            }),
+            None,
+            || Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read_link(&cli_target).unwrap(), active_cli);
+        assert_eq!(fs::read(&cli_target).unwrap(), b"candidate-cli");
+        assert_eq!(
+            fs::read(&daemon_target).unwrap(),
+            fs::read(&daemon_source).unwrap()
+        );
+        assert_eq!(fs::read(prior_cli.unwrap()).unwrap(), b"prior-cli");
+        assert_eq!(fs::read(prior_daemon.unwrap()).unwrap(), b"prior-daemon");
+    }
+
+    #[test]
+    fn mismatched_daemon_leaves_both_control_plane_targets_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("immutable");
+        let cli_source = dir.path().join("candidate-lf");
+        let daemon_source = dir.path().join("candidate-lfd");
+        let cli_target = dir.path().join("lf");
+        let daemon_target = dir.path().join("lfd");
+        fs::write(&cli_source, b"candidate-cli").unwrap();
+        fs::write(&cli_target, b"prior-cli").unwrap();
+        fs::write(&daemon_target, b"prior-daemon").unwrap();
+        fs::write(&daemon_source, b"#!/bin/sh\necho 'lfd 0.0.0+other'\n").unwrap();
+        fs::set_permissions(&daemon_source, fs::Permissions::from_mode(0o755)).unwrap();
+        let identity = CandidateIdentity::current();
+
+        let error = activate_install_then_advance(
+            &Verdict::Promote,
+            &CliPromotion {
+                candidate_binary: &cli_source,
+                cli_target: &cli_target,
+                bin_dir: &bin_dir,
+            },
+            Some(&DaemonPromotion {
+                source: &daemon_source,
+                target: &daemon_target,
+                bin_dir: &bin_dir,
+                expected_candidate: &identity,
+            }),
+            None,
+            || Ok(()),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("not the promoted candidate"),
+            "{error}"
+        );
+        assert_eq!(fs::read(&cli_target).unwrap(), b"prior-cli");
+        assert_eq!(fs::read(&daemon_target).unwrap(), b"prior-daemon");
+        assert!(!bin_dir.exists());
+    }
+
+    #[test]
+    fn failed_cli_activation_restores_the_prior_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("immutable");
+        let cli_source = dir.path().join("candidate-lf");
+        let daemon_source = dir.path().join("candidate-lfd");
+        let cli_target = dir.path().join("lf");
+        let daemon_target = dir.path().join("lfd");
+        fs::write(&cli_source, b"candidate-cli").unwrap();
+        fs::create_dir(&cli_target).unwrap();
+        fs::write(&daemon_target, b"prior-daemon").unwrap();
+        let identity = CandidateIdentity::current();
+        write_daemon_binary(&daemon_source, &identity);
+
+        let error = activate_install_then_advance(
+            &Verdict::Promote,
+            &CliPromotion {
+                candidate_binary: &cli_source,
+                cli_target: &cli_target,
+                bin_dir: &bin_dir,
+            },
+            Some(&DaemonPromotion {
+                source: &daemon_source,
+                target: &daemon_target,
+                bin_dir: &bin_dir,
+                expected_candidate: &identity,
+            }),
+            None,
+            || Ok(()),
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("neither a file nor a symlink"),
+            "{error}"
+        );
+        assert!(cli_target.is_dir());
+        assert_eq!(fs::read(&daemon_target).unwrap(), b"prior-daemon");
+    }
+
+    #[test]
     fn a_frontier_failure_leaves_the_compatible_candidate_global() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("lf");
@@ -1400,13 +1715,15 @@ mod promote_tests {
         fs::write(&candidate, b"candidate-knows-pending-frontier").unwrap();
         let bin_dir = dir.path().join("bin");
 
-        let error = activate_cli_then_advance(
+        let error = activate_install_then_advance(
             &Verdict::PromoteAndMigrate,
             &CliPromotion {
                 candidate_binary: &candidate,
                 cli_target: &target,
                 bin_dir: &bin_dir,
             },
+            None,
+            None,
             || Err(anyhow!("migration fsync failed")),
         )
         .unwrap_err();
@@ -1455,6 +1772,7 @@ mod promote_tests {
                 cli_target: &cli_target,
                 bin_dir: &bin_dir,
             },
+            None,
             Some(&AppPromotion {
                 source: &app_source,
                 target: &app_target,
@@ -1511,6 +1829,7 @@ mod promote_tests {
                 cli_target: &cli_target,
                 bin_dir: &bin_dir,
             },
+            None,
             Some(&AppPromotion {
                 source: &app_source,
                 target: &app_target,
@@ -1544,7 +1863,20 @@ mod promote_tests {
         let retained = stage_binary(&source, &bin_dir).unwrap();
         fs::write(&cli_target, b"current-compatible").unwrap();
 
-        let error = rollback_from_store(&cli_target, &retained, &bin_dir).unwrap_err();
+        let daemon_source = dir.path().join("prior-lfd");
+        write_daemon_binary(&daemon_source, &CandidateIdentity::current());
+        let daemon_candidate = stage_daemon_binary(&daemon_source, &bin_dir).unwrap();
+        let daemon_target = dir.path().join("lfd");
+        fs::write(&daemon_target, b"current-compatible-daemon").unwrap();
+
+        let error = rollback_from_store(
+            &cli_target,
+            &retained,
+            &daemon_target,
+            &daemon_candidate,
+            &bin_dir,
+        )
+        .unwrap_err();
 
         assert!(
             error.to_string().contains("not rollback-compatible"),
@@ -1552,6 +1884,39 @@ mod promote_tests {
         );
         assert_eq!(fs::read(&cli_target).unwrap(), b"current-compatible");
         assert!(!cli_target.is_symlink());
+    }
+
+    #[test]
+    fn rollback_restores_a_validated_cli_and_daemon_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_dir = dir.path().join("immutable");
+        let identity = CandidateIdentity::current();
+        let prior_cli_source = dir.path().join("prior-lf");
+        let prior_daemon_source = dir.path().join("prior-lfd");
+        write_preflight_binary(&prior_cli_source, &identity, &Verdict::Promote);
+        write_daemon_binary(&prior_daemon_source, &identity);
+        let prior_cli = stage_binary(&prior_cli_source, &bin_dir).unwrap();
+        let prior_daemon = stage_daemon_binary(&prior_daemon_source, &bin_dir).unwrap();
+        let cli_target = dir.path().join("bin/lf");
+        let daemon_target = dir.path().join("bin/lfd");
+        fs::create_dir_all(cli_target.parent().unwrap()).unwrap();
+        fs::write(&cli_target, b"current-cli").unwrap();
+        fs::write(&daemon_target, b"current-daemon").unwrap();
+
+        let restored = rollback_from_store(
+            &cli_target,
+            &prior_cli,
+            &daemon_target,
+            &prior_daemon,
+            &bin_dir,
+        )
+        .unwrap();
+
+        let prior_cli = fs::canonicalize(prior_cli).unwrap();
+        let prior_daemon = fs::canonicalize(prior_daemon).unwrap();
+        assert_eq!(restored, (prior_cli.clone(), prior_daemon.clone()));
+        assert_eq!(fs::read_link(&cli_target).unwrap(), prior_cli);
+        assert_eq!(fs::read_link(&daemon_target).unwrap(), prior_daemon);
     }
 
     #[test]
@@ -1718,6 +2083,7 @@ mod promote_tests {
                 cli_target: &cli_target,
                 bin_dir: &bin_dir,
             },
+            None,
             Some(&app),
             || Err(anyhow!("migration fsync failed")),
         )

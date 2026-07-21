@@ -1055,6 +1055,12 @@ pub enum InstallCommand {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
         cli_target: PathBuf,
+        /// The staged lfd built from the same candidate source.
+        #[arg(long)]
+        daemon_source: PathBuf,
+        /// The global lfd symlink to replace (e.g. ~/.local/bin/lfd).
+        #[arg(long)]
+        daemon_target: PathBuf,
         /// A staged Loopflow.app bundle to install alongside the CLI.
         #[arg(long)]
         app_source: Option<PathBuf>,
@@ -1080,6 +1086,12 @@ pub enum InstallCommand {
         /// The immutable content-addressed prior executable to activate.
         #[arg(long)]
         candidate: PathBuf,
+        /// The global lfd symlink to restore with the CLI.
+        #[arg(long)]
+        daemon_target: PathBuf,
+        /// The retained immutable lfd binary paired with the CLI candidate.
+        #[arg(long)]
+        daemon_candidate: PathBuf,
     },
 }
 

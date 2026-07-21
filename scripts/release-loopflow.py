@@ -141,7 +141,15 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
     if release_binary:
         bin_dir = Path(release_binary).parent
     else:
-        cargo_cmd = ["cargo", "build", "--release", "--bin", "lf"]
+        cargo_cmd = [
+            "cargo",
+            "build",
+            "--release",
+            "--bin",
+            "lf",
+            "--bin",
+            "lfd",
+        ]
         bin_dir = REPO_ROOT / "target" / "release"
         result = run(
             cargo_cmd,
@@ -151,10 +159,10 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
             env={**os.environ, "LOOPFLOW_BUILD_PROVENANCE": "release"},
         )
         if result.returncode != 0:
-            raise RuntimeError("Failed to build bundled lf binary")
+            raise RuntimeError("Failed to build bundled control binaries")
 
-    for binary in ("lf",):
-        source = Path(release_binary) if release_binary else bin_dir / binary
+    for binary in ("lf", "lfd"):
+        source = bin_dir / binary
         if not source.exists():
             raise RuntimeError(f"Missing built binary: {source}")
         shutil.copy(source, app_macos_dir / binary)

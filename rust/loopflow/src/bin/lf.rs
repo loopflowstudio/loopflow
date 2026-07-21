@@ -1194,23 +1194,36 @@ fn main() -> anyhow::Result<()> {
             InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
             InstallCommand::Promote {
                 cli_target,
+                daemon_source,
+                daemon_target,
                 app_source,
                 app_target,
                 legacy_app_target,
                 sync_skills,
                 preview,
             } => loopflow::lf::commands::install::promote(
-                cli_target,
-                app_source.as_deref(),
-                app_target.as_deref(),
-                legacy_app_target.as_deref(),
+                loopflow::lf::commands::install::PromotionArtifacts {
+                    cli_target,
+                    daemon_source,
+                    daemon_target,
+                    app_source: app_source.as_deref(),
+                    app_target: app_target.as_deref(),
+                    legacy_app_target: legacy_app_target.as_deref(),
+                },
                 *sync_skills,
                 *preview,
             ),
             InstallCommand::Rollback {
                 cli_target,
                 candidate,
-            } => loopflow::lf::commands::install::rollback(cli_target, candidate),
+                daemon_target,
+                daemon_candidate,
+            } => loopflow::lf::commands::install::rollback(
+                cli_target,
+                candidate,
+                daemon_target,
+                daemon_candidate,
+            ),
         };
     }
 

@@ -131,7 +131,7 @@ fn init_tracing() -> anyhow::Result<()> {
 #[derive(Parser)]
 #[command(name = "lfd")]
 #[command(about = "Loopflow Home daemon: Wave startup, webhook ingress, and liveness")]
-#[command(version)]
+#[command(version = loopflow::build_info::BUILD_VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

@@ -17,7 +17,7 @@ RELEASE_INSTALLER = REPO_ROOT / "release" / "install.sh"
 
 
 def _write_stubs(stub_dir: Path) -> None:
-    """Stub curl (logs args, fakes the download) and tar (drops lf)."""
+    """Stub curl and tar without touching the network."""
     stub_dir.mkdir(parents=True, exist_ok=True)
     curl = stub_dir / "curl"
     curl.write_text(
@@ -39,6 +39,10 @@ def _write_stubs(stub_dir: Path) -> None:
         "printf '%s\\n' \"$*\" >> \"$LFTEST_PROMOTE_LOG\"\n"
         "exit 0\n"
         "LF\n"
+        '  cat > "$dir/lfd" <<\'LFD\'\n'
+        "#!/bin/sh\n"
+        "exit 0\n"
+        "LFD\n"
         "fi\n"
         "exit 0\n"
     )
@@ -116,9 +120,16 @@ def test_downloaded_candidate_owns_activation(
 ) -> None:
     result = _run(installer, [], env)
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "promote.log").read_text().strip() == (
-        f"install promote --cli-target {tmp_path / 'dest/lf'}"
-    )
+    args = (tmp_path / "promote.log").read_text().split()
+    assert args[:4] == [
+        "install",
+        "promote",
+        "--cli-target",
+        str(tmp_path / "dest/lf"),
+    ]
+    assert args[4] == "--daemon-source"
+    assert Path(args[5]).name == "lfd"
+    assert args[6:] == ["--daemon-target", str(tmp_path / "dest/lfd")]
 
 
 def test_missing_version_value_fails_clearly(installer: Path, env: dict[str, str]) -> None:

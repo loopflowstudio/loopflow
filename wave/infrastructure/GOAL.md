@@ -10,13 +10,9 @@ pm:
 
 ## Objective
 
-Loopflow's infrastructure keeps real waves moving. It owns the substrate around
-the product: technical architecture, developer efficiency, and release
-stability.
-
-The work succeeds when the system is legible, local work is fast, and shipping
-is boring. Infrastructure does not build a generic platform ahead of need; it
-turns repeated friction and operational risk into system capability.
+Loopflow's infrastructure makes ordinary work fast, safe, and boring. It keeps
+the system legible, converts failures into prevention, and turns repeated
+operational friction into durable capability.
 
 ## Projects
 

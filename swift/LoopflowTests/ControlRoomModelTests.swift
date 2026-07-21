@@ -91,6 +91,7 @@ struct ControlRoomModelTests {
         let summary = try #require(model.fleetSummary)
 
         #expect(summary.registeredWaves == 2)
+        #expect(summary.pausedWaves == 1)
         #expect(summary.activeRuns == 1)
         #expect(summary.liveListeners == 1)
         #expect(summary.unservedRuns == 0)
@@ -104,6 +105,7 @@ struct ControlRoomModelTests {
                 repo: wave.repo,
                 status: wave.status,
                 live: false,
+                paused: wave.paused,
                 activeTasks: wave.activeTasks,
                 activeProjects: wave.activeProjects,
                 parentWaveId: wave.parentWaveId
@@ -144,18 +146,7 @@ private struct ControlRoomTestFixture {
         let waveObjects = try roadmapWaves.map { try #require($0["wave"] as? [String: Any]) }
         let waveData = try JSONSerialization.data(withJSONObject: waveObjects)
         let snapshots = try JSONDecoder().decode([WaveSnapshot].self, from: waveData)
-        let waves = snapshots.map { snapshot in
-            Wave(
-                id: snapshot.id,
-                name: snapshot.name,
-                repo: snapshot.repo,
-                status: snapshot.status,
-                live: snapshot.live,
-                activeTasks: snapshot.activeTasks,
-                activeProjects: snapshot.activeProjects,
-                parentWaveId: snapshot.parentWaveId
-            )
-        }
+        let waves = snapshots.map { $0.toWave() }
         let roadmapJSON = try #require(String(data: roadmapData, encoding: .utf8))
         let wavesJSON = try #require(String(data: waveData, encoding: .utf8))
         let activityJSON = try #require(String(data: activityData, encoding: .utf8))

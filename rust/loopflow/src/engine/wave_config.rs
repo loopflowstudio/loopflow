@@ -303,6 +303,22 @@ pub fn update_wave_agent_config(
     })
 }
 
+/// Set authored Wave turn intent, preserving unrelated frontmatter and body.
+///
+/// Enabled turns are the default, so resuming removes `paused` rather than
+/// persisting a redundant `paused: false` field.
+pub fn update_wave_paused(repo: &Path, name: &str, paused: bool) -> Result<(), String> {
+    update_wave_goal_config(repo, name, |map| {
+        let key = Value::String("paused".to_string());
+        if paused {
+            map.insert(key, Value::Bool(true));
+        } else {
+            map.remove(&key);
+        }
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,5 +512,33 @@ mod tests {
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(config.agent.is_none());
         assert!(config.skill_agents.is_none());
+    }
+
+    #[test]
+    fn update_wave_paused_preserves_goal_and_removes_default() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("product");
+        fs::create_dir_all(&dir).expect("create dir");
+        let goal = dir.join("GOAL.md");
+        let body = "\n## Objective\n\nShip the control room.\n";
+        fs::write(
+            &goal,
+            format!("---\nowner: jack\nagent: codex\n---\n{body}"),
+        )
+        .expect("write");
+
+        update_wave_paused(temp.path(), "product", true).expect("pause");
+        let paused = fs::read_to_string(&goal).expect("read paused goal");
+        assert!(paused.contains("owner: jack"));
+        assert!(paused.contains("agent: codex"));
+        assert!(paused.contains("paused: true"));
+        assert!(paused.ends_with(body));
+
+        update_wave_paused(temp.path(), "product", false).expect("resume");
+        let resumed = fs::read_to_string(&goal).expect("read resumed goal");
+        assert!(resumed.contains("owner: jack"));
+        assert!(resumed.contains("agent: codex"));
+        assert!(!resumed.contains("paused:"));
+        assert!(resumed.ends_with(body));
     }
 }

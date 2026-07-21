@@ -1313,6 +1313,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Stop { name }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::home::stop(name, repo)
             }),
+            Some(Commands::Pause { name, json }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::wave_intent::run(name, true, *json, repo)
+            }),
+            Some(Commands::Resume { name, json }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::wave_intent::run(name, false, *json, repo)
+            }),
             Some(Commands::Resident { name }) => {
                 in_repo_runtime(&args, |_| loopflow::wave::resident::run(name))
             }
@@ -1713,6 +1719,18 @@ mod tests {
         assert!(matches!(
             stopped.command,
             Some(Commands::Stop { name }) if name == "goals"
+        ));
+
+        let paused = Cli::try_parse_from(["lf", "pause", "goals", "--json"]).unwrap();
+        assert!(matches!(
+            paused.command,
+            Some(Commands::Pause { name, json: true }) if name == "goals"
+        ));
+
+        let resumed = Cli::try_parse_from(["lf", "resume", "goals", "--json"]).unwrap();
+        assert!(matches!(
+            resumed.command,
+            Some(Commands::Resume { name, json: true }) if name == "goals"
         ));
 
         // The listener's own body — hidden, but spellable, because the

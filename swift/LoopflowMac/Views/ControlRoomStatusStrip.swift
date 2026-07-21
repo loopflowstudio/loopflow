@@ -78,6 +78,7 @@ struct ControlRoomStatusStrip: View {
                 detail: model.repoPath == nil ? "All repositories" : "Selected repository"
             )
             metric("Waves", value: summary.registeredWaves.formatted())
+            metric("Paused", value: summary.pausedWaves.formatted())
             metric("Runs", value: summary.activeRuns.formatted())
             metric("Listeners", value: summary.liveListeners.formatted())
             metric("Work", value: "\(summary.activeProjects)P · \(summary.activeTasks)T")

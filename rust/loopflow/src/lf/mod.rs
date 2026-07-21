@@ -284,6 +284,22 @@ pub enum Commands {
         /// Wave name
         name: String,
     },
+    /// Pause new turns while keeping the Wave listener available.
+    Pause {
+        /// Wave name
+        name: String,
+        /// Emit the resulting turn intent as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resume new turns for a paused Wave.
+    Resume {
+        /// Wave name
+        name: String,
+        /// Emit the resulting turn intent as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Internal: the resident body a listener spawns for its own wave. Never
     /// booted by hand — `lf wave` owns the listener half.
     #[command(name = "__resident", hide = true)]

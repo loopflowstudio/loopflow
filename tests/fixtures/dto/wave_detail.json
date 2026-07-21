@@ -12,6 +12,7 @@
     "active_tasks": 1,
     "active_projects": 1,
     "live": true,
+    "paused": false,
     "endpoint": "127.0.0.1:7777",
     "created_at": "2026-07-01T00:00:00Z",
     "parent_wave_id": null,

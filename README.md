@@ -62,6 +62,8 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```bash
 lf start designer                           # serve it from this Home's one keeper
 lf chat --steer "ship the button audit first"
+lf pause designer                           # keep listening; queue new turn starts
+lf resume designer
 lf stop designer
 ```
 

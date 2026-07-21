@@ -89,14 +89,24 @@ public struct WaveLens: Sendable, Hashable {
     /// than guessing from a local session probe.
     ///
     /// - green: the Wave listener answered its health probe.
+    /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
     /// - red: an active Run or planned work has no answering listener.
     /// - black: off and clean — no live body, no active work.
     public static func forWave(
         live: Bool,
+        paused: Bool = false,
         status: WorkStatus,
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
+        if paused {
+            return WaveLens(
+                color: .blue,
+                reason: live
+                    ? "Paused · listener is serving and queueing input"
+                    : "Paused · listener is stopped"
+            )
+        }
         if live {
             return WaveLens(color: .green, reason: "Listening · Wave listener answered")
         }

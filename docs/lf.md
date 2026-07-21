@@ -254,6 +254,8 @@ Flow authoring — `op:` steps, `xor` branching, routers — is covered in
 ```bash
 lf start designer                                  # serve it on this machine
 lf wave designer                                   # foreground development mode
+lf pause designer                                  # keep listening; queue new turn starts
+lf resume designer                                 # enable queued and future turns
 lf stop designer                                   # stop it; leave the Home keeper running
 lf project run <linear-project-id>                  # durable Project Work
 lf task start <linear-project-id> "fix the flaky chord-timeout test"
@@ -314,9 +316,12 @@ lf home id --json
 lf home observe <home-id> ssh://jack@mini.local
 lf work place wave <wave-id> <home-id>
 lf start shipper --json
+lf pause shipper --json
+lf resume shipper --json
 lf stop shipper
 lf ssh <home-id> status shipper --json
 lf ssh <home-id> start shipper --json
+lf ssh <home-id> pause shipper --json
 ```
 
 `lf start` returns the same Wave rows as `lf ls --json`; it does not define a
@@ -327,6 +332,13 @@ repositories known to its local store and reconciles it every 30 seconds.
 continue. It suppresses reconciliation until an explicit `lf start` or the
 next `lfd` restart; change `owner`, `home`, or placement for a durable
 assignment change.
+
+`lf pause` and `lf resume` change turn intent, not process residency. A paused
+listener keeps serving and queues messages while refusing message, heartbeat,
+and cron turn starts. `lf ls` reports that authored intent as the required
+`paused` field and the `TURNS` column, independently from `live`. The commands
+preserve the GOAL body and unrelated frontmatter; resume removes the key because
+enabled turns are the default.
 
 `lf ssh <HomeId>` resolves the Home's current observed route and makes the
 target prove that identity. The remote `lf` is implicit, so everything after

@@ -74,18 +74,7 @@ enum ControlRoomFixture {
         let url = try fixtureURL(named: "roadmap_snapshot.json", sourceFile: sourceFile)
         let data = try Data(contentsOf: url)
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
-        let waves = roadmap.waves.map { snapshot in
-            Wave(
-                id: snapshot.wave.id,
-                name: snapshot.wave.name,
-                repo: snapshot.wave.repo,
-                status: snapshot.wave.status,
-                live: snapshot.wave.live,
-                activeTasks: snapshot.wave.activeTasks,
-                activeProjects: snapshot.wave.activeProjects,
-                parentWaveId: snapshot.wave.parentWaveId
-            )
-        }
+        let waves = roadmap.waves.map { $0.wave.toWave() }
         var seen = Set<String>()
         let repos = roadmap.waves.compactMap { roadmap -> PortfolioRepo? in
             let path = WaveOrigin.resolve(roadmap.wave.repo).normalizedFilePath

@@ -122,20 +122,26 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
+def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple[Path, Path]:
     arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
     with tarfile.open(arm_archive, "r:gz") as package:
         members = package.getmembers()
-        if len(members) != 1 or members[0].name != "lf" or not members[0].isfile():
+        if sorted(member.name for member in members) != ["lf", "lfd"] or not all(
+            member.isfile() for member in members
+        ):
             raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
-        source = package.extractfile(members[0])
-        if source is None:
-            raise RuntimeError(f"could not read lf from {arm_archive.name}")
-        with (output_dir / "lf").open("wb") as destination:
-            shutil.copyfileobj(source, destination)
-    binary = output_dir / "lf"
-    binary.chmod(0o755)
-    return binary
+        binaries = []
+        for name in ("lf", "lfd"):
+            member = next(member for member in members if member.name == name)
+            source = package.extractfile(member)
+            if source is None:
+                raise RuntimeError(f"could not read {name} from {arm_archive.name}")
+            binary = output_dir / name
+            with binary.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+            binary.chmod(0o755)
+            binaries.append(binary)
+    return binaries[0], binaries[1]
 
 
 def _sha256(path: Path) -> str:
@@ -213,7 +219,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
 
     stages: list[str] = ["artifacts_verified"]
     with tempfile.TemporaryDirectory() as temp:
-        arm_binary = _extract_arm_binary(archives, Path(temp))
+        arm_binary, _arm_daemon = _extract_arm_binaries(archives, Path(temp))
         env = {
             **os.environ,
             "LF_RELEASE_BINARY": str(arm_binary),

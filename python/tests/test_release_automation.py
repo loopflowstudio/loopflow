@@ -259,7 +259,10 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
 def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
     installer = (ROOT / "release/install.sh").read_text()
 
-    assert '"$src" install promote --cli-target "$dst"' in installer
+    assert '"$src" install promote \\' in installer
+    assert '--cli-target "$dst"' in installer
+    assert '--daemon-source "$daemon_src"' in installer
+    assert '--daemon-target "$daemon_dst"' in installer
     assert 'mv -f "$tmp" "$dst"' not in installer
 
 

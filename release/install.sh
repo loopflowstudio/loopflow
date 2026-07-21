@@ -99,11 +99,16 @@ main() {
   tar -xzf "$tarball" -C "$tmpdir"
 
   src="$tmpdir/lf"
+  daemon_src="$tmpdir/lfd"
   dst="$install_dir/lf"
-  chmod +x "$src"
-  "$src" install promote --cli-target "$dst"
+  daemon_dst="$install_dir/lfd"
+  chmod +x "$src" "$daemon_src"
+  "$src" install promote \
+    --cli-target "$dst" \
+    --daemon-source "$daemon_src" \
+    --daemon-target "$daemon_dst"
 
-  echo "Installed to $install_dir/lf"
+  echo "Installed to $install_dir/lf and $install_dir/lfd"
 
   case ":$PATH:" in
     *":$install_dir:"*) ;;

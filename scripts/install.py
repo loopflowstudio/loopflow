@@ -5,7 +5,7 @@
     install.py local --use      # promote this worktree onto PATH and /Applications
     install.py local --skip swift
     install.py local -n         # dry run
-    install.py refresh          # update lf when the default branch moves
+    install.py refresh          # update lf + lfd when the default branch moves
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
@@ -84,6 +84,7 @@ def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
         executables=(
             swift / ".build" / "release" / "LoopflowMac",
             cargo_release / "lf",
+            cargo_release / "lfd",
         ),
         info_plist=swift / "LoopflowMac" / "Info.plist",
         resources=(
@@ -214,9 +215,19 @@ def _build_binaries() -> None:
 
 
 def _build_cli_binaries() -> None:
-    typer.echo("Building lf (cargo release)...")
+    typer.echo("Building lf + lfd (cargo release)...")
     _run_or_raise(
-        ["cargo", "build", "--release", "-p", "loopflow", "--bin", "lf"],
+        [
+            "cargo",
+            "build",
+            "--release",
+            "-p",
+            "loopflow",
+            "--bin",
+            "lf",
+            "--bin",
+            "lfd",
+        ],
         "cargo",
         cwd=ROOT,
         env=_release_build_env(),
@@ -329,9 +340,10 @@ def _resolve_install_dir() -> Path:
 
 
 def _stage_binaries(local_bin: Path) -> None:
-    """Copy freshly built lf into this worktree's local-bin/."""
+    """Copy freshly built control binaries into this worktree's local-bin/."""
     local_bin.mkdir(parents=True, exist_ok=True)
     _atomic_install(ROOT / "target" / "release" / "lf", local_bin / "lf")
+    _atomic_install(ROOT / "target" / "release" / "lfd", local_bin / "lfd")
 
 
 def _require_complete_schema_for_promotion(repo: Path) -> None:
@@ -363,6 +375,10 @@ def _promote_with_candidate(
         "promote",
         "--cli-target",
         str(install_dir / "lf"),
+        "--daemon-source",
+        str(candidate.with_name("lfd")),
+        "--daemon-target",
+        str(install_dir / "lfd"),
         "--sync-skills",
     ]
     if app_source is not None:
@@ -451,7 +467,7 @@ def _codesign_identity() -> str:
 
 
 def _verify_bundle_layout(spec: BundleSpec) -> None:
-    """Verify the app executable and bundled `lf` helper.
+    """Verify the app executable and bundled control helpers.
 
     Every declared executable must exist, be executable, and be a Mach-O binary
     that includes the current architecture. Catches missing files, wrong-arch

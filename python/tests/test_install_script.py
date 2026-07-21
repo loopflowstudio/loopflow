@@ -65,6 +65,7 @@ def _stage_build_artifacts(root: Path) -> None:
     cargo_rel = root / "target" / "release"
     cargo_rel.mkdir(parents=True)
     _write_fake_macho(cargo_rel / "lf")
+    _write_fake_macho(cargo_rel / "lfd")
 
 
 def _make_spec(root: Path) -> install.BundleSpec:
@@ -113,6 +114,17 @@ temporary.unlink(missing_ok=True)
 temporary.symlink_to(immutable)
 temporary.replace(cli_target)
 
+daemon_source = option("--daemon-source")
+daemon_target = option("--daemon-target")
+daemon_target.parent.mkdir(parents=True, exist_ok=True)
+daemon_immutable = immutable.with_name("immutable-lfd")
+shutil.copy2(daemon_source, daemon_immutable)
+daemon_immutable.chmod(0o555)
+daemon_temporary = daemon_target.with_name(".lfd.fake-boundary")
+daemon_temporary.unlink(missing_ok=True)
+daemon_temporary.symlink_to(daemon_immutable)
+daemon_temporary.replace(daemon_target)
+
 if "--app-source" in args:
     app_source = option("--app-source")
     app_target = option("--app-target")
@@ -158,7 +170,7 @@ def _patch_subprocess(
 # --- Tests ---
 
 
-def test_install_loopflow_bundles_only_the_lf_helper(
+def test_install_loopflow_bundles_the_control_plane_helpers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     root = tmp_path / "repo"
@@ -170,6 +182,7 @@ def test_install_loopflow_bundles_only_the_lf_helper(
 
     assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lf").exists()
+    assert (spec.macos_dir / "lfd").exists()
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"
@@ -191,7 +204,7 @@ def test_verify_bundle_rejects_wrong_architecture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Loopflow", "lf"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=["sparc64"])
 
     with pytest.raises(install.StageError, match="built for sparc64"):
@@ -200,7 +213,7 @@ def test_verify_bundle_rejects_wrong_architecture(
 
 def test_verify_bundle_rejects_non_macho(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     spec = _make_spec(tmp_path / "repo")
-    _stage_bundle(spec, binaries=("Loopflow", "lf"))
+    _stage_bundle(spec, binaries=("Loopflow", "lf", "lfd"))
     _patch_subprocess(monkeypatch, archs=[])  # lipo fails -> not Mach-O
 
     with pytest.raises(install.StageError, match="not a Mach-O"):
@@ -284,6 +297,7 @@ def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
     root = tmp_path / "repo"
     candidate = root / "target" / "release" / "lf"
     _write_fake_promotion_boundary(candidate)
+    _write_fake_macho(candidate.with_name("lfd"))
     install_dir = tmp_path / "custom-bin"
     install_dir.mkdir()
     (install_dir / "lf").write_text("python-direct-copy")
@@ -306,6 +320,8 @@ def test_refresh_routes_default_no_pull_and_custom_dir_through_rust_promotion(
 
     assert (install_dir / "lf").is_symlink()
     assert (install_dir / "lf").resolve() == immutable
+    assert (install_dir / "lfd").is_symlink()
+    assert (install_dir / "lfd").resolve().read_bytes() == b"fake-macho"
     command = log.read_text()
     assert command.startswith("install promote ")
     assert f"--cli-target {install_dir / 'lf'}" in command
@@ -349,6 +365,7 @@ def test_refresh_builds_unchanged_main_when_lf_is_missing(
     root = tmp_path / "repo"
     candidate = root / "target/release/lf"
     _write_fake_promotion_boundary(candidate)
+    _write_fake_macho(candidate.with_name("lfd"))
     install_dir = tmp_path / "bin"
     install_dir.mkdir()
     log = tmp_path / "promotion.log"
@@ -492,8 +509,11 @@ def test_local_use_routes_cli_app_bundled_helper_and_skills_through_rust_promoti
     installed_app = applications / "Loopflow.app"
     assert (installed_app / ".rust-promotion-boundary").read_text() == "committed"
     assert (installed_app / "Contents" / "MacOS" / "lf").exists()
+    assert (installed_app / "Contents" / "MacOS" / "lfd").exists()
     assert not (applications / "Concerto.app").exists()
     command = log.read_text()
     assert f"--app-source {local_bin / 'Loopflow.app'}" in command
     assert f"--app-target {installed_app}" in command
+    assert f"--daemon-source {local_bin / 'lfd'}" in command
+    assert f"--daemon-target {install_dir / 'lfd'}" in command
     assert "--sync-skills" in command

@@ -9,13 +9,17 @@ from scripts import publish_release
 
 
 def _native_artifacts(directory: Path) -> None:
-    binary = directory / "lf"
-    binary.write_bytes(b"loopflow release binary")
+    binaries = []
+    for name in ("lf", "lfd"):
+        binary = directory / name
+        binary.write_bytes(f"loopflow release {name}".encode())
+        binaries.append(binary)
     for target in publish_release.TARGETS:
         package_dir = directory / target
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
-            package.add(binary, arcname="lf")
+            for binary in binaries:
+                package.add(binary, arcname=binary.name)
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -33,7 +37,23 @@ def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
         package.addfile(member, io.BytesIO(b"nope"))
 
     with pytest.raises(RuntimeError, match="unexpected archive contents"):
-        publish_release._extract_arm_binary((archive,), tmp_path)
+        publish_release._extract_arm_binaries((archive,), tmp_path)
+
+
+def test_publisher_extracts_the_arm_control_plane_pair(tmp_path: Path):
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    _native_artifacts(artifacts)
+    archives = publish_release._find_native_archives(artifacts)
+    output = tmp_path / "extracted"
+    output.mkdir()
+
+    cli, daemon = publish_release._extract_arm_binaries(archives, output)
+
+    assert cli.read_bytes() == b"loopflow release lf"
+    assert daemon.read_bytes() == b"loopflow release lfd"
+    assert cli.stat().st_mode & 0o111
+    assert daemon.stat().st_mode & 0o111
 
 
 def test_publisher_completes_all_stages_before_marking_release_published(

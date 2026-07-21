@@ -1,8 +1,24 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_yaml_ng::{Mapping, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::warn;
+
+use crate::durable::HomeId;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum WaveConfigError {
+    #[error("failed to read {path}: {source}")]
+    Read {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    #[error("invalid wave goal frontmatter in {path}: {source}")]
+    Parse {
+        path: std::path::PathBuf,
+        source: serde_yaml_ng::Error,
+    },
+}
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
 /// The wave's resident loop reads these and opens a system pass when a
@@ -26,6 +42,26 @@ pub struct WavePmConfig {
     pub linear_team: Option<String>,
 }
 
+/// One existing Discord guild text channel bound to this Wave's chat.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum WaveChatConfig {
+    Discord {
+        #[serde(deserialize_with = "deserialize_home_id")]
+        home_id: HomeId,
+        guild_id: String,
+        channel_id: String,
+    },
+}
+
+fn deserialize_home_id<'de, D>(deserializer: D) -> Result<HomeId, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    HomeId::parse(&value).map_err(serde::de::Error::custom)
+}
+
 /// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
@@ -38,6 +74,9 @@ pub struct WaveConfig {
     pub agent: Option<String>,
     pub skill_agents: Option<HashMap<String, String>>,
     pub pm: Option<WavePmConfig>,
+    /// One external presentation binding. Discord is the only supported
+    /// provider and remains a concrete variant rather than a registry.
+    pub chat: Option<WaveChatConfig>,
     /// The safety valve: `paused: true` in GOAL.md frontmatter tells the wave
     /// listener to refuse to START turns (message→turn, heartbeat, cron)
     /// while keeping the listener serving and queueing. File-first and re-read
@@ -56,25 +95,32 @@ pub struct WaveConfig {
 
 /// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
 pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
+    match try_read_wave_config(repo, name) {
+        Ok(config) => config,
+        Err(err) => {
+            warn!(error = %err, "failed to read wave config");
+            None
+        }
+    }
+}
+
+/// Read wave machine policy and surface malformed frontmatter to callers that
+/// must fail closed before starting external side effects.
+pub(crate) fn try_read_wave_config(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<WaveConfig>, WaveConfigError> {
     let path = goal_path(repo, name);
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(err) => {
-            warn!(path = %path.display(), error = %err, "failed to read wave config");
-            return None;
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(WaveConfigError::Read { path, source }),
     };
-    Some(match split_frontmatter(&content) {
-        Some((frontmatter, _)) => match serde_yaml_ng::from_str::<WaveConfig>(&frontmatter) {
-            Ok(config) => config,
-            Err(err) => {
-                warn!(path = %path.display(), error = %err, "invalid wave goal frontmatter");
-                return None;
-            }
-        },
+    Ok(Some(match split_frontmatter(&content) {
+        Some((frontmatter, _)) => serde_yaml_ng::from_str::<WaveConfig>(&frontmatter)
+            .map_err(|source| WaveConfigError::Parse { path, source })?,
         None => WaveConfig::default(),
-    })
+    }))
 }
 
 /// One-line Wave objective for status, PM, and API projections.
@@ -310,6 +356,48 @@ mod tests {
         assert_eq!(pm.provider.as_deref(), Some("linear"));
         assert_eq!(pm.linear_initiative.as_deref(), Some("lin-123"));
         assert_eq!(pm.linear_team.as_deref(), Some("team-prd"));
+    }
+
+    #[test]
+    fn discord_chat_config_is_typed_and_invalid_bindings_fail_closed() {
+        let temp = tempdir().expect("temp dir");
+        let dir = temp.path().join("wave").join("scan");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  home_id: home_39860354aaca640c2ccb50bf6ca609d8\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+        )
+        .expect("write");
+        let config = try_read_wave_config(temp.path(), "scan")
+            .expect("valid config")
+            .expect("config");
+        assert!(matches!(
+            config.chat,
+            Some(WaveChatConfig::Discord { home_id, guild_id, channel_id })
+                if home_id.as_str() == "home_39860354aaca640c2ccb50bf6ca609d8"
+                    && guild_id == "guild"
+                    && channel_id == "channel"
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n",
+        )
+        .expect("write invalid");
+        assert!(matches!(
+            try_read_wave_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
+
+        fs::write(
+            dir.join("GOAL.md"),
+            "---\nchat:\n  provider: discord\n  home_id: not-a-home\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+        )
+        .expect("write invalid HomeId");
+        assert!(matches!(
+            try_read_wave_config(temp.path(), "scan"),
+            Err(WaveConfigError::Parse { .. })
+        ));
     }
 
     /// Crons live in GOAL.md frontmatter — the resident loop's schedule

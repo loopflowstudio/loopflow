@@ -710,6 +710,7 @@ fn pending_inbox_frame(message: &PendingMessage) -> InboxFrame {
         id: message.id.0.clone(),
         op: message.op,
         text: message.text.clone(),
+        source: message.source.clone(),
     }
 }
 

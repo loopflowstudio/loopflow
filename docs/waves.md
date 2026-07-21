@@ -94,6 +94,36 @@ lf wave s3            # the s3 (control) charter
 Writing a goal well — the weight of each section, frontmatter fields, KR
 craft — is covered in [Authoring → Goals](authoring.md#goals).
 
+### Discord chat
+
+Bind one existing guild text channel to one Wave:
+
+```yaml
+# wave/product/GOAL.md
+---
+chat:
+  provider: discord
+  home_id: "home_0123456789abcdef0123456789abcdef"
+  guild_id: "123456789012345678"
+  channel_id: "234567890123456789"
+---
+```
+
+Start the Wave with `LF_DISCORD_TOKEN` injected by Doppler:
+
+```bash
+doppler run -- lf wave product
+```
+
+The bot needs only **View Channel**, **Read Message History**, and **Send
+Messages**, with Message Content enabled in the Discord developer portal. The
+first start attaches at the channel's current head; later starts resume from
+the journaled cursor. Discord remains the shared company transcript. Loopflow
+retains source-linked Wave inputs, answering turns, and send receipts as Run
+evidence. `home_id` is the binding's durable owner (`lf home id`). Another Home
+fails before contacting Discord, while an OS-held lease prevents another
+checkout on the owner Home from consuming the same channel.
+
 ### Memory
 
 `MEMORY.md` is durable working context agents curate as Wave work moves —

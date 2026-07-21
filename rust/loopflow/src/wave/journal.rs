@@ -114,6 +114,80 @@ pub struct PendingMessage {
     pub id: MessageId,
     pub op: MessageOp,
     pub text: String,
+    pub source: Option<DiscordMessageSource>,
+}
+
+impl PendingMessage {
+    pub fn destination(&self) -> MessageDestination {
+        self.source
+            .as_ref()
+            .map(|source| MessageDestination::Discord(source.binding.clone()))
+            .unwrap_or(MessageDestination::Local)
+    }
+}
+
+/// The authored-chat destination a resident pass is allowed to answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageDestination {
+    Local,
+    Discord(DiscordChatBinding),
+}
+
+/// One configured Discord guild text channel.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DiscordChatBinding {
+    pub guild_id: String,
+    pub channel_id: String,
+}
+
+/// Provider identity retained with one imported human message.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DiscordMessageSource {
+    pub binding: DiscordChatBinding,
+    pub message_id: String,
+    pub author_id: String,
+}
+
+impl DiscordMessageSource {
+    pub fn uri(&self) -> String {
+        format!(
+            "discord://{}/{}/{}",
+            self.binding.guild_id, self.binding.channel_id, self.message_id
+        )
+    }
+}
+
+/// One deterministic Discord message part recorded before delivery.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordMessagePart {
+    pub part_id: String,
+    pub nonce: String,
+    pub content: String,
+}
+
+/// One journal-folded outbound delivery and its provider receipts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordDelivery {
+    pub delivery_id: String,
+    pub turn_id: String,
+    pub sources: Vec<DiscordMessageSource>,
+    pub parts: Vec<DiscordMessagePart>,
+    pub confirmed: HashMap<String, String>,
+}
+
+impl DiscordDelivery {
+    /// Discord replies target the newest authored source claimed by the turn.
+    pub fn reply_to(&self) -> Option<&DiscordMessageSource> {
+        self.sources.last()
+    }
+}
+
+/// The last committed binding attachment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordAttachment {
+    pub binding: DiscordChatBinding,
+    pub bot_user_id: String,
+    pub cursor: Option<String>,
 }
 
 /// One journal row.
@@ -147,6 +221,31 @@ pub enum EventKind {
         id: MessageId,
         op: MessageOp,
         text: String,
+    },
+    DiscordChatAttached {
+        binding: DiscordChatBinding,
+        bot_user_id: String,
+        cursor: Option<String>,
+    },
+    DiscordUserMessage {
+        id: MessageId,
+        text: String,
+        source: DiscordMessageSource,
+    },
+    DiscordChatCursorAdvanced {
+        binding: DiscordChatBinding,
+        message_id: String,
+    },
+    DiscordChatSendPlanned {
+        delivery_id: String,
+        turn_id: String,
+        sources: Vec<DiscordMessageSource>,
+        parts: Vec<DiscordMessagePart>,
+    },
+    DiscordChatSendConfirmed {
+        delivery_id: String,
+        part_id: String,
+        provider_message_id: String,
     },
     TurnStarted {
         turn_id: String,
@@ -405,6 +504,34 @@ impl Narrator {
                 };
                 info(format!("chat ← {op_tag}\"{}\" ({id})", ellipsize(text, 60)))
             }
+            EventKind::DiscordChatAttached {
+                binding, cursor, ..
+            } => info(format!(
+                "discord attached · channel {} · cursor {}",
+                binding.channel_id,
+                cursor.as_deref().unwrap_or("empty")
+            )),
+            EventKind::DiscordUserMessage { id, text, source } => info(format!(
+                "discord ← \"{}\" ({id}, {})",
+                ellipsize(text, 60),
+                source.message_id
+            )),
+            EventKind::DiscordChatCursorAdvanced { message_id, .. } => {
+                debug(format!("discord cursor → {message_id}"))
+            }
+            EventKind::DiscordChatSendPlanned {
+                delivery_id, parts, ..
+            } => info(format!(
+                "discord send planned · {delivery_id} · {} part(s)",
+                parts.len()
+            )),
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id,
+                part_id,
+                provider_message_id,
+            } => info(format!(
+                "discord send confirmed · {delivery_id}/{part_id} → {provider_message_id}"
+            )),
             EventKind::TurnStarted {
                 turn_id, answers, ..
             } => {
@@ -863,6 +990,12 @@ pub struct ThreadFold {
     /// Every journaled input by id — `MessagesRequeued` restores pending
     /// entries from it.
     pub messages: HashMap<MessageId, PendingMessage>,
+    /// The attached Discord channel and its committed cursor.
+    pub discord: Option<DiscordAttachment>,
+    /// Outbound intents and receipts, keyed by deterministic delivery id.
+    pub discord_deliveries: HashMap<String, DiscordDelivery>,
+    /// Completed assistant turns and the authored inputs they answered.
+    pub completed_claims: HashMap<String, Vec<MessageId>>,
     /// Typed Task observations indexed by their synthetic consumption id.
     pub tasks: HashMap<MessageId, TaskObservation>,
     /// Typed Project observations indexed by their synthetic consumption id.
@@ -935,6 +1068,9 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut playhead: Option<Playhead> = None;
     let mut pending_messages: Vec<PendingMessage> = Vec::new();
     let mut messages: HashMap<MessageId, PendingMessage> = HashMap::new();
+    let mut discord: Option<DiscordAttachment> = None;
+    let mut discord_deliveries: HashMap<String, DiscordDelivery> = HashMap::new();
+    let mut completed_claims: HashMap<String, Vec<MessageId>> = HashMap::new();
     let mut tasks: HashMap<MessageId, TaskObservation> = HashMap::new();
     let mut projects: HashMap<MessageId, ProjectObservation> = HashMap::new();
     let mut promotions: HashMap<MessageId, PromotionWake> = HashMap::new();
@@ -953,11 +1089,75 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                     id: id.clone(),
                     op: *op,
                     text: text.clone(),
+                    source: None,
                 };
                 if !consumed_messages.contains(id) {
                     pending_messages.push(message.clone());
                 }
                 messages.insert(id.clone(), message);
+            }
+            EventKind::DiscordChatAttached {
+                binding,
+                bot_user_id,
+                cursor,
+            } => {
+                discord = Some(DiscordAttachment {
+                    binding: binding.clone(),
+                    bot_user_id: bot_user_id.clone(),
+                    cursor: cursor.clone(),
+                });
+            }
+            EventKind::DiscordUserMessage { id, text, source } => {
+                let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+                turn.created_at = event.at_rfc3339();
+                turns.push(turn);
+                let message = PendingMessage {
+                    id: id.clone(),
+                    op: MessageOp::Message,
+                    text: format!("[{}]\n{}", source.uri(), text),
+                    source: Some(source.clone()),
+                };
+                if !consumed_messages.contains(id) {
+                    pending_messages.push(message.clone());
+                }
+                messages.insert(id.clone(), message);
+            }
+            EventKind::DiscordChatCursorAdvanced {
+                binding,
+                message_id,
+            } => {
+                if let Some(attached) = discord.as_mut() {
+                    if &attached.binding == binding {
+                        attached.cursor = Some(message_id.clone());
+                    }
+                }
+            }
+            EventKind::DiscordChatSendPlanned {
+                delivery_id,
+                turn_id,
+                sources,
+                parts,
+            } => {
+                discord_deliveries
+                    .entry(delivery_id.clone())
+                    .or_insert_with(|| DiscordDelivery {
+                        delivery_id: delivery_id.clone(),
+                        turn_id: turn_id.clone(),
+                        sources: sources.clone(),
+                        parts: parts.clone(),
+                        confirmed: HashMap::new(),
+                    });
+            }
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id,
+                part_id,
+                provider_message_id,
+            } => {
+                if let Some(delivery) = discord_deliveries.get_mut(delivery_id) {
+                    delivery
+                        .confirmed
+                        .insert(part_id.clone(), provider_message_id.clone());
+                }
             }
             EventKind::TaskObserved { observation } => {
                 let message = task_observation_message(observation);
@@ -1048,7 +1248,10 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 let mut turn = open.remove(pos);
                 turn.status = *status;
                 turn.close_body(event.at_rfc3339(), termination_reason.clone());
-                claims_by_open_turn.remove(turn_id);
+                let claims = claims_by_open_turn.remove(turn_id).unwrap_or_default();
+                if *status == Lifecycle::Completed {
+                    completed_claims.insert(turn_id.clone(), claims);
+                }
                 turns.push(turn);
             }
             EventKind::LoopState { to, .. } => {
@@ -1113,6 +1316,9 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         playhead,
         pending_messages,
         messages,
+        discord,
+        discord_deliveries,
+        completed_claims,
         tasks,
         projects,
         promotions,
@@ -1125,6 +1331,7 @@ pub fn task_observation_message(observation: &TaskObservation) -> PendingMessage
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
+        source: None,
     }
 }
 
@@ -1133,6 +1340,7 @@ pub fn project_observation_message(observation: &ProjectObservation) -> PendingM
         id: MessageId(observation.inbox_id()),
         op: MessageOp::Message,
         text: observation.prompt(),
+        source: None,
     }
 }
 
@@ -1141,6 +1349,7 @@ pub(crate) fn promotion_wake_message(wake: &PromotionWake) -> PendingMessage {
         id: MessageId(wake.inbox_id()),
         op: MessageOp::Message,
         text: wake.prompt(),
+        source: None,
     }
 }
 
@@ -1186,6 +1395,29 @@ mod tests {
                 resumable: true,
             },
         }
+    }
+
+    fn discord_binding() -> DiscordChatBinding {
+        DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        }
+    }
+
+    fn discord_source() -> DiscordMessageSource {
+        DiscordMessageSource {
+            binding: discord_binding(),
+            message_id: "101".into(),
+            author_id: "human".into(),
+        }
+    }
+
+    fn discord_parts() -> Vec<DiscordMessagePart> {
+        vec![DiscordMessagePart {
+            part_id: "part-1".into(),
+            nonce: "lf-nonce-1".into(),
+            content: "answer".into(),
+        }]
     }
 
     #[test]
@@ -1271,6 +1503,31 @@ mod tests {
     fn event_round_trips_every_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::DiscordChatAttached {
+                binding: discord_binding(),
+                bot_user_id: "bot".into(),
+                cursor: Some("100".into()),
+            },
+            EventKind::DiscordUserMessage {
+                id: MessageId("msg-2".into()),
+                text: "question".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordChatCursorAdvanced {
+                binding: discord_binding(),
+                message_id: "101".into(),
+            },
+            EventKind::DiscordChatSendPlanned {
+                delivery_id: "delivery-1".into(),
+                turn_id: "turn-3".into(),
+                sources: vec![discord_source()],
+                parts: discord_parts(),
+            },
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id: "delivery-1".into(),
+                part_id: "part-1".into(),
+                provider_message_id: "102".into(),
+            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![MessageId("msg-1".into())],
@@ -1365,6 +1622,31 @@ mod tests {
     fn narration_renders_every_event_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::DiscordChatAttached {
+                binding: discord_binding(),
+                bot_user_id: "bot".into(),
+                cursor: Some("100".into()),
+            },
+            EventKind::DiscordUserMessage {
+                id: MessageId("msg-2".into()),
+                text: "question".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordChatCursorAdvanced {
+                binding: discord_binding(),
+                message_id: "101".into(),
+            },
+            EventKind::DiscordChatSendPlanned {
+                delivery_id: "delivery-1".into(),
+                turn_id: "turn-3".into(),
+                sources: vec![discord_source()],
+                parts: discord_parts(),
+            },
+            EventKind::DiscordChatSendConfirmed {
+                delivery_id: "delivery-1".into(),
+                part_id: "part-1".into(),
+                provider_message_id: "102".into(),
+            },
             EventKind::TurnStarted {
                 turn_id: "turn-2".into(),
                 answers: vec![],

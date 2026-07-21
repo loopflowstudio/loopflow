@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
-use crate::wave::journal::MessageOp;
+use crate::wave::journal::{DiscordMessageSource, MessageOp};
 use crate::wave::playhead::{BodyProvenance, PlayheadView, StepOutcome};
 
 /// Header carrying the resident token on every `/resident/*` request.
@@ -184,6 +184,7 @@ pub enum InboxFrame {
         id: String,
         op: MessageOp,
         text: String,
+        source: Option<DiscordMessageSource>,
     },
     Task {
         observation: TaskObservation,

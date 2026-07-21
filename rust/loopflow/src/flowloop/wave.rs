@@ -63,7 +63,7 @@ use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRend
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
 use crate::harness::{default_create_harness, ApprovalPolicy, Harness, SendCurrentOutcome};
 use crate::store::{open_store, storage_config_from_env, Store};
-use crate::wave::journal::{MessageId, MessageOp, PendingMessage};
+use crate::wave::journal::{MessageDestination, MessageId, MessageOp, PendingMessage};
 use crate::wave::playhead::{BodyProvenance, StepKind, StepOutcome, StepRef};
 use crate::wave::resident::ListenerClient;
 use crate::wave::runtime::InboxItem;
@@ -561,8 +561,13 @@ impl WaveLoop {
     }
 
     async fn on_heartbeat(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        self.run_pass(HEARTBEAT_PROMPT.to_string(), Vec::new(), inbox_rx)
-            .await;
+        self.run_pass(
+            HEARTBEAT_PROMPT.to_string(),
+            Vec::new(),
+            MessageDestination::Local,
+            inbox_rx,
+        )
+        .await;
     }
 
     async fn on_cron(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
@@ -585,11 +590,12 @@ impl WaveLoop {
             self.cron_last_fired.insert(cron_key(cron), now);
         }
         let prompt = cron_prompt(&due);
-        self.run_pass(prompt, Vec::new(), inbox_rx).await;
+        self.run_pass(prompt, Vec::new(), MessageDestination::Local, inbox_rx)
+            .await;
     }
 
     async fn start_queued_pass(&mut self, inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>) {
-        let messages = std::mem::take(&mut self.queue);
+        let messages = take_destination_prefix(&mut self.queue);
         self.start_message_pass(messages, inbox_rx).await;
     }
 
@@ -604,12 +610,16 @@ impl WaveLoop {
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let answers: Vec<MessageId> = messages.iter().map(|m| m.id.clone()).collect();
+        let destination = messages
+            .first()
+            .map(PendingMessage::destination)
+            .unwrap_or(MessageDestination::Local);
         let content = messages
             .iter()
             .map(|m| m.text.clone())
             .collect::<Vec<_>>()
             .join("\n\n");
-        self.run_pass(content, answers, inbox_rx).await;
+        self.run_pass(content, answers, destination, inbox_rx).await;
     }
 
     async fn capture_control(
@@ -690,6 +700,7 @@ impl WaveLoop {
         &mut self,
         wake: String,
         answers: Vec<MessageId>,
+        destination: MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let mut answers = answers.into_iter().map(|id| id.0).collect::<Vec<_>>();
@@ -713,7 +724,8 @@ impl WaveLoop {
             let live_skill = step.kind == StepKind::Skill
                 && matches!(&self.backend, BodyBackend::Harness { .. });
             if live_skill {
-                self.run_harness_pass(step, seed, answers, inbox_rx).await;
+                self.run_harness_pass(step, seed, answers, &destination, inbox_rx)
+                    .await;
             } else {
                 self.run_process_pass(step, seed, answers, inbox_rx).await;
             }
@@ -825,6 +837,7 @@ impl WaveLoop {
         step: StepRef,
         seed: String,
         answers: Vec<String>,
+        destination: &MessageDestination,
         inbox_rx: &mut mpsc::UnboundedReceiver<InboxItem>,
     ) {
         let mut body = body_provenance(&step, &self.cwd);
@@ -1002,11 +1015,15 @@ impl WaveLoop {
                         }
                         InboxAction::Deliver(item) => match *item {
                             InboxItem::Message(message) if message.op == MessageOp::Steer => {
-                                if self
-                                    .steer_harness(message, harness.as_mut())
-                                    .await
-                                {
-                                    timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                                if message.destination() == *destination {
+                                    if self
+                                        .steer_harness(message, harness.as_mut())
+                                        .await
+                                    {
+                                        timeout.as_mut().reset(Instant::now() + self.config.pass_timeout);
+                                    }
+                                } else {
+                                    self.on_inbox(InboxItem::Message(message)).await;
                                 }
                             }
                             item => self.on_inbox(item).await,
@@ -1177,6 +1194,9 @@ impl WaveLoop {
         }
         match harness.send_current(&message.text).await {
             SendCurrentOutcome::Sent { .. } => {
+                if message.source.is_some() {
+                    return true;
+                }
                 // Live delivery improves latency; it does not advance the
                 // Turn's immutable starting Basis. Keep the message pending so
                 // a later boundary can incorporate it durably.
@@ -1455,6 +1475,19 @@ impl WaveLoop {
     }
 }
 
+fn take_destination_prefix(queue: &mut Vec<PendingMessage>) -> Vec<PendingMessage> {
+    let destination = queue
+        .first()
+        .expect("a queued pass starts with a message")
+        .destination();
+    let split = queue
+        .iter()
+        .position(|message| message.destination() != destination)
+        .unwrap_or(queue.len());
+    let remaining = queue.split_off(split);
+    std::mem::replace(queue, remaining)
+}
+
 fn spawn_wave_step(
     cwd: &Path,
     step: &StepRef,
@@ -1484,11 +1517,62 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::chat::turns::{ChatRole, ChatTurn};
-    use crate::wave::journal::{journal_path, EventKind, Journal};
+    use crate::wave::journal::{
+        journal_path, DiscordChatBinding, DiscordMessageSource, EventKind, Journal,
+    };
     use crate::wave::runtime::WaveRuntime;
     use crate::wave::server::{self, ResidentDoor};
     use crate::wave::state::LoopState;
     use async_trait::async_trait;
+
+    fn queued_message(id: &str, source: Option<DiscordMessageSource>) -> PendingMessage {
+        PendingMessage {
+            id: MessageId(id.into()),
+            op: MessageOp::Message,
+            text: id.into(),
+            source,
+        }
+    }
+
+    fn discord_source(id: &str) -> DiscordMessageSource {
+        DiscordMessageSource {
+            binding: DiscordChatBinding {
+                guild_id: "guild".into(),
+                channel_id: "channel".into(),
+            },
+            message_id: id.into(),
+            author_id: "human".into(),
+        }
+    }
+
+    #[test]
+    fn discord_chat_batches_only_the_fifo_prefix_for_one_destination() {
+        let mut queue = vec![
+            queued_message("discord-1", Some(discord_source("1"))),
+            queued_message("discord-2", Some(discord_source("2"))),
+            queued_message("local", None),
+            queued_message("discord-3", Some(discord_source("3"))),
+        ];
+
+        let first = take_destination_prefix(&mut queue);
+        assert_eq!(
+            first
+                .iter()
+                .map(|message| message.id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["discord-1", "discord-2"]
+        );
+        assert_eq!(
+            queue
+                .iter()
+                .map(|message| message.id.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["local", "discord-3"]
+        );
+        let second = take_destination_prefix(&mut queue);
+        assert_eq!(second[0].id.0, "local");
+        assert_eq!(queue[0].id.0, "discord-3");
+    }
 
     /// The rig: a REAL listener (runtime + router with the resident door)
     /// and a resident (subscription follower + `run_loop_with` and a

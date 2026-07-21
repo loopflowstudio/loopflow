@@ -19,6 +19,10 @@ release:
       publisher:
       - doppler
       - run
+      - --project
+      - loopflow
+      - --config
+      - prd
       - --
       - uv
       - run

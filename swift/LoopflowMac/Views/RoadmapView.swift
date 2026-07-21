@@ -76,10 +76,9 @@ func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
     roadmapTaskAction(task) != nil || roadmapTaskCanInterrupt(task)
 }
 
-/// The default Wave Chat surface: one machine-wide `lf roadmap --json` read,
-/// rendered without re-querying each Wave or inventing another work model.
+/// The control room's shared Work surface: one machine-wide `lf roadmap --json`
+/// read, rendered without re-querying each Wave or inventing another work model.
 struct RoadmapView: View {
-    let repoPath: String?
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
@@ -87,14 +86,40 @@ struct RoadmapView: View {
     // WaveDetailPane) — the create-and-own lifecycle fires the publisher during
     // the first body pass and logs an AttributeGraph cycle at cold launch.
     @ObservedObject private var terminalStore = TaskTerminalStore.shared
+    @State private var model: ControlRoomModel
+    @Binding private var selection: ControlRoomSelection?
     @State private var lens: WorkLens = .now
-    @State private var snapshot: RoadmapSnapshot?
-    @State private var queryError: String?
     @State private var controlError: String?
     @State private var activeControlId: String?
     @State private var workspaceSelection: RoadmapTaskSelection?
     @State private var interruptSelection: RoadmapTaskSelection?
-    @State private var isRefreshing = false
+
+    init(
+        repoPath: String?,
+        onOpenWave: @escaping (WaveSnapshot) -> Void
+    ) {
+        _model = State(initialValue: ControlRoomModel(
+            query: RegistryQueryLocal.shared,
+            repoPath: repoPath
+        ))
+        _selection = .constant(nil)
+        self.onOpenWave = onOpenWave
+    }
+
+    init(
+        model: ControlRoomModel,
+        selection: Binding<ControlRoomSelection?>,
+        onOpenWave: @escaping (WaveSnapshot) -> Void = { _ in }
+    ) {
+        _model = State(initialValue: model)
+        _selection = selection
+        self.onOpenWave = onOpenWave
+    }
+
+    private var repoPath: String? { model.repoPath }
+    private var snapshot: RoadmapSnapshot? { model.roadmap.value }
+    private var queryError: String? { model.roadmap.errorMessage }
+    private var isRefreshing: Bool { model.isRefreshing }
 
     private var visibleWaves: [WaveRoadmap] {
         guard let repoPath else { return snapshot?.waves ?? [] }
@@ -201,17 +226,20 @@ struct RoadmapView: View {
         if snapshot == nil, queryError == nil {
             ProgressView("Reading roadmap…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("control-room-work-loading")
         } else if snapshot == nil {
             ContentUnavailableView(
                 "Work unavailable",
                 systemImage: "exclamationmark.triangle",
                 description: Text("Couldn't read the latest work. Refresh to try again.")
             )
+            .accessibilityIdentifier("control-room-work-unavailable")
         } else if visibleWaves.isEmpty {
             ContentUnavailableView(
                 repoPath == nil ? "No Waves yet" : "No Waves in this repository",
                 systemImage: "map"
             )
+            .accessibilityIdentifier("control-room-work-empty")
         } else {
             switch lens {
             case .now: nowContent
@@ -238,7 +266,11 @@ struct RoadmapView: View {
                     ForEach(nowSectionsList) { section in
                         NowSectionView(
                             section: section,
+                            selection: selection,
                             activeControlId: activeControlId,
+                            onSelect: { row in
+                                selection = .task(waveId: row.wave.id, taskId: row.task.id)
+                            },
                             onTaskAction: { row, action in
                                 perform(action, on: RoadmapTaskSelection(wave: row.wave, task: row.task))
                             },
@@ -264,8 +296,13 @@ struct RoadmapView: View {
                 ForEach(visibleWaves, id: \.wave.id) { roadmap in
                     RoadmapWaveCard(
                         roadmap: roadmap,
+                        selection: selection,
                         activeControlId: activeControlId,
-                        onOpen: { openWave(roadmap.wave) },
+                        onSelect: { selected in selection = selected },
+                        onOpen: {
+                            selection = .wave(waveId: roadmap.wave.id)
+                            openWave(roadmap.wave)
+                        },
                         onError: { controlError = $0 },
                         onTaskAction: { task, action in
                             perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
@@ -306,15 +343,7 @@ struct RoadmapView: View {
 
     @MainActor
     private func refresh() async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
-        do {
-            snapshot = try await RegistryQueryLocal.shared.roadmap()
-            queryError = nil
-        } catch {
-            queryError = error.localizedDescription
-        }
+        await model.refresh()
     }
 
     /// Navigate to the Wave. Starting a stopped Wave remains the Home control's
@@ -500,7 +529,9 @@ private struct HomeControl: View {
 
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
+    let selection: ControlRoomSelection?
     let activeControlId: String?
+    let onSelect: (ControlRoomSelection) -> Void
     let onOpen: () -> Void
     let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
@@ -531,6 +562,11 @@ private struct RoadmapWaveCard: View {
                             .lineLimit(2)
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { onSelect(.wave(waveId: roadmap.wave.id)) }
+                .accessibilityAddTraits(
+                    selection == .wave(waveId: roadmap.wave.id) ? [.isSelected] : []
+                )
                 Spacer()
                 HomeControl(wave: roadmap.wave, onOpen: onOpen, onError: onError)
             }
@@ -549,8 +585,11 @@ private struct RoadmapWaveCard: View {
                 } else {
                     ForEach(projects) { project in
                         RoadmapProjectCard(
+                            waveId: roadmap.wave.id,
                             project: project,
+                            selection: selection,
                             activeControlId: activeControlId,
+                            onSelect: onSelect,
                             onTaskAction: onTaskAction,
                             onInterrupt: onInterrupt,
                             onOpenWorktree: onOpenWorktree
@@ -569,14 +608,22 @@ private struct RoadmapWaveCard: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.lg))
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.lg)
-                .stroke(palette.border, lineWidth: 1)
+                .stroke(
+                    selection == .wave(waveId: roadmap.wave.id)
+                        ? Color.loopflowBurgundy : palette.border,
+                    lineWidth: selection == .wave(waveId: roadmap.wave.id) ? 2 : 1
+                )
         }
+        .accessibilityIdentifier("control-room-wave-\(roadmap.wave.id)")
     }
 }
 
 private struct RoadmapProjectCard: View {
+    let waveId: String
     let project: RoadmapProject
+    let selection: ControlRoomSelection?
     let activeControlId: String?
+    let onSelect: (ControlRoomSelection) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onInterrupt: (RoadmapTask) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -595,6 +642,10 @@ private struct RoadmapProjectCard: View {
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSelect(.project(waveId: waveId, projectId: project.id))
+            }
             if !project.project.definition.isEmpty {
                 Text(project.project.definition)
                     .font(Typography.caption(11))
@@ -609,7 +660,11 @@ private struct RoadmapProjectCard: View {
                 ForEach(project.tasks) { task in
                     RoadmapTaskRow(
                         task: task,
+                        isSelected: selection == .task(waveId: waveId, taskId: task.id),
                         activeControlId: activeControlId,
+                        onSelect: {
+                            onSelect(.task(waveId: waveId, taskId: task.id))
+                        },
                         onAction: { action in onTaskAction(task, action) },
                         onInterrupt: { onInterrupt(task) },
                         onOpenWorktree: onOpenWorktree
@@ -618,8 +673,16 @@ private struct RoadmapProjectCard: View {
             }
         }
         .padding(Spacing.md)
-        .background(palette.surfaceMuted.opacity(0.6))
+        .background(
+            selection == .project(waveId: waveId, projectId: project.id)
+                ? Color.loopflowBurgundy.opacity(0.08)
+                : palette.surfaceMuted.opacity(0.6)
+        )
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+        .accessibilityAddTraits(
+            selection == .project(waveId: waveId, projectId: project.id) ? [.isSelected] : []
+        )
+        .accessibilityIdentifier("control-room-project-\(project.id)")
     }
 
     private func sectionBadge(_ section: RoadmapSection) -> some View {
@@ -635,7 +698,9 @@ private struct RoadmapProjectCard: View {
 
 private struct RoadmapTaskRow: View {
     let task: RoadmapTask
+    let isSelected: Bool
     let activeControlId: String?
+    let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
     let onInterrupt: () -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -686,8 +751,14 @@ private struct RoadmapTaskRow: View {
             }
         }
         .padding(Spacing.sm)
-        .background(palette.background.opacity(0.6))
+        .background(
+            isSelected ? Color.loopflowBurgundy.opacity(0.1) : palette.background.opacity(0.6)
+        )
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityIdentifier("control-room-task-\(task.id)")
         .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
@@ -794,7 +865,9 @@ private struct TaskActionCluster: View {
 
 private struct NowSectionView: View {
     let section: NowSection
+    let selection: ControlRoomSelection?
     let activeControlId: String?
+    let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
     let onInterrupt: (NowRow) -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -819,13 +892,16 @@ private struct NowSectionView: View {
             ForEach(section.rows) { row in
                 NowRowView(
                     row: row,
+                    isSelected: selection == .task(waveId: row.wave.id, taskId: row.task.id),
                     activeControlId: activeControlId,
+                    onSelect: { onSelect(row) },
                     onAction: { action in onTaskAction(row, action) },
                     onInterrupt: { onInterrupt(row) },
                     onOpenWorktree: onOpenWorktree
                 )
             }
         }
+        .accessibilityIdentifier("control-room-now-\(section.group.rawValue)")
     }
 
     private func nowColor(_ group: NowGroup) -> Color {
@@ -842,7 +918,9 @@ private struct NowSectionView: View {
 
 private struct NowRowView: View {
     let row: NowRow
+    let isSelected: Bool
     let activeControlId: String?
+    let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
     let onInterrupt: () -> Void
     let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
@@ -889,12 +967,16 @@ private struct NowRowView: View {
             )
         }
         .padding(Spacing.sm)
-        .background(palette.surface)
+        .background(isSelected ? Color.loopflowBurgundy.opacity(0.1) : palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
         .overlay {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .stroke(palette.border, lineWidth: 1)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .accessibilityIdentifier("control-room-task-\(task.id)")
         .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }

@@ -3,7 +3,7 @@
 import Loopflow
 import Foundation
 
-struct PortfolioRepo: Codable, Identifiable, Hashable {
+struct PortfolioRepo: Codable, Identifiable, Hashable, Sendable {
     let path: String
     var lastOpened: Date
 

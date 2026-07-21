@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture deterministic Wave-surface evidence from fixtures.
+"""Capture deterministic control-room evidence from fixtures.
 
     uv run python scripts/generate_screenshots.py
 
@@ -41,7 +41,7 @@ DELAY = 2
 
 @dataclass(frozen=True)
 class WaveProofShot:
-    """One fixture-rendered Wave-surface state at one width."""
+    """One fixture-rendered control-room state at one width."""
 
     name: str
     mode: str

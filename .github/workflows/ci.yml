@@ -126,14 +126,14 @@ jobs:
         run: swift test --package-path swift -Xswiftc -gnone
       - name: Check Swift multiplatform boundaries
         run: uv run python scripts/check_swift_multiplatform_boundaries.py
-      - name: Prove the Wave surface renders its five states distinctly
+      - name: Prove the control room renders its four states distinctly
         # Unlike the hosted XCUITest (which needs Automation permission and so
         # lives behind the `--ui-host` gate), this launches the built app
         # directly and renders each state's window through SnapshotService
         # (cacheDisplay, no Screen Recording or Automation permission needed),
-        # then asserts the five states at two widths are pairwise distinct. It
-        # is the CI-runnable half of the W2-178 distinctness proof — a
-        # regression like the DETAIL_STATE forwarding gap fails this step.
+        # then asserts the four states at two widths are pairwise distinct. It
+        # is the CI-runnable half of the control-room state proof — fixture
+        # lookup and state-forwarding regressions fail this step.
         run: |
           swift build --package-path swift --product LoopflowMac
           scripts/prove_wave_surface_states.sh

@@ -13,7 +13,7 @@ website:
     delay: 8
     output: website/static/context-lab.png
 
-  - name: wave-surface
+  - name: control-room
     view: wave
     wave: product
     width: 1440
@@ -31,43 +31,34 @@ website:
 
 # Stable Wave-surface proof, rendered offline from fixtures at both widths.
 wave-proof:
-  - name: wave-surface-selected-narrow
+  - name: control-room-selected-narrow
     mode: mock-waves
     width: 900
-  - name: wave-surface-selected-wide
+  - name: control-room-selected-wide
     mode: mock-waves
     width: 1440
 
-  - name: wave-surface-child-narrow
-    mode: mock-waves
-    wave: cadenza
-    width: 900
-  - name: wave-surface-child-wide
-    mode: mock-waves
-    wave: cadenza
-    width: 1440
-
-  - name: wave-surface-loading-narrow
+  - name: control-room-loading-narrow
     mode: mock-waves
     detail_state: loading
     width: 900
-  - name: wave-surface-loading-wide
+  - name: control-room-loading-wide
     mode: mock-waves
     detail_state: loading
     width: 1440
 
-  - name: wave-surface-error-narrow
+  - name: control-room-error-narrow
     mode: mock-waves
     detail_state: error
     width: 900
-  - name: wave-surface-error-wide
+  - name: control-room-error-wide
     mode: mock-waves
     detail_state: error
     width: 1440
 
-  - name: wave-surface-empty-narrow
+  - name: control-room-empty-narrow
     mode: empty-workspaces
     width: 900
-  - name: wave-surface-empty-wide
+  - name: control-room-empty-wide
     mode: empty-workspaces
     width: 1440

@@ -7,17 +7,21 @@
 ./dev xcode        # regenerate and open the Xcode project
 ```
 
-Loopflow opens on a repository rail, a Wave list, and the machine-wide roadmap.
-The roadmap reads `lf roadmap --json` once, showing every Wave's durable
-Projects and Tasks even when its process is stopped. Select **All Repos** for
-the whole machine or a repository to filter that same snapshot locally.
+Loopflow opens on the control room: repository and Wave scope on the left,
+machine-wide Now/Roadmap work in the center, and selected Work evidence on the
+right. Selecting a Wave, Project, or Task preserves the surrounding live view.
+The control room reads `lf roadmap --json` and `lf ls --json` once per refresh;
+repository scope filters those shared snapshots locally.
 
-Create a Wave with the `+` button. The app writes `GOAL.md` and `MEMORY.md`
-in the repository's main checkout. **Open chat** attaches to a live Wave;
-**Start & open** launches a stopped Wave through `lf wave` and opens its
-conversation while it connects. Wave Chat paints the bounded local journal
-tail before SSE, keeps it visible through reconnects, and rolls equivalent
-operational failures into one disclosed notice.
+Loading, empty, stale-last-good, and unavailable reads stay distinct. A failed
+refresh keeps the last useful Work visible with its failure reason rather than
+painting a healthy empty fleet.
+
+The previous Wave workspace remains available in repository and Portfolio
+windows while its proven inspectors and Chat surface move into the new root.
+Wave Chat paints the bounded local journal tail before SSE, keeps it visible
+through reconnects, and rolls equivalent operational failures into one
+disclosed notice. Cold launch does not start a chat transcript read.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and human-level failures remain visible. The detail pane
 reads Projects, Tasks, decisions, PR delivery, and attention from
@@ -71,7 +75,9 @@ and observation spans.
 
 ## Code map
 
-- `LoopflowMac/Views/WavesView.swift` — repository rail and Wave selection
+- `LoopflowMac/Views/ControlRoomView.swift` — primary scope, live Work, and selected detail
+- `LoopflowMac/ControlRoomModel.swift` — shared readings, stable selection, and local scope
+- `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface

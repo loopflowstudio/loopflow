@@ -56,7 +56,7 @@ struct LoopflowApp: App {
         let launchRepoURL = LaunchArguments.repoURL()
 
         WindowGroup {
-            WavesView(
+            ControlRoomView(
                 portfolioService: portfolioService,
                 initialRepoPath: launchRepoURL?.path
             )
@@ -71,7 +71,7 @@ struct LoopflowApp: App {
             }
         }
         .windowStyle(.automatic)
-        .defaultSize(width: 1080, height: 760)
+        .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appSettings) {
                 Picker("Appearance", selection: Binding(

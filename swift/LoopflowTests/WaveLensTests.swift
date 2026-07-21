@@ -10,18 +10,19 @@ struct WaveLensTests {
     func greenWhenLive() {
         let lens = WaveLens.forWave(live: true, status: .ready, activeTasks: 0, activeProjects: 0)
         #expect(lens.color == .green)
-        #expect(lens.reason.contains("Running"))
+        #expect(lens.reason.contains("listener answered"))
     }
 
-    @Test("green when running even without an explicit live flag")
-    func greenWhenRunning() {
+    @Test("an active Run without a listener is red, not invented green")
+    func activeRunWithoutListenerIsRed() {
         let lens = WaveLens.forWave(
             live: false,
             status: .running(runID: "run_test"),
             activeTasks: 0,
             activeProjects: 0
         )
-        #expect(lens.color == .green)
+        #expect(lens.color == .red)
+        #expect(lens.reason == "Run active · Wave listener did not answer")
     }
 
     @Test("red when stopped with outstanding work")

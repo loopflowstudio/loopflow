@@ -53,6 +53,15 @@ struct ControlRoomActivitySummary: Equatable {
     let measuredOutputTokens: UInt64
 }
 
+struct ControlRoomFleetSummary: Equatable {
+    let registeredWaves: Int
+    let activeRuns: Int
+    let liveListeners: Int
+    let unservedRuns: Int
+    let activeProjects: Int
+    let activeTasks: Int
+}
+
 extension ActivitySnapshot {
     var controlRoomSummary: ControlRoomActivitySummary {
         let providers = nodes.filter { $0.kind == .providerLaunch }
@@ -120,6 +129,19 @@ final class ControlRoomModel {
         return result.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
+    }
+
+    var fleetSummary: ControlRoomFleetSummary? {
+        guard waves.value != nil else { return nil }
+        let registered = visibleWaves.filter(\.isRegistered).map(\.api)
+        return ControlRoomFleetSummary(
+            registeredWaves: registered.count,
+            activeRuns: registered.count { $0.status.isRunning },
+            liveListeners: registered.count { $0.live },
+            unservedRuns: registered.count { $0.status.isRunning && !$0.live },
+            activeProjects: registered.reduce(0) { $0 + $1.activeProjects },
+            activeTasks: registered.reduce(0) { $0 + $1.activeTasks }
+        )
     }
 
     var visibleRepos: [PortfolioRepo] {

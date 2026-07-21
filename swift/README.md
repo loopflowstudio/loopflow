@@ -11,14 +11,17 @@ Loopflow opens on the control room: repository and Wave scope on the left,
 machine-wide Now/Roadmap work in the center, and selected Work evidence on the
 right. The strip above them shows active agents, attributed motion,
 five-minute output, measured tokens, and orphaned or unclaimed providers from
-`lf ps --json`. Selecting a Wave, Project, or Task preserves the surrounding
-live view. The control room reads `lf roadmap --json`, `lf ls --json`, and
-`lf ps --json` once per refresh; repository scope filters the Work snapshots
-locally while activity remains machine-wide.
+`lf ps --json`. Beside that activity it keeps Wave count, active Runs,
+answering listeners, active Project/Task counts, and Run-without-listener
+warnings from `lf ls --json`. Selecting a Wave, Project, or Task preserves the
+surrounding live view. The control room reads `lf roadmap --json`,
+`lf ls --json`, and `lf ps --json` once per refresh; repository scope filters
+the Work and Wave snapshots locally while agent activity remains machine-wide.
 
-Loading, empty, stale-last-good, and unavailable reads stay distinct. A failed
-refresh keeps the last useful Work visible with its failure reason rather than
-painting a healthy empty fleet.
+Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and
+agent readings fail independently. A failed refresh keeps the last useful
+evidence visible with its failure reason rather than painting a healthy empty
+fleet.
 
 The previous Wave workspace remains available in repository and Portfolio
 windows while its proven inspectors and Chat surface move into the new root.
@@ -79,7 +82,7 @@ and observation spans.
 ## Code map
 
 - `LoopflowMac/Views/ControlRoomView.swift` — primary scope, live Work, and selected detail
-- `LoopflowMac/Views/ControlRoomActivityStrip.swift` — machine-wide agent motion and output
+- `LoopflowMac/Views/ControlRoomStatusStrip.swift` — Wave fleet health and machine-wide agent motion
 - `LoopflowMac/ControlRoomModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls

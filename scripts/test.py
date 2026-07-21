@@ -72,6 +72,8 @@ PHASE_BUDGETS: dict[str, int] = {
     "website": 900,
     "swift": 1200,
     "swift-boundaries": 120,
+    "swift-build": 900,
+    "swift-surface": 900,
     "xcodegen": 180,
     "xcodebuild": 1200,
     "e2e-smoke": 600,
@@ -248,6 +250,16 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
             REPO_ROOT,
             "swift-boundaries",
         ),
+        Command(
+            ["swift", "build", "--package-path", "swift", "--product", "LoopflowMac"],
+            REPO_ROOT,
+            "swift-build",
+        ),
+        Command(
+            ["scripts/prove_wave_surface_states.sh"],
+            REPO_ROOT,
+            "swift-surface",
+        ),
     ]
 
 
@@ -409,8 +421,10 @@ SUITES: list[Suite] = [
     Suite(
         name="swift",
         slow=False,
-        trigger_desc="swift/",
-        match=lambda c: _touches(c, "swift/"),
+        trigger_desc="swift/ or the headless surface proof",
+        match=lambda c: (
+            _touches(c, "swift/") or _touches_exact(c, "scripts/prove_wave_surface_states.sh")
+        ),
         build=_swift_commands,
     ),
     Suite(

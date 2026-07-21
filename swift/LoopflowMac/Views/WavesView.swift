@@ -384,29 +384,12 @@ struct WavesView: View {
         guard let initialRepoPath, !didApplyInitialRepo else { return nil }
         if AppTestMode.shouldBypassRegistry { return nil }
         let readPath = await Task.detached {
-            Self.resolveLaunchRepo(initialRepoPath).path
+            PortfolioDiscovery.resolveLaunchRepo(initialRepoPath).path
         }.value
         if !portfolioService.repos.contains(where: { $0.path.normalizedFilePath == readPath }) {
             portfolioService.addRepo(URL(fileURLWithPath: readPath))
         }
         return readPath
-    }
-
-    /// Resolve the launch-provided repo into its (read path, main path, rail label).
-    /// Production reads the collapsed main worktree — the on-disk `wave/` dir is
-    /// quick-launch templates that live on main by design. The
-    /// `LOOPFLOW_DEV_WAVE_REPO` dev override (set by loopflow-dev on `run` /
-    /// `run-debug`) instead reads the launched checkout AS-IS, so a dev launch
-    /// enumerates its own worktree's waves. The rail label is always the collapsed
-    /// main-repo name, so the rail stays clean and worktree-free.
-    private nonisolated static func resolveLaunchRepo(_ initialPath: String) -> (path: String, mainPath: String, displayName: String) {
-        let scanner = RepoScanner()
-        let dev = ProcessInfo.processInfo.environment["LOOPFLOW_DEV_WAVE_REPO"]
-        let devOverride = (dev?.isEmpty == false) ? dev : nil
-        let readURL = URL(fileURLWithPath: devOverride ?? initialPath)
-        let mainURL = scanner.resolveMainWorktree(readURL)
-        let readPath = devOverride != nil ? readURL.normalizedFilePath : mainURL.normalizedFilePath
-        return (readPath, mainURL.normalizedFilePath, mainURL.lastPathComponent)
     }
 
     /// Source the rail directly from a `~/src` scan of main (non-worktree) repos,
@@ -421,42 +404,10 @@ struct WavesView: View {
             return
         }
 
-        let initialPath = initialRepoPath
-        repos = await Task.detached {
-            let scanner = RepoScanner()
-            var seen = Set<String>()
-            var result: [PortfolioRepo] = []
-            for url in scanner.scanDefaultRoot() {
-                let path = url.normalizedFilePath
-                guard seen.insert(path).inserted else { continue }
-                result.append(PortfolioRepo(path: path, lastOpened: Date()))
-            }
-            if let initialPath {
-                let launch = Self.resolveLaunchRepo(initialPath)
-                if launch.path == launch.mainPath {
-                    // Production (or a launched main repo): read main. Keep the
-                    // scanned row in place; add it only if the scan missed it.
-                    if seen.insert(launch.path).inserted {
-                        result.append(PortfolioRepo(
-                            path: launch.path,
-                            lastOpened: Date(),
-                            displayNameOverride: launch.displayName
-                        ))
-                    }
-                } else {
-                    // Dev override: the launched worktree stands in for its main
-                    // repo. Drop the scanned main row so the worktree is the sole
-                    // row (reads its own wave/ dir + registry), labeled with the main name.
-                    result.removeAll { $0.path == launch.mainPath || $0.path == launch.path }
-                    result.append(PortfolioRepo(
-                        path: launch.path,
-                        lastOpened: Date(),
-                        displayNameOverride: launch.displayName
-                    ))
-                }
-            }
-            return result
-        }.value
+        repos = await PortfolioDiscovery.repos(
+            initialRepoPath: initialRepoPath,
+            persistedRepos: portfolioService.repos
+        )
     }
 
     /// Enumerate each rail repo's authored waves — `<repo>/wave/<name>/GOAL.md`
@@ -464,35 +415,7 @@ struct WavesView: View {
     /// rows before they have a registry entry.
     private func refreshAuthoredWaves() async {
         if AppTestMode.shouldBypassRegistry { return }
-        let paths = repos.map(\.path)
-        authoredWavesByRepo = await Task.detached {
-            var result: [String: [String]] = [:]
-            for path in paths {
-                result[path] = Self.authoredWaves(inRepo: path)
-            }
-            return result
-        }.value
-    }
-
-    /// Wave names authored on disk at `<repo>/wave/<name>/GOAL.md`, sorted.
-    private nonisolated static func authoredWaves(inRepo repoPath: String) -> [String] {
-        let waveDir = URL(fileURLWithPath: repoPath).appendingPathComponent("wave", isDirectory: true)
-        let fm = FileManager.default
-        guard let children = try? fm.contentsOfDirectory(
-            at: waveDir,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-        return children
-            .filter { url in
-                var isDir: ObjCBool = false
-                let goal = url.appendingPathComponent("GOAL.md")
-                return fm.fileExists(atPath: goal.path, isDirectory: &isDir) && !isDir.boolValue
-            }
-            .map(\.lastPathComponent)
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: repos)
     }
 
     private func ensureRepoStates() {

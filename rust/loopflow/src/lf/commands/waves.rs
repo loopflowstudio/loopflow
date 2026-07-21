@@ -75,7 +75,8 @@ pub struct WaveDetailSnapshot {
     /// serving dormant.
     pub loop_state: Option<String>,
     pub projects: Vec<ProjectDetailSnapshot>,
-    /// Non-terminal durable Project Work that cannot join the current PM plan.
+    /// Durable Project Work that cannot join the current PM plan, including
+    /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_projects: Vec<UnavailableProjectEvidence>,
     /// This wave's agent-backed skill runs, newest first.
     pub runs: Evidence<SkillRunEntry>,
@@ -429,6 +430,22 @@ pub struct UnavailableProjectEvidence {
     pub work_id: String,
     pub project_id: String,
     pub project_slug: String,
+    pub status: WorkStatus,
+    pub owner: NextMoveOwner,
+    pub reason: String,
+    pub recovery: String,
+    pub tasks: Vec<UnavailableTaskEvidence>,
+}
+
+/// Non-terminal durable Task Work whose historical Project is no longer in the
+/// current PM snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnavailableTaskEvidence {
+    pub work_id: String,
+    pub task_id: String,
+    pub task_identifier: String,
+    pub status: WorkStatus,
+    pub owner: NextMoveOwner,
     pub reason: String,
     pub recovery: String,
 }
@@ -470,7 +487,8 @@ pub struct WaveRoadmap {
     /// The Wave's plan joined to live evidence, or the reason there is none — a
     /// Wave with no local PM snapshot reads "unavailable", never an empty plan.
     pub projects: Evidence<RoadmapProject>,
-    /// Durable Project Work that failed to join an otherwise readable plan.
+    /// Durable Project Work that failed to join an otherwise readable plan,
+    /// including non-terminal Tasks stranded under a historical Project.
     pub unavailable_projects: Vec<UnavailableProjectEvidence>,
 }
 
@@ -572,7 +590,6 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             });
         let project_snapshots = snapshot_projects(
             &store,
-            &wave,
             stored_projects,
             stored_tasks,
             planning,
@@ -741,7 +758,7 @@ async fn wave_roadmap_projects(
     };
     // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail.
     // Roadmap's bounded Git reads belong only to the shared attention evidence.
-    match snapshot_projects(store, wave, projects, tasks, planning, liveness, false).await {
+    match snapshot_projects(store, projects, tasks, planning, liveness, false).await {
         Ok(snapshots) => RoadmapProjectSnapshots {
             projects: Evidence::complete(
                 snapshots
@@ -1245,7 +1262,6 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
 
 async fn snapshot_projects(
     store: &SharedStore,
-    wave: &Wave,
     projects: Vec<Project>,
     tasks: Vec<Task>,
     planning: PmSnapshot,
@@ -1271,7 +1287,7 @@ async fn snapshot_projects(
             find_project_index(&details, project.plan.id.as_str(), &project.plan.slug)
         else {
             if !work_status_is_terminal(&status) {
-                unavailable_projects.push(unavailable_project(project));
+                unavailable_projects.push(unavailable_project(project, status));
             }
             continue;
         };
@@ -1310,21 +1326,25 @@ async fn snapshot_projects(
         let Some(project_index) =
             find_project_index(&details, parent.plan.id.as_str(), &parent.plan.slug)
         else {
-            if unavailable_projects
-                .iter()
-                .any(|evidence| evidence.work_id == parent.id.as_str())
-                || work_status_is_terminal(&status)
-            {
+            if work_status_is_terminal(&status) {
                 continue;
             }
-            return Err(anyhow!(
-                "Task {} references Project {} ({}), which is absent from the current PM snapshot; run `lf pm sync --wave {}`. If the Project remains absent, settle the stale Work with `lf task abandon {} --reason \"Project is absent from the current PM snapshot\"`",
-                runtime_task.id,
-                parent.plan.slug,
-                parent.plan.id.as_str(),
-                wave.name(),
-                runtime_task.plan.identifier,
-            ));
+            let unavailable_index = match unavailable_projects
+                .iter()
+                .position(|evidence| evidence.work_id == parent.id.as_str())
+            {
+                Some(index) => index,
+                None => {
+                    let parent_status =
+                        child_work_status(store, &ChildRef::Project(parent.id.clone())).await?;
+                    unavailable_projects.push(unavailable_project(parent, parent_status));
+                    unavailable_projects.len() - 1
+                }
+            };
+            unavailable_projects[unavailable_index]
+                .tasks
+                .push(unavailable_task(runtime_task, status));
+            continue;
         };
         if details[project_index].tasks.iter().any(|detail| {
             detail.task.id == runtime_task.plan.id.as_str()
@@ -1359,22 +1379,61 @@ async fn snapshot_projects(
                 .then(left.task.identifier.cmp(&right.task.identifier))
         });
     }
+    for project in &mut unavailable_projects {
+        project.tasks.sort_by(|left, right| {
+            left.task_identifier
+                .cmp(&right.task_identifier)
+                .then(left.work_id.cmp(&right.work_id))
+        });
+    }
+    unavailable_projects.sort_by(|left, right| {
+        left.project_slug
+            .cmp(&right.project_slug)
+            .then(left.work_id.cmp(&right.work_id))
+    });
     Ok(ProjectSnapshots {
         projects: details,
         unavailable_projects,
     })
 }
 
-fn unavailable_project(project: &Project) -> UnavailableProjectEvidence {
+fn unavailable_project(project: &Project, status: WorkStatus) -> UnavailableProjectEvidence {
     const REASON: &str = "Project is absent from the current PM snapshot";
+    let recovery = if work_status_is_terminal(&status) {
+        format!(
+            "Settle the listed Tasks; Project Work is already {}",
+            work_status_label(&status)
+        )
+    } else {
+        format!(
+            "lf project abandon {} --reason \"{REASON}\"",
+            project.plan.slug
+        )
+    };
     UnavailableProjectEvidence {
         work_id: project.id.to_string(),
         project_id: project.plan.id.as_str().to_string(),
         project_slug: project.plan.slug.clone(),
+        status,
+        owner: NextMoveOwner::Wave,
+        reason: REASON.to_string(),
+        recovery,
+        tasks: Vec::new(),
+    }
+}
+
+fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence {
+    const REASON: &str = "Task's owning Project is absent from the current PM snapshot";
+    UnavailableTaskEvidence {
+        work_id: task.id.to_string(),
+        task_id: task.plan.id.as_str().to_string(),
+        task_identifier: task.plan.identifier.clone(),
+        status,
+        owner: NextMoveOwner::Wave,
         reason: REASON.to_string(),
         recovery: format!(
-            "lf project abandon {} --reason \"{REASON}\"",
-            project.plan.slug
+            "lf work abandon task {} --reason \"Project is absent from the current PM snapshot\"",
+            task.id
         ),
     }
 }
@@ -2146,12 +2205,25 @@ fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
     println!("  unavailable projects");
     for project in projects {
         println!(
-            "    {slug:<24}  {work}  {reason}",
+            "    {slug:<24}  {status:<10}  {owner:<8}  {work}  {reason}",
             slug = truncate(&project.project_slug, 24),
+            status = work_status_label(&project.status),
+            owner = owner_label(&project.owner),
             work = project.work_id,
             reason = project.reason,
         );
         println!("      recover  {}", project.recovery);
+        for task in &project.tasks {
+            println!(
+                "      {identifier:<12}  {status:<10}  {owner:<8}  {work}  {reason}",
+                identifier = truncate(&task.task_identifier, 12),
+                status = work_status_label(&task.status),
+                owner = owner_label(&task.owner),
+                work = task.work_id,
+                reason = task.reason,
+            );
+            println!("        recover  {}", task.recovery);
+        }
     }
 }
 

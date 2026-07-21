@@ -9,10 +9,14 @@ use std::process::Command;
 use loopflow::child::ChildRef;
 use loopflow::durable::{Containment, RunAdvance, RunTrigger};
 use loopflow::id::WaveId;
-use loopflow::planning::{LinearProjectId, ProjectPlan};
+use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{PmSnapshotRow, RunEventRow};
+use loopflow::task::{
+    Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
+    TaskPrId,
+};
 use loopflow::trace::{AgentInvocationRow, AgentTurnRow};
 use loopflow::wave::Wave;
 use time::OffsetDateTime;
@@ -228,8 +232,9 @@ fn prepend_test_bin(command: &mut Command, home: &Path) {
 }
 
 fn seed_stale_project_work(home: &Path) {
-    const STALE_WORK_ID: &str = "proj_3998f8611e9c9069f53c44dc831803d7";
-    const STALE_PROJECT_ID: &str = "0b13d98e-800e-49a3-a778-6fb13ac0f03a";
+    const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
+    const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
+    const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
 
     let wave = seed(home, "product");
     let repo = home.join("repo");
@@ -240,9 +245,9 @@ fn seed_stale_project_work(home: &Path) {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
         plan: ProjectPlan {
             id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
-            slug: "wave-chat".to_string(),
-            name: "Wave Chat".to_string(),
-            prompt_context: "Wave Chat remains steerable.".to_string(),
+            slug: "technical-architecture".to_string(),
+            name: "Technical Architecture".to_string(),
+            prompt_context: "Keep the system legible and minimally simple.".to_string(),
             pm_snapshot_synced_at: now.unix_timestamp() - 1,
         },
         wave_id: wave.id().clone(),
@@ -257,6 +262,71 @@ fn seed_stale_project_work(home: &Path) {
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
+    let stale_task = Task {
+        id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
+        plan: TaskPlan {
+            id: LinearIssueId::new("linear-task-w2-127").expect("recorded PM Task id"),
+            identifier: "W2-127".to_string(),
+            title: "Preserve historical architecture evidence".to_string(),
+            description: "This Task outlived its retired Linear Project.".to_string(),
+            pm_snapshot_synced_at: now.unix_timestamp() - 1,
+        },
+        pm_writeback: PmWritebackState::Current,
+        wave_id: wave.id().clone(),
+        project_id: stale.id.clone(),
+        worktree: home.join("repo.w2-127"),
+        workspace_slug: "w2-127".to_string(),
+        lifecycle: TaskLifecyclePlan::defaults(),
+        lifecycle_phase: TaskLifecyclePhase::Loop,
+        phase_epoch: 1,
+        phase_cursor: 0,
+        phase_iteration: 0,
+        gate_cycle: 0,
+        gate_proposal: None,
+        agent: "codex".to_string(),
+        provider: "codex".to_string(),
+        provider_session_id: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        observation: Observation::NotRequired,
+    };
+    let stale_pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: stale_task.id.clone(),
+        sequence: 1,
+        slug: stale_task.workspace_slug.clone(),
+        branch: "jack-heart/w2-127".to_string(),
+        base_commit: "deadbeef".to_string(),
+        parent_pr_id: None,
+        publication: None,
+        merge_commit: None,
+        abandoned_at: None,
+        ci_observation: None,
+        github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store
+        .insert_task(&stale_task, &stale_pr)
+        .expect("seed orphaned Task");
+    let stale_work = store
+        .work_for_child(&ChildRef::Project(stale.id.clone()))
+        .expect("resolve stale Project Work");
+    let stale_basis = store
+        .current_epoch(&stale_work)
+        .expect("read stale Project epoch")
+        .current_basis;
+    store
+        .abandon(
+            &stale_work,
+            "Project is absent from the current PM snapshot",
+            &stale_basis,
+        )
+        .expect("retire stale Project Work");
 
     let current = Project {
         id: ProjectId::new(),
@@ -587,7 +657,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
 }
 
 #[test]
-fn stale_project_work_preserves_status_and_roadmap_evidence() {
+fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
     let home = tempfile::tempdir().expect("tempdir");
     seed_stale_project_work(home.path());
 
@@ -619,20 +689,40 @@ fn stale_project_work_preserves_status_and_roadmap_evidence() {
     assert_eq!(unavailable.len(), 1);
     assert_eq!(
         unavailable[0]["work_id"],
-        "proj_3998f8611e9c9069f53c44dc831803d7"
+        "proj_e972b70272fbb5e91c096ebe657f9f9b"
     );
     assert_eq!(
         unavailable[0]["project_id"],
-        "0b13d98e-800e-49a3-a778-6fb13ac0f03a"
+        "f56c583c-c360-4dc4-ba12-4b5a02268623"
     );
-    assert_eq!(unavailable[0]["project_slug"], "wave-chat");
+    assert_eq!(unavailable[0]["project_slug"], "technical-architecture");
+    assert_eq!(unavailable[0]["status"], "abandoned");
+    assert_eq!(unavailable[0]["owner"], "wave");
     assert_eq!(
         unavailable[0]["reason"],
         "Project is absent from the current PM snapshot"
     );
     assert_eq!(
         unavailable[0]["recovery"],
-        "lf project abandon wave-chat --reason \"Project is absent from the current PM snapshot\""
+        "Settle the listed Tasks; Project Work is already abandoned"
+    );
+    let orphaned_tasks = unavailable[0]["tasks"].as_array().expect("orphaned Tasks");
+    assert_eq!(orphaned_tasks.len(), 1);
+    assert_eq!(
+        orphaned_tasks[0]["work_id"],
+        "task_40fbeeaadfbca5367aa7391432ae84ff"
+    );
+    assert_eq!(orphaned_tasks[0]["task_id"], "linear-task-w2-127");
+    assert_eq!(orphaned_tasks[0]["task_identifier"], "W2-127");
+    assert_eq!(orphaned_tasks[0]["status"], "ready");
+    assert_eq!(orphaned_tasks[0]["owner"], "wave");
+    assert_eq!(
+        orphaned_tasks[0]["reason"],
+        "Task's owning Project is absent from the current PM snapshot"
+    );
+    assert_eq!(
+        orphaned_tasks[0]["recovery"],
+        "lf work abandon task task_40fbeeaadfbca5367aa7391432ae84ff --reason \"Project is absent from the current PM snapshot\""
     );
 
     let roadmap = roadmap_json(home.path(), "product");

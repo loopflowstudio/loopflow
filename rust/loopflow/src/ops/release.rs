@@ -13,9 +13,12 @@ use crate::engine::command::{run_command, CommandError};
 use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
-use crate::engine::git::{delete_local_branch, get_default_branch, sync_main, worktree_remove};
+use crate::engine::git::{
+    acquire_worktree_lease, delete_local_branch, get_default_branch, sync_main, worktree_remove,
+    worktree_remove_owned, WorktreeLease,
+};
 use crate::engine::naming::{git_user, sanitize_for_branch};
-use crate::engine::worktrees::{create_named_worktree, main_repo_root};
+use crate::engine::worktrees::{create_named_worktree, main_repo_root, worktree_path};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{land, LandOptions};
@@ -675,7 +678,7 @@ pub fn release_run(
             &target,
             progress,
         );
-        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, progress);
+        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, None, progress);
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
@@ -744,7 +747,8 @@ fn run_publisher_check(
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let Some((program, args)) = target.publisher.split_first() else {
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    let Some((program, args)) = publisher.split_first() else {
         return Ok(());
     };
     progress.status("Checking release host...");
@@ -764,7 +768,8 @@ fn run_publisher(
     workflow: &ReleaseWorkflowResult,
     progress: &impl Progress,
 ) -> OpsResult<()> {
-    let Some((program, args)) = target.publisher.split_first() else {
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    let Some((program, args)) = publisher.split_first() else {
         return Ok(());
     };
     if workflow.database_id == 0 {
@@ -772,6 +777,10 @@ fn run_publisher(
             "release workflow for {tag} did not expose a run id"
         )));
     }
+
+    let wt_name = publish_worktree_name(target, tag);
+    let wt_path = worktree_path(repo, &wt_name);
+    let lease = acquire_worktree_lease(repo, &wt_path, &format!("release publisher for {tag}"))?;
 
     let artifact_dir = tempfile::tempdir()?;
     let run_id = workflow.database_id.to_string();
@@ -788,7 +797,6 @@ fn run_publisher(
         ],
     )?;
 
-    let wt_name = publish_worktree_name(target, tag);
     progress.status(&format!(
         "Materializing tagged publisher worktree {wt_name}..."
     ));
@@ -802,6 +810,7 @@ fn run_publisher(
             .arg("--artifacts")
             .arg(artifact_dir.path())
             .env("LF_RELEASE_MAIN_REPO", repo)
+            .env("LF_RELEASE_SOURCE_REPO", &wt.path)
             .env(
                 "LF_RELEASE_WORKFLOW_RUN_ID",
                 workflow.database_id.to_string(),
@@ -812,7 +821,7 @@ fn run_publisher(
             stderr: err.stderr,
         })
     };
-    cleanup_release_worktree(repo, &wt.path, &wt.branch, progress);
+    cleanup_release_worktree(repo, &wt.path, &wt.branch, Some(&lease), progress);
     publish_result?;
 
     if github_release_state(repo, tag)? != GitHubReleaseState::Published {
@@ -821,6 +830,14 @@ fn run_publisher(
         )));
     }
     Ok(())
+}
+
+fn expand_publisher_command(repo: &Path, publisher: &[String]) -> Vec<String> {
+    let repo = repo.to_string_lossy();
+    publisher
+        .iter()
+        .map(|arg| arg.replace("{repo}", &repo))
+        .collect()
 }
 
 #[derive(Debug)]
@@ -1501,9 +1518,14 @@ fn cleanup_release_worktree(
     main_repo: &Path,
     wt_path: &Path,
     branch: &str,
+    lease: Option<&WorktreeLease>,
     progress: &impl Progress,
 ) {
-    if let Err(err) = worktree_remove(main_repo, wt_path) {
+    let result = match lease {
+        Some(lease) => worktree_remove_owned(main_repo, wt_path, lease),
+        None => worktree_remove(main_repo, wt_path),
+    };
+    if let Err(err) = result {
         progress.error(&format!(
             "Warning: could not remove release worktree {}: {err}",
             wt_path.display()

@@ -27,4 +27,4 @@ release:
       - uv
       - run
       - python
-      - scripts/publish_release.py
+      - '{repo}/scripts/publish_release.py'

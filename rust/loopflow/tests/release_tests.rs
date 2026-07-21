@@ -2,6 +2,8 @@ mod support;
 
 use std::fs;
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use loopflow::ops::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
@@ -65,6 +67,18 @@ fn git_output_bare(repo: &TestRepo, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn wait_for_path(path: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {}",
+            path.display()
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -605,6 +619,149 @@ fn release_run_keeps_a_failed_tag_red_until_a_fix_merges() {
         .expect_err("failed build without a fix should stay red");
 
     assert!(error.to_string().contains("no merged fix is available"));
+}
+
+#[test]
+fn active_tagged_publisher_blocks_concurrent_cleanup_until_exit() {
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    let state = tempfile::tempdir().expect("publisher state");
+    let ready = state.path().join("ready");
+    let publish = state.path().join("publish");
+    let completed = state.path().join("completed");
+    let exit = state.path().join("exit");
+    let published = state.path().join("published");
+    let publisher = repo.path().join("publisher.sh");
+    fs::write(
+        &publisher,
+        format!(
+            r#"#!/bin/sh
+case "$1" in
+  check) exit 0 ;;
+  publish)
+    worktree="$LF_RELEASE_SOURCE_REPO"
+    [ -e "$worktree/.git" ] || {{ echo 'tagged source missing' >&2; exit 41; }}
+    [ ! -f "$worktree/publisher.sh" ] || {{ echo 'publisher control came from tag' >&2; exit 42; }}
+    : > '{}'
+    attempts=0
+    while [ ! -f '{}' ] && [ "$attempts" -lt 500 ]; do
+      attempts=$((attempts + 1))
+      sleep 0.02
+    done
+    [ -d "$worktree" ] || {{ echo 'publisher worktree disappeared' >&2; exit 43; }}
+    : > '{}'
+    : > '{}'
+    attempts=0
+    while [ ! -f '{}' ] && [ "$attempts" -lt 500 ]; do
+      attempts=$((attempts + 1))
+      sleep 0.02
+    done
+    [ -d "$worktree" ] || {{ echo 'publisher worktree disappeared before exit' >&2; exit 44; }}
+    exit 0 ;;
+esac
+exit 2
+"#,
+            ready.display(),
+            publish.display(),
+            published.display(),
+            completed.display(),
+            exit.display(),
+        ),
+    )
+    .expect("write publisher");
+
+    let gh_script = format!(
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo 'gh version 2.0.0'
+  exit 0
+fi
+case "$1 $2" in
+  'release view')
+    if [ -f '{}' ]; then
+      echo '{{"isDraft":false}}'
+      exit 0
+    fi
+    exit 1 ;;
+  'run list')
+    echo '[{{"databaseId":42,"headBranch":"v0.9.1","status":"completed","conclusion":"success"}}]'
+    exit 0 ;;
+  'run download') exit 0 ;;
+esac
+echo "unexpected gh invocation: $@" >&2
+exit 1
+"#,
+        published.display(),
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    fs::create_dir_all(repo.path().join(".lf")).expect("config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"{repo}/publisher.sh\"]\n",
+    )
+    .expect("release config");
+    git(&repo, &["add", ".lf/config.yaml", "publisher.sh"]);
+    git(&repo, &["commit", "-m", "Add current publisher controller"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let tags_before = git_output(&repo, &["tag", "--list"]);
+    let neighbor = repo.create_named_worktree("neighbor");
+    let repo_name = repo
+        .path()
+        .file_name()
+        .expect("repo name")
+        .to_string_lossy();
+    let publisher_worktree = repo
+        .path()
+        .parent()
+        .expect("repo parent")
+        .join(format!("{repo_name}.publish-default-v0-9-1"));
+
+    let release = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["release", "run", "patch"])
+        .current_dir(repo.path())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("start release re-entry");
+
+    wait_for_path(&ready);
+    assert!(publisher_worktree.exists());
+    let removal = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["wt", "remove", "publish-default-v0-9-1"])
+        .current_dir(repo.path())
+        .output()
+        .expect("attempt concurrent cleanup");
+
+    assert!(!removal.status.success());
+    assert!(
+        String::from_utf8_lossy(&removal.stderr).contains("release publisher for v0.9.1"),
+        "unexpected cleanup error: {}",
+        String::from_utf8_lossy(&removal.stderr)
+    );
+    assert!(publisher_worktree.exists());
+    assert!(neighbor.exists());
+
+    fs::write(&publish, "").expect("allow publication");
+    wait_for_path(&completed);
+    assert!(
+        publisher_worktree.exists(),
+        "owner cleanup must wait for publisher exit"
+    );
+    fs::write(&exit, "").expect("allow publisher exit");
+
+    let output = release
+        .wait_with_output()
+        .expect("wait for release re-entry");
+    assert!(
+        output.status.success(),
+        "release re-entry failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!publisher_worktree.exists());
+    assert!(neighbor.exists());
+    assert_eq!(git_output(&repo, &["tag", "--list"]), tags_before);
 }
 
 #[test]

@@ -68,6 +68,7 @@ def test_publisher_completes_all_stages_before_marking_release_published(
     (tmp_path / "RELEASE_NOTES.md").write_text("# v1.2.3\n")
     (tmp_path / "swift/dist").mkdir(parents=True)
     receipts: list[publish_release.PublishReceipt] = []
+    commands: list[list[str]] = []
 
     def fake_run(
         command: list[str],
@@ -76,6 +77,7 @@ def test_publisher_completes_all_stages_before_marking_release_published(
         capture: bool = False,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
         if command[:3] == ["git", "tag", "--points-at"]:
             return subprocess.CompletedProcess(command, 0, "v1.2.3\n", "")
         if command[:3] == ["git", "rev-parse", "HEAD"]:
@@ -112,3 +114,6 @@ def test_publisher_completes_all_stages_before_marking_release_published(
         "install.sh",
     }
     assert receipts == [receipt]
+    deploy = next(command for command in commands if "deploy_website.py" in command[1])
+    assert deploy[1] == str(publish_release.CONTROL_ROOT / "scripts/deploy_website.py")
+    assert deploy[-2:] == ["--repo", str(tmp_path)]

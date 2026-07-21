@@ -243,7 +243,7 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
         "uv",
         "run",
         "python",
-        "scripts/publish_release.py",
+        "{repo}/scripts/publish_release.py",
     ]
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()

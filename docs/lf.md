@@ -675,6 +675,11 @@ the operator. `--match-head-commit` fences the arming command; Loopflow revokes
 Auto before its own later head mutation. Concurrent Loopflow finalization and
 push commands in one worktree are refused rather than interleaved.
 
+If a Task reaches `finally` after its work already merged and rotation left a
+provably empty unpublished successor, `lf pr land -c` completes over the merged
+PR without creating another one. Earlier lifecycle phases still refuse the
+empty range.
+
 Submit and land clear `scratch/`, preserve a recovery ref, collapse the
 authored range to one tree-identical commit, replay that commit onto the pinned
 target, verify it, and push once. Ordinary `lf rebase` keeps commit history.

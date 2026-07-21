@@ -91,6 +91,9 @@ If `lf pr land` fails due to rebase conflicts, launch a sub-agent to run the
 ## Notes
 
 - If the PR already has a good title and body, run `lf pr land` without `--title`/`--body` to keep existing content.
+- In a Task's `finally` phase, `-c` completes directly over already-merged work
+  when lifecycle rotation left a provably empty unpublished successor. It does
+  not create an empty PR; earlier phases keep the ordinary empty-range refusal.
 
 ## Adaptation
 

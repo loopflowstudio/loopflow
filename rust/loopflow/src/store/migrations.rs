@@ -500,6 +500,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "release",
         sql: include_str!("migrations/0.12.4.001_release.sql"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 12,
+            patch: Some(5),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.12.5.001_release.sql"),
+    },
 ];
 
 #[cfg(test)]

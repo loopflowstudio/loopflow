@@ -542,6 +542,9 @@ pub enum Commands {
         /// Maximum durable turns to return (default: 12).
         #[arg(long, requires = "history")]
         limit: Option<usize>,
+        /// Select one immutable conversation epoch.
+        #[arg(long, requires = "history")]
+        epoch: Option<String>,
         #[command(flatten)]
         target: WaveTargetArgs,
     },
@@ -2902,6 +2905,8 @@ mod tests {
             "--json",
             "--limit",
             "20",
+            "--epoch",
+            "chat-epoch-2",
             "--wave",
             "goals",
         ])
@@ -2910,6 +2915,7 @@ mod tests {
             history,
             json,
             limit,
+            epoch,
             target,
             ..
         }) = cli.command
@@ -2919,9 +2925,11 @@ mod tests {
         assert!(history);
         assert!(json);
         assert_eq!(limit, Some(20));
+        assert_eq!(epoch.as_deref(), Some("chat-epoch-2"));
         assert_eq!(target.wave.as_deref(), Some("goals"));
 
         assert!(Cli::try_parse_from(["lf", "chat", "--json", "--wave", "goals"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "chat", "--epoch", "chat-epoch-2"]).is_err());
         assert!(Cli::try_parse_from([
             "lf",
             "chat",

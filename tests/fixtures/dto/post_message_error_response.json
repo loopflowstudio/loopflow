@@ -1,0 +1,20 @@
+{
+  "error": "message was not accepted: this Wave chat is backed by Discord",
+  "epoch": {
+    "id": "chat-epoch-8",
+    "number": 2,
+    "backing": {
+      "kind": "discord",
+      "guild_id": "guild-1",
+      "channel_id": "channel-1",
+      "open": {
+        "kind": "open_discord",
+        "label": "Open in Discord",
+        "url": "https://discord.com/channels/guild-1/channel-1"
+      }
+    },
+    "journal_seq": 8,
+    "started_at": "2026-07-15T05:00:00Z",
+    "ended_at": null
+  }
+}

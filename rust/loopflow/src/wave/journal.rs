@@ -32,6 +32,7 @@ use crate::chat::turns::{ChatRole, ChatTurn};
 use crate::chat::types::{ConversationItem, Lifecycle};
 use crate::project::ProjectObservation;
 use crate::task::TaskObservation;
+use crate::wave::chat::{ChatBacking, ConversationEpoch};
 use crate::wave::playhead::{BodyProvenance, Playhead, PlayheadEvent};
 use crate::wave::state::LoopState;
 use crate::wave::PromotionWake;
@@ -140,12 +141,34 @@ pub struct DiscordChatBinding {
     pub channel_id: String,
 }
 
+impl DiscordChatBinding {
+    pub fn channel_url(&self) -> String {
+        format!(
+            "https://discord.com/channels/{}/{}",
+            self.guild_id, self.channel_id
+        )
+    }
+
+    pub fn message_url(&self, message_id: &str) -> String {
+        format!("{}/{}", self.channel_url(), message_id)
+    }
+}
+
 /// Provider identity retained with one imported human message.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DiscordMessageSource {
     pub binding: DiscordChatBinding,
     pub message_id: String,
     pub author_id: String,
+}
+
+/// One legacy epoch imported atomically when an old journal first adopts the
+/// explicit backing model. `turn_ids` keeps local projection exact even when
+/// the old journal alternated between local and Discord speech.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationEpochImport {
+    pub epoch: ConversationEpoch,
+    pub turn_ids: Vec<String>,
 }
 
 impl DiscordMessageSource {
@@ -170,6 +193,7 @@ pub struct DiscordMessagePart {
 pub struct DiscordDelivery {
     pub delivery_id: String,
     pub turn_id: String,
+    pub binding: DiscordChatBinding,
     pub sources: Vec<DiscordMessageSource>,
     pub parts: Vec<DiscordMessagePart>,
     pub confirmed: HashMap<String, String>,
@@ -217,6 +241,14 @@ impl Event {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
     // -- conversation --
+    ConversationEpochsImported {
+        epochs: Vec<ConversationEpochImport>,
+    },
+    ConversationEpochStarted {
+        epoch_id: String,
+        number: u64,
+        backing: ChatBacking,
+    },
     UserMessage {
         id: MessageId,
         op: MessageOp,
@@ -239,6 +271,10 @@ pub enum EventKind {
     DiscordChatSendPlanned {
         delivery_id: String,
         turn_id: String,
+        /// Added after the first sourced-reply format. Old events derive it
+        /// from `sources`; every new event writes it explicitly.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<DiscordChatBinding>,
         sources: Vec<DiscordMessageSource>,
         parts: Vec<DiscordMessagePart>,
     },
@@ -496,6 +532,12 @@ impl Narrator {
     /// console.
     fn render(&mut self, kind: &EventKind) -> Narration {
         match kind {
+            EventKind::ConversationEpochsImported { epochs } => {
+                info(format!("{} legacy chat epoch(s) imported", epochs.len()))
+            }
+            EventKind::ConversationEpochStarted {
+                number, backing, ..
+            } => info(format!("chat epoch {number} started · {backing:?}")),
             EventKind::UserMessage { id, op, text } => {
                 let op_tag = match op {
                     MessageOp::Message => "",
@@ -975,6 +1017,12 @@ pub struct ThreadFold {
     /// User turns and finalized assistant turns, in commit order (user turns
     /// at their `UserMessage` event; assistant turns at their `TurnFinished`).
     pub turns: Vec<ChatTurn>,
+    /// Immutable conversation authority intervals, oldest first.
+    pub conversation_epochs: Vec<ConversationEpoch>,
+    /// Exact turn membership for imported legacy epochs.
+    pub conversation_epoch_turns: HashMap<String, Vec<String>>,
+    /// Provider backing for legacy turns with confirmed Discord provenance.
+    pub discord_turn_bindings: HashMap<String, DiscordChatBinding>,
     /// Turns started but never finished — the crash tail. The boot janitor
     /// finalizes these as `Failed`.
     pub open: Vec<ChatTurn>,
@@ -1062,6 +1110,9 @@ pub fn restore_pending(
 /// items land in `ChatTurn.items`.
 pub fn fold_thread(events: &[Event]) -> ThreadFold {
     let mut turns: Vec<ChatTurn> = Vec::new();
+    let mut conversation_epochs: Vec<ConversationEpoch> = Vec::new();
+    let mut conversation_epoch_turns: HashMap<String, Vec<String>> = HashMap::new();
+    let mut discord_turn_bindings: HashMap<String, DiscordChatBinding> = HashMap::new();
     // In-order list, not a map: the crash tail keeps its start order.
     let mut open: Vec<ChatTurn> = Vec::new();
     let mut state = LoopState::Idle;
@@ -1081,6 +1132,34 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
 
     for event in events {
         match &event.kind {
+            EventKind::ConversationEpochsImported { epochs } => {
+                for imported in epochs {
+                    if let Some(active) = conversation_epochs.last_mut() {
+                        active.ended_at = Some(imported.epoch.started_at.clone());
+                    }
+                    conversation_epoch_turns
+                        .insert(imported.epoch.id.clone(), imported.turn_ids.clone());
+                    conversation_epochs.push(imported.epoch.clone());
+                }
+            }
+            EventKind::ConversationEpochStarted {
+                epoch_id,
+                number,
+                backing,
+            } => {
+                let at = event.at_rfc3339();
+                if let Some(active) = conversation_epochs.last_mut() {
+                    active.ended_at = Some(at.clone());
+                }
+                conversation_epochs.push(ConversationEpoch {
+                    id: epoch_id.clone(),
+                    number: *number,
+                    backing: backing.clone(),
+                    journal_seq: event.seq,
+                    started_at: at,
+                    ended_at: None,
+                });
+            }
             EventKind::UserMessage { id, op, text } => {
                 let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
                 turn.created_at = event.at_rfc3339();
@@ -1108,9 +1187,11 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 });
             }
             EventKind::DiscordUserMessage { id, text, source } => {
-                let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
+                let turn_id = format!("turn-{}", event.seq);
+                let mut turn = ChatTurn::user(turn_id.clone(), text.clone());
                 turn.created_at = event.at_rfc3339();
                 turns.push(turn);
+                discord_turn_bindings.insert(turn_id, source.binding.clone());
                 let message = PendingMessage {
                     id: id.clone(),
                     op: MessageOp::Message,
@@ -1135,18 +1216,27 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
             EventKind::DiscordChatSendPlanned {
                 delivery_id,
                 turn_id,
+                binding,
                 sources,
                 parts,
             } => {
-                discord_deliveries
-                    .entry(delivery_id.clone())
-                    .or_insert_with(|| DiscordDelivery {
-                        delivery_id: delivery_id.clone(),
-                        turn_id: turn_id.clone(),
-                        sources: sources.clone(),
-                        parts: parts.clone(),
-                        confirmed: HashMap::new(),
-                    });
+                let destination = binding
+                    .clone()
+                    .or_else(|| sources.first().map(|source| source.binding.clone()));
+                if let Some(binding) = destination {
+                    discord_deliveries
+                        .entry(delivery_id.clone())
+                        .or_insert_with(|| DiscordDelivery {
+                            delivery_id: delivery_id.clone(),
+                            turn_id: turn_id.clone(),
+                            binding,
+                            sources: sources.clone(),
+                            parts: parts.clone(),
+                            confirmed: HashMap::new(),
+                        });
+                } else {
+                    tracing::warn!(%delivery_id, "Discord delivery has no destination; ignoring it");
+                }
             }
             EventKind::DiscordChatSendConfirmed {
                 delivery_id,
@@ -1309,8 +1399,17 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
         .flatten()
         .collect();
 
+    for delivery in discord_deliveries.values() {
+        if !delivery.confirmed.is_empty() {
+            discord_turn_bindings.insert(delivery.turn_id.clone(), delivery.binding.clone());
+        }
+    }
+
     ThreadFold {
         turns,
+        conversation_epochs,
+        conversation_epoch_turns,
+        discord_turn_bindings,
         open,
         state,
         playhead,
@@ -1401,6 +1500,17 @@ mod tests {
         DiscordChatBinding {
             guild_id: "guild".into(),
             channel_id: "channel".into(),
+        }
+    }
+
+    fn local_epoch() -> ConversationEpoch {
+        ConversationEpoch {
+            id: "chat-epoch-legacy-1".into(),
+            number: 1,
+            backing: ChatBacking::Local,
+            journal_seq: 0,
+            started_at: "2026-07-04T00:00:00Z".into(),
+            ended_at: None,
         }
     }
 
@@ -1503,6 +1613,17 @@ mod tests {
     fn event_round_trips_every_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::ConversationEpochsImported {
+                epochs: vec![ConversationEpochImport {
+                    epoch: local_epoch(),
+                    turn_ids: vec!["turn-1".into()],
+                }],
+            },
+            EventKind::ConversationEpochStarted {
+                epoch_id: "chat-epoch-2".into(),
+                number: 2,
+                backing: ChatBacking::Local,
+            },
             EventKind::DiscordChatAttached {
                 binding: discord_binding(),
                 bot_user_id: "bot".into(),
@@ -1520,6 +1641,7 @@ mod tests {
             EventKind::DiscordChatSendPlanned {
                 delivery_id: "delivery-1".into(),
                 turn_id: "turn-3".into(),
+                binding: None,
                 sources: vec![discord_source()],
                 parts: discord_parts(),
             },
@@ -1595,6 +1717,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn historical_sourced_delivery_derives_its_destination() {
+        let event = Event {
+            v: FORMAT_VERSION,
+            seq: 1,
+            at: OffsetDateTime::now_utc(),
+            kind: EventKind::DiscordChatSendPlanned {
+                delivery_id: "delivery-1".into(),
+                turn_id: "turn-1".into(),
+                binding: None,
+                sources: vec![discord_source()],
+                parts: discord_parts(),
+            },
+        };
+
+        let delivery = fold_thread(&[event])
+            .discord_deliveries
+            .remove("delivery-1")
+            .expect("historical delivery");
+        assert_eq!(delivery.binding, discord_binding());
+    }
+
     /// New appends carry the post-rename kind names on disk — a run completion
     /// serializes as `run_completed`, never the retired `worker_finished`.
     #[test]
@@ -1622,6 +1766,17 @@ mod tests {
     fn narration_renders_every_event_kind() {
         let kinds = vec![
             user_message(1, "hi"),
+            EventKind::ConversationEpochsImported {
+                epochs: vec![ConversationEpochImport {
+                    epoch: local_epoch(),
+                    turn_ids: vec!["turn-1".into()],
+                }],
+            },
+            EventKind::ConversationEpochStarted {
+                epoch_id: "chat-epoch-2".into(),
+                number: 2,
+                backing: ChatBacking::Local,
+            },
             EventKind::DiscordChatAttached {
                 binding: discord_binding(),
                 bot_user_id: "bot".into(),
@@ -1639,6 +1794,7 @@ mod tests {
             EventKind::DiscordChatSendPlanned {
                 delivery_id: "delivery-1".into(),
                 turn_id: "turn-3".into(),
+                binding: Some(discord_binding()),
                 sources: vec![discord_source()],
                 parts: discord_parts(),
             },

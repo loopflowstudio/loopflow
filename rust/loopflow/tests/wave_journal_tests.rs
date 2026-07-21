@@ -251,6 +251,8 @@ async fn corrupt_trailing_line_is_tolerated_on_reboot() {
 async fn illegal_loop_transition_is_refused() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let rt = open_wave(tmp.path());
+    let path = journal_path(tmp.path(), "ship");
+    let (_, before) = Journal::open(&path).expect("open journal before transition");
 
     assert!(!rt.transition(
         LoopState::Interrupting {
@@ -259,9 +261,9 @@ async fn illegal_loop_transition_is_refused() {
         "nothing to interrupt"
     ));
     assert_eq!(rt.loop_state(), LoopState::Idle, "state untouched");
-    // Refused moves leave no trace in the journal.
-    let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
-    assert!(events.is_empty());
+    // Refused moves add no trace beyond the runtime's durable epoch.
+    let (_, after) = Journal::open(&path).expect("open journal after transition");
+    assert_eq!(after.len(), before.len());
 }
 
 /// `/health` splits listener liveness (`status`, always `serving`) from the

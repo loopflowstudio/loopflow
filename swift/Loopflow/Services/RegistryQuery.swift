@@ -94,16 +94,22 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
-    /// Latest durable Wave turns from the local journal. This read does not
-    /// require or start a Wave listener; Wave Chat installs it before SSE.
+    /// Bounded history for one conversation epoch. `lf` uses the live backing
+    /// when a listener exists and otherwise folds readable local epochs from
+    /// the journal; this query never starts a Wave listener.
     public func chatHistory(
         wave: String,
         limit: Int = 12,
+        epoch: String? = nil,
         cwd: String?
     ) async throws -> ChatHistorySnapshot {
-        let stdout = try await run([
+        var args = [
             "chat", "--history", "--json", "--limit", String(limit), "--wave", wave,
-        ], cwd)
+        ]
+        if let epoch {
+            args.append(contentsOf: ["--epoch", epoch])
+        }
+        let stdout = try await run(args, cwd)
         return try Self.decode(ChatHistorySnapshot.self, from: stdout)
     }
 

@@ -88,8 +88,13 @@ struct WaveChatView: View {
             let conn = WaveChatConnection(
                 repoPath: repoPath,
                 waveName: waveName,
-                loadHistory: { repoPath, waveName, limit in
-                    try await query.chatHistory(wave: waveName, limit: limit, cwd: repoPath)
+                loadHistory: { repoPath, waveName, limit, epoch in
+                    try await query.chatHistory(
+                        wave: waveName,
+                        limit: limit,
+                        epoch: epoch,
+                        cwd: repoPath
+                    )
                 }
             )
             connection = conn

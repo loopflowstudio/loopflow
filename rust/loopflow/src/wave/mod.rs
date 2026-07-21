@@ -47,6 +47,7 @@
 //! exists on the machine, child observations wait durably; the listener remains
 //! functional and acquires the registry when it appears.
 
+pub mod chat;
 pub(crate) mod discord;
 pub mod journal;
 pub(crate) mod memory;
@@ -76,6 +77,7 @@ use crate::engine::wave_config::{try_read_wave_config, WaveChatConfig};
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::util::normalize_wave_name;
 use crate::store::{open_existing_store, SharedStore};
+use crate::wave::chat::ChatBacking;
 use crate::wave::runtime::WaveRuntime;
 
 /// The hidden subcommand a listener spawns for its own resident body. Named
@@ -318,7 +320,7 @@ pub(crate) async fn run_listener(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
 
-    let discord_adapter =
+    let (chat_backing, discord_adapter) =
         match try_read_wave_config(&repo_root, &wave)?.and_then(|config| config.chat) {
             Some(WaveChatConfig::Discord {
                 home_id,
@@ -333,9 +335,12 @@ pub(crate) async fn run_listener(
                     guild_id,
                     channel_id,
                 };
-                Some(discord::DiscordAdapter::preflight(binding, &home_id, &local_home.id).await?)
+                let backing = ChatBacking::discord(&binding);
+                let adapter =
+                    discord::DiscordAdapter::preflight(binding, &home_id, &local_home.id).await?;
+                (backing, Some(adapter))
             }
-            None => None,
+            Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
         };
 
     let registered = registry_config
@@ -380,7 +385,7 @@ pub(crate) async fn run_listener(
 
     // Refusals are behind us: NOW open the journal for writing and mark the
     // boot. The store-polling observer starts once the runtime exists.
-    let runtime = WaveRuntime::open(wave.clone(), repo_root.clone())?;
+    let runtime = WaveRuntime::open_with_backing(wave.clone(), repo_root.clone(), chat_backing)?;
     if let Some(adapter) = discord_adapter.as_ref() {
         adapter.attach(&runtime)?;
     }
@@ -398,6 +403,9 @@ pub(crate) async fn run_listener(
     });
     let observer = Arc::new(registry::ObserverSlot::new(runtime.clone(), observer));
     let observer_task = tokio::spawn(Arc::clone(&observer).run(registry::POLL_CADENCE));
+    let discord_projection = discord_adapter
+        .as_ref()
+        .map(discord::DiscordAdapter::projection);
     let discord_task = discord_adapter.map(|adapter| tokio::spawn(adapter.run(runtime.clone())));
 
     // The resident door: a per-boot token, published beside the endpoint
@@ -475,12 +483,13 @@ pub(crate) async fn run_listener(
             _ = shutdown_request.wait() => {}
         }
     };
-    let app = server::router_with_observer(
+    let app = server::router_with_chat_projection(
         runtime.clone(),
         door.clone(),
         observer,
         Some(supervisor_handle),
         shutdown_door,
+        discord_projection,
     );
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(graceful_shutdown)
@@ -530,6 +539,7 @@ mod tests {
 
     use crate::chat::turns::{ChatRole, ChatTurn, TurnDelta};
     use crate::chat::types::Lifecycle;
+    use crate::wave::chat::{ChatHistorySnapshot, PostMessageResponse, WaveChatMessage};
     use crate::wave::journal::MessageOp;
     use crate::wave::server::ResidentDoor;
     use crate::wave::wire::{ResidentDelta, RESIDENT_TOKEN_HEADER};
@@ -661,16 +671,16 @@ mod tests {
         narrate(&runtime, "second");
         narrate(&runtime, "third");
 
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=2"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation?limit=2"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 2);
-        assert_eq!(turns[0]["text"], "second");
-        assert_eq!(turns[1]["text"], "third");
+        assert_eq!(turns[0].text, "second");
+        assert_eq!(turns[1].text, "third");
 
         // A limit past the thread length serves the whole thread; no limit
         // does too.
@@ -678,8 +688,8 @@ mod tests {
             format!("{base}/conversation?limit=99"),
             format!("{base}/conversation"),
         ] {
-            let body: serde_json::Value = reqwest::get(url).await.unwrap().json().await.unwrap();
-            assert_eq!(body["turns"].as_array().unwrap().len(), 3);
+            let body: ChatHistorySnapshot = reqwest::get(url).await.unwrap().json().await.unwrap();
+            assert_eq!(body.messages.len(), 3);
         }
 
         // The open turn counts as the newest turn in the tail.
@@ -689,16 +699,16 @@ mod tests {
         runtime.apply_resident_delta(ResidentDelta::TurnText {
             text: "in progress".into(),
         });
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation?limit=1"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation?limit=1"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "running");
-        assert_eq!(turns[0]["text"], "in progress");
+        assert_eq!(turns[0].status, Lifecycle::Running);
+        assert_eq!(turns[0].text, "in progress");
     }
 
     #[tokio::test]
@@ -706,7 +716,7 @@ mod tests {
         let (base, runtime, _tmp) = boot().await;
 
         let client = reqwest::Client::new();
-        let body: serde_json::Value = client
+        let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
             .json(&serde_json::json!({ "op": "message", "text": "how's it going?" }))
             .send()
@@ -715,10 +725,10 @@ mod tests {
             .json()
             .await
             .unwrap();
-        let posted: ChatTurn = serde_json::from_value(body["turn"].clone()).unwrap();
+        let posted = body.message.expect("posted message").turn;
         assert_eq!(posted.role, ChatRole::User);
         assert_eq!(posted.text, "how's it going?");
-        assert_eq!(body["state"], "idle");
+        assert_eq!(body.state, "idle");
 
         // The message is in the thread; the resident answers it at its next
         // turn (loop scheduling is covered in loop/wave.rs tests).
@@ -804,7 +814,7 @@ mod tests {
     async fn bare_interrupt_while_idle_is_a_noop_success_with_state() {
         let (base, runtime, _tmp) = boot().await;
         let client = reqwest::Client::new();
-        let body: serde_json::Value = client
+        let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
             .json(&serde_json::json!({ "op": "interrupt", "text": "" }))
             .send()
@@ -813,8 +823,8 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert!(body["turn"].is_null(), "nothing said, nothing appended");
-        assert_eq!(body["state"], "idle");
+        assert!(body.message.is_none(), "nothing said, nothing appended");
+        assert_eq!(body.state, "idle");
         assert!(runtime.thread_snapshot().is_empty());
     }
 
@@ -978,7 +988,10 @@ mod tests {
                 Ok(Err(_)) => break,
             }
         }
-        assert!(acc.contains("event: turn"), "SSE frames are named `turn`");
+        assert!(
+            acc.contains("event: message"),
+            "human SSE frames are named `message`"
+        );
         assert!(
             acc.contains("replayed turn"),
             "replays the thread on connect"
@@ -1046,8 +1059,8 @@ mod tests {
         );
     }
 
-    /// Raw-TCP SSE client that decodes the chunked body and parses every
-    /// `data:` line into a [`ChatTurn`], in arrival order.
+    /// Raw-TCP SSE client that decodes the chunked body and folds source-bearing
+    /// message frames into their [`ChatTurn`] values in arrival order.
     struct SseClient {
         stream: tokio::net::TcpStream,
         raw: Vec<u8>,
@@ -1075,7 +1088,7 @@ mod tests {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
             let mut buf = [0u8; 4096];
             loop {
-                let frames = parse_turn_frames(&dechunk(&self.raw));
+                let frames = parse_message_frames(&dechunk(&self.raw));
                 if pred(&frames) {
                     return frames;
                 }
@@ -1133,10 +1146,11 @@ mod tests {
         out
     }
 
-    /// Reconstruct the thread the way a real client does: a `turn` frame
-    /// replaces the turn of its id, a `turn-delta` frame absorbs one increment
-    /// into it. Returns the turns in first-seen order, each at its latest state.
-    fn parse_turn_frames(sse_body: &str) -> Vec<ChatTurn> {
+    /// Reconstruct the thread the way a real client does: a `message` frame
+    /// replaces the source-bearing message's turn, and a `message-delta` frame
+    /// absorbs one increment into it. Returns turns in first-seen order at their
+    /// latest state.
+    fn parse_message_frames(sse_body: &str) -> Vec<ChatTurn> {
         let mut order: Vec<String> = Vec::new();
         let mut by_id: std::collections::HashMap<String, ChatTurn> =
             std::collections::HashMap::new();
@@ -1147,15 +1161,16 @@ mod tests {
             } else if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim();
                 match event.as_str() {
-                    "turn" => {
-                        if let Ok(turn) = serde_json::from_str::<ChatTurn>(data) {
+                    "message" => {
+                        if let Ok(message) = serde_json::from_str::<WaveChatMessage>(data) {
+                            let turn = message.turn;
                             if !by_id.contains_key(&turn.id) {
                                 order.push(turn.id.clone());
                             }
                             by_id.insert(turn.id.clone(), turn);
                         }
                     }
-                    "turn-delta" => {
+                    "message-delta" => {
                         if let Ok(delta) = serde_json::from_str::<TurnDelta>(data) {
                             if let Some(turn) = by_id.get_mut(&delta.turn_id) {
                                 turn.absorb_item(delta.item);
@@ -1283,16 +1298,16 @@ mod tests {
             text: "half a thought".into(),
         });
 
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "running");
-        assert_eq!(turns[0]["text"], "half a thought");
+        assert_eq!(turns[0].status, Lifecycle::Running);
+        assert_eq!(turns[0].text, "half a thought");
 
         // After finalization the same id is served exactly once, terminal.
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
@@ -1300,15 +1315,15 @@ mod tests {
             cost_usd: None,
             reason: None,
         });
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "completed");
+        assert_eq!(turns[0].status, Lifecycle::Completed);
     }
 
     #[tokio::test]
@@ -1342,16 +1357,20 @@ mod tests {
         });
         let base = format!("http://{addr}");
 
-        let body: serde_json::Value = reqwest::get(format!("{base}/conversation"))
+        let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))
             .await
             .unwrap()
             .json()
             .await
             .unwrap();
-        let turns = body["turns"].as_array().unwrap();
+        let turns: Vec<_> = body.messages.iter().map(|message| &message.turn).collect();
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0]["status"], "failed", "janitor closed the turn");
-        assert_eq!(turns[0]["text"], "half a thought");
+        assert_eq!(
+            turns[0].status,
+            Lifecycle::Failed,
+            "janitor closed the turn"
+        );
+        assert_eq!(turns[0].text, "half a thought");
 
         // SSE replay agrees: the turn arrives failed, never running.
         let mut client = SseClient::connect(&base).await;
@@ -1392,7 +1411,7 @@ mod tests {
         let (base, runtime, tmp) = boot_family().await;
         let client = reqwest::Client::new();
 
-        let body: serde_json::Value = client
+        let body: PostMessageResponse = client
             .post(format!("{base}/messages"))
             .json(&serde_json::json!({ "op": "message", "text": "landed the parser" }))
             .send()
@@ -1401,7 +1420,10 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(body["turn"]["text"], "landed the parser");
+        assert_eq!(
+            body.message.expect("posted message").turn.text,
+            "landed the parser"
+        );
 
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);

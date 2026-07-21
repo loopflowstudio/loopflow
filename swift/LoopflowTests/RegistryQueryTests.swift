@@ -116,14 +116,14 @@ struct RegistryQueryTests {
         #expect(result.waves.isEmpty)
     }
 
-    @Test("Wave Chat history is a bounded local query")
-    func chatHistoryUsesLocalJournalQuery() async throws {
+    @Test("Wave Chat history uses the backing-aware DTO")
+    func chatHistoryUsesBackingAwareDTO() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == [
                 "chat", "--history", "--json", "--limit", "12", "--wave", "product",
             ])
             #expect(cwd == "/tmp/repo")
-            return #"{"state":"missing","detail":"No durable Wave Chat history exists yet.","turns":[],"truncated":false}"#
+            return #"{"epochs":[],"selected_epoch_id":null,"state":"missing","detail":"No durable Wave Chat history exists yet.","messages":[],"truncated":false}"#
         }
 
         let snapshot = try await query.chatHistory(
@@ -132,7 +132,7 @@ struct RegistryQueryTests {
             cwd: "/tmp/repo"
         )
         #expect(snapshot.state == .missing)
-        #expect(snapshot.turns.isEmpty)
+        #expect(snapshot.messages.isEmpty)
         #expect(!snapshot.truncated)
     }
 

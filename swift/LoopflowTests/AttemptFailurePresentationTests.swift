@@ -217,7 +217,7 @@ struct AttemptFailurePresentationTests {
             invocationId: invocationID,
             stepIndex: 0,
             flow: "wave",
-            step: "wave_pursue",
+            step: "wave/pursue",
             iteration: iteration,
             sessionId: nil,
             harness: "codex",

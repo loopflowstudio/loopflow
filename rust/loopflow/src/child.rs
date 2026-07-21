@@ -365,7 +365,7 @@ mod tests {
             observable: true,
             process_alive: alive,
             progress_age: progress,
-            step: Some("task_pursue".to_string()),
+            step: Some("task/pursue".to_string()),
             reason: "running".to_string(),
         }
     }

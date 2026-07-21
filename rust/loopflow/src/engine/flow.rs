@@ -157,6 +157,14 @@ pub fn available_flow_names(repo: &Path) -> Vec<String> {
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
+    names.extend(repo_flow_names(repo));
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub(crate) fn repo_flow_names(repo: &Path) -> Vec<String> {
+    let mut names = Vec::new();
     collect_flow_names(&repo.join(".lf/flows"), None, &mut names);
     names.sort();
     names.dedup();
@@ -514,13 +522,7 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     }
 
     // 2. Namespaced flows in subdirectories (.lf/flows/gstack/sprint.yaml)
-    // Accept both "gstack/sprint" and "gstack-sprint"
-    let splits: Vec<(&str, &str)> = name
-        .split_once('/')
-        .into_iter()
-        .chain(name.split_once('-'))
-        .collect();
-    for (prefix, flow_name) in splits {
+    if let Some((prefix, flow_name)) = name.split_once('/') {
         if let Some(path) = first_existing_path(paths_with_extensions(
             &repo.join(".lf/flows").join(prefix),
             flow_name,
@@ -803,7 +805,7 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
         })?;
 
         let flow = parse_optional_string(path_map, "flow");
-        let skill = parse_optional_string(path_map, "step");
+        let skill = parse_optional_string(path_map, "skill");
         let skills = parse_xor_path_skills(path_map, key_str, kind_prefix)?;
 
         let target_count = usize::from(flow.is_some())
@@ -811,7 +813,7 @@ fn parse_xor_def(map: &serde_yaml_ng::Mapping, kind: &str) -> Result<XorDef, Loa
             + usize::from(!skills.is_empty());
         if target_count > 1 {
             return Err(LoadError::InvalidFlow(format!(
-                "{kind_prefix} path '{key_str}' cannot have more than one of flow, step, or steps"
+                "{kind_prefix} path '{key_str}' cannot have more than one of flow, skill, or steps"
             )));
         }
 
@@ -1723,7 +1725,7 @@ Be careful.
 - xor:
     paths:
       skip:
-        step: gate
+        skill: gate
         description: "Just run gate"
       full:
         flow: build
@@ -1775,7 +1777,7 @@ Be careful.
     paths:
       bad:
         flow: build
-        step: gate
+        skill: gate
         description: "invalid"
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
@@ -1783,8 +1785,8 @@ Be careful.
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("flow") && err.contains("step"),
-            "expected error about both flow and step, got: {err}"
+            err.contains("flow") && err.contains("skill"),
+            "expected error about both flow and skill, got: {err}"
         );
     }
 
@@ -1854,13 +1856,13 @@ Be careful.
     paths:
       bad:
         description: "invalid"
-        step: implement
+        skill: implement
         steps:
           - review
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let err = parse_flow_items(&value).unwrap_err().to_string();
-        assert!(err.contains("flow, step, or steps"));
+        assert!(err.contains("flow, skill, or steps"));
     }
 
     #[test]

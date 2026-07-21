@@ -104,13 +104,13 @@
                       "run_id": "run_00000000000000000000000000000005"
                     }
                   },
-                  "reason": "Task flow iteration 1, step 2/3: task_pursue",
+                  "reason": "Task flow iteration 1, step 2/3: task/pursue",
                   "updated_at": "2026-07-14T23:44:00Z",
                   "provider": "claude",
                   "process_alive": true,
                   "observation": {
                     "category": "working",
-                    "reason": "Task flow iteration 1, step 2/3: task_pursue",
+                    "reason": "Task flow iteration 1, step 2/3: task/pursue",
                     "owner": "work",
                     "controls": [
                       "attach",
@@ -125,11 +125,11 @@
                 },
                 "next_move": {
                   "owner": "task",
-                  "reason": "Task flow iteration 1, step 2/3: task_pursue"
+                  "reason": "Task flow iteration 1, step 2/3: task/pursue"
                 },
                 "attention": {
                   "level": "green",
-                  "reason": "Task flow iteration 1, step 2/3: task_pursue",
+                  "reason": "Task flow iteration 1, step 2/3: task/pursue",
                   "observed_at": "2026-07-15T00:00:00Z",
                   "evidence_age_secs": 960,
                   "next_owner": "task",

@@ -102,7 +102,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         worktree: home.join("repo").display().to_string(),
         wave: Some(wave_name.to_string()),
         flow: Some("wave".to_string()),
-        skill: Some("wave_mutate".to_string()),
+        skill: Some("wave/mutate".to_string()),
         project: Some("auditability".to_string()),
         task: Some("W2-122".to_string()),
         provider: "codex".to_string(),
@@ -498,7 +498,7 @@ fn status_reports_skill_runs_without_lookup_or_flow_processes() {
     assert_eq!(runs.len(), 1);
     let skill = runs
         .iter()
-        .find(|run| run["skill"] == "wave_mutate")
+        .find(|run| run["skill"] == "wave/mutate")
         .expect("the wave's skill is in its status");
     assert_eq!(skill["flow"], "wave");
     assert_eq!(skill["provider"], "codex");
@@ -507,7 +507,7 @@ fn status_reports_skill_runs_without_lookup_or_flow_processes() {
     assert_eq!(skill["output_tokens"], 5);
 
     let human = status_human(home.path(), "audit-a");
-    assert!(human.contains("wave/wave_mutate"));
+    assert!(human.contains("wave/wave/mutate"));
     assert!(human.contains("ctx      10"));
     assert!(human.contains("tok      15"));
     assert!(!human.contains("pm sync"));
@@ -548,7 +548,7 @@ fn runs_are_skill_invocations_with_context_and_token_evidence() {
     assert_eq!(run["id"], "invocation-wave-mutate");
     assert_eq!(run["trace_id"], "run-resident");
     assert_eq!(run["exec_id"], "proc-resident");
-    assert_eq!(run["skill"], "wave_mutate");
+    assert_eq!(run["skill"], "wave/mutate");
     assert_eq!(run["supplied_context_tokens"], 10);
     assert_eq!(run["input_tokens"], 10);
     assert_eq!(run["output_tokens"], 5);

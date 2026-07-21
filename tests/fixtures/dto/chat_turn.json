@@ -59,7 +59,7 @@
     "invocation_id": "inv-wave-1",
     "step_index": 1,
     "flow": "wave",
-    "step": "wave_pursue",
+    "step": "wave/pursue",
     "iteration": 2,
     "session_id": "session-3",
     "harness": "codex",

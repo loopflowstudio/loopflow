@@ -192,7 +192,7 @@ Offer the lightweight path without pretending it is the whole product:
 ```bash
 lf debug -c
 lf design
-lf --list
+lf list
 ```
 
 These are next commands, not setup probes; do not run them automatically.

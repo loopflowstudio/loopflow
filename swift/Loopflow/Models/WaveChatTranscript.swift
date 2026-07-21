@@ -2,7 +2,7 @@ import Foundation
 
 // The wave thread is a conversation, not a build log. The wire carries
 // everything the loop did — every tool call, every shell command, every file
-// edit, and the flow step (`task_clarify`, `task_pursue`, `task_mutate`) that
+// edit, and the flow step (`task/clarify`, `task/pursue`, `task/mutate`) that
 // produced each assistant span. Rendering all of it, flat, buries the two
 // things a human actually reads for: what the wave SAID, and what needs a
 // decision.

@@ -611,7 +611,7 @@ mod tests {
         );
         feed(&mut renderer, "state", "turning".into());
 
-        // task_clarify: reads the repo, writes a design note, says what it found.
+        // task/clarify: reads the repo, writes a design note, says what it found.
         let clarify_items = format!(
             "[{},{},{},{},{}]",
             think("h0"),
@@ -637,7 +637,7 @@ mod tests {
             ),
         );
 
-        // task_pursue: builds, and the test run goes red.
+        // task/pursue: builds, and the test run goes red.
         let pursue_items = format!(
             "[{},{},{},{},{},{}]",
             edit("f1", "swift/Loopflow/Models/WaveChatTranscript.swift"),

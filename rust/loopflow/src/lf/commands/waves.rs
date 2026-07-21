@@ -73,6 +73,8 @@ pub struct WaveDetailSnapshot {
     /// serving dormant.
     pub loop_state: Option<String>,
     pub projects: Vec<ProjectDetailSnapshot>,
+    /// Non-terminal durable Project Work that cannot join the current PM plan.
+    pub unavailable_projects: Vec<UnavailableProjectEvidence>,
     /// This wave's agent-backed skill runs, newest first.
     pub runs: Evidence<SkillRunEntry>,
     /// Work whose next move belongs to someone other than itself.
@@ -418,6 +420,17 @@ pub struct ProjectDetailSnapshot {
     pub tasks: Vec<TaskDetailSnapshot>,
 }
 
+/// One durable Project Work row that cannot join the current PM snapshot.
+/// Identity, reason, and recovery stay structured so clients never parse prose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnavailableProjectEvidence {
+    pub work_id: String,
+    pub project_id: String,
+    pub project_slug: String,
+    pub reason: String,
+    pub recovery: String,
+}
+
 /// Where a row's next move sends the reader's attention. A coarse view lens over
 /// the same primitives `lf status` exposes (durable intent × liveness ×
 /// ownership) — deliberately *not* a runtime-state taxonomy. It is derived once,
@@ -455,6 +468,20 @@ pub struct WaveRoadmap {
     /// The Wave's plan joined to live evidence, or the reason there is none — a
     /// Wave with no local PM snapshot reads "unavailable", never an empty plan.
     pub projects: Evidence<RoadmapProject>,
+    /// Durable Project Work that failed to join an otherwise readable plan.
+    pub unavailable_projects: Vec<UnavailableProjectEvidence>,
+}
+
+#[derive(Debug)]
+struct ProjectSnapshots {
+    projects: Vec<ProjectDetailSnapshot>,
+    unavailable_projects: Vec<UnavailableProjectEvidence>,
+}
+
+#[derive(Debug)]
+struct RoadmapProjectSnapshots {
+    projects: Evidence<RoadmapProject>,
+    unavailable_projects: Vec<UnavailableProjectEvidence>,
 }
 
 /// One Project in the roadmap: its plan, live Project Work evidence when a
@@ -531,7 +558,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .map_err(|err| anyhow!("failed to read Tasks: {err}"))?;
         let liveness = TmuxLiveness::snapshot().await;
         let planning = read_pm_planning(&store, &wave).await?.unwrap_or_default();
-        let projects = snapshot_projects(
+        let project_snapshots = snapshot_projects(
             &store,
             &wave,
             stored_projects,
@@ -541,7 +568,11 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             true,
         )
         .await?;
-        let attention = Evidence::complete(attention(&projects, now(), liveness.liveness()));
+        let attention = Evidence::complete(attention(
+            &project_snapshots.projects,
+            now(),
+            liveness.liveness(),
+        ));
         // Probe the focused Wave's Home once so the detail carries live evidence
         // and the single contextual action (Open/Attach, Start, or reason).
         let home_runtime =
@@ -551,7 +582,8 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             attention,
             wave: snapshot,
             loop_state,
-            projects,
+            projects: project_snapshots.projects,
+            unavailable_projects: project_snapshots.unavailable_projects,
             home_runtime,
         };
         if json {
@@ -612,10 +644,11 @@ pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
             let snapshot = snapshot_wave(&store, wave).await?;
-            let projects = wave_roadmap_projects(&store, wave, &liveness).await;
+            let project_snapshots = wave_roadmap_projects(&store, wave, &liveness).await;
             roadmaps.push(WaveRoadmap {
                 wave: snapshot,
-                projects,
+                projects: project_snapshots.projects,
+                unavailable_projects: project_snapshots.unavailable_projects,
             });
         }
         roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
@@ -639,50 +672,69 @@ async fn wave_roadmap_projects(
     store: &SharedStore,
     wave: &Wave,
     liveness: &TmuxLiveness,
-) -> Evidence<RoadmapProject> {
+) -> RoadmapProjectSnapshots {
     let planning = match read_pm_planning(store, wave).await {
         Ok(Some(planning)) => planning,
         Ok(None) => {
-            return Evidence::Unavailable {
-                reason: format!(
-                    "no local PM snapshot for wave/{}; run `lf pm sync`",
-                    wave.name()
-                ),
-            }
+            return RoadmapProjectSnapshots {
+                projects: Evidence::Unavailable {
+                    reason: format!(
+                        "no local PM snapshot for wave/{}; run `lf pm sync`",
+                        wave.name()
+                    ),
+                },
+                unavailable_projects: Vec::new(),
+            };
         }
         Err(err) => {
-            return Evidence::Unavailable {
-                reason: err.to_string(),
-            }
+            return RoadmapProjectSnapshots {
+                projects: Evidence::Unavailable {
+                    reason: err.to_string(),
+                },
+                unavailable_projects: Vec::new(),
+            };
         }
     };
     let projects = match store.list_projects(Some(wave.id())).await {
         Ok(projects) => projects,
         Err(err) => {
-            return Evidence::Unavailable {
-                reason: format!("failed to read Projects: {err}"),
-            }
+            return RoadmapProjectSnapshots {
+                projects: Evidence::Unavailable {
+                    reason: format!("failed to read Projects: {err}"),
+                },
+                unavailable_projects: Vec::new(),
+            };
         }
     };
     let tasks = match store.list_tasks(Some(wave.id())).await {
         Ok(tasks) => tasks,
         Err(err) => {
-            return Evidence::Unavailable {
-                reason: format!("failed to read Tasks: {err}"),
-            }
+            return RoadmapProjectSnapshots {
+                projects: Evidence::Unavailable {
+                    reason: format!("failed to read Tasks: {err}"),
+                },
+                unavailable_projects: Vec::new(),
+            };
         }
     };
     // `probe_pr_empty: false` — PR emptiness is `lf status`'s execution detail.
     // Roadmap's bounded Git reads belong only to the shared attention evidence.
     match snapshot_projects(store, wave, projects, tasks, planning, liveness, false).await {
-        Ok(details) => Evidence::complete(
-            details
-                .into_iter()
-                .map(|detail| roadmap_project(detail, liveness.liveness()))
-                .collect(),
-        ),
-        Err(err) => Evidence::Unavailable {
-            reason: err.to_string(),
+        Ok(snapshots) => RoadmapProjectSnapshots {
+            projects: Evidence::complete(
+                snapshots
+                    .projects
+                    .into_iter()
+                    .map(|detail| roadmap_project(detail, liveness.liveness()))
+                    .collect(),
+            ),
+            unavailable_projects: snapshots.unavailable_projects,
+        },
+        Err(err) => RoadmapProjectSnapshots {
+            projects: Evidence::Unavailable {
+                reason: err.to_string(),
+            },
+            unavailable_projects: Vec::new(),
         },
     }
 }
@@ -1148,7 +1200,7 @@ async fn snapshot_projects(
     planning: CachedPmSnapshot,
     liveness: &TmuxLiveness,
     probe_pr_empty: bool,
-) -> Result<Vec<ProjectDetailSnapshot>> {
+) -> Result<ProjectSnapshots> {
     let mut details = planning
         .projects
         .into_iter()
@@ -1160,6 +1212,7 @@ async fn snapshot_projects(
             tasks: Vec::new(),
         })
         .collect::<Vec<_>>();
+    let mut unavailable_projects = Vec::new();
 
     for project in &projects {
         let status = child_work_status(store, &ChildRef::Project(project.id.clone())).await?;
@@ -1167,9 +1220,7 @@ async fn snapshot_projects(
             find_project_index(&details, project.plan.id.as_str(), &project.plan.slug)
         else {
             if !work_status_is_terminal(&status) {
-                details.push(
-                    stored_project_detail(store, project, status, liveness, wave.name()).await?,
-                );
+                unavailable_projects.push(unavailable_project(project));
             }
             continue;
         };
@@ -1212,20 +1263,25 @@ async fn snapshot_projects(
                     runtime_task.project_id
                 )
             })?;
-        let project_index =
-            match find_project_index(&details, parent.plan.id.as_str(), &parent.plan.slug) {
-                Some(index) => index,
-                None if work_status_is_terminal(&status) => continue,
-                None => {
-                    let parent_status =
-                        child_work_status(store, &ChildRef::Project(parent.id.clone())).await?;
-                    details.push(
-                        stored_project_detail(store, parent, parent_status, liveness, wave.name())
-                            .await?,
-                    );
-                    details.len() - 1
-                }
-            };
+        let Some(project_index) =
+            find_project_index(&details, parent.plan.id.as_str(), &parent.plan.slug)
+        else {
+            if unavailable_projects
+                .iter()
+                .any(|evidence| evidence.work_id == parent.id.as_str())
+                || work_status_is_terminal(&status)
+            {
+                continue;
+            }
+            return Err(anyhow!(
+                "Task {} references Project {} ({}), which is absent from the current PM snapshot; run `lf pm sync --wave {}`. If the Project remains absent, settle the stale Work with `lf task abandon {} --reason \"Project is absent from the current PM snapshot\"`",
+                runtime_task.id,
+                parent.plan.slug,
+                parent.plan.id.as_str(),
+                wave.name(),
+                runtime_task.plan.identifier,
+            ));
+        };
         if details[project_index].tasks.iter().any(|detail| {
             detail.task.id == runtime_task.plan.id.as_str()
                 || detail.task.identifier == runtime_task.plan.identifier
@@ -1257,7 +1313,24 @@ async fn snapshot_projects(
                 .then(left.task.identifier.cmp(&right.task.identifier))
         });
     }
-    Ok(details)
+    Ok(ProjectSnapshots {
+        projects: details,
+        unavailable_projects,
+    })
+}
+
+fn unavailable_project(project: &Project) -> UnavailableProjectEvidence {
+    const REASON: &str = "Project is absent from the current PM snapshot";
+    UnavailableProjectEvidence {
+        work_id: project.id.to_string(),
+        project_id: project.plan.id.as_str().to_string(),
+        project_slug: project.plan.slug.clone(),
+        reason: REASON.to_string(),
+        recovery: format!(
+            "lf project abandon {} --reason \"{REASON}\"",
+            project.plan.slug
+        ),
+    }
 }
 
 fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Result<usize> {
@@ -1267,37 +1340,6 @@ fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Re
                 "Project {slug} ({id}) is not present in the current PM snapshot; run `lf pm sync` before reading the Wave work map"
             )
         })
-}
-
-async fn stored_project_detail(
-    store: &SharedStore,
-    project: &Project,
-    status: WorkStatus,
-    liveness: &TmuxLiveness,
-    wave: &str,
-) -> Result<ProjectDetailSnapshot> {
-    Ok(ProjectDetailSnapshot {
-        project: PmProjectSummary {
-            id: project.plan.id.as_str().to_string(),
-            slug: project.plan.slug.clone(),
-            name: project.plan.name.clone(),
-            summary: format!(
-                "Project Work is absent from the current PM snapshot; run `lf pm sync --wave {wave}`"
-            ),
-            definition: project.plan.prompt_context.clone(),
-            flows: ProjectFlowPlan::empty(),
-            krs: Vec::new(),
-        },
-        next_move: NextMove {
-            owner: NextMoveOwner::Wave,
-            reason: "Reconcile Project Work with the current PM snapshot".to_string(),
-        },
-        runtime: Some(
-            snapshot_project_runtime(store, project, status, liveness, now()).await?,
-        ),
-        direction: current_direction(store, ChildRef::Project(project.id.clone())).await?,
-        tasks: Vec::new(),
-    })
 }
 
 fn find_project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Option<usize> {
@@ -2040,8 +2082,25 @@ fn print_status(status: &WaveDetailSnapshot) {
             }
         }
     }
+    print_unavailable_projects(&status.unavailable_projects);
     print_attention(&status.attention);
     print_runs(&status.runs);
+}
+
+fn print_unavailable_projects(projects: &[UnavailableProjectEvidence]) {
+    if projects.is_empty() {
+        return;
+    }
+    println!("  unavailable projects");
+    for project in projects {
+        println!(
+            "    {slug:<24}  {work}  {reason}",
+            slug = truncate(&project.project_slug, 24),
+            work = project.work_id,
+            reason = project.reason,
+        );
+        println!("      recover  {}", project.recovery);
+    }
 }
 
 fn print_attention(attention: &Evidence<AttentionItem>) {
@@ -2204,6 +2263,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             name = wave.wave.name,
             status = work_status_label(&wave.wave.status),
         );
+        print_unavailable_projects(&wave.unavailable_projects);
         let details = match &wave.projects {
             Evidence::Unavailable { reason } => {
                 println!("  unavailable: {reason}");

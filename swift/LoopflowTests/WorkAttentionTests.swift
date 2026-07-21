@@ -113,7 +113,8 @@ struct WorkAttentionTests {
           "wave": {"id":"w","name":"product","status":{"running":{"run_id":"run_00000000000000000000000000000003"}},"goal":"g","repo":"/src/loopflow","active_tasks":\(workingTasks.count),"active_projects":1,"live":true,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "projects": {"state":"ok","truncated":false,"items":[
             {"project":{"id":"p","slug":"api","name":"API","summary":"s","definition":"d","flows":{"first":null,"loop":null,"finally":null},"krs":[]},"runtime":null,"next_move":{"owner":"project","reason":"r"},"section":"now","tasks":[\(tasks)]}
-          ]}
+          ]},
+          "unavailable_projects": []
         }
         """
         return try JSONDecoder().decode(WaveRoadmap.self, from: Data(json.utf8))

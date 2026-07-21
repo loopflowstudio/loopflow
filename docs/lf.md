@@ -644,11 +644,13 @@ lf -m codex pr publish        # one-off agent override for copy generation
 
 When `-m` is omitted, copy generation uses `agent:` from `.lf/config.yaml` or
 `~/.lf/config.yaml`. Use the `pr` ops skill to generate `--title`/`--body`
-with agent judgment. Publication commits and pushes the current branch as-is;
-it never fetches to integrate, rebases, rewrites Task stack metadata, or
-launches conflict recovery. A PR may remain behind its base until `lf rebase`,
-`lf gate`, `lf pr submit`, or `lf pr land` owns integration. Push or GitHub
-failure returns an error and presents nothing.
+with agent judgment. When task gate has written cached PR copy, publication
+consumes it and removes the gate-owned copy/review files before its first
+commit or push. Other `scratch/` state remains untouched. Publication never
+fetches to integrate, rebases, rewrites Task stack metadata, or launches
+conflict recovery. A PR may remain behind its base until `lf rebase`, `lf gate`,
+`lf pr submit`, or `lf pr land` owns integration. Push or GitHub failure returns
+an error and presents nothing.
 
 ### lf pr open
 

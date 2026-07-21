@@ -56,6 +56,7 @@ use crate::engine::worktrees::{
     main_repo_root, prune_abandoned_prompt_logs, prune_branch_worktree, prune_terminal_worktree,
     prune_worktrees, TargetedPruneOutcome, WorktreePrunePolicy, WorktreePruneReason,
 };
+use crate::harness::opencode_runtime::reap_orphaned_opencode_servers_at;
 use crate::id::WaveId;
 use crate::repository::RepoId;
 use crate::store::provider_deliveries::{DeliveryCompletion, DeliveryEventKind, DeliveryStatus};
@@ -623,6 +624,25 @@ async fn prune_github_event(state: &LfdState, event: GithubPruneEvent) -> anyhow
 }
 
 async fn maintenance_sweep(state: &LfdState) {
+    let lf_home = crate::store::lf_home_dir();
+    match tokio::task::spawn_blocking(move || reap_orphaned_opencode_servers_at(&lf_home)).await {
+        Ok(report) => {
+            if report.reaped > 0 {
+                tracing::info!(
+                    reaped = report.reaped,
+                    "OpenCode orphan maintenance complete"
+                );
+            }
+            if report.errors > 0 {
+                tracing::warn!(
+                    errors = report.errors,
+                    "OpenCode orphan maintenance incomplete"
+                );
+            }
+        }
+        Err(error) => tracing::warn!(%error, "OpenCode orphan maintenance task failed"),
+    }
+
     let protected_paths = match protected_worktree_paths(state).await {
         Ok(paths) => paths,
         Err(error) => {

@@ -276,6 +276,82 @@ fn publish_makes_no_presentation_attempt() {
 }
 
 #[test]
+fn task_gate_artifacts_never_reach_the_published_head() {
+    let gh_script = write_gh_script("[]", None);
+    let marker_dir = tempfile::TempDir::new().expect("marker dir");
+    let agent_marker = marker_dir.path().join("agent-called");
+    let codex = format!(
+        "#!/bin/sh\nprintf called > '{}'\nexit 1\n",
+        agent_marker.display()
+    );
+    let home = tempfile::TempDir::new().expect("temp home");
+    let _env = EnvGuard::with_home(
+        &[("gh", gh_script.as_str()), ("codex", codex.as_str())],
+        Some(home.path()),
+    );
+    let repo = TestRepo::new();
+    create_changed_branch(&repo, "feature");
+    push_branch(&repo, "feature");
+    let implementation_head = repo.head_sha();
+
+    let scratch = repo.path().join("scratch");
+    fs::create_dir_all(&scratch).expect("create scratch");
+    fs::write(scratch.join(".pr-copy-ref"), &implementation_head).expect("write copy ref");
+    fs::write(scratch.join("pr-title.txt"), "cached gate title").expect("write title");
+    fs::write(scratch.join("pr-body.md"), "cached gate body").expect("write body");
+    fs::write(scratch.join("feature-review.md"), "temporary review").expect("write review");
+
+    create_or_update_pr(
+        repo.path(),
+        &PrOptions {
+            title: None,
+            body: None,
+            agent: Some("codex".to_string()),
+        },
+        &NullProgress,
+    )
+    .expect("publish cached gate output");
+
+    assert_eq!(
+        repo.head_sha(),
+        implementation_head,
+        "gate handoff must not manufacture an artifact-only prepare commit"
+    );
+    let remote_head = Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["rev-parse", "refs/heads/feature"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .expect("read remote feature");
+    assert_eq!(remote_head, implementation_head);
+    for artifact in [
+        ".pr-copy-ref",
+        "pr-title.txt",
+        "pr-body.md",
+        "feature-review.md",
+    ] {
+        assert!(
+            !scratch.join(artifact).exists(),
+            "task-gate artifact survived publication: {artifact}"
+        );
+    }
+    assert!(
+        !agent_marker.exists(),
+        "valid task-gate copy must be consumed without launching another provider"
+    );
+    let status = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(repo.path())
+        .output()
+        .expect("read worktree status");
+    assert!(
+        status.stdout.is_empty(),
+        "publication must leave a clean tree"
+    );
+}
+
+#[test]
 fn publication_refuses_if_copy_generation_changes_the_pushed_head() {
     let gh_script = write_gh_script("[]", None);
     let _env = EnvGuard::new(&[

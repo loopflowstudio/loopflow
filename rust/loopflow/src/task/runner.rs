@@ -952,6 +952,8 @@ async fn prepare_task_flow_step(
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?
     };
     prepared.config.agent = Some(task.agent.clone());
+    prepared.config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
+    prepared.config.skip_permissions = false;
     let position = FlowPosition {
         work,
         epoch_id: boundary.basis.epoch_id.clone(),
@@ -1967,6 +1969,9 @@ fn progress_summary(text: &str) -> String {
 }
 
 #[cfg(test)]
+mod shipping_lifecycle_tests;
+
+#[cfg(test)]
 mod planning_tests {
     use super::{
         complete_interactive_step, finish_task_flow_turn, interactive_step_prompt, sync_task_state,
@@ -2550,6 +2555,11 @@ mod planning_tests {
         .await
         .unwrap();
         assert!(prepared.interactive);
+        assert_eq!(
+            prepared.turn.config.write_scope,
+            crate::engine::agent::AgentWriteScope::Worktree
+        );
+        assert!(!prepared.turn.config.skip_permissions);
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut harness = UnusedHarness;
 

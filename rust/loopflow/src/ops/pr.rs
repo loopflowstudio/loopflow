@@ -85,6 +85,11 @@ pub fn create_or_update_pr(
     // first remote side effect. No-op for non-Task worktrees.
     crate::ops::task::verify_task_pr_range_without_healing(repo)?;
 
+    // Gate output is an in-worktree handoff, never published content. Consume
+    // valid cached copy before deleting the gate-owned files so the commit and
+    // push below can only expose the reviewed implementation tree.
+    let cached_copy = consume_gate_artifacts(repo, progress)?;
+
     // Publication owns no integration. Commit locally, prove the resulting
     // range, then push exactly the branch the user has now. A PR may honestly
     // remain behind its base until an explicit integration boundary.
@@ -103,7 +108,7 @@ pub fn create_or_update_pr(
     let published_head = rev_parse(repo, "HEAD")?;
     crate::ops::commit::push_with_upstream_if_needed(repo)?;
 
-    let copy = resolve_pr_copy(repo, options, progress)?;
+    let copy = resolve_pr_copy(repo, options, cached_copy, progress)?;
     let current_branch_state = current_branch(repo)?;
     let current_head = rev_parse(repo, "HEAD")?;
     if current_branch_state.as_deref() != Some(branch.as_str()) || current_head != published_head {
@@ -204,6 +209,7 @@ pub(crate) fn reject_control_plane_pr(repo: &Path) -> OpsResult<()> {
 fn resolve_pr_copy(
     repo: &Path,
     options: &PrOptions,
+    cached: Option<PrCopy>,
     progress: &impl Progress,
 ) -> OpsResult<PrCopy> {
     if let Some(title) = options
@@ -218,11 +224,99 @@ fn resolve_pr_copy(
         });
     }
 
-    let mut generated = generate_pr_copy(repo, progress, options.agent.as_deref())?;
+    let mut copy = match cached {
+        Some(copy) => {
+            progress.status("Using cached PR copy from task gate");
+            copy
+        }
+        None => generate_pr_copy(repo, progress, options.agent.as_deref())?,
+    };
     if let Some(body_override) = options.body.as_deref() {
-        generated.body = body_override.to_string();
+        copy.body = body_override.to_string();
     }
-    Ok(generated)
+    Ok(copy)
+}
+
+fn consume_gate_artifacts(repo: &Path, progress: &impl Progress) -> OpsResult<Option<PrCopy>> {
+    let cached = read_cached_pr_copy(repo, progress)?;
+    let scratch = repo.join("scratch");
+    if !scratch.exists() {
+        return Ok(cached);
+    }
+
+    let mut removed = false;
+    for entry in std::fs::read_dir(&scratch)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let gate_owned = matches!(
+            name.as_ref(),
+            ".pr-copy-ref" | "pr-title.txt" | "pr-body.md"
+        ) || name.ends_with("-review.md");
+        if gate_owned {
+            std::fs::remove_file(path)?;
+            removed = true;
+        }
+    }
+    if removed {
+        progress.status("Removing task-gate artifacts before publication");
+    }
+    Ok(cached)
+}
+
+pub(crate) fn read_cached_pr_copy(
+    repo: &Path,
+    progress: &impl Progress,
+) -> OpsResult<Option<PrCopy>> {
+    let title_path = repo.join("scratch/pr-title.txt");
+    let body_path = repo.join("scratch/pr-body.md");
+    let ref_path = repo.join("scratch/.pr-copy-ref");
+
+    if !title_path.exists() || !body_path.exists() {
+        return Ok(None);
+    }
+
+    let title = std::fs::read_to_string(&title_path)?.trim().to_string();
+    if title.is_empty() {
+        return Ok(None);
+    }
+
+    let copied_for = match std::fs::read_to_string(&ref_path) {
+        Ok(value) => value.trim().to_string(),
+        Err(_) => {
+            progress.status("Ignoring cached PR copy: scratch/.pr-copy-ref is missing");
+            return Ok(None);
+        }
+    };
+    if !is_recent_ancestor(repo, &copied_for, 1)? {
+        progress.status("Ignoring cached PR copy: branch changed since gate output");
+        return Ok(None);
+    }
+
+    let body = std::fs::read_to_string(body_path)?;
+    Ok(Some(PrCopy { title, body }))
+}
+
+/// Check if HEAD is no more than `max_ahead` commits ahead of `commit`.
+/// This tolerates one bookkeeping commit after gate output while still
+/// forcing regeneration if substantive commits were added later.
+fn is_recent_ancestor(repo: &Path, commit: &str, max_ahead: u32) -> OpsResult<bool> {
+    let output = Command::new("git")
+        .args(["rev-list", "--count", &format!("{commit}..HEAD")])
+        .current_dir(repo)
+        .output()?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let ahead = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .unwrap_or(u32::MAX);
+    Ok(ahead <= max_ahead)
 }
 
 pub fn generate_pr_copy(

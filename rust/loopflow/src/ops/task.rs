@@ -1704,7 +1704,7 @@ async fn resolve_verifier_upstream(
 
 /// Core parity proof. Takes the store + task explicitly so it can be
 /// exercised in tests without a live LF_HOME (mirrors `ensure_working_pr`).
-async fn verify_task_pr_range_with_authority(
+pub(crate) async fn verify_task_pr_range_with_authority(
     store: &SharedStore,
     task: &Task,
     lease: Option<&RunLease>,

@@ -11,7 +11,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::chat::types::{ConversationEvent, FailureEvidence, Lifecycle};
-use crate::engine::agent::{register_interrupt_cleanup, AgentConfig};
+use crate::engine::agent::{
+    opencode_worktree_config, register_interrupt_cleanup, AgentConfig, AgentWriteScope,
+};
 use crate::engine::config::parse_agent;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::{
@@ -103,6 +105,9 @@ impl OpenCodeHarness {
             .kill_on_drop(true);
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
+        }
+        if config.write_scope == AgentWriteScope::Worktree {
+            command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
         // Own process group so `stop()` and the interrupt hook can kill the
         // whole tree — `opencode serve` spawns descendants (MCP servers, model

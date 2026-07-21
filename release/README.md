@@ -74,9 +74,18 @@ and the GitHub Release. It deploys the website from the exact tag and requires
 image and leaves the release incomplete. Publishing the non-draft GitHub
 Release is the final completion marker.
 
+The publisher controller runs from current main while its source path is the
+leased exact-tag worktree. This lets an incomplete immutable tag resume with a
+release-plumbing repair without changing the code or artifacts being shipped.
+An ambiguous Fly command result is accepted only when `/healthz` and the root
+page prove the exact tag; rollback starts only after that production proof
+fails.
+
 The daily run is idempotent. No merged changes is success. If a tag's hosted
 build succeeded but publishing stopped, the next run downloads that run's
 artifacts and resumes the same tag instead of cutting another patch.
+The runner leases that tag's publisher worktree until the publisher exits, so
+concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
 Append to `release/unreleased/DECISIONS.md` only when the change captures durable intent: policy choices, scope calls, paths not taken, or decisions a contributor would cite months later. Skip bug-fix churn and mechanical edits.
 

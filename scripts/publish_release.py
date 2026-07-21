@@ -11,6 +11,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass
@@ -18,7 +19,8 @@ from pathlib import Path
 
 import boto3
 
-ROOT = Path(__file__).resolve().parent.parent
+CONTROL_ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(os.environ.get("LF_RELEASE_SOURCE_REPO", CONTROL_ROOT))
 TARGETS = (
     "aarch64-apple-darwin",
     "x86_64-apple-darwin",
@@ -75,9 +77,7 @@ def _run(
 def _r2_client():
     return boto3.client(
         "s3",
-        endpoint_url=(
-            f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com"
-        ),
+        endpoint_url=(f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com"),
         aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"].strip(),
         aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"].strip(),
         region_name="auto",
@@ -115,9 +115,7 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     for target in TARGETS:
         matches = list(artifact_dir.rglob(f"lf-{target}.tar.gz"))
         if len(matches) != 1:
-            raise RuntimeError(
-                f"expected one lf-{target}.tar.gz artifact, found {len(matches)}"
-            )
+            raise RuntimeError(f"expected one lf-{target}.tar.gz artifact, found {len(matches)}")
         archives.append(matches[0])
     return tuple(archives)
 
@@ -245,7 +243,16 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     _upload_dmg(dmg, f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable")
     stages.append("versioned_dmg_uploaded")
 
-    _run(["uv", "run", "python", "scripts/deploy_website.py", "--tag", tag])
+    _run(
+        [
+            sys.executable,
+            str(CONTROL_ROOT / "scripts/deploy_website.py"),
+            "--tag",
+            tag,
+            "--repo",
+            str(ROOT),
+        ]
+    )
     stages.append("website_deployed")
 
     _upload_dmg(dmg, "Loopflow-latest.dmg", "public, max-age=60")

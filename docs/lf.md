@@ -895,7 +895,9 @@ publisher. `lf release run` appends `check` before changing release state, then
 downloads the successful hosted build and invokes it with `publish --tag ...
 --artifacts ...` from an exact-tag worktree. No merged changes is a successful
 no-op. An incomplete latest tag resumes; it never cuts a newer tag around a
-failed publication.
+failed publication. Use `{repo}` in a publisher argument to name the current
+synchronized repository; `LF_RELEASE_SOURCE_REPO` names the leased exact-tag
+worktree during publication.
 
 | Path | What it holds |
 |------|--------------|

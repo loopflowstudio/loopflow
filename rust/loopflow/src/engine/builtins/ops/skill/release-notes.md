@@ -7,18 +7,23 @@ Write release notes that fuse release intent with shipped behavior.
 
 ## Workflow
 
-1. Read `LF_RELEASE_NOTES_CONTEXT` and parse the JSON.
+1. Read `LF_RELEASE_NOTES_CONTEXT` and parse the JSON. `source_limits` states
+   the hard context/output bounds; `omissions` records source material that did
+   not fit. Never infer behavior from omitted source.
 2. Treat `decisions` as the intent ledger: what changed in product direction, release policy, operations, and user experience during this cycle.
-3. Treat `commits` as the behavior ledger: the exact first-parent git range in
-   the target area. Use `merged_prs` to recover intent and discussion. When
-   `prev_tag` exists, use `git diff <prev_tag>..HEAD` only to inspect details.
+3. Treat `commits` as the bounded behavior ledger for the exact first-parent
+   git range in the target area. Use `merged_prs` to recover intent and
+   discussion. Do not expand the source with git or GitHub queries; the bounded
+   JSON is the complete notes input.
 4. Fuse them. The release notes should explain what users, operators, and contributors can do differently now. Use commits/PRs to ground every claim.
 5. Keep the previous release-note voice if `previous_release_notes` exists, but improve structure when the previous notes were too raw.
 6. Write `RELEASE_NOTES.md`.
 
 ## Output
 
-Raw markdown only. No JSON. No code fence wrapping the output.
+Raw markdown only. No JSON. No code fence wrapping the output. Keep the
+complete file below `source_limits.release_notes_bytes`; Loopflow rejects
+oversized notes because this file also becomes release-queue metadata.
 
 First line must be exactly:
 
@@ -39,6 +44,9 @@ Structure:
 - PR titles are source material, not release notes. Do not dump them chronologically.
 - If decisions and commits disagree, trust the commits for what shipped and use decisions to explain why.
 - If decisions mention future work that did not ship, either omit it or mark it clearly as “not included.”
+- If `omissions` contains non-zero counts, synthesize only from the included
+  evidence. Mention the bounded sample only when it materially limits a claim;
+  do not dump the omission ledger into the notes.
 - If there are no decisions, build the narrative from commits, merged PRs, and
   diffs.
 - If there are decisions but no matching shipped behavior, keep the note cautious: describe the policy/intent change, not an implementation that is absent.

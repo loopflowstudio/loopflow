@@ -5,7 +5,8 @@ use std::process::Command;
 
 use loopflow::ops::{
     bump_version, generate_release, release_bump, release_check, release_notes, release_run,
-    release_status, release_tag, NullProgress, ReleaseRunOutcome,
+    release_status, release_tag, NullProgress, ReleaseNotesDegradation, ReleaseNotesStatus,
+    ReleaseRunOutcome,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -153,6 +154,7 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
         .expect("release notes should fall back");
 
     assert!(notes.starts_with("# v0.9.1\n\n"));
+    assert!(notes.contains("loopflow:release-notes=degraded;reason=missing-cli;gate=safe"));
     assert!(notes.contains("_Generated mechanically for v0.9.1._"));
     // Notes synthesize from the merged PRs, not a central ledger.
     assert!(notes.contains("Make weekly release self-contained"));
@@ -164,6 +166,242 @@ fn release_notes_falls_back_when_agent_cli_is_missing() {
     // The unreleased dir was promoted to the version dir.
     assert!(!repo.path().join("release/unreleased").exists());
     assert!(repo.path().join("release/v0.9.1/CHANGES.md").exists());
+}
+
+#[test]
+fn release_notes_falls_back_for_every_provider_degradation_class() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = "#!/bin/sh\ncat .provider-failure >&2\nexit 1\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    let cases = [
+        (
+            "failed to select provider account: no eligible managed codex account: 'primary'",
+            ReleaseNotesDegradation::Cooldown,
+        ),
+        (
+            "agent stopped after account subscription limit",
+            ReleaseNotesDegradation::Quota,
+        ),
+        (
+            "agent stopped after account credential invalidated",
+            ReleaseNotesDegradation::Authentication,
+        ),
+        (
+            "agent stopped after provider rate limit",
+            ReleaseNotesDegradation::RateLimit,
+        ),
+        (
+            "agent stopped after provider unavailable",
+            ReleaseNotesDegradation::ProviderUnavailable,
+        ),
+        (
+            "agent stopped after provider capacity",
+            ReleaseNotesDegradation::ProviderUnavailable,
+        ),
+        (
+            "agent stopped after provider transport",
+            ReleaseNotesDegradation::ProviderUnavailable,
+        ),
+    ];
+
+    for (failure, degradation) in cases {
+        let repo = TestRepo::new();
+        git(&repo, &["tag", "v0.9.0"]);
+        fs::write(repo.path().join(".provider-failure"), failure).unwrap();
+
+        let notes = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+            .expect("provider degradation should select deterministic notes");
+
+        assert!(notes.contains(&format!(
+            "loopflow:release-notes=degraded;reason={degradation};gate=safe"
+        )));
+        assert!(notes.contains("_Generated mechanically for v0.9.1._"));
+        assert!(notes.len() < 60 * 1024);
+    }
+}
+
+#[test]
+fn release_notes_bounds_oversized_pr_bodies_and_queue_metadata() {
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    fs::write(
+        repo.path().join("RELEASE_NOTES.md"),
+        "previous voice ".repeat(4_000),
+    )
+    .unwrap();
+    fs::create_dir_all(repo.path().join("release/unreleased")).unwrap();
+    fs::write(
+        repo.path().join("release/unreleased/DECISIONS.md"),
+        "bounded decision ".repeat(4_000),
+    )
+    .unwrap();
+    fs::write(repo.path().join("bounded.txt"), "bounded\n").unwrap();
+    git(&repo, &["add", "bounded.txt"]);
+    git(&repo, &["commit", "-m", "Bound release context"]);
+    let sha = git_output(&repo, &["rev-parse", "HEAD"]);
+    let pr_list = serde_json::to_string(&vec![serde_json::json!({
+        "number": 202,
+        "title": "Bound release context",
+        "body": "x".repeat(100_000),
+        "additions": 8,
+        "deletions": 2,
+        "changedFiles": 1,
+        "mergeCommit": {"oid": sha},
+    })])
+    .unwrap();
+    let gh_script = write_gh_script(&pr_list);
+    let lf_script = "#!/bin/sh\ncp \"$LF_RELEASE_NOTES_CONTEXT\" RELEASE_CONTEXT.json\nprintf '# v0.9.1\\n\\nBounded narrative notes.\\n' > RELEASE_NOTES.md\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+
+    let notes = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect("bounded narrative notes should succeed");
+
+    let context_path = repo.path().join("RELEASE_CONTEXT.json");
+    assert!(fs::metadata(&context_path).unwrap().len() <= 128 * 1024);
+    let context: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(context_path).unwrap()).unwrap();
+    assert!(context["merged_prs"][0]["body"].as_str().unwrap().len() <= 4 * 1024);
+    assert!(context["omissions"]["text_bytes"].as_u64().unwrap() >= 95_000);
+    assert!(context["decisions"].as_str().unwrap().len() <= 16 * 1024);
+    assert!(context["previous_release_notes"].as_str().unwrap().len() <= 16 * 1024);
+    assert!(context["omissions"]["decisions_bytes"].as_u64().unwrap() > 0);
+    assert!(
+        context["omissions"]["previous_release_notes_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(notes.len() < 60 * 1024);
+    assert!(!notes.contains(&"x".repeat(1_000)));
+}
+
+#[test]
+fn interrupted_release_notes_retry_replaces_partial_state_once() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = r#"#!/bin/sh
+attempt=1
+if [ -f .notes-attempt ]; then
+  attempt=2
+fi
+printf '%s' "$attempt" > .notes-attempt
+cp "$LF_RELEASE_NOTES_CONTEXT" "RELEASE_CONTEXT.$attempt.json"
+if [ "$attempt" = "1" ]; then
+  printf '# v0.9.1\n\nPartial notes that must not ship.\n' > RELEASE_NOTES.md
+  echo 'operator interrupted release-notes generation' >&2
+  exit 130
+fi
+printf '# v0.9.1\n\nConcise resumed release notes.\n' > RELEASE_NOTES.md
+"#;
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    let previous_notes = "# v0.9.0\n\nPrevious safe notes.\n";
+    fs::write(repo.path().join("RELEASE_NOTES.md"), previous_notes).unwrap();
+
+    let error = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect_err("an unclassified interruption must keep the gate red");
+    assert!(error.to_string().contains("release gate blocked"));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
+        previous_notes
+    );
+
+    let notes = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect("retry should replace partial state");
+
+    assert!(
+        fs::metadata(repo.path().join("RELEASE_CONTEXT.1.json"))
+            .unwrap()
+            .len()
+            <= 128 * 1024
+    );
+    assert!(
+        fs::metadata(repo.path().join("RELEASE_CONTEXT.2.json"))
+            .unwrap()
+            .len()
+            <= 128 * 1024
+    );
+    assert!(notes.contains("Concise resumed release notes."));
+    assert!(!notes.contains("Partial notes that must not ship."));
+    assert_eq!(notes.matches("loopflow:release-notes=").count(), 1);
+    let archived = fs::read_to_string(repo.path().join("release/v0.9.1/NOTES.md")).unwrap();
+    assert_eq!(archived, notes);
+    assert_eq!(
+        fs::read_dir(repo.path().join("release/v0.9.1"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name() == "NOTES.md")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn successful_agent_without_fresh_notes_keeps_release_gate_unsafe() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = "#!/bin/sh\nexit 0\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    let previous_notes = "# v0.9.0\n\nPrevious safe notes.\n";
+    fs::write(repo.path().join("RELEASE_NOTES.md"), previous_notes).unwrap();
+
+    let error = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect_err("missing fresh notes must stop the gate");
+
+    assert!(error.to_string().contains("release gate blocked"));
+    assert!(error.to_string().contains("fresh RELEASE_NOTES.md"));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
+        previous_notes
+    );
+}
+
+#[test]
+fn release_notes_rejects_a_successful_agent_with_stale_version() {
+    let gh_script = write_gh_script("[]");
+    let lf_script =
+        "#!/bin/sh\nprintf '# v0.9.0\\n\\nWrong generated release.\\n' > RELEASE_NOTES.md\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+    let previous_notes = "# v0.9.0\n\nPrevious safe notes.\n";
+    fs::write(repo.path().join("RELEASE_NOTES.md"), previous_notes).unwrap();
+
+    let error = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect_err("stale-version notes must stop the gate");
+
+    assert!(error.to_string().contains("release gate blocked"));
+    assert!(error.to_string().contains("must start with '# v0.9.1'"));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
+        previous_notes
+    );
+}
+
+#[test]
+fn oversized_agent_notes_keep_queue_metadata_unsafe() {
+    let gh_script = write_gh_script("[]");
+    let lf_script = r#"#!/bin/sh
+{
+  printf '# v0.9.1\n\n'
+  i=0
+  while [ "$i" -lt 7000 ]; do
+    printf '0123456789'
+    i=$((i + 1))
+  done
+} > RELEASE_NOTES.md
+"#;
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.0"]);
+
+    let error = release_notes(repo.path(), "0.9.1", Some("v0.9.0"), None, &NullProgress)
+        .expect_err("oversized queue metadata must stop the gate");
+
+    assert!(error.to_string().contains("release gate blocked"));
+    assert!(error.to_string().contains("maximum queue metadata"));
+    assert!(!repo.path().join("RELEASE_NOTES.md").exists());
 }
 
 #[test]
@@ -401,7 +639,84 @@ fn release_status_reports_latest_tag_and_release() {
     assert_eq!(status.latest_tag.as_deref(), Some("v0.9.1"));
     assert_eq!(status.workflow_status.as_deref(), Some("completed"));
     assert_eq!(status.workflow_conclusion.as_deref(), Some("success"));
+    assert_eq!(status.notes_status, Some(ReleaseNotesStatus::Missing));
     assert!(status.release_exists);
+}
+
+#[test]
+fn release_status_reports_degraded_notes_as_gate_safe() {
+    let gh_script = write_gh_status_script(
+        r#"[{"databaseId":42,"headBranch":"v0.9.1","status":"completed","conclusion":"success"}]"#,
+        r#"{"isDraft":false}"#,
+    );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join("release/v0.9.1")).unwrap();
+    fs::write(
+        repo.path().join("release/v0.9.1/NOTES.md"),
+        "# v0.9.1\n\n<!-- loopflow:release-notes=degraded;reason=quota;gate=safe -->\n\nConcise fallback notes.\n",
+    )
+    .unwrap();
+    git(&repo, &["add", "release/v0.9.1/NOTES.md"]);
+    git(&repo, &["commit", "-m", "Archive degraded release notes"]);
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should read tagged notes");
+
+    assert_eq!(
+        status.notes_status,
+        Some(ReleaseNotesStatus::Degraded(ReleaseNotesDegradation::Quota))
+    );
+    assert!(status.release_exists);
+}
+
+#[test]
+fn release_status_reports_unmarked_notes_as_legacy() {
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join("release/v0.9.1")).unwrap();
+    fs::write(
+        repo.path().join("release/v0.9.1/NOTES.md"),
+        "# v0.9.1\n\nNotes from before status markers.\n",
+    )
+    .unwrap();
+    git(&repo, &["add", "release/v0.9.1/NOTES.md"]);
+    git(&repo, &["commit", "-m", "Archive legacy release notes"]);
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let status = release_status(repo.path(), None).expect("status should read legacy notes");
+
+    assert_eq!(status.notes_status, Some(ReleaseNotesStatus::Legacy));
+    assert!(status.release_exists);
+}
+
+#[test]
+fn release_status_does_not_trust_malformed_safe_markers() {
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+    let markers = [
+        "narrative;gate=unsafe -->",
+        "degraded;reason=quota -->",
+        "degraded;reason=unknown;gate=safe -->",
+    ];
+
+    for marker in markers {
+        let repo = TestRepo::new();
+        fs::create_dir_all(repo.path().join("release/v0.9.1")).unwrap();
+        fs::write(
+            repo.path().join("release/v0.9.1/NOTES.md"),
+            format!("# v0.9.1\n\n<!-- loopflow:release-notes={marker}\n\nNotes.\n"),
+        )
+        .unwrap();
+        git(&repo, &["add", "release/v0.9.1/NOTES.md"]);
+        git(&repo, &["commit", "-m", "Archive malformed release notes"]);
+        git(&repo, &["tag", "v0.9.1"]);
+
+        let status = release_status(repo.path(), None).expect("status should fail closed");
+
+        assert_eq!(status.notes_status, Some(ReleaseNotesStatus::Legacy));
+    }
 }
 
 #[test]
@@ -468,6 +783,11 @@ fn release_run_resumes_an_existing_explicit_tag() {
     let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
     let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
     let repo = TestRepo::new();
+    let intended_notes = "# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nConcise intended artifact.\n";
+    fs::create_dir_all(repo.path().join("release/v0.9.1")).unwrap();
+    fs::write(repo.path().join("release/v0.9.1/NOTES.md"), intended_notes).unwrap();
+    git(&repo, &["add", "release/v0.9.1/NOTES.md"]);
+    git(&repo, &["commit", "-m", "Prepare exact release artifact"]);
     release_tag(repo.path(), "0.9.1", None).expect("tag should succeed");
 
     let result = release_run(repo.path(), "0.9.1", None, &NullProgress)
@@ -479,6 +799,21 @@ fn release_run_resumes_an_existing_explicit_tag() {
     assert_eq!(receipt.version, "0.9.1");
     assert_eq!(receipt.tag, "v0.9.1");
     assert!(receipt.release_exists);
+    let status = release_status(repo.path(), None).expect("status should preserve narrative notes");
+    assert_eq!(status.notes_status, Some(ReleaseNotesStatus::Narrative));
+    assert_eq!(
+        git_output_bare(&repo, &["show", "v0.9.1:release/v0.9.1/NOTES.md",],),
+        intended_notes.trim()
+    );
+    assert_eq!(
+        git_output_bare(
+            &repo,
+            &["for-each-ref", "--format=%(refname)", "refs/tags/v0.9.1"],
+        )
+        .lines()
+        .count(),
+        1
+    );
 }
 
 #[test]

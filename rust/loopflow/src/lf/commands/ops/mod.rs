@@ -1297,6 +1297,22 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
         println!("Workflow URL: {url}");
     }
 
+    match status.notes_status {
+        Some(crate::ops::ReleaseNotesStatus::Narrative) => {
+            println!("Release notes: narrative / gate safe");
+        }
+        Some(crate::ops::ReleaseNotesStatus::Degraded(reason)) => {
+            println!("Release notes: degraded ({reason}) / gate safe");
+        }
+        Some(crate::ops::ReleaseNotesStatus::Missing) => {
+            println!("Release notes: missing / gate unsafe");
+        }
+        Some(crate::ops::ReleaseNotesStatus::Legacy) => {
+            println!("Release notes: legacy / gate status unknown");
+        }
+        None => println!("Release notes: (no release tag)"),
+    }
+
     println!(
         "GitHub Release: {}",
         if status.release_exists { "yes" } else { "no" }

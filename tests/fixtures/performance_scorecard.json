@@ -43,5 +43,23 @@
     "p95": 9.0,
     "verdict": "fail",
     "reason": "observed value exceeds budget"
+  },
+  {
+    "id": "build_disk_bytes",
+    "eligible": 1,
+    "measured": 1,
+    "p50": 13958643712.0,
+    "p95": 13958643712.0,
+    "verdict": "fail",
+    "reason": "observed value exceeds budget"
+  },
+  {
+    "id": "preland_cpu_seconds",
+    "eligible": 1,
+    "measured": 1,
+    "p50": 720.0,
+    "p95": 720.0,
+    "verdict": "collecting",
+    "reason": "1 samples; p95 requires 20"
   }
 ]

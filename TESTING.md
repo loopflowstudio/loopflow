@@ -7,6 +7,7 @@ proof that can change the next decision.
 
 ```bash
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
+uv run python scripts/resource_envelope.py             # attribute local disk pressure
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
@@ -43,8 +44,23 @@ uv run python scripts/test.py --base HEAD~5  # diff against a different ref
 
 ### Bounded and honest
 
+```bash
+uv run python scripts/resource_envelope.py
+uv run python scripts/resource_envelope.py --recover
+```
+
+The resource preflight names the owner and budget for every worktree build,
+gate-artifact root, the Loopflow trace store, uv cache, Cargo cache, and free
+disk. Budgets live in `performance/budgets.json`: 64 GiB free, 12 GiB per
+worktree build, 128 GiB across builds, 16 GiB each for traces and uv, and four
+low-priority verification workers. Recovery removes only allowlisted build
+roots from inactive worktrees, old disposable gate output, and entries accepted
+by `uv cache prune`. It never removes source, a worktree, trace evidence, gate
+receipts, or SQLite state. Unresolved pressure stops before product tests run
+and prints the supported next action.
+
 Every phase runs under a printed wall-clock limit. A phase that overruns is
-killed—process group and all—and reported as `TIMEOUT <phase> (budget Ns)`, so
+killed—process group and all—and reported as `VERIFICATION BUDGET`, so
 **no phase can hang the
 gate**. The plan and summary print each phase's `elapsed / budget`; later
 phases remain visible as `not_run` after an earlier failure. On failure the
@@ -61,7 +77,11 @@ Git common directory:
 This evidence is shared by linked worktrees and survives `.lf/tmp` cleanup.
 Records contain operational identity, exact-tree and plan fingerprints,
 phase status, and elapsed time—not commands or output. Persistence failure is
-a warning and never replaces the underlying test result.
+a warning and never replaces the underlying test result. Schema-3 records also
+carry child CPU, minimum observed free disk, build bytes, and source-attributed
+growth. A product assertion remains a product failure; a stopped phase under
+sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported as
+host-security pressure with the product result explicitly unproven.
 
 Read the same gate evidence through the scorecard:
 
@@ -92,7 +112,7 @@ Path → suite mapping:
 | Changed | Suite | Runs |
 |---------|-------|------|
 | `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
-| `python/`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
+| `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
 | `swift/LoopflowMac/`, `swift/project.yml` | loopflow *(slow)* | xcodegen + xcodebuild |

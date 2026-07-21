@@ -82,6 +82,7 @@ struct GateRun {
     finished_at: Option<String>,
     status: String,
     phases: Vec<GatePhase>,
+    resources: Option<GateResources>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -89,6 +90,12 @@ struct GatePhase {
     phase: String,
     elapsed_s: f64,
     status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+struct GateResources {
+    build_disk_bytes: Option<f64>,
+    cpu_seconds: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -236,7 +243,7 @@ fn load_gate(path: &Path) -> Result<GateRun> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let gate: GateRun =
         serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))?;
-    if !matches!(gate.schema, 1 | 2) {
+    if !matches!(gate.schema, 1..=3) {
         return Err(anyhow!(
             "unsupported pre-land evidence schema {} in {}",
             gate.schema,
@@ -298,19 +305,23 @@ fn build_report(policy: &BudgetPolicy, input: ScorecardInput) -> Result<Performa
             "Manual git repair",
             "raw git adoption is not yet a durable scored incident",
         )?,
-        unknown_row(
-            policy,
-            "build_disk_bytes",
-            "Build + disk use",
-            "local resource envelopes are owned by LOO-9",
-        )?,
-        unknown_row(
-            policy,
-            "preland_cpu_seconds",
-            "Pre-land CPU",
-            "gate evidence records wall time but not process CPU; collection is owned by LOO-9",
-        )?,
     ]);
+    rows.push(gate_resource_row(
+        policy,
+        &input.gates,
+        "build_disk_bytes",
+        "Build artifacts / gate",
+        window_started,
+        |resources| resources.build_disk_bytes,
+    )?);
+    rows.push(gate_resource_row(
+        policy,
+        &input.gates,
+        "preland_cpu_seconds",
+        "Pre-land child CPU",
+        window_started,
+        |resources| resources.cpu_seconds,
+    )?);
 
     rows.extend(usage_rows(policy, &input.usage, None)?);
     let providers = input
@@ -401,6 +412,34 @@ fn gate_in_window(gate: &GateRun, since: OffsetDateTime) -> bool {
         .as_deref()
         .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
         .is_some_and(|finished| finished >= since)
+}
+
+fn gate_resource_row(
+    policy: &BudgetPolicy,
+    gates: &[GateRun],
+    metric: &str,
+    label: &str,
+    since: OffsetDateTime,
+    value: impl Fn(&GateResources) -> Option<f64>,
+) -> Result<PerformanceRow> {
+    let eligible = gates
+        .iter()
+        .filter(|gate| gate_in_window(gate, since))
+        .collect::<Vec<_>>();
+    let values = eligible
+        .iter()
+        .filter_map(|gate| gate.resources.as_ref())
+        .filter_map(value)
+        .collect::<Vec<_>>();
+    Ok(measured_row(
+        metric,
+        label,
+        None,
+        values,
+        eligible.len(),
+        metric_budget(policy, metric)?,
+        policy.minimum_p95_samples,
+    ))
 }
 
 fn usage_rows(
@@ -618,7 +657,7 @@ fn format_value(value: f64, unit: &str) -> String {
 mod tests {
     use super::{
         build_report, invocation_belongs_to_repo, load_gate, turn_ended_in_window, BudgetPolicy,
-        GatePhase, GateRun, PerformanceRow, ScorecardInput, UsageSample, Verdict,
+        GatePhase, GateResources, GateRun, PerformanceRow, ScorecardInput, UsageSample, Verdict,
     };
     use serde::Deserialize;
     use std::path::Path;
@@ -673,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_gate_record_emitted_by_the_landing_path() {
+    fn reads_a_legacy_gate_record_without_inventing_resources() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("gate.json");
         std::fs::write(
@@ -707,6 +746,34 @@ mod tests {
         assert_eq!(gate.kind, "changed");
         assert_eq!(gate.status, "passed");
         assert_eq!(gate.phases[0].elapsed_s, 120.0);
+        assert!(gate.resources.is_none());
+    }
+
+    #[test]
+    fn reads_schema_three_resource_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("gate.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "schema": 3,
+              "kind": "full",
+              "finished_at": "2026-07-21T18:02:00Z",
+              "status": "passed",
+              "phases": [],
+              "resources": {
+                "build_disk_bytes": 4294967296,
+                "cpu_seconds": 42.5
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let gate = load_gate(&path).unwrap();
+        let resources = gate.resources.unwrap();
+
+        assert_eq!(resources.build_disk_bytes, Some(4_294_967_296.0));
+        assert_eq!(resources.cpu_seconds, Some(42.5));
     }
 
     #[test]
@@ -734,7 +801,7 @@ mod tests {
             },
         ];
         let gates = vec![GateRun {
-            schema: 2,
+            schema: 3,
             kind: "full".to_string(),
             finished_at: Some("2026-07-20T00:05:00Z".to_string()),
             status: "passed".to_string(),
@@ -743,6 +810,10 @@ mod tests {
                 elapsed_s: 300.0,
                 status: "passed".to_string(),
             }],
+            resources: Some(GateResources {
+                build_disk_bytes: Some(13.0 * 1024.0_f64.powi(3)),
+                cpu_seconds: Some(720.0),
+            }),
         }];
 
         let report = build_report(

@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import platform
+import resource as process_resource
 import secrets
 import shutil
 import signal
@@ -47,7 +48,22 @@ XCODE_DERIVED_DATA = ".build/xcode-derived-data"
 # Failure artifacts (phase logs, xcresult bundles) land here so a worker can
 # repair the first red signal without reopening Xcode. Ignored (.lf/tmp/*).
 GATE_ARTIFACT_ROOT = REPO_ROOT / ".lf" / "tmp" / "gate"
-GATE_EVIDENCE_SCHEMA = 2
+GATE_EVIDENCE_SCHEMA = 3
+RESOURCE_SCRIPT = REPO_ROOT / "scripts" / "resource_envelope.py"
+RESOURCE_POLICY_PATH = REPO_ROOT / "performance" / "budgets.json"
+HOST_SECURITY_PROCESSES = {"amfid", "syspolicyd", "taskgated", "trustd"}
+
+
+def _load_resource_policy() -> dict[str, object]:
+    payload = json.loads(RESOURCE_POLICY_PATH.read_text(encoding="utf-8"))
+    envelope = payload.get("resource_envelope")
+    if not isinstance(envelope, dict):
+        raise ValueError(f"resource_envelope is missing from {RESOURCE_POLICY_PATH}")
+    return envelope
+
+
+RESOURCE_ENVELOPE = _load_resource_policy()
+MAX_PARALLEL_JOBS = int(RESOURCE_ENVELOPE["max_parallel_jobs"])
 
 
 def _run_artifact_root() -> Path:
@@ -150,6 +166,10 @@ def _toplevel_py(changed: list[str]) -> bool:
     return any("/" not in p and p.endswith(".py") for p in changed)
 
 
+def _scripts_py(changed: list[str]) -> bool:
+    return any(p.startswith("scripts/") and p.endswith(".py") for p in changed)
+
+
 # --- Suites --------------------------------------------------------------
 
 
@@ -185,13 +205,40 @@ class Suite:
 
 def _rust_commands(_changed: list[str]) -> list[Command]:
     if shutil.which("cargo-nextest"):
-        test_argv = ["cargo", "nextest", "run", "--all"]
+        test_argv = [
+            "cargo",
+            "nextest",
+            "run",
+            "--all",
+            "--build-jobs",
+            str(MAX_PARALLEL_JOBS),
+            "--test-threads",
+            str(MAX_PARALLEL_JOBS),
+        ]
     else:
-        test_argv = ["cargo", "test", "--all"]
+        test_argv = [
+            "cargo",
+            "test",
+            "--all",
+            "--jobs",
+            str(MAX_PARALLEL_JOBS),
+            "--",
+            "--test-threads",
+            str(MAX_PARALLEL_JOBS),
+        ]
     return [
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
         Command(
-            ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
+            [
+                "cargo",
+                "clippy",
+                "--all-targets",
+                "--jobs",
+                str(MAX_PARALLEL_JOBS),
+                "--",
+                "-D",
+                "warnings",
+            ],
             REPO_ROOT,
             "clippy",
         ),
@@ -222,6 +269,7 @@ def _python_commands(changed: list[str]) -> list[Command]:
     touches_source = (
         any(p.startswith("python/") and p not in test_files for p in changed)
         or _toplevel_py(changed)
+        or _scripts_py(changed)
         or _touches_exact(changed, "pyproject.toml", "uv.lock")
     )
     if test_files and not touches_source:
@@ -244,7 +292,16 @@ def _website_commands(_changed: list[str]) -> list[Command]:
 def _swift_commands(_changed: list[str]) -> list[Command]:
     return [
         Command(
-            ["swift", "test", "--package-path", "swift", "-Xswiftc", "-gnone"],
+            [
+                "swift",
+                "test",
+                "--package-path",
+                "swift",
+                "--jobs",
+                str(MAX_PARALLEL_JOBS),
+                "-Xswiftc",
+                "-gnone",
+            ],
             REPO_ROOT,
             "swift",
         ),
@@ -254,7 +311,16 @@ def _swift_commands(_changed: list[str]) -> list[Command]:
             "swift-boundaries",
         ),
         Command(
-            ["swift", "build", "--package-path", "swift", "--product", "LoopflowMac"],
+            [
+                "swift",
+                "build",
+                "--package-path",
+                "swift",
+                "--product",
+                "LoopflowMac",
+                "--jobs",
+                str(MAX_PARALLEL_JOBS),
+            ],
             REPO_ROOT,
             "swift-build",
         ),
@@ -282,6 +348,8 @@ def _loopflow_commands(_changed: list[str]) -> list[Command]:
                 "platform=macOS",
                 "-derivedDataPath",
                 XCODE_DERIVED_DATA,
+                "-jobs",
+                str(MAX_PARALLEL_JOBS),
                 "-disableAutomaticPackageResolution",
                 *XCODE_LOCAL_SIGNING,
             ],
@@ -363,6 +431,10 @@ def _ui_host_commands(_changed: list[str]) -> list[Command]:
                 "-only-testing:LoopflowUITests",
                 "-resultBundlePath",
                 str(xcresult),
+                "-jobs",
+                str(MAX_PARALLEL_JOBS),
+                "-parallel-testing-worker-count",
+                str(MAX_PARALLEL_JOBS),
                 *XCODE_LOCAL_SIGNING,
             ],
             swift_dir,
@@ -399,10 +471,11 @@ SUITES: list[Suite] = [
     Suite(
         name="python",
         slow=False,
-        trigger_desc="python/ or top-level *.py",
+        trigger_desc="python/, scripts/*.py, or top-level *.py",
         match=lambda c: (
             _touches(c, "python/")
             or _toplevel_py(c)
+            or _scripts_py(c)
             or _touches_exact(c, "pyproject.toml", "uv.lock")
         ),
         build=_python_commands,
@@ -546,6 +619,59 @@ def print_plan(plans: list[Plan], changed: list[str]) -> None:
                 print(f"         $ {_fmt_cmd(cmd)}  (budget {_budget_for(cmd.label)}s)")
 
 
+# --- Resource envelope ---------------------------------------------------
+
+
+def _run_resource_check(recover: bool) -> tuple[Optional[dict[str, object]], Optional[str]]:
+    argv = [sys.executable, str(RESOURCE_SCRIPT), "--json", "--repo", str(REPO_ROOT)]
+    if recover:
+        argv.append("--recover")
+    try:
+        result = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"RESOURCE MEASUREMENT FAILED: {exc}"
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        return None, f"RESOURCE MEASUREMENT FAILED: {detail}"
+    if not isinstance(report, dict):
+        return None, "RESOURCE MEASUREMENT FAILED: report is not a JSON object"
+    if report.get("ok") is True and result.returncode == 0:
+        return report, None
+    after = report.get("after")
+    issues = after.get("issues") if isinstance(after, dict) else None
+    if not isinstance(issues, list) or not issues:
+        detail = result.stderr.strip() or f"resource check exited {result.returncode}"
+        return report, f"RESOURCE PRESSURE: {detail}"
+    lines = ["RESOURCE PRESSURE: verification did not start inside its envelope."]
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        lines.append(
+            f"- {issue.get('code', 'unknown')} ({issue.get('owner', 'unknown')}): "
+            f"{issue.get('detail', 'no detail')}"
+        )
+        lines.append(f"  NEXT ACTION: {issue.get('action', 'inspect the named source')}")
+    return report, "\n".join(lines)
+
+
+def _resource_summary(report: dict[str, object], label: str) -> str:
+    after = report.get("after")
+    if not isinstance(after, dict):
+        return f"Resource {label}: UNKNOWN"
+    free = after.get("free_disk_bytes")
+    floor = after.get("minimum_free_disk_bytes")
+    jobs = after.get("max_parallel_jobs")
+    nice = after.get("process_nice")
+    if not isinstance(free, int) or not isinstance(floor, int):
+        return f"Resource {label}: UNKNOWN"
+    return (
+        f"Resource {label}: PASS · {free / 2**30:.1f} GiB free / "
+        f"{floor / 2**30:.1f} GiB floor · {jobs} workers · nice +{nice}"
+    )
+
+
 # --- Durable evidence ----------------------------------------------------
 
 
@@ -558,6 +684,9 @@ class PhaseOutcome:
     status: str
     over_budget: bool
     failure: Optional[str] = None
+    failure_kind: Optional[str] = None
+    cpu_s: Optional[float] = None
+    minimum_free_disk_bytes: Optional[int] = None
 
     def as_record(self) -> dict[str, object]:
         return {
@@ -567,6 +696,9 @@ class PhaseOutcome:
             "elapsed_s": round(self.elapsed_s, 3),
             "status": self.status,
             "over_budget": self.over_budget,
+            "failure_kind": self.failure_kind,
+            "cpu_s": None if self.cpu_s is None else round(self.cpu_s, 3),
+            "minimum_free_disk_bytes": self.minimum_free_disk_bytes,
         }
 
 
@@ -583,6 +715,7 @@ class GateRun:
     finished_at: Optional[str]
     status: str
     phases: list[PhaseOutcome]
+    resources: Optional[dict[str, object]] = None
 
     def update_phase(self, outcome: PhaseOutcome) -> None:
         for index, phase in enumerate(self.phases):
@@ -605,8 +738,103 @@ class GateRun:
             "finished_at": self.finished_at,
             "status": self.status,
             "phases": [phase.as_record() for phase in self.phases],
+            "resources": self.resources,
         }
         return record
+
+
+def _resource_receipt(
+    preflight: Optional[dict[str, object]],
+    postflight: Optional[dict[str, object]],
+    phases: list[PhaseOutcome],
+) -> Optional[dict[str, object]]:
+    if preflight is None:
+        return None
+    before = preflight.get("after")
+    after_report = postflight or preflight
+    after = after_report.get("after")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return None
+    before_sources = before.get("sources")
+    after_sources = after.get("sources")
+    if not isinstance(before_sources, list) or not isinstance(after_sources, list):
+        return None
+
+    def _indexed(sources: list[object]) -> dict[str, dict[str, object]]:
+        return {
+            source["id"]: source
+            for source in sources
+            if isinstance(source, dict) and isinstance(source.get("id"), str)
+        }
+
+    before_by_id = _indexed(before_sources)
+    after_by_id = _indexed(after_sources)
+    sources = []
+    for source_id in sorted(set(before_by_id) | set(after_by_id)):
+        initial = before_by_id.get(source_id, {})
+        final = after_by_id.get(source_id, {})
+        before_bytes = initial.get("bytes")
+        after_bytes = final.get("bytes")
+        if not isinstance(before_bytes, int):
+            before_bytes = None
+        if not isinstance(after_bytes, int):
+            after_bytes = None
+        sources.append(
+            {
+                "id": source_id,
+                "kind": final.get("kind", initial.get("kind")),
+                "owner": final.get("owner", initial.get("owner")),
+                "budget_bytes": final.get("budget_bytes", initial.get("budget_bytes")),
+                "before_bytes": before_bytes,
+                "after_bytes": after_bytes,
+                "growth_bytes": (
+                    after_bytes - before_bytes
+                    if before_bytes is not None and after_bytes is not None
+                    else None
+                ),
+            }
+        )
+
+    current = str(REPO_ROOT.resolve())
+    current_build = next(
+        (
+            source
+            for source in after_sources
+            if isinstance(source, dict)
+            and source.get("kind") == "build"
+            and source.get("root") == current
+        ),
+        None,
+    )
+    build_disk_bytes = current_build.get("bytes") if isinstance(current_build, dict) else None
+    aggregate_build_bytes = sum(
+        source.get("bytes", 0)
+        for source in after_sources
+        if isinstance(source, dict)
+        and source.get("kind") == "build"
+        and isinstance(source.get("bytes"), int)
+    )
+    cpu_values = [phase.cpu_s for phase in phases if phase.cpu_s is not None]
+    free_values = [
+        value
+        for value in (
+            before.get("free_disk_bytes"),
+            after.get("free_disk_bytes"),
+            *(phase.minimum_free_disk_bytes for phase in phases),
+        )
+        if isinstance(value, int)
+    ]
+    return {
+        "build_disk_bytes": build_disk_bytes,
+        "aggregate_build_bytes": aggregate_build_bytes,
+        "cpu_seconds": sum(cpu_values) if cpu_values else None,
+        "minimum_free_disk_bytes": min(free_values) if free_values else None,
+        "max_parallel_jobs": after.get("max_parallel_jobs"),
+        "process_nice": after.get("process_nice"),
+        "sources": sources,
+        "recovery": preflight.get("recovery", []),
+        "issues": after.get("issues", []),
+    }
 
 
 def _utc_now() -> datetime:
@@ -733,6 +961,7 @@ def _new_gate_run(
     tree_fingerprint: Optional[str],
     plan_fingerprint: str,
     now: Optional[datetime] = None,
+    resources: Optional[dict[str, object]] = None,
 ) -> GateRun:
     started = now or _utc_now()
     run_id = f"{started.strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}-{secrets.token_hex(4)}"
@@ -751,6 +980,7 @@ def _new_gate_run(
         finished_at=None,
         status="running",
         phases=phases,
+        resources=resources,
     )
 
 
@@ -796,9 +1026,16 @@ def _start_recorder(
     plans: list[Plan],
     tree_fingerprint: Optional[str],
     plan_fingerprint: str,
+    resources: Optional[dict[str, object]] = None,
 ) -> Optional[_GateRecorder]:
     try:
-        run = _new_gate_run(kind, plans, tree_fingerprint, plan_fingerprint)
+        run = _new_gate_run(
+            kind,
+            plans,
+            tree_fingerprint,
+            plan_fingerprint,
+            resources=resources,
+        )
         path = _gate_evidence_root() / kind / f"{run.run_id}.json"
     except (OSError, subprocess.SubprocessError) as exc:
         print(
@@ -849,6 +1086,51 @@ def _kill_group(proc: "subprocess.Popen[str]") -> None:
             pass
 
 
+def _command_exists(cmd: Command) -> bool:
+    executable = Path(cmd.argv[0])
+    if executable.is_absolute():
+        return executable.exists()
+    if executable.parent != Path("."):
+        return (cmd.cwd / executable).exists()
+    return shutil.which(cmd.argv[0]) is not None
+
+
+def _child_cpu_seconds() -> float:
+    usage = process_resource.getrusage(process_resource.RUSAGE_CHILDREN)
+    return usage.ru_utime + usage.ru_stime
+
+
+def _free_disk_bytes() -> int:
+    return shutil.disk_usage(REPO_ROOT).free
+
+
+def _host_security_pressure() -> Optional[tuple[str, float]]:
+    if platform.system() != "Darwin":
+        return None
+    result = subprocess.run(
+        ["ps", "-Ao", "pcpu=,comm="],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    hottest: Optional[tuple[str, float]] = None
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        try:
+            cpu = float(fields[0])
+        except ValueError:
+            continue
+        name = Path(fields[1]).name
+        if name not in HOST_SECURITY_PROCESSES:
+            continue
+        if hottest is None or cpu > hottest[1]:
+            hottest = (name, cpu)
+    return hottest
+
+
 def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
     """Run one command bounded by its budget, streaming output live and teeing
     it to a per-phase log."""
@@ -856,10 +1138,58 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     log_path = artifact_dir / f"{cmd.label}.log"
     started = time.monotonic()
+    cpu_started = _child_cpu_seconds()
+    minimum_free = _free_disk_bytes()
+    disk_floor = int(RESOURCE_ENVELOPE["minimum_free_disk_bytes"])
+    sample_interval = float(RESOURCE_ENVELOPE["sample_interval_seconds"])
+    security_limit = float(RESOURCE_ENVELOPE["host_security_cpu_percent"])
+    security_samples = int(RESOURCE_ENVELOPE["host_security_samples"])
+
+    def _finish(
+        status: str,
+        failure: Optional[str],
+        failure_kind: Optional[str],
+        over_budget: bool,
+    ) -> PhaseOutcome:
+        nonlocal minimum_free
+        try:
+            minimum_free = min(minimum_free, _free_disk_bytes())
+        except OSError:
+            pass
+        return PhaseOutcome(
+            suite=suite,
+            phase=cmd.label,
+            budget_s=budget,
+            elapsed_s=time.monotonic() - started,
+            status=status,
+            over_budget=over_budget,
+            failure=failure,
+            failure_kind=failure_kind,
+            cpu_s=max(0.0, _child_cpu_seconds() - cpu_started),
+            minimum_free_disk_bytes=minimum_free,
+        )
+
+    if not _command_exists(cmd):
+        return _finish(
+            "missing_tool",
+            (
+                f"MISSING TOOL: '{cmd.argv[0]}' is not installed on this host. "
+                f"Install it or run the {cmd.label} phase where it exists."
+            ),
+            "missing_tool",
+            False,
+        )
+
+    run_argv = cmd.argv
+    nice = shutil.which("nice")
+    process_nice = int(RESOURCE_ENVELOPE["process_nice"])
+    if nice is not None and process_nice > 0:
+        run_argv = [nice, "-n", str(process_nice), *cmd.argv]
+
     with open(log_path, "w") as logf:
         try:
             proc = subprocess.Popen(
-                cmd.argv,
+                run_argv,
                 cwd=cmd.cwd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -868,18 +1198,14 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
                 text=True,
             )
         except FileNotFoundError:
-            elapsed = time.monotonic() - started
-            return PhaseOutcome(
-                suite=suite,
-                phase=cmd.label,
-                budget_s=budget,
-                elapsed_s=elapsed,
-                status="missing_tool",
-                over_budget=False,
-                failure=(
+            return _finish(
+                "missing_tool",
+                (
                     f"MISSING TOOL: '{cmd.argv[0]}' is not installed on this host. "
                     f"Install it or run the {cmd.label} phase where it exists."
                 ),
+                "missing_tool",
+                False,
             )
 
         def _pump() -> None:
@@ -891,25 +1217,75 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
 
         pump = threading.Thread(target=_pump, daemon=True)
         pump.start()
+        pressure_count = 0
+        pressure: Optional[tuple[str, float]] = None
+        deadline = started + budget
         try:
-            proc.wait(timeout=budget)
-        except subprocess.TimeoutExpired:
+            while proc.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    _kill_group(proc)
+                    pump.join(timeout=5)
+                    elapsed = time.monotonic() - started
+                    return _finish(
+                        "timed_out",
+                        (
+                            f"VERIFICATION BUDGET: phase '{cmd.label}' exceeded its {budget}s "
+                            f"wall limit (ran {elapsed:.0f}s) and was killed with its process "
+                            f"group. Product result: unproven. Log: {log_path}"
+                        ),
+                        "verification_budget",
+                        True,
+                    )
+                try:
+                    proc.wait(timeout=min(sample_interval, remaining))
+                except subprocess.TimeoutExpired:
+                    try:
+                        free = _free_disk_bytes()
+                        minimum_free = min(minimum_free, free)
+                    except OSError:
+                        free = disk_floor
+                    if free < disk_floor:
+                        _kill_group(proc)
+                        pump.join(timeout=5)
+                        return _finish(
+                            "resource_exhausted",
+                            (
+                                f"RESOURCE PRESSURE: free disk crossed the "
+                                f"{disk_floor / 2**30:.0f} GiB safety floor during "
+                                f"'{cmd.label}', so its process group was killed. Product result: "
+                                "unproven. NEXT ACTION: run `uv run python "
+                                "scripts/resource_envelope.py --recover`, then rerun the gate. "
+                                f"Log: {log_path}"
+                            ),
+                            "resource_pressure",
+                            False,
+                        )
+                    pressure = _host_security_pressure()
+                    if pressure is not None and pressure[1] >= security_limit:
+                        pressure_count += 1
+                    else:
+                        pressure_count = 0
+                    if pressure_count >= security_samples and pressure is not None:
+                        _kill_group(proc)
+                        pump.join(timeout=5)
+                        return _finish(
+                            "host_pressure",
+                            (
+                                f"HOST SECURITY PRESSURE: {pressure[0]} held {pressure[1]:.0f}% "
+                                f"CPU for {pressure_count} samples while '{cmd.label}' ran, so the "
+                                "verification group was stopped at low priority. Product result: "
+                                "unproven. NEXT ACTION: let macOS verification drain, inspect "
+                                "`ps -Ao pid,pcpu,comm | sort -k2 -nr | head`, then rerun. "
+                                f"Log: {log_path}"
+                            ),
+                            "host_security_pressure",
+                            False,
+                        )
+        except KeyboardInterrupt:
             _kill_group(proc)
             pump.join(timeout=5)
-            elapsed = time.monotonic() - started
-            return PhaseOutcome(
-                suite=suite,
-                phase=cmd.label,
-                budget_s=budget,
-                elapsed_s=elapsed,
-                status="timed_out",
-                over_budget=True,
-                failure=(
-                    f"TIMEOUT: phase '{cmd.label}' exceeded its {budget}s budget "
-                    f"(ran {elapsed:.0f}s) and was killed. No phase hangs the gate. "
-                    f"Log: {log_path}"
-                ),
-            )
+            raise
         pump.join(timeout=5)
 
     elapsed = time.monotonic() - started
@@ -919,27 +1295,21 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
             reason = f"killed by signal {-proc.returncode}"
         else:
             reason = f"exit {proc.returncode}"
-        return PhaseOutcome(
-            suite=suite,
-            phase=cmd.label,
-            budget_s=budget,
-            elapsed_s=elapsed,
-            status="failed",
-            over_budget=over_budget,
-            failure=f"FAILED ({cmd.label}, {reason}). Log: {log_path}",
+        return _finish(
+            "failed",
+            f"PRODUCT FAILURE ({cmd.label}, {reason}). Log: {log_path}",
+            "product",
+            over_budget,
         )
     failure = None
+    failure_kind = None
     if over_budget:
-        failure = f"OVER BUDGET: phase '{cmd.label}' ran {elapsed:.1f}s / {budget}s budget"
-    return PhaseOutcome(
-        suite=suite,
-        phase=cmd.label,
-        budget_s=budget,
-        elapsed_s=elapsed,
-        status="passed",
-        over_budget=over_budget,
-        failure=failure,
-    )
+        failure = (
+            f"VERIFICATION BUDGET: phase '{cmd.label}' ran "
+            f"{elapsed:.1f}s / {budget}s wall limit"
+        )
+        failure_kind = "verification_budget"
+    return _finish("passed", failure, failure_kind, over_budget)
 
 
 def _run_suite(
@@ -967,12 +1337,13 @@ def _run_suite(
         print(f"\n$ {_fmt_cmd(cmd)}  (budget {_budget_for(cmd.label)}s)", flush=True)
         outcome = _run_command(cmd, artifact_dir, plan.suite.name)
         if outcome.failure is not None:
-            if plan.suite.classify is not None:
+            if plan.suite.classify is not None and outcome.failure_kind == "product":
                 log_path = artifact_dir / f"{cmd.label}.log"
                 log_text = log_path.read_text() if log_path.exists() else ""
                 refined = plan.suite.classify(log_text)
                 if refined is not None:
                     outcome.failure = refined
+                    outcome.failure_kind = "missing_capability"
         phases[index] = outcome
         checkpoint_phase(outcome)
         if outcome.failure is not None:
@@ -993,12 +1364,33 @@ def run_plans(
         print(f"Gate budget: {total_budget}s across {len(running)} suites ({', '.join(running)})")
         print(f"Artifacts on failure: {artifact_root}")
 
+    preflight, preflight_failure = _run_resource_check(True)
+    if preflight is not None and preflight_failure is None:
+        print(_resource_summary(preflight, "preflight"))
+
     try:
         tree_fingerprint = _tree_fingerprint()
     except (OSError, subprocess.SubprocessError) as exc:
         tree_fingerprint = None
         print(f"MEASUREMENT WARNING: cannot fingerprint the working tree: {exc}", file=sys.stderr)
     plan_fingerprint = _plan_fingerprint(plans)
+
+    initial_resources = _resource_receipt(preflight, None, [])
+    if preflight_failure is not None:
+        recorder = _start_recorder(
+            kind,
+            plans,
+            tree_fingerprint,
+            plan_fingerprint,
+            resources=initial_resources,
+        )
+        if recorder is not None:
+            recorder.run.status = "resource_blocked"
+            recorder.run.finished_at = _format_timestamp(_utc_now())
+            recorder.checkpoint()
+        print(f"\n{preflight_failure}")
+        print("\nResult: FAIL (resource preflight; product suites not run)")
+        return 1
 
     if reuse_passing and kind == "changed" and running and tree_fingerprint is not None:
         try:
@@ -1013,12 +1405,19 @@ def run_plans(
             )
             return 0
 
-    recorder = _start_recorder(kind, plans, tree_fingerprint, plan_fingerprint)
+    recorder = _start_recorder(
+        kind,
+        plans,
+        tree_fingerprint,
+        plan_fingerprint,
+        resources=initial_resources,
+    )
 
     def _checkpoint_phase(outcome: PhaseOutcome) -> None:
         if recorder is None:
             return
         recorder.run.update_phase(outcome)
+        recorder.run.resources = _resource_receipt(preflight, None, recorder.run.phases)
         recorder.checkpoint()
 
     outcomes: dict[str, SuiteOutcome] = {}
@@ -1027,8 +1426,16 @@ def run_plans(
             outcomes[plan.suite.name] = _run_suite(plan, artifact_root, _checkpoint_phase)
 
     failed = [(name, outcome) for name, outcome in outcomes.items() if not outcome.ok]
+    phases = [phase for outcome in outcomes.values() for phase in outcome.phases]
+    postflight, postflight_failure = _run_resource_check(False)
+    resource_breach = postflight_failure if postflight is not None else None
+    if postflight is not None and postflight_failure is None:
+        print(_resource_summary(postflight, "postflight"))
+    elif postflight is None and postflight_failure is not None:
+        print(f"MEASUREMENT WARNING: {postflight_failure}", file=sys.stderr)
     if recorder is not None:
-        recorder.run.status = "failed" if failed else "passed"
+        recorder.run.resources = _resource_receipt(preflight, postflight, phases)
+        recorder.run.status = "failed" if failed or resource_breach else "passed"
         recorder.run.finished_at = _format_timestamp(_utc_now())
         recorder.checkpoint()
 
@@ -1043,6 +1450,8 @@ def run_plans(
                     "passed": "PASS",
                     "failed": "FAIL",
                     "timed_out": "TIMEOUT",
+                    "resource_exhausted": "RESOURCE",
+                    "host_pressure": "HOST",
                     "missing_tool": "MISSING",
                     "not_run": "NOT RUN",
                 }[phase.status]
@@ -1050,7 +1459,8 @@ def run_plans(
                 over = "  OVER BUDGET" if phase.over_budget else ""
                 print(
                     f"  {status:<7} {phase.suite}/{phase.phase:<20} "
-                    f"{elapsed} / {phase.budget_s}s budget{over}"
+                    f"{elapsed} / {phase.budget_s}s budget · "
+                    f"{phase.cpu_s or 0.0:.1f}s CPU{over}"
                 )
             status = "PASS" if outcome.ok else "FAIL"
             detail = f"{outcome.elapsed_s:.0f}s / {_plan_budget(plan)}s budget"
@@ -1062,15 +1472,23 @@ def run_plans(
     passed = [name for name, o in outcomes.items() if o.ok]
     total_elapsed = sum(o.elapsed_s for o in outcomes.values())
     print()
-    if not outcomes:
+    if not outcomes and resource_breach is None:
         print("No suites ran (nothing changed). Use --all to force the full matrix.")
         return 0
-    if failed:
+    if failed or resource_breach is not None:
         for name, outcome in failed:
             print(f"[{name}] {outcome.failure}")
-        names = ", ".join(name for name, _ in failed)
+        if resource_breach is not None:
+            print(f"[resources] {resource_breach}")
+        names = ", ".join(
+            [
+                *(name for name, _ in failed),
+                *(("resources",) if resource_breach else ()),
+            ]
+        )
+        failure_count = len(failed) + int(resource_breach is not None)
         print(
-            f"\nResult: FAIL ({len(passed)} passed, {len(failed)} failed: {names}) "
+            f"\nResult: FAIL ({len(passed)} passed, {failure_count} failed: {names}) "
             f"in {total_elapsed:.0f}s / {total_budget}s budget"
         )
         return 1

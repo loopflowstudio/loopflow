@@ -314,7 +314,7 @@ def test_changed_aware_runner_includes_ci_static_checks():
     )
 
     assert "cargo fmt --all -- --check" in result.stdout
-    assert "cargo clippy --all-targets -- -D warnings" in result.stdout
+    assert "cargo clippy --all-targets --jobs 4 -- -D warnings" in result.stdout
     assert "scripts/materialize_rust_tests.py -- cargo" in result.stdout
     assert "cargo nextest run --all" in result.stdout or "cargo test --all" in result.stdout
     assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout

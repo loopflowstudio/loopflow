@@ -94,6 +94,18 @@ lf usage               # subscription state and spend, per account and repo
 lf performance         # 14-day latency, verification, and spend scorecard
 ```
 
+Keep Loopflow development inside its local resource envelope:
+
+```bash
+uv run python scripts/resource_envelope.py             # attribute disk use to its owner
+uv run python scripts/resource_envelope.py --recover   # clean only safe disposable pressure
+uv run python scripts/test.py                          # preflight, then run affected suites
+```
+
+The verifier keeps 64 GiB free, caps build/test concurrency at four
+low-priority workers, and records build bytes plus child CPU for
+`lf performance`. See [TESTING.md](TESTING.md#bounded-and-honest).
+
 ## The model
 
 | Atom | What it does | Where it lives |

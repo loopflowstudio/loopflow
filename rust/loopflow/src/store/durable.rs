@@ -1157,4 +1157,53 @@ mod tests {
             .await
             .is_err());
     }
+
+    #[tokio::test]
+    async fn interactive_launch_and_late_handback_are_independent_evidence() {
+        let (store, work) = wave_work().await;
+        let (_lease, invocation) = start_invocation(&store, &work).await;
+
+        let launched = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(launched.invocation.ended_at.is_none());
+        assert_eq!(launched.handback, None);
+        assert_eq!(store.invocation_surfaces(true).await.unwrap().len(), 1);
+
+        let handed_back = store
+            .handback_invocation(&invocation.id, BoundaryState::Failed)
+            .await
+            .unwrap();
+        assert!(handed_back.invocation.ended_at.is_some());
+        assert_eq!(handed_back.handback, Some(BoundaryState::Failed));
+        assert!(store.invocation_surfaces(true).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_interactive_launch_is_not_an_active_surface() {
+        let (store, work) = wave_work().await;
+        let (lease, invocation) = start_invocation(&store, &work).await;
+
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::InvocationEnded {
+                    invocation_id: invocation.id.clone(),
+                    outcome: BoundaryState::Failed,
+                },
+            )
+            .await
+            .unwrap();
+
+        let failed = store
+            .invocation_surface(&invocation.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(failed.invocation.ended_at.is_some());
+        assert_eq!(failed.handback, None);
+        assert!(store.invocation_surfaces(true).await.unwrap().is_empty());
+    }
 }

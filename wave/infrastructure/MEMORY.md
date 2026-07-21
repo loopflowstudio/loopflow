@@ -42,6 +42,13 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   deleted. Authored input is a durable Work Steer. Best-effort process nudges may
   reduce latency, but the server follow-up must make Home-owned Ready scanning
   the correctness path so a stopped Project cannot miss child Feedback.
+- **Durable Ask is the only blocking human-input primitive** (decided
+  2026-07-21). Interactive Task phases are advisory: the runner makes one launch
+  attempt and advances independently of launcher success, UI lifetime, or
+  Invocation handback. A launched surface is read-only while the next writable
+  phase owns the Task worktree; providers without enforceable read-only mode
+  fail closed. Launch failure ends the Invocation once, while a successful
+  launch stays live until optional handback records its evidence.
 
 ## Planning model (settled, PR #852)
 

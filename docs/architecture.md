@@ -126,8 +126,12 @@ Steers or special control turns. The current durable-Ask slice exposes explicit
 agents are a separate follow-up: they will use fresh AgentInvocations under the
 parent Run without receiving its lease or disturbing its core conversation.
 
-Interactive Demo handback is also separate. Invocation handback remains only
-for the existing opaque interactive surface until Demo owns that protocol.
+Interactive Task phases are advisory. The runner makes one launch attempt,
+records its outcome, and advances the playhead without waiting for the window or
+its handback. A successfully launched surface is read-only so it can remain open
+beside the next writable Task phase without creating a second worktree writer.
+Its later Invocation handback records evidence only. A durable Ask is the sole
+human-input primitive that can hold a Turn open.
 
 ## Runtime topology
 
@@ -180,6 +184,8 @@ Swift mirrors do not hide drift behind defaults.
 
 - One non-ended Run exists per Epoch.
 - Only the current opaque Run lease writes as Work.
+- A durable Ask is the only human-input primitive that blocks a Work Turn.
+- An advisory interactive surface has no write authority over its Task worktree.
 - Run containment, not invocation ordering, is the interrupt and recovery target.
 - Every Turn belongs to one AgentInvocation; every Ask belongs to one Turn.
 - One Turn has at most one unanswered Ask.

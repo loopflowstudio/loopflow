@@ -374,14 +374,19 @@ impl SqliteStore {
             } => {
                 if !outcome.is_terminal() {
                     return Err(StoreError::InvalidData(
-                        "Invocation handback must be terminal".to_string(),
+                        "Invocation outcome must be terminal".to_string(),
                     ));
                 }
                 require_invocation_for_run(&tx, invocation_id, &run.id)?;
                 let now = now_unix();
                 tx.execute(
                     "UPDATE agent_invocations
-                     SET ended_at=COALESCE(ended_at, ?2), outcome=?3, handback_state=?4
+                     SET ended_at=COALESCE(ended_at, ?2), outcome=?3,
+                         handback_state=CASE
+                             WHEN surface IN ('tui', 'ide') AND answer_ask_id IS NULL
+                             THEN handback_state
+                             ELSE ?4
+                         END
                      WHERE id=?1 AND ended_at IS NULL",
                     params![
                         invocation_id.as_str(),

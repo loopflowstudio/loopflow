@@ -348,9 +348,18 @@ its identity. The descriptor carries the supervising Run and its stable Work,
 Wave, Home, cwd, and containment alongside provider trace, explicit
 handback evidence, and optional attach argv.
 
-Closing the app or terminal does not end the Invocation. Record the observed
-boundary result with `handback --outcome succeeded|failed|interrupted|unknown`;
-process exit alone does not claim success.
+An interactive Task phase advances after one launch attempt. A successful
+surface is read-only and stays reopenable until handback; a failed launch is
+recorded once and does not retry the phase. Handback is advisory evidence, not
+Task input. Use `lf ask` for a dependency that must hold the Task open.
+Advisory launches disable provider hooks, plugins, and MCP integrations that
+could bypass the read-only boundary; a provider without an enforceable
+read-only mode is skipped.
+
+Closing the app or terminal does not supply handback evidence. Record the
+observed boundary result with `handback --outcome
+succeeded|failed|interrupted|unknown`; process exit alone does not claim
+success.
 
 ## Speaking to Waves
 

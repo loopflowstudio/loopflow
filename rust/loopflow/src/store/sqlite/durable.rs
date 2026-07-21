@@ -21,6 +21,16 @@ use crate::task::Task;
 
 use super::SqliteStore;
 
+const HAS_PENDING_USER_ASK_FOR_WORK_SQL: &str = "SELECT EXISTS(
+        SELECT 1 FROM ask_exchanges a
+        JOIN agent_turns t ON t.id=a.turn_id
+        JOIN epochs e ON e.id=t.epoch_id
+        WHERE a.route_kind='user' AND a.answered_at IS NULL
+          AND e.state='open'
+          AND (e.wave_id=?1 OR e.project_id=?2 OR e.task_id=?3)
+          AND t.status NOT IN ('completed', 'interrupted')
+     )";
+
 impl SqliteStore {
     pub(crate) fn task_writer_state(
         &self,
@@ -967,16 +977,14 @@ impl SqliteStore {
 
     pub fn has_pending_user_ask_for_work(&self, work: &WorkRef) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let (wave_id, project_id, task_id) = match work {
+            WorkRef::Wave(id) => (Some(id.as_str()), None, None),
+            WorkRef::Project(id) => (None, Some(id.as_str()), None),
+            WorkRef::Task(id) => (None, None, Some(id.as_str())),
+        };
         conn.query_row(
-            "SELECT EXISTS(
-                SELECT 1 FROM ask_exchanges a
-                JOIN agent_turns t ON t.id=a.turn_id
-                JOIN epochs e ON e.id=t.epoch_id
-                WHERE a.route_kind='user' AND a.answered_at IS NULL
-                  AND e.state='open' AND e.work_kind=?1 AND e.work_id=?2
-                  AND t.status NOT IN ('completed', 'interrupted')
-             )",
-            params![work.kind(), work.id()],
+            HAS_PENDING_USER_ASK_FOR_WORK_SQL,
+            params![wave_id, project_id, task_id],
             |row| row.get(0),
         )
         .map_err(StoreError::from)
@@ -3604,15 +3612,19 @@ fn to_sql_error(error: impl std::fmt::Display) -> rusqlite::Error {
 }
 
 #[cfg(test)]
-mod observe_invocation_provider_tests {
+mod durable_store_tests {
     use crate::durable::{
-        BoundaryState, Containment, ContainmentObservation, InvocationRoute, RunAdvance,
-        RunControl, RunState, RunTrigger, StopCause, WorkRef,
+        AdvanceReceipt, AnswerRoute, AskExchange, AskId, BoundaryState, Containment,
+        ContainmentObservation, EpochId, InvocationRoute, RunAdvance, RunControl, RunState,
+        RunTrigger, StopCause, WorkRef,
     };
     use crate::id::WaveId;
+    use crate::project::ProjectId;
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
+    use crate::task::TaskId;
     use std::path::{Path, PathBuf};
+    use time::OffsetDateTime;
 
     /// A registered Wave is the cheapest real Work: `upsert_wave` is the only
     /// public path that mints an Epoch, and Wave Work needs no PM binding.
@@ -3643,7 +3655,7 @@ mod observe_invocation_provider_tests {
     fn start_invocation(
         store: &SqliteStore,
         work: &WorkRef,
-    ) -> (crate::durable::RunLease, PathBuf) {
+    ) -> (crate::durable::RunLease, crate::durable::AgentInvocation) {
         let (_, lease) = store
             .reserve_run(work, &RunTrigger::User)
             .expect("reserve a Run");
@@ -3659,7 +3671,7 @@ mod observe_invocation_provider_tests {
                 },
             )
             .expect("start a Run");
-        store
+        let receipt = store
             .advance_run(
                 &lease,
                 &RunAdvance::InvocationStarting {
@@ -3674,7 +3686,147 @@ mod observe_invocation_provider_tests {
                 },
             )
             .expect("start an AgentInvocation");
-        (lease, cwd)
+        let AdvanceReceipt::Invocation(invocation) = receipt else {
+            panic!("expected AgentInvocation receipt")
+        };
+        (lease, invocation)
+    }
+
+    fn store_with_work_hierarchy() -> (tempfile::TempDir, SqliteStore, Vec<(WorkRef, WorkRef)>) {
+        let (directory, store, wave) = store_with_wave();
+        let path = directory.path().join("loopflow.db");
+        let project_id = ProjectId::new();
+        let project = WorkRef::Project(project_id.clone());
+        let task_id = TaskId::new();
+        let task = WorkRef::Task(task_id.clone());
+        let mut conn = rusqlite::Connection::open(path).unwrap();
+        let tx = conn.transaction().unwrap();
+        tx.execute(
+            "INSERT INTO projects (id, wave_id, external_project_id, created_at)
+             VALUES (?1, ?2, 'linear-project', 1700000001)",
+            rusqlite::params![project_id.as_str(), wave.id()],
+        )
+        .unwrap();
+        super::inherit_placement(&tx, &project, Some(&wave), 1_700_000_001).unwrap();
+        let project_epoch_id = EpochId::new();
+        tx.execute(
+            "INSERT INTO epochs (
+                id, number, wave_id, project_id, task_id, state, current_rev,
+                created_at, terminal_at
+             ) VALUES (?1, 1, NULL, ?2, NULL, 'open', 0, 1700000001, NULL)",
+            rusqlite::params![project_epoch_id.as_str(), project_id.as_str()],
+        )
+        .unwrap();
+        super::insert_truth(
+            &tx,
+            &project_epoch_id,
+            serde_json::json!({"external_project_id": "linear-project"}),
+            OffsetDateTime::from_unix_timestamp(1_700_000_001).unwrap(),
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO tasks (
+                id, project_id, external_issue_id, issue_identifier, created_at
+             ) VALUES (?1, ?2, 'linear-issue', 'ENG-1', 1700000002)",
+            rusqlite::params![task_id.as_str(), project_id.as_str()],
+        )
+        .unwrap();
+        super::inherit_placement(&tx, &task, Some(&project), 1_700_000_002).unwrap();
+        let task_epoch_id = EpochId::new();
+        tx.execute(
+            "INSERT INTO epochs (
+                id, number, wave_id, project_id, task_id, state, current_rev,
+                created_at, terminal_at
+             ) VALUES (?1, 1, NULL, NULL, ?2, 'open', 0, 1700000002, NULL)",
+            rusqlite::params![task_epoch_id.as_str(), task_id.as_str()],
+        )
+        .unwrap();
+        super::insert_truth(
+            &tx,
+            &task_epoch_id,
+            serde_json::json!({"issue_identifier": "ENG-1"}),
+            OffsetDateTime::from_unix_timestamp(1_700_000_002).unwrap(),
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        (
+            directory,
+            store,
+            vec![
+                (wave.clone(), wave.clone()),
+                (project.clone(), wave),
+                (task, project),
+            ],
+        )
+    }
+
+    fn start_turn(store: &SqliteStore, work: &WorkRef) -> crate::durable::TurnId {
+        let (lease, invocation) = start_invocation(store, work);
+        let receipt = store
+            .advance_run(
+                &lease,
+                &RunAdvance::TurnStarting {
+                    invocation_id: invocation.id,
+                },
+            )
+            .unwrap();
+        let AdvanceReceipt::Turn(turn) = receipt else {
+            panic!("expected Turn receipt")
+        };
+        turn.id
+    }
+
+    #[test]
+    fn status_ask_sql_prepares_against_the_migrated_schema() {
+        let (directory, _, _) = store_with_wave();
+        let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+
+        conn.prepare(super::HAS_PENDING_USER_ASK_FOR_WORK_SQL)
+            .expect("runtime status SQL must prepare against the migration head");
+    }
+
+    #[test]
+    fn pending_user_ask_status_resolves_every_work_kind_and_excludes_parent_routes() {
+        let (directory, store, work_routes) = store_with_work_hierarchy();
+        let path = directory.path().join("loopflow.db");
+
+        for (work, parent) in &work_routes {
+            let turn_id = start_turn(&store, work);
+            let ask = AskExchange {
+                id: AskId::new(),
+                turn_id,
+                route: AnswerRoute::User,
+                question: format!("What blocks {}?", work.kind()),
+                asked_at: OffsetDateTime::now_utc(),
+                answer: None,
+            };
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            super::insert_ask(&conn, &ask).unwrap();
+
+            for (candidate, _) in &work_routes {
+                assert_eq!(
+                    store.has_pending_user_ask_for_work(candidate).unwrap(),
+                    candidate == work,
+                    "the User Ask must belong only to its {} Epoch",
+                    work.kind()
+                );
+            }
+
+            conn.execute(
+                "UPDATE ask_exchanges
+                 SET route_kind='parent', route_work_kind=?2, route_work_id=?3
+                 WHERE id=?1",
+                rusqlite::params![ask.id.as_str(), parent.kind(), parent.id()],
+            )
+            .unwrap();
+            assert!(!store.has_pending_user_ask_for_work(work).unwrap());
+            let pending = store.pending_asks_for_parent(parent).unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].route, AnswerRoute::Parent(parent.clone()));
+
+            conn.execute("DELETE FROM ask_exchanges WHERE id=?1", [ask.id.as_str()])
+                .unwrap();
+        }
     }
 
     #[test]

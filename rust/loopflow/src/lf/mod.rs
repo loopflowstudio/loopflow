@@ -1097,8 +1097,6 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
-        #[arg(short = 'p', long = "create-pr")]
-        create_pr: bool,
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -2246,14 +2244,12 @@ mod tests {
             }) if issue == "INF-123" && summary == "Root cause recorded"
         ));
 
-        let land =
-            Cli::try_parse_from(["lf", "pr", "land", "-c", "-p"]).expect("parse completing land");
+        let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
         assert!(matches!(
             land.command,
             Some(Commands::Pr {
                 cmd: Some(PrCommand::Land {
                     complete: true,
-                    create_pr: true,
                     next: None,
                     ..
                 })

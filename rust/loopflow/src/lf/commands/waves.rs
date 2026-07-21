@@ -1163,19 +1163,14 @@ async fn snapshot_projects(
 
     for project in &projects {
         let status = child_work_status(store, &ChildRef::Project(project.id.clone())).await?;
-        let Some(index) = work_project_index(
-            &details,
-            project.plan.id.as_str(),
-            &project.plan.slug,
-            work_status_is_terminal(&status),
-            wave.name(),
-            &format!("Project {}", project.id),
-            &format!(
-                "lf project abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                project.plan.slug
-            ),
-        )?
+        let Some(index) =
+            find_project_index(&details, project.plan.id.as_str(), &project.plan.slug)
         else {
+            if !work_status_is_terminal(&status) {
+                details.push(
+                    stored_project_detail(store, project, status, liveness, wave.name()).await?,
+                );
+            }
             continue;
         };
         if details[index].runtime.is_some() {
@@ -1217,21 +1212,20 @@ async fn snapshot_projects(
                     runtime_task.project_id
                 )
             })?;
-        let Some(project_index) = work_project_index(
-            &details,
-            parent.plan.id.as_str(),
-            &parent.plan.slug,
-            work_status_is_terminal(&status),
-            wave.name(),
-            &format!("Task {}", runtime_task.id),
-            &format!(
-                "lf task abandon {} --reason \"Project is absent from the current PM snapshot\"",
-                runtime_task.plan.identifier
-            ),
-        )?
-        else {
-            continue;
-        };
+        let project_index =
+            match find_project_index(&details, parent.plan.id.as_str(), &parent.plan.slug) {
+                Some(index) => index,
+                None if work_status_is_terminal(&status) => continue,
+                None => {
+                    let parent_status =
+                        child_work_status(store, &ChildRef::Project(parent.id.clone())).await?;
+                    details.push(
+                        stored_project_detail(store, parent, parent_status, liveness, wave.name())
+                            .await?,
+                    );
+                    details.len() - 1
+                }
+            };
         if details[project_index].tasks.iter().any(|detail| {
             detail.task.id == runtime_task.plan.id.as_str()
                 || detail.task.identifier == runtime_task.plan.identifier
@@ -1266,26 +1260,6 @@ async fn snapshot_projects(
     Ok(details)
 }
 
-fn work_project_index(
-    projects: &[ProjectDetailSnapshot],
-    id: &str,
-    slug: &str,
-    terminal: bool,
-    wave: &str,
-    work: &str,
-    recovery: &str,
-) -> Result<Option<usize>> {
-    if let Some(index) = find_project_index(projects, id, slug) {
-        return Ok(Some(index));
-    }
-    if terminal {
-        return Ok(None);
-    }
-    Err(anyhow!(
-        "{work} references Project {slug} ({id}), which is absent from the current PM snapshot; run `lf pm sync --wave {wave}`. If the Project remains absent, settle the stale Work with `{recovery}`"
-    ))
-}
-
 fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Result<usize> {
     find_project_index(projects, id, slug)
         .ok_or_else(|| {
@@ -1293,6 +1267,37 @@ fn project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Re
                 "Project {slug} ({id}) is not present in the current PM snapshot; run `lf pm sync` before reading the Wave work map"
             )
         })
+}
+
+async fn stored_project_detail(
+    store: &SharedStore,
+    project: &Project,
+    status: WorkStatus,
+    liveness: &TmuxLiveness,
+    wave: &str,
+) -> Result<ProjectDetailSnapshot> {
+    Ok(ProjectDetailSnapshot {
+        project: PmProjectSummary {
+            id: project.plan.id.as_str().to_string(),
+            slug: project.plan.slug.clone(),
+            name: project.plan.name.clone(),
+            summary: format!(
+                "Project Work is absent from the current PM snapshot; run `lf pm sync --wave {wave}`"
+            ),
+            definition: project.plan.prompt_context.clone(),
+            flows: ProjectFlowPlan::empty(),
+            krs: Vec::new(),
+        },
+        next_move: NextMove {
+            owner: NextMoveOwner::Wave,
+            reason: "Reconcile Project Work with the current PM snapshot".to_string(),
+        },
+        runtime: Some(
+            snapshot_project_runtime(store, project, status, liveness, now()).await?,
+        ),
+        direction: current_direction(store, ChildRef::Project(project.id.clone())).await?,
+        tasks: Vec::new(),
+    })
 }
 
 fn find_project_index(projects: &[ProjectDetailSnapshot], id: &str, slug: &str) -> Option<usize> {
@@ -1344,11 +1349,13 @@ async fn snapshot_task_detail(
     };
     let process = task_process_evidence(runtime.as_ref(), liveness);
     let local_progress = task_local_progress(task, runtime.as_ref(), active, &process);
-    let completion_refusal = match task {
-        Some(task) => crate::ops::task::task_completion_gate(store, task)
-            .await?
-            .refusal(&task.plan.identifier),
-        None => None,
+    let completion_refusal = match (task, runtime.as_ref()) {
+        (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
+            crate::ops::task::task_completion_gate(store, task)
+                .await?
+                .refusal(&task.plan.identifier)
+        }
+        _ => None,
     };
     let resume_refusal = task.and_then(|task| {
         crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
@@ -1684,12 +1691,8 @@ async fn current_direction(
     store: &SharedStore,
     target: ChildRef,
 ) -> Result<Option<BoundarySeedSnapshot>> {
-    let work = store
-        .work_for_child(&target)
-        .await
-        .map_err(|err| anyhow!("failed to resolve child Work: {err}"))?;
     let seed = store
-        .boundary_seed(&work)
+        .boundary_seed_for_child(&target)
         .await
         .map_err(|err| anyhow!("failed to read boundary seed: {err}"))?;
     let text = seed.render();

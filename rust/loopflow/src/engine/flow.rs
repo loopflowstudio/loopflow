@@ -1597,7 +1597,7 @@ Be careful.
     #[test]
     fn parse_ops_mapping_accepts_command_and_args() {
         let yaml = r#"
-- op: pr land --create-pr
+- op: pr land
 "#;
         let value: Value = serde_yaml_ng::from_str(yaml).unwrap();
         let items = parse_flow_items(&value).unwrap();
@@ -1606,7 +1606,7 @@ Be careful.
         match &items[0] {
             Step::Op(item) => {
                 assert_eq!(item.command, "pr");
-                assert_eq!(item.args, vec!["land", "--create-pr"]);
+                assert_eq!(item.args, vec!["land"]);
             }
             other => panic!("expected Ops item, got {other:?}"),
         }

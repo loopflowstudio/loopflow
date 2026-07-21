@@ -273,7 +273,7 @@ fn ops_item_parses_and_expands() {
         "ship-ish",
         r#"
 - implement
-- op: pr land --create-pr
+- op: pr land
 "#,
     );
 
@@ -282,7 +282,7 @@ fn ops_item_parses_and_expands() {
     match &flow.items[1] {
         Step::Op(item) => {
             assert_eq!(item.command, "pr");
-            assert_eq!(item.args, vec!["land", "--create-pr"]);
+            assert_eq!(item.args, vec!["land"]);
         }
         other => panic!("expected ops item, got {other:?}"),
     }

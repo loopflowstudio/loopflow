@@ -81,7 +81,6 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
         PrCommand::Land {
             strict,
             local,
-            create_pr,
             complete,
             next,
             worktree,
@@ -94,7 +93,7 @@ fn execute_pr(repo: &Path, cmd: PrCommand, progress: &impl Progress) -> OpsResul
                 &LandOptions {
                     strict,
                     local,
-                    create_pr,
+                    create_pr: true,
                     complete,
                     next_slug: next,
                     worktree,

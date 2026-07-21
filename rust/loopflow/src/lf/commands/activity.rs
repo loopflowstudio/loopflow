@@ -544,6 +544,31 @@ mod tests {
         AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPublication, TaskId, TaskPrId,
     };
 
+    #[test]
+    fn work_activity_fixture_round_trips() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/work_activity_snapshot.json");
+        let snapshot = serde_json::from_str::<WorkActivitySnapshot>(fixture).unwrap();
+
+        assert_eq!(snapshot.limit, 50);
+        assert_eq!(snapshot.items.len(), 4);
+        assert!(matches!(
+            snapshot.items[0].fact,
+            WorkActivityFact::RunFinished { ref status, .. } if status == "ok"
+        ));
+        assert!(matches!(
+            snapshot.items[1].fact,
+            WorkActivityFact::PrMerged { ref github, .. }
+                if github.as_ref().map(|pr| pr.number) == Some(1144)
+        ));
+        assert_eq!(
+            serde_json::from_str::<WorkActivitySnapshot>(
+                &serde_json::to_string(&snapshot).unwrap()
+            )
+            .unwrap(),
+            snapshot
+        );
+    }
+
     fn task_owner(identifier: &str, project: &str, wave: &str) -> WorkOwner {
         WorkOwner {
             work: WorkRef::Task(TaskId::new()),

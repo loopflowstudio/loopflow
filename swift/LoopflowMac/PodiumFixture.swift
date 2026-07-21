@@ -2,8 +2,8 @@ import Foundation
 import Loopflow
 
 @MainActor
-enum ControlRoomFixture {
-    static func applyIfRequested(to model: ControlRoomModel, sourceFile: String = #filePath) {
+enum PodiumFixture {
+    static func applyIfRequested(to model: PodiumModel, sourceFile: String = #filePath) {
         guard let mode = AppTestMode.current(), mode != .live else { return }
         do {
             switch mode {
@@ -15,49 +15,49 @@ enum ControlRoomFixture {
                 model.applyFixture(
                     roadmap: .available(snapshot),
                     waves: .available([]),
-                    activity: .available(try emptyActivity()),
-                    selectedRuns: .available([]),
+                    processActivity: .available(try emptyProcessActivity()),
+                    workActivity: .available(try emptyWorkActivity()),
                     repos: [],
                     fixed: true
                 )
             case .mockWaves:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
-                let reading: ControlRoomReading<RoadmapSnapshot>
-                let activity: ControlRoomReading<ActivitySnapshot>
-                let runs: ControlRoomReading<[SkillRunEntry]>
+                let reading: PodiumReading<RoadmapSnapshot>
+                let processActivity: PodiumReading<ActivitySnapshot>
+                let workActivity: PodiumReading<WorkActivitySnapshot>
                 switch MockWaveFixture.detailState {
                 case .selected:
                     reading = .available(fixture.roadmap)
-                    activity = .available(try loadActivity(sourceFile: sourceFile))
-                    runs = .available(try loadRuns(sourceFile: sourceFile))
+                    processActivity = .available(try loadProcessActivity(sourceFile: sourceFile))
+                    workActivity = .available(try loadWorkActivity(sourceFile: sourceFile))
                 case .loading:
                     reading = .loading
-                    activity = .loading
-                    runs = .loading
+                    processActivity = .loading
+                    workActivity = .loading
                 case .error:
                     reading = .unavailable(
                         lastGood: nil,
                         reason: "the local registry is unreachable"
                     )
-                    activity = .unavailable(
+                    processActivity = .unavailable(
                         lastGood: nil,
                         reason: "live process evidence is unavailable"
                     )
-                    runs = .unavailable(
+                    workActivity = .unavailable(
                         lastGood: nil,
-                        reason: "recent Run evidence is unavailable"
+                        reason: "durable Work activity is unavailable"
                     )
                 }
                 model.applyFixture(
                     roadmap: reading,
                     waves: .available(fixture.waves),
-                    activity: activity,
-                    selectedRuns: runs,
+                    processActivity: processActivity,
+                    workActivity: workActivity,
                     repos: fixture.repos,
                     fixed: true
                 )
-                let requested = AppTestMode.selectBranch ?? fixture.roadmap.waves.first?.wave.name
-                if let wave = fixture.roadmap.waves.first(where: { $0.wave.name == requested }) {
+                if let requested = AppTestMode.selectBranch,
+                   let wave = fixture.roadmap.waves.first(where: { $0.wave.name == requested }) {
                     model.select(.wave(waveId: wave.wave.id))
                 }
             case .live:
@@ -67,11 +67,11 @@ enum ControlRoomFixture {
             model.applyFixture(
                 roadmap: .unavailable(
                     lastGood: nil,
-                    reason: "Control-room fixture unavailable: \(error.localizedDescription)"
+                    reason: "Podium fixture unavailable: \(error.localizedDescription)"
                 ),
                 waves: .unavailable(lastGood: nil, reason: error.localizedDescription),
-                activity: .unavailable(lastGood: nil, reason: error.localizedDescription),
-                selectedRuns: .unavailable(lastGood: nil, reason: error.localizedDescription),
+                processActivity: .unavailable(lastGood: nil, reason: error.localizedDescription),
+                workActivity: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 repos: [],
                 fixed: true
             )
@@ -94,19 +94,24 @@ enum ControlRoomFixture {
         return (roadmap, waves, repos)
     }
 
-    private static func loadActivity(sourceFile: String) throws -> ActivitySnapshot {
+    private static func loadProcessActivity(sourceFile: String) throws -> ActivitySnapshot {
         let url = try fixtureURL(named: "activity_snapshot.json", sourceFile: sourceFile)
         return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(contentsOf: url))
     }
 
-    private static func loadRuns(sourceFile: String) throws -> [SkillRunEntry] {
-        let url = try fixtureURL(named: "recent_runs.json", sourceFile: sourceFile)
-        return try JSONDecoder().decode([SkillRunEntry].self, from: Data(contentsOf: url))
+    private static func loadWorkActivity(sourceFile: String) throws -> WorkActivitySnapshot {
+        let url = try fixtureURL(named: "work_activity_snapshot.json", sourceFile: sourceFile)
+        return try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(contentsOf: url))
     }
 
-    private static func emptyActivity() throws -> ActivitySnapshot {
+    private static func emptyProcessActivity() throws -> ActivitySnapshot {
         let json = #"{"schema_version":1,"observed_at":1784606400,"fast_window_seconds":300,"slow_window_seconds":1800,"aggregate":{"measured_output_tokens":0,"output_tokens_fast":0,"output_tokens_slow":0,"output_tokens_per_second_fast":0.0,"output_tokens_per_second_slow":0.0,"measured_turns":0,"unmeasured_turns":0},"nodes":[],"provider_processes":[]}"#
         return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(json.utf8))
+    }
+
+    private static func emptyWorkActivity() throws -> WorkActivitySnapshot {
+        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[]}"#
+        return try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(json.utf8))
     }
 
     private static func fixtureURL(named name: String, sourceFile: String) throws -> URL {

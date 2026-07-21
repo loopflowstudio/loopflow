@@ -6,7 +6,7 @@
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
 // CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
 //
-// This runs `lf ls/status/roadmap/ps/runs --json` as a subprocess and decodes the wire
+// This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it resolves and execs a local `lf`. There is no
@@ -100,9 +100,27 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Live Loopflow process trees and provider-measured output activity.
-    public func activity() async throws -> ActivitySnapshot {
+    public func processActivity() async throws -> ActivitySnapshot {
         let stdout = try await run(["ps", "--json"], nil)
         return try Self.decode(ActivitySnapshot.self, from: stdout)
+    }
+
+    /// Durable Work facts across creation, Runs, PR lifecycle, and Steers.
+    /// Filters are composed by `lf` before its bounded presentation window.
+    public func workActivity(
+        since: String = "7d",
+        limit: Int = 50,
+        wave: String? = nil,
+        project: String? = nil,
+        task: String? = nil
+    ) async throws -> WorkActivitySnapshot {
+        var args = ["activity", "--since", since, "--limit", String(limit)]
+        if let wave { args.append(contentsOf: ["--wave", wave]) }
+        if let project { args.append(contentsOf: ["--project", project]) }
+        if let task { args.append(contentsOf: ["--task", task]) }
+        args.append("--json")
+        let stdout = try await run(args, nil)
+        return try Self.decode(WorkActivitySnapshot.self, from: stdout)
     }
 
     /// Bounded history for one conversation epoch. `lf` uses the live backing
@@ -154,37 +172,19 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    /// Recent agent-backed skill calls, optionally drilled to one Wave, Project,
-    /// or Task, with their context and token evidence. Process diagnostics live
-    /// in `lf execs`.
-    public func recentRuns(
-        wave: String? = nil,
-        project: String? = nil,
-        task: String? = nil
-    ) async throws -> [SkillRunEntry] {
-        var args = ["runs"]
-        if let wave { args.append(contentsOf: ["--wave", wave]) }
-        if let project { args.append(contentsOf: ["--project", project]) }
-        if let task { args.append(contentsOf: ["--task", task]) }
-        args.append("--json")
-        let stdout = try await run(args, nil)
-        return try Self.decode([SkillRunEntry].self, from: stdout)
-    }
-
-    /// Resolve one visible Run to the latest captured turn for its exact
-    /// invocation. Trace bodies remain unopened until `traceContent` is called.
-    public func traceAddress(for entry: SkillRunEntry) async throws -> TraceAddress {
-        let stdout = try await run(["trace", entry.id, "--json"], nil)
+    /// Resolve one durable Activity Run fact to its latest captured turn.
+    public func traceAddress(invocationId: String) async throws -> TraceAddress {
+        let stdout = try await run(["trace", invocationId, "--json"], nil)
         let trace = try Self.decode(TraceIndexSnapshot.self, from: stdout)
         guard let turn = trace.turns
-            .filter({ $0.invocationId == entry.id })
+            .filter({ $0.invocationId == invocationId })
             .max(by: { $0.ordinal < $1.ordinal })
         else {
-            throw RegistryQueryError("Run \(entry.id) has no captured trace turn")
+            throw RegistryQueryError("Run \(invocationId) has no captured trace turn")
         }
         return TraceAddress(
             runId: trace.traceId,
-            invocationId: entry.id,
+            invocationId: invocationId,
             turnId: turn.id
         )
     }
@@ -601,7 +601,7 @@ public struct SkillRunEntry: Decodable, Sendable, Identifiable, Hashable {
 }
 
 /// Narrow decoding view over `lf trace <run> --json`. Rust owns the full trace
-/// graph; the control room needs only the immutable ids for an explicit content
+/// graph; The Podium needs only the immutable ids for an explicit content
 /// request.
 public struct TraceIndexSnapshot: Decodable, Sendable {
     public let traceId: String

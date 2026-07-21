@@ -7,25 +7,23 @@
 ./dev xcode        # regenerate and open the Xcode project
 ```
 
-Loopflow opens on the control room: repository and Wave scope on the left,
-machine-wide Now/Roadmap work in the center, and selected Work evidence on the
-right. The strip above them shows active agents, attributed motion,
-five-minute output, measured tokens, and orphaned or unclaimed providers from
-`lf ps --json`. Beside that activity it keeps Wave count, active Runs,
-answering listeners, active Project/Task counts, and Run-without-listener
-warnings from `lf ls --json`. Selecting a Wave, Project, or Task preserves the
-surrounding live view and loads its explicitly attributed recent Runs. Open a
-Run to inspect its exact captured prompt and conversation in the existing trace
-sheet. The control room reads `lf roadmap --json`, `lf ls --json`, and
-`lf ps --json` once per refresh; selection reads filtered `lf runs --json`
-evidence on demand and refreshes it while that Work stays selected. Repository
-scope filters the Work and Wave snapshots locally while agent activity remains
-machine-wide.
+Loopflow opens on The Podium: a closable Wave score on the left, machine-wide
+Now/Roadmap Work in the center, and durable Activity on the right. Selecting a
+Wave, Project, or Task preserves the live view and scopes `lf activity --json`
+at the source. Run facts open their exact trace; PR facts open GitHub proof.
+
+The compact Podium bar reads live process evidence from `lf ps --json`. Its
+vertical signal meter shows exact five-minute TOK/s, with the 30-minute rate as
+a reference tick. The lamp stays independent from output: black is off, green
+is producing, blue is blocked, and amber is waiting or unknown. Wave count,
+active Runs, and Run-without-listener warnings come from `lf ls --json`.
+Repository scope filters the Work and Wave snapshots locally; live process
+evidence remains machine-wide.
 
 Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and
 agent readings fail independently. A failed refresh keeps the last useful
 evidence visible with its failure reason rather than painting a healthy empty
-fleet.
+state.
 
 The previous Wave workspace remains available in repository and Portfolio
 windows while its proven inspectors and Chat surface move into the new root.
@@ -79,25 +77,24 @@ and observation spans.
   Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
   are answered through the explicit `lf work asks/answer` CLI.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf ls/status/roadmap/ps/runs/usage/doctor/tokens/context/trace --json`; the app
+  `lf ls/status/roadmap/ps/activity/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
-  roadmap or selected Run history visible. Prompt and conversation bodies load
-  only after **Open trace**.
+  roadmap or Activity history visible. Prompt and conversation bodies load only
+  after **Open trace**.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.
 
 ## Code map
 
-- `LoopflowMac/Views/ControlRoomView.swift` — primary scope, live Work, and selected detail
-- `LoopflowMac/Views/ControlRoomStatusStrip.swift` — Wave fleet health and machine-wide agent motion
-- `LoopflowMac/ControlRoomModel.swift` — shared readings, stable selection, and local scope
+- `LoopflowMac/Views/PodiumView.swift` — primary Wave scope, Work, and live TOK/s signal
+- `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
+- `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
 - `LoopflowMac/Views/WaveDetailPane.swift` — Wave Chat plus Project/Task work
 - `LoopflowMac/Views/TaskWorkspaceView.swift` — Task diff, file, Ghostty, and Warp surface
-- `LoopflowMac/Views/WorkCensusView.swift` — machine-wide Work and Invocation census
 - `LoopflowMac/Views/ContextLabView.swift` — invocation-set filters, flames, lanes, and evidence
 - `LoopflowMac/Views/ContextLabHandoffView.swift` — explicit trace bodies and Task refinement handoff
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection

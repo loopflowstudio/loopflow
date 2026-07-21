@@ -64,25 +64,7 @@ struct WavesView: View {
     /// but a future child Wave — a Project promoted to residency — indents under
     /// its parent with the same lens and selection behavior.
     private var outlinedWaves: [(wave: WaveViewModel, indent: Int)] {
-        let waves = filteredWaves
-        let byId = Dictionary(waves.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        func isRoot(_ w: WaveViewModel) -> Bool {
-            guard let parent = w.parentWaveId else { return true }
-            return byId[parent] == nil
-        }
-        let childrenByParent = Dictionary(
-            grouping: waves.filter { !isRoot($0) },
-            by: { $0.parentWaveId ?? "" }
-        )
-        var result: [(WaveViewModel, Int)] = []
-        func emit(_ wave: WaveViewModel, _ indent: Int) {
-            result.append((wave, indent))
-            let children = (childrenByParent[wave.id] ?? [])
-                .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-            for child in children { emit(child, indent + 1) }
-        }
-        for root in waves.filter(isRoot) { emit(root, 0) }
-        return result
+        waveOutline(filteredWaves)
     }
 
     /// An idle, not-yet-launched row for a wave authored on disk.

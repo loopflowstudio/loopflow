@@ -32,12 +32,13 @@ struct WaveRowViewTests {
     private func makeRow(
         wave: WaveViewModel,
         isSelected: Bool = false,
-        indentLevel: Int = 0
+        indentLevel: Int = 0,
+        onSelect: @escaping () -> Void = {}
     ) -> WaveRow {
         WaveRow(
             wave: wave,
             isSelected: isSelected,
-            onSelect: {},
+            onSelect: onSelect,
             indentLevel: indentLevel
         )
     }
@@ -70,5 +71,15 @@ struct WaveRowViewTests {
         #expect(throws: (any Error).self) {
             _ = try none.inspect().find(text: "0")
         }
+    }
+
+    @Test("Row is one keyboard-operable selection control")
+    func selectsThroughButton() throws {
+        var selected = false
+        let row = makeRow(wave: makeWave(), onSelect: { selected = true })
+
+        try row.inspect().button().tap()
+
+        #expect(selected)
     }
 }

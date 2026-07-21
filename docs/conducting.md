@@ -24,6 +24,7 @@ command.
 
 ```bash
 lf runs --wave infra          # recent agent-backed runs with token evidence
+lf runs --project parser      # one Project, filtered before the result cap
 lf execs                      # recent lf processes across all repos
 lf trace <exec-id>            # reconstruct one process tree
 lf trace <id> --content       # include prompt/conversation bodies (gated)

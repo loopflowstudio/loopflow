@@ -412,6 +412,7 @@ lf ls --json                    # every durable Wave and its Home/runtime eviden
 lf status <wave> --json         # one Wave's Work hierarchy, Runs, and attention
 lf roadmap --json               # current plan across Waves joined to runtime truth
 lf runs                         # one row per skill call: context, tokens, cost
+lf runs --project parser        # one Project's Runs, filtered before the result cap
 lf execs                        # one row per lf process
 lf trace 66863649               # select an exec or trace; render its process tree
 lf trace 66863649 --json        # inspect the same tree and its skill invocations

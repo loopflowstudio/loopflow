@@ -129,6 +129,7 @@ Every read the conducting surfaces offer is `--json`:
 lf ls --json                # every durable Wave and its Home/runtime evidence
 lf status <wave> --json     # live Project → Task hierarchy
 lf roadmap --json           # every open Task across every wave
+lf runs --project parser --json
 lf runs --task INF-123 --json
 lf trace <exec-id> --json
 ```

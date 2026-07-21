@@ -29,7 +29,13 @@ struct ControlRoomView: View {
                 ControlRoomSidebar(model: model)
                     .frame(minWidth: 205, idealWidth: 245, maxWidth: 290)
 
-                RoadmapView(model: model, selection: $model.selection)
+                RoadmapView(
+                    model: model,
+                    selection: Binding(
+                        get: { model.selection },
+                        set: { model.select($0) }
+                    )
+                )
                     .frame(minWidth: 390, idealWidth: 650, maxWidth: .infinity)
                     .accessibilityIdentifier("control-room-work")
 
@@ -193,6 +199,9 @@ private struct ControlRoomInspector: View {
     @Environment(\.palette) private var palette
     @State private var isSettingTurnIntent = false
     @State private var turnIntentError: String?
+    @State private var openingTraceId: String?
+    @State private var traceError: String?
+    @State private var traceRequest: TraceAddress?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -225,6 +234,22 @@ private struct ControlRoomInspector: View {
         .background(palette.surface)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("control-room-inspector")
+        .task(id: model.selection) {
+            traceError = nil
+            guard model.selection != nil else { return }
+            while !Task.isCancelled {
+                await model.refreshSelectedRuns()
+                do {
+                    try await Task.sleep(for: .seconds(15))
+                } catch {
+                    return
+                }
+            }
+        }
+        .sheet(item: $traceRequest) { address in
+            TraceEvidenceView(address: address)
+                .frame(minWidth: 900, minHeight: 620)
+        }
     }
 
     @ViewBuilder
@@ -240,6 +265,7 @@ private struct ControlRoomInspector: View {
                     case .task(let waveId, let taskId):
                         taskDetail(waveId: waveId, taskId: taskId)
                     }
+                    runHistory(selection)
                 }
                 .padding(Spacing.lg)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -385,6 +411,97 @@ private struct ControlRoomInspector: View {
         }
     }
 
+    @ViewBuilder
+    private func runHistory(_ selection: ControlRoomSelection) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack {
+                Text("Recent runs")
+                    .font(Typography.caption(10).weight(.semibold))
+                    .foregroundStyle(palette.textSecondary)
+                    .textCase(.uppercase)
+                Spacer()
+                if case .available(let runs) = model.selectedRuns, runs.count > 6 {
+                    Text("Latest 6")
+                        .font(Typography.caption(9))
+                        .foregroundStyle(palette.textSecondary)
+                }
+            }
+
+            if model.selectedRuns.isLoading {
+                ProgressView("Reading Runs…")
+                    .controlSize(.small)
+                    .accessibilityIdentifier("control-room-runs-loading")
+            } else {
+                let runs = model.runs(for: selection)
+                if runs.isEmpty, model.selectedRuns.errorMessage == nil {
+                    Text("No recent attributed Runs.")
+                        .font(Typography.body(11))
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("control-room-runs-empty")
+                } else {
+                    ForEach(Array(runs.prefix(6))) { run in
+                        runCard(run)
+                    }
+                }
+                if let reason = model.selectedRuns.errorMessage {
+                    unavailable(reason)
+                        .accessibilityIdentifier("control-room-runs-unavailable")
+                }
+            }
+
+            if let traceError {
+                unavailable(traceError)
+                    .accessibilityIdentifier("control-room-trace-error")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("control-room-run-history")
+    }
+
+    private func runCard(_ run: SkillRunEntry) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                Circle()
+                    .fill(runColor(run))
+                    .frame(width: 7, height: 7)
+                Text(runLabel(run))
+                    .font(Typography.body(11).weight(.semibold))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Text(run.status)
+                    .font(Typography.caption(9).weight(.semibold))
+                    .foregroundStyle(runColor(run))
+            }
+
+            Text("\(run.provider)\(run.model.map { ":\($0)" } ?? "") · \(runStarted(run))")
+                .font(Typography.caption(9))
+                .foregroundStyle(palette.textSecondary)
+                .lineLimit(1)
+
+            HStack(spacing: Spacing.sm) {
+                Text(runEvidence(run))
+                    .font(Typography.caption(9))
+                    .foregroundStyle(palette.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button(openingTraceId == run.id ? "Opening…" : "Open trace") {
+                    Task { await openTrace(run) }
+                }
+                .buttonStyle(.plain)
+                .font(Typography.caption(9).weight(.semibold))
+                .foregroundStyle(Color.loopflowBurgundy)
+                .disabled(openingTraceId != nil)
+                .accessibilityIdentifier("control-room-open-trace-\(run.id)")
+            }
+        }
+        .padding(Spacing.sm)
+        .background(palette.surfaceMuted)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(runLabel(run)), \(run.status), \(runEvidence(run))")
+    }
+
     private func eyebrow(_ value: String) -> some View {
         Text(value.uppercased())
             .font(Typography.caption(9).weight(.bold))
@@ -452,6 +569,39 @@ private struct ControlRoomInspector: View {
             .textSelection(.enabled)
     }
 
+    private func runLabel(_ run: SkillRunEntry) -> String {
+        guard let flow = run.flow, flow != run.skill else { return run.skill }
+        return "\(flow) / \(run.skill)"
+    }
+
+    private func runStarted(_ run: SkillRunEntry) -> String {
+        Date(timeIntervalSince1970: TimeInterval(run.started))
+            .formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func runEvidence(_ run: SkillRunEntry) -> String {
+        var evidence: [String] = []
+        if run.inputTokens != nil || run.outputTokens != nil {
+            let tokens = (run.inputTokens ?? 0) + (run.outputTokens ?? 0)
+            evidence.append("\(tokens.formatted()) tokens")
+        }
+        evidence.append(run.turns == 1 ? "1 turn" : "\(run.turns) turns")
+        if let cost = run.costUsd {
+            evidence.append(cost.formatted(.currency(code: "USD")))
+        }
+        return evidence.joined(separator: " · ")
+    }
+
+    private func runColor(_ run: SkillRunEntry) -> Color {
+        if run.ended == nil { return .statusInfo }
+        switch run.status.lowercased() {
+        case "ok", "completed", "succeeded": return .statusSuccess
+        case "failed", "error": return .statusError
+        case "interrupted": return .statusWarning
+        default: return .statusNeutral
+        }
+    }
+
     private func waveName(_ waveId: String) -> String {
         model.wave(id: waveId)?.wave.name ?? model.rosterWave(id: waveId)?.displayName ?? "Wave"
     }
@@ -465,6 +615,18 @@ private struct ControlRoomInspector: View {
             try await model.setWavePaused(waveId: waveId, paused: paused)
         } catch {
             turnIntentError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func openTrace(_ run: SkillRunEntry) async {
+        openingTraceId = run.id
+        traceError = nil
+        defer { openingTraceId = nil }
+        do {
+            traceRequest = try await model.traceAddress(for: run)
+        } catch {
+            traceError = error.localizedDescription
         }
     }
 

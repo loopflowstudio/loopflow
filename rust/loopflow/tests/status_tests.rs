@@ -506,6 +506,22 @@ fn runs_drill_to_one_task_by_issue_identifier() {
     assert_eq!(missed.as_array().expect("run array").len(), 0);
 }
 
+/// Project drill applies before the result cap, using the slug carried by the
+/// invocation rather than inferring ownership from its Wave or Task.
+#[test]
+fn runs_drill_to_one_project_by_slug() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed(home.path(), "audit-project-drill");
+
+    let matched = runs_json_filtered(home.path(), &["--project", "auditability"]);
+    let matched = matched.as_array().expect("run array");
+    assert_eq!(matched.len(), 1);
+    assert_eq!(matched[0]["project"], "auditability");
+
+    let missed = runs_json_filtered(home.path(), &["--project", "no-such-project"]);
+    assert_eq!(missed.as_array().expect("run array").len(), 0);
+}
+
 /// The wave drill mirrors the internal scoping `lf status` uses.
 #[test]
 fn runs_drill_to_one_wave_by_name() {

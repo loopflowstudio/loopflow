@@ -14,9 +14,13 @@ five-minute output, measured tokens, and orphaned or unclaimed providers from
 `lf ps --json`. Beside that activity it keeps Wave count, active Runs,
 answering listeners, active Project/Task counts, and Run-without-listener
 warnings from `lf ls --json`. Selecting a Wave, Project, or Task preserves the
-surrounding live view. The control room reads `lf roadmap --json`,
-`lf ls --json`, and `lf ps --json` once per refresh; repository scope filters
-the Work and Wave snapshots locally while agent activity remains machine-wide.
+surrounding live view and loads its explicitly attributed recent Runs. Open a
+Run to inspect its exact captured prompt and conversation in the existing trace
+sheet. The control room reads `lf roadmap --json`, `lf ls --json`, and
+`lf ps --json` once per refresh; selection reads filtered `lf runs --json`
+evidence on demand and refreshes it while that Work stays selected. Repository
+scope filters the Work and Wave snapshots locally while agent activity remains
+machine-wide.
 
 Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and
 agent readings fail independently. A failed refresh keeps the last useful
@@ -74,7 +78,8 @@ and observation spans.
   `lf ls/status/roadmap/ps/runs/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave
   evidence renders its reason, and refresh failures leave the last successful
-  roadmap or selected Wave detail visible.
+  roadmap or selected Run history visible. Prompt and conversation bodies load
+  only after **Open trace**.
 - **Per-Wave SSE** owns live motion. `WaveChatConnection` first reads
   `lf chat --history --json`, then connects only to the selected Wave's
   `/events` stream and upserts its replay before continuing live.

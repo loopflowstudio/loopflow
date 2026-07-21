@@ -16,6 +16,7 @@ enum ControlRoomFixture {
                     roadmap: .available(snapshot),
                     waves: .available([]),
                     activity: .available(try emptyActivity()),
+                    selectedRuns: .available([]),
                     repos: [],
                     fixed: true
                 )
@@ -23,13 +24,16 @@ enum ControlRoomFixture {
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
                 let reading: ControlRoomReading<RoadmapSnapshot>
                 let activity: ControlRoomReading<ActivitySnapshot>
+                let runs: ControlRoomReading<[SkillRunEntry]>
                 switch MockWaveFixture.detailState {
                 case .selected:
                     reading = .available(fixture.roadmap)
                     activity = .available(try loadActivity(sourceFile: sourceFile))
+                    runs = .available(try loadRuns(sourceFile: sourceFile))
                 case .loading:
                     reading = .loading
                     activity = .loading
+                    runs = .loading
                 case .error:
                     reading = .unavailable(
                         lastGood: nil,
@@ -39,11 +43,16 @@ enum ControlRoomFixture {
                         lastGood: nil,
                         reason: "live process evidence is unavailable"
                     )
+                    runs = .unavailable(
+                        lastGood: nil,
+                        reason: "recent Run evidence is unavailable"
+                    )
                 }
                 model.applyFixture(
                     roadmap: reading,
                     waves: .available(fixture.waves),
                     activity: activity,
+                    selectedRuns: runs,
                     repos: fixture.repos,
                     fixed: true
                 )
@@ -62,6 +71,7 @@ enum ControlRoomFixture {
                 ),
                 waves: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 activity: .unavailable(lastGood: nil, reason: error.localizedDescription),
+                selectedRuns: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 repos: [],
                 fixed: true
             )
@@ -87,6 +97,11 @@ enum ControlRoomFixture {
     private static func loadActivity(sourceFile: String) throws -> ActivitySnapshot {
         let url = try fixtureURL(named: "activity_snapshot.json", sourceFile: sourceFile)
         return try JSONDecoder().decode(ActivitySnapshot.self, from: Data(contentsOf: url))
+    }
+
+    private static func loadRuns(sourceFile: String) throws -> [SkillRunEntry] {
+        let url = try fixtureURL(named: "recent_runs.json", sourceFile: sourceFile)
+        return try JSONDecoder().decode([SkillRunEntry].self, from: Data(contentsOf: url))
     }
 
     private static func emptyActivity() throws -> ActivitySnapshot {

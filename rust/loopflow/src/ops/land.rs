@@ -80,7 +80,46 @@ fn prepare_pr(
     crate::ops::task::verify_task_pr_range(&repo_root)?;
     {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
-        crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+        if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
+            let after_merge = if options.complete {
+                crate::task::AfterMerge::CompleteTask
+            } else {
+                crate::task::AfterMerge::ContinueTask
+            };
+            if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
+                &repo_root,
+                crate::task::PrMergeMode::Auto,
+                after_merge,
+                options.next_slug.as_deref(),
+            )? {
+                if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
+                    if pr.number == u64::from(number)
+                        && pr.head_sha.as_deref() == Some(head.as_str())
+                        && crate::ops::pr::auto_merge_enabled(&repo_root, pr.number)?
+                    {
+                        progress.status("Pull request is already armed for this exact head");
+                        return Ok(Some(pr));
+                    }
+                }
+            }
+        }
+        let cleared_task_request =
+            crate::ops::task::clear_task_pr_merge_before_head_mutation(&repo_root, true)?;
+        if !options.local && !cleared_task_request {
+            // Wave and other non-Task PRs have no durable Task request to
+            // revoke, but GitHub may still have this branch in its merge queue.
+            // Dequeue it before rebase/push; otherwise GitHub rejects the head
+            // update and the repair cannot publish.
+            if let Some(pr) = crate::ops::pr::current_pr(&repo_root)? {
+                let number = u32::try_from(pr.number).map_err(|_| {
+                    OpsError::Message(format!(
+                        "pull request #{} exceeds supported range",
+                        pr.number
+                    ))
+                })?;
+                crate::ops::pr::disable_auto_merge(&repo_root, number)?;
+            }
+        }
     }
     match integration {
         Integration::Required => prepare_land(&repo_root, options, progress)?,

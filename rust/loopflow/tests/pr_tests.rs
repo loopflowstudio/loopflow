@@ -84,15 +84,15 @@ echo "$@" >> "{log_path}"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  echo 'true'
+  exit 0
+fi
 if [ "$1" = "api" ]; then
   echo '{{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"new-head"}}}}'
   exit 0
 fi
-if [ "$1 $2" = "pr view" ]; then
-  echo 'true'
-  exit 0
-fi
-if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
   exit 0
 fi
 exit 0
@@ -107,16 +107,16 @@ echo "$@" >> "{log_path}"
 if [ "$1" = "--version" ]; then
   exit 0
 fi
+if [ "$1 $2" = "api graphql" ]; then
+  echo 'true'
+  exit 0
+fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
   printf '{{"merged":false,"state":"open","draft":false,"merge_commit_sha":null,"number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
   exit 0
 fi
-if [ "$1 $2" = "pr view" ]; then
-  echo 'true'
-  exit 0
-fi
-if [ "$1 $2 $3 $4" = "pr merge 912 --disable" ]; then
+if [ "$1 $2 $3 $4" = "pr merge 912 --disable-auto" ]; then
   exit 0
 fi
 exit 0
@@ -500,7 +500,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
     assert!(persisted.merge_request().is_none());
     assert_eq!(persisted.after_merge(), AfterMerge::ContinueTask);
     let log = std::fs::read_to_string(log_path).expect("read gh log");
-    assert!(log.contains("pr merge 912 --disable"));
+    assert!(log.contains("pr merge 912 --disable-auto"));
 }
 
 #[test]
@@ -549,7 +549,7 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
         .expect("active PR");
     assert!(persisted.merge_request().is_none());
     let log = std::fs::read_to_string(log_path).expect("read gh log");
-    assert!(log.contains("pr merge 912 --disable"));
+    assert!(log.contains("pr merge 912 --disable-auto"));
 }
 
 #[test]
@@ -624,7 +624,9 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
         .expect("active PR");
     assert!(persisted.merge_request().is_none());
     let log = fs::read_to_string(log_path).expect("read operation log");
-    let disable = log.find("pr merge 912 --disable").expect("Auto is revoked");
+    let disable = log
+        .find("pr merge 912 --disable-auto")
+        .expect("Auto is revoked");
     let push = log.find("git-push").expect("new head is pushed");
     assert!(disable < push, "Auto must be revoked before push:\n{log}");
 }

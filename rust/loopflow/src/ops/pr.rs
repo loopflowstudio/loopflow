@@ -356,23 +356,27 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
 }
 
 pub(crate) fn auto_merge_enabled(repo: &Path, number: u64) -> OpsResult<bool> {
+    let query = "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}";
     let observation = Command::new("gh")
         .args([
-            "pr",
-            "view",
-            &number.to_string(),
-            "--json",
-            "autoMergeRequest",
+            "api",
+            "graphql",
+            "-F",
+            "owner={owner}",
+            "-F",
+            "name={repo}",
+            "-F",
+            &format!("number={number}"),
+            "-f",
+            &format!("query={query}"),
             "--jq",
-            ".autoMergeRequest != null",
+            ".data.repository.pullRequest | (.autoMergeRequest != null) or (.mergeQueueEntry != null)",
         ])
         .current_dir(repo)
         .output()?;
     if !observation.status.success() {
         return Err(OpsError::CommandFailed {
-            command: format!(
-                "gh pr view {number} --json autoMergeRequest --jq .autoMergeRequest!=null"
-            ),
+            command: format!("gh api graphql [pull request #{number} merge request]"),
             stderr: stderr_from_output(&observation),
         });
     }
@@ -392,14 +396,14 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
         return Ok(());
     }
     let output = Command::new("gh")
-        .args(["pr", "merge", &number.to_string(), "--disable"])
+        .args(["pr", "merge", &number.to_string(), "--disable-auto"])
         .current_dir(repo)
         .output()?;
     if output.status.success() {
         return Ok(());
     }
     Err(OpsError::CommandFailed {
-        command: format!("gh pr merge {number} --disable"),
+        command: format!("gh pr merge {number} --disable-auto"),
         stderr: stderr_from_output(&output),
     })
 }

@@ -1227,6 +1227,54 @@ pub(crate) fn request_task_pr_publication(repo: &Path) -> OpsResult<bool> {
     })
 }
 
+/// The exact clean Task settlement already represented by local HEAD and the
+/// stored GitHub head. `land` uses this read before any head mutation so a
+/// replay can observe an already-armed request instead of clearing it.
+pub(crate) fn matching_task_pr_merge_request(
+    repo: &Path,
+    mode: PrMergeMode,
+    after_merge: AfterMerge,
+    next_slug: Option<&str>,
+) -> OpsResult<Option<(u32, String)>> {
+    let next_slug = next_slug.map(parse_pr_slug).transpose()?;
+    if after_merge == AfterMerge::CompleteTask && next_slug.is_some() {
+        return Err(task_error("--complete and --next cannot be used together"));
+    }
+    block_on_task(async move {
+        let TaskAuthority::Authority { store, task, .. } = resolve_task_authority(repo).await?
+        else {
+            return Ok(None);
+        };
+        if !is_clean(repo)? {
+            return Ok(None);
+        }
+        let branch = current_branch(repo)?;
+        let head = rev_parse(repo, "HEAD")?;
+        let pr = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+            .ok_or_else(|| task_error(format!("Task {} has no active PR", task.plan.identifier)))?;
+        if branch.as_deref() != Some(pr.branch.as_str()) {
+            return Ok(None);
+        }
+        let Some(github) = pr.github() else {
+            return Ok(None);
+        };
+        let Some(request) = pr.merge_request() else {
+            return Ok(None);
+        };
+        if github.head_sha.as_deref() != Some(head.as_str())
+            || request.mode != mode
+            || request.after_merge != after_merge
+            || request.next_slug != next_slug
+        {
+            return Ok(None);
+        }
+        Ok(Some((github.number, head)))
+    })
+}
+
 /// Clear settlement intent before a Loopflow-owned operation can move the PR
 /// head. Auto-merge is revoked remotely first; a crash between the two steps is
 /// replay-safe because the next attempt observes it already disabled.

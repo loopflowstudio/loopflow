@@ -7,10 +7,12 @@ use std::process::Command;
 use loopflow::durable::WorkStatus;
 use loopflow::ops::task::{pr_next, task_complete, task_resume, task_snapshot, task_status};
 use loopflow::ops::{
-    commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
-    NullProgress, OpsError, PrOptions,
+    commit_workflow, create_or_update_pr, current_pr, land, present_pr_review, CommitOptions,
+    LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPublication};
+use loopflow::task::{
+    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPublication, TaskGateProposal,
+};
 use loopflow_test_support::TestRepo;
 use support::{
     counting_open_script, presentation_attempts, register_active_task, register_task,
@@ -75,6 +77,27 @@ if [ "$1" = "api" ]; then
 fi
 exit 0
 "#
+}
+
+fn gh_merged_pr_logging_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+echo "$@" >> "{log_path}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  head=$(git rev-parse HEAD)
+  printf '{{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
+  exit 0
+fi
+if [ "$1 $2" = "pr list" ]; then
+  echo '[]'
+  exit 0
+fi
+exit 0
+"#
+    )
 }
 
 fn gh_changed_head_script(log_path: &str) -> String {
@@ -454,6 +477,140 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
     ));
+}
+
+#[test]
+fn completing_land_discards_an_empty_successor_only_in_finally() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let log_path = home.path().join("gh.log");
+    let script = gh_merged_pr_logging_script(log_path.to_string_lossy().as_ref());
+    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join("scratch")).expect("create scratch");
+    fs::write(repo.path().join("scratch/.gitkeep"), "").expect("write gitkeep");
+    repo.stage_all();
+    repo.commit("track scratch");
+    push_branch(&repo, "main");
+    let base = repo.head_sha();
+    let branch = "jack/task-pr-proof";
+    repo.create_branch(branch);
+    point_origin_at_github(&repo);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".to_string(),
+            head_sha: None,
+        }),
+        merge: None,
+    });
+    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    runtime
+        .block_on(task.store.update_task_pr(&pr))
+        .expect("mark PR as published");
+    task_status("INF-123").expect("reconcile merged Task PR");
+
+    let restore = Command::new("git")
+        .current_dir(repo.path())
+        .args([
+            "remote",
+            "set-url",
+            "origin",
+            repo.bare_path().to_str().expect("bare origin path"),
+        ])
+        .status()
+        .expect("restore local origin");
+    assert!(restore.success());
+    let successor = pr_next(repo.path(), None).expect("rotate merged continuation");
+    assert_eq!(successor.phase(), PrPhase::Working);
+
+    let options = LandOptions {
+        strict: false,
+        local: false,
+        create_pr: true,
+        complete: true,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: None,
+        pr_body: None,
+        agent: None,
+    };
+    let pre_final = land(repo.path(), &options, &NullProgress)
+        .expect_err("an empty pre-final successor must not complete");
+    assert!(pre_final.to_string().contains("PR range is empty"));
+
+    let work = runtime
+        .block_on(
+            task.store
+                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
+        )
+        .expect("resolve Task Work");
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
+    let mut final_task = runtime
+        .block_on(task.store.get_task(&task.task.id))
+        .expect("read Task")
+        .expect("Task exists");
+    final_task
+        .enter_finally(TaskGateProposal {
+            done: false,
+            reason: "review the already-merged slice".to_string(),
+        })
+        .expect("enter finally");
+    let conn =
+        rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open Task registry");
+    conn.execute(
+        "UPDATE tasks SET lifecycle_phase='gate', phase_epoch=?2, gate_cycle=?3, \
+         gate_proposal_json=?4 WHERE id=?1",
+        rusqlite::params![
+            final_task.id.as_str(),
+            final_task.phase_epoch,
+            final_task.gate_cycle,
+            serde_json::to_string(&final_task.gate_proposal).expect("serialize gate proposal")
+        ],
+    )
+    .expect("persist finally phase");
+    fs::create_dir_all(repo.path().join("scratch")).expect("recreate scratch after rotation");
+    fs::write(repo.path().join("scratch/review.md"), "final gate evidence")
+        .expect("write final evidence");
+    let calls_before = fs::read_to_string(&log_path).expect("read setup calls");
+
+    let result = land(repo.path(), &options, &NullProgress).expect("complete final Task");
+
+    assert!(result.is_none(), "no empty GitHub PR should be created");
+    let calls_after = fs::read_to_string(&log_path).expect("read final calls");
+    let final_calls = calls_after
+        .strip_prefix(&calls_before)
+        .expect("setup calls remain a prefix");
+    for mutation in ["pr create", "pr edit", "pr ready", "pr merge"] {
+        assert!(
+            !final_calls.contains(mutation),
+            "direct completion must not mutate GitHub: {final_calls}"
+        );
+    }
+    assert_eq!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    );
+    let completed = runtime
+        .block_on(task.store.get_task(&task.task.id))
+        .expect("read completed Task")
+        .expect("completed Task exists");
+    assert!(completed
+        .gate_proposal
+        .as_ref()
+        .is_some_and(|gate| gate.done));
+    let prs = runtime
+        .block_on(task.store.task_prs(&task.task.id))
+        .expect("read completed PR chain");
+    assert_eq!(prs.len(), 1, "the empty successor is removed atomically");
+    assert_eq!(prs[0].phase(), PrPhase::Merged);
+    assert!(!repo.path().join("scratch/review.md").exists());
 }
 
 #[test]

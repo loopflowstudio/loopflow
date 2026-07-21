@@ -398,10 +398,21 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
 
 /// Return true if working tree is clean.
 pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
-    let output = run_git(repo, &["status", "--porcelain"])?;
+    is_clean_for_pathspec(repo, &[])
+}
+
+/// Return true when only gate artifacts under `scratch/` are dirty.
+pub fn is_materially_clean(repo: &Path) -> Result<bool, GitError> {
+    is_clean_for_pathspec(repo, &[".", ":(exclude)scratch", ":(exclude)scratch/**"])
+}
+
+fn is_clean_for_pathspec(repo: &Path, pathspec: &[&str]) -> Result<bool, GitError> {
+    let mut args = vec!["status", "--porcelain"];
+    args.extend_from_slice(pathspec);
+    let output = run_git(repo, &args)?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
-            command: "git status --porcelain".to_string(),
+            command: format!("git {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
@@ -1455,6 +1466,7 @@ mod tests {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "tracked");
         let initial = material_worktree_state(repo.path()).expect("initial state");
+        assert!(is_materially_clean(repo.path()).expect("initially clean"));
 
         fs::create_dir(repo.path().join("scratch")).expect("create scratch");
         fs::write(repo.path().join("scratch/review.md"), "gate evidence")
@@ -1463,12 +1475,14 @@ mod tests {
             material_worktree_state(repo.path()).expect("scratch-only state"),
             initial
         );
+        assert!(is_materially_clean(repo.path()).expect("scratch-only clean"));
 
         fs::write(repo.path().join("src.txt"), "material repair").expect("write repair");
         assert_ne!(
             material_worktree_state(repo.path()).expect("material state"),
             initial
         );
+        assert!(!is_materially_clean(repo.path()).expect("materially dirty"));
     }
 
     #[test]

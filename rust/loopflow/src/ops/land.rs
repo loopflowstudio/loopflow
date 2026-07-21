@@ -48,8 +48,9 @@ enum Integration {
 /// Run every land skill: commit, rebase onto main, clear scratch, mark the PR
 /// ready, and finalize per `finalize`. `land` arms auto-merge; `submit` assigns
 /// the PR for a human to merge. Neither rotates the worktree — the wave home is
-/// permanent. Returns the resulting PR (`None` for a local merge) so callers can
-/// record it against the run.
+/// permanent. Returns the resulting PR, or `None` for a local merge or direct
+/// Task completion over an already-merged PR, so callers can record it against
+/// the run.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -70,6 +71,22 @@ fn prepare_pr(
     }
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
+    if options.complete && (!options.strict || is_clean(&repo_root)?) {
+        if let Some(issue) = crate::ops::task::find_discardable_final_task(&repo_root)? {
+            // The final flow reviewed work that already landed, and rotation left
+            // one unpublished branch at its recorded base. Reuse the Task completion
+            // gate instead of manufacturing an empty GitHub PR. Pre-final Tasks do
+            // not match the query and continue through the ordinary range refusal.
+            clear_scratch(&repo_root, progress)?;
+            crate::ops::task::task_complete(
+                &issue,
+                "Final Task flow approved completion after its prior pull request merged"
+                    .to_string(),
+            )?;
+            progress.status("Completed Task over its merged pull request.");
+            return Ok(None);
+        }
+    }
     if !options.local && !crate::ops::pr::gh_available() {
         return Err(OpsError::Message("gh CLI not found".to_string()));
     }

@@ -13,8 +13,8 @@ use crate::durable::{
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{
     checkout, checkout_new_branch_from, cherry_pick_range, current_branch, delete_local_branch,
-    fetch, get_default_branch, is_ancestor, is_clean, merge_base, push_with_upstream, ref_exists,
-    rev_parse, stash_including_untracked, stash_pop,
+    fetch, get_default_branch, is_ancestor, is_clean, is_materially_clean, merge_base,
+    push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{tmux_session_exists, tmux_session_slug};
@@ -3633,6 +3633,29 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
         reconcile_process_liveness(&store, &mut task).await?;
         reconcile_task_completion(&store, &mut task, None).await?;
         Ok(task)
+    })
+}
+
+/// Find a final Task whose only active PR is the empty artifact of rotating
+/// past already-merged work. Scratch is gate evidence, not another PR slice.
+pub(crate) fn find_discardable_final_task(repo: &Path) -> OpsResult<Option<String>> {
+    let repo = repo.to_path_buf();
+    block_on_task(async move {
+        let TaskAuthority::Authority { store, task, .. } = resolve_task_authority(&repo).await?
+        else {
+            return Ok(None);
+        };
+        if task.lifecycle_phase != crate::task::TaskLifecyclePhase::Finally {
+            return Ok(None);
+        }
+        let materially_clean = is_materially_clean(&task.worktree)
+            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?;
+        if !materially_clean {
+            return Ok(None);
+        }
+        let gate = task_completion_gate(&store, &task).await?;
+        Ok((gate.satisfied && gate.discardable_successor.is_some())
+            .then(|| task.plan.identifier.clone()))
     })
 }
 

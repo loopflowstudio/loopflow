@@ -32,6 +32,10 @@ windows while its proven inspectors and Chat surface move into the new root.
 Wave Chat loads the active backing's bounded history before SSE, keeps it visible
 through reconnects, and rolls equivalent operational failures into one
 disclosed notice. Cold launch does not start a chat transcript read.
+Local-backed conversations compose in the app. Discord-backed conversations
+mirror the same source-linked transcript and open Discord to reply; they never
+create a parallel local thread. Prior backing epochs remain selectable and
+read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and human-level failures remain visible. The detail pane
 reads Projects, Tasks, decisions, PR delivery, and attention from

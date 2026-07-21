@@ -40,6 +40,24 @@ struct WaveChatConnectionTests {
         )
     }
 
+    private func discordEpoch(number: UInt64 = 2) -> ConversationEpoch {
+        ConversationEpoch(
+            id: "chat-epoch-\(number)",
+            number: number,
+            backing: .discord(
+                guildId: "guild",
+                channelId: "channel",
+                open: .openDiscord(
+                    label: "Open in Discord",
+                    url: "https://discord.com/channels/guild/channel"
+                )
+            ),
+            journalSeq: number,
+            startedAt: "2026-07-15T05:00:00Z",
+            endedAt: nil
+        )
+    }
+
     private func localMessage(_ turn: ChatTurn, epoch: ConversationEpoch) -> WaveChatMessage {
         WaveChatMessage(
             epochId: epoch.id,
@@ -63,6 +81,25 @@ struct WaveChatConnectionTests {
 
     private func streamMessage(id: String, text: String) -> String {
         "{\"type\":\"message\",\"id\":\"\(id)\",\"text\":\"\(text)\",\"phase\":\"stream\"}"
+    }
+
+    @Test("compose follows the selected conversation backing")
+    func composeRouteIsSingleBacked() {
+        let local = localEpoch()
+        let discord = discordEpoch()
+
+        #expect(waveChatComposeRoute(activeEpoch: nil, selectedEpoch: nil) == .unavailable)
+        #expect(waveChatComposeRoute(activeEpoch: local, selectedEpoch: local) == .local)
+        #expect(
+            waveChatComposeRoute(activeEpoch: discord, selectedEpoch: discord)
+                == .openDiscord(
+                    .openDiscord(
+                        label: "Open in Discord",
+                        url: "https://discord.com/channels/guild/channel"
+                    )
+                )
+        )
+        #expect(waveChatComposeRoute(activeEpoch: discord, selectedEpoch: local) == .archived)
     }
 
     @Test("start installs durable history before waiting for a listener")

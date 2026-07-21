@@ -60,8 +60,9 @@ struct WaveChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if isLive {
+            if showsWaveHeader {
                 waveControlHeader
+                backingHealthNotice
                 Divider()
             }
             transcript
@@ -151,10 +152,14 @@ struct WaveChatView: View {
                             )
                             .id(turn.id)
                         } else {
+                            let source = connection?.messages.first {
+                                $0.turn.id == turn.id
+                            }?.source
                             MessageRow(
                                 turn: turn,
                                 timestampLabel: timestampLabel(for: turn),
                                 attemptFailure: failures[turn.id],
+                                source: source,
                                 references: referenceContext
                             )
                                 .id(turn.id)
@@ -210,27 +215,124 @@ struct WaveChatView: View {
             Text(waveName)
                 .font(Typography.caption().weight(.semibold))
                 .foregroundStyle(palette.text)
-            Spacer()
-            Button {
-                confirmStop = true
-            } label: {
-                HStack(spacing: Spacing.xs) {
-                    if isStopping {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    Text(isStopping ? "Stopping…" : "Stop")
-                }
+
+            if let epoch = selectedEpoch {
+                backingBadge(epoch.backing)
+                epochMenu(epoch)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .foregroundStyle(Color.statusError)
-            .disabled(isStopping)
-            .accessibilityIdentifier("wave-chat-stop")
+
+            Spacer()
+
+            if isLive {
+                Button {
+                    confirmStop = true
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        if isStopping {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(isStopping ? "Stopping…" : "Stop")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .foregroundStyle(Color.statusError)
+                .disabled(isStopping)
+                .accessibilityIdentifier("wave-chat-stop")
+            }
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
         .background(palette.surfaceMuted.opacity(0.45))
+    }
+
+    private var showsWaveHeader: Bool {
+        isLive || connection?.activeEpoch != nil
+    }
+
+    private var selectedEpoch: ConversationEpoch? {
+        connection?.selectedEpoch ?? connection?.activeEpoch
+    }
+
+    private func backingBadge(_ backing: ChatBacking) -> some View {
+        Label(backingName(backing), systemImage: backingIcon(backing))
+            .font(Typography.caption(10).weight(.semibold))
+            .foregroundStyle(palette.textSecondary)
+            .padding(.horizontal, Spacing.sm)
+            .padding(.vertical, Spacing.xxs)
+            .background(palette.surface)
+            .clipShape(Capsule())
+    }
+
+    private func epochMenu(_ selected: ConversationEpoch) -> some View {
+        Menu {
+            ForEach(Array((connection?.epochs ?? []).reversed()), id: \.id) { epoch in
+                Button {
+                    Task { await connection?.selectEpoch(epoch.id) }
+                } label: {
+                    Label(
+                        "Conversation \(epoch.number) · \(backingName(epoch.backing))",
+                        systemImage: epoch.id == selected.id ? "checkmark" : "clock"
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: Spacing.xxs) {
+                Text("Conversation \(selected.number)")
+                if selected.id != connection?.activeEpoch?.id {
+                    Text("· Archived")
+                }
+                Image(systemName: "chevron.down")
+                    .font(Typography.caption(8))
+            }
+            .font(Typography.caption(10))
+            .foregroundStyle(palette.textSecondary)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityIdentifier("wave-chat-epoch-menu")
+    }
+
+    private func backingName(_ backing: ChatBacking) -> String {
+        switch backing {
+        case .local: "Local"
+        case .discord: "Discord"
+        }
+    }
+
+    private func backingIcon(_ backing: ChatBacking) -> String {
+        switch backing {
+        case .local: "macbook"
+        case .discord: "bubble.left.and.bubble.right"
+        }
+    }
+
+    @ViewBuilder
+    private var backingHealthNotice: some View {
+        switch connection?.backingHealth {
+        case let .retrying(detail):
+            WaveBackingHealthNotice(
+                icon: "arrow.clockwise",
+                title: "\(activeBackingName) reconnecting",
+                detail: detail,
+                color: .statusWarning
+            )
+        case let .blocked(detail):
+            WaveBackingHealthNotice(
+                icon: "exclamationmark.triangle.fill",
+                title: "\(activeBackingName) blocked",
+                detail: detail,
+                color: .statusError
+            )
+        case .ready, nil:
+            EmptyView()
+        }
+    }
+
+    private var activeBackingName: String {
+        guard let backing = connection?.activeEpoch?.backing else { return "Chat" }
+        return backingName(backing)
     }
 
     private func stopWave() {
@@ -451,6 +553,13 @@ struct WaveChatView: View {
 
     private var isLive: Bool { connection?.phase == .live }
 
+    private var composeRoute: WaveChatComposeRoute {
+        waveChatComposeRoute(
+            activeEpoch: connection?.activeEpoch,
+            selectedEpoch: connection?.selectedEpoch
+        )
+    }
+
     private var hasText: Bool {
         !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -459,7 +568,19 @@ struct WaveChatView: View {
         composerVerbs(state: connection?.loopState ?? .idle, hasText: hasText)
     }
 
+    @ViewBuilder
     private var composer: some View {
+        switch composeRoute {
+        case .unavailable, .local:
+            localComposer
+        case let .openDiscord(action):
+            discordComposer(action)
+        case .archived:
+            archivedComposer
+        }
+    }
+
+    private var localComposer: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             if let sendError {
                 Text(sendError)
@@ -468,6 +589,62 @@ struct WaveChatView: View {
                     .accessibilityIdentifier("wave-chat-send-error")
             }
             composerRow
+        }
+        .padding(Spacing.lg)
+        .background(palette.background)
+    }
+
+    private func discordComposer(_ action: ChatAction) -> some View {
+        HStack(alignment: .center, spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Discord is the active conversation")
+                    .font(Typography.caption().weight(.semibold))
+                    .foregroundStyle(palette.text)
+                Text("Messages appear here live. Reply in Discord so the Wave keeps one thread.")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+                if hasText {
+                    Text("Unsent draft: \(composerText)")
+                        .font(Typography.caption(11))
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 0)
+            if let url = action.url {
+                Link(destination: url) {
+                    Label(action.label, systemImage: "arrow.up.right")
+                }
+                .buttonStyle(DarkButtonStyle())
+                .accessibilityIdentifier("wave-chat-open-discord")
+            } else {
+                Text("Discord link unavailable")
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusError)
+            }
+        }
+        .padding(Spacing.lg)
+        .background(palette.background)
+    }
+
+    private var archivedComposer: some View {
+        HStack(spacing: Spacing.lg) {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Archived conversation")
+                    .font(Typography.caption().weight(.semibold))
+                    .foregroundStyle(palette.text)
+                Text("History is read-only. Return to the current conversation to respond.")
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            Spacer(minLength: 0)
+            Button("Return to current") {
+                guard let active = connection?.activeEpoch else { return }
+                Task { await connection?.selectEpoch(active.id) }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("wave-chat-return-current")
         }
         .padding(Spacing.lg)
         .background(palette.background)
@@ -534,6 +711,11 @@ struct WaveChatView: View {
         Task {
             do {
                 try await connection.send(text, op: op)
+            } catch WaveChatError.openDiscord {
+                if !text.isEmpty, composerText.isEmpty {
+                    composerText = text
+                }
+                sendError = nil
             } catch {
                 // Don't lose the message: put it back in the composer (unless the
                 // user already started typing something new) and say what failed.
@@ -548,6 +730,34 @@ struct WaveChatView: View {
     private func timestampLabel(for turn: ChatTurn) -> String? {
         guard let date = turn.createdAtDate else { return nil }
         return Self.timestampFormatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct WaveBackingHealthNotice: View {
+    let icon: String
+    let title: String
+    let detail: String
+    let color: Color
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            Text(title)
+                .font(Typography.caption(11).weight(.semibold))
+                .foregroundStyle(palette.text)
+            Text(detail)
+                .font(Typography.caption(11))
+                .foregroundStyle(palette.textSecondary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+        .background(color.opacity(0.08))
+        .accessibilityIdentifier("wave-chat-backing-health")
     }
 }
 

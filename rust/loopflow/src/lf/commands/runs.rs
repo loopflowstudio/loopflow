@@ -1012,8 +1012,12 @@ fn print_recorded_event(event: &crate::trace::RecordedConversationEvent) {
         RecordedConversationPayload::Usage { usage } => {
             println!(
                 "usage  input {} output {} cache {}",
-                usage.input_tokens,
-                usage.output_tokens,
+                usage
+                    .input_tokens
+                    .map_or_else(|| "-".to_string(), |value| value.to_string()),
+                usage
+                    .output_tokens
+                    .map_or_else(|| "-".to_string(), |value| value.to_string()),
                 usage.cache_read_tokens.unwrap_or(0)
             );
         }

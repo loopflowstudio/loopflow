@@ -57,7 +57,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::durable::{RunLease, WorkRef};
 use crate::engine::flow::{available_flow_names, load_goal, render_goal, GoalRenderContext};
 use crate::engine::wave_config::{read_wave_config, WaveCronDef};
@@ -998,11 +998,9 @@ impl WaveLoop {
         }
 
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut terminal_wait = Box::pin(tokio::time::sleep(Duration::from_secs(86_400)));
         let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
         answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut terminal_status: Option<Lifecycle> = None;
-        let mut usage = TurnUsage::default();
+        let mut cost_usd = None;
         loop {
             tokio::select! {
                 biased;
@@ -1075,37 +1073,30 @@ impl WaveLoop {
                             self.send(vec![ResidentDelta::TurnItem { item }]).await;
                         }
                         ConversationEvent::TurnUsage { usage: reported, .. } => {
-                            usage = reported;
+                            cost_usd = reported.cost_usd;
                             self.send(vec![ResidentDelta::TurnUsage {
-                                input_tokens: Some(usage.input_tokens),
-                                output_tokens: Some(usage.output_tokens),
-                                cache_read_tokens: usage.cache_read_tokens,
+                                input_tokens: reported.input_tokens,
+                                output_tokens: reported.output_tokens,
+                                cache_read_tokens: reported.cache_read_tokens,
                             }]).await;
-                            if terminal_status.is_some() {
-                                let status = terminal_status.take().expect("checked");
-                                let outcome = if status == Lifecycle::Completed {
-                                    "completed"
-                                } else if status == Lifecycle::Interrupted {
-                                    "interrupted"
-                                } else {
-                                    "failed"
-                                };
-                                self.finish_harness_pass(
-                                    &body_id,
-                                    &step,
-                                    status,
-                                    usage.cost_usd,
-                                    harness.as_mut(),
-                                ).await;
-                                finish_capture(capture.as_ref(), outcome);
-                                return;
-                            }
                         }
                         ConversationEvent::TurnCompleted { status, .. } => {
-                            terminal_status = Some(status);
-                            terminal_wait.as_mut().reset(
-                                Instant::now() + Duration::from_millis(100)
-                            );
+                            let outcome = if status == Lifecycle::Completed {
+                                "completed"
+                            } else if status == Lifecycle::Interrupted {
+                                "interrupted"
+                            } else {
+                                "failed"
+                            };
+                            self.finish_harness_pass(
+                                &body_id,
+                                &step,
+                                status,
+                                cost_usd,
+                                harness.as_mut(),
+                            ).await;
+                            finish_capture(capture.as_ref(), outcome);
+                            return;
                         }
                         ConversationEvent::Error { code, message, .. } => {
                             let _ = harness.stop().await;
@@ -1129,25 +1120,6 @@ impl WaveLoop {
                         finish_capture(capture.as_ref(), "interrupted");
                         return;
                     }
-                }
-                _ = &mut terminal_wait, if terminal_status.is_some() => {
-                    let status = terminal_status.take().expect("checked");
-                    let outcome = if status == Lifecycle::Completed {
-                        "completed"
-                    } else if status == Lifecycle::Interrupted {
-                        "interrupted"
-                    } else {
-                        "failed"
-                    };
-                    self.finish_harness_pass(
-                        &body_id,
-                        &step,
-                        status,
-                        usage.cost_usd,
-                        harness.as_mut(),
-                    ).await;
-                    finish_capture(capture.as_ref(), outcome);
-                    return;
                 }
                 _ = &mut timeout => {
                     match self.timeout_action() {
@@ -1517,6 +1489,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use crate::chat::turns::{ChatRole, ChatTurn};
+    use crate::chat::types::TurnUsage;
     use crate::wave::journal::{
         journal_path, DiscordChatBinding, DiscordMessageSource, EventKind, Journal,
     };
@@ -1815,17 +1788,17 @@ mod tests {
                     turn_id: "vendor-turn".to_string(),
                     content: " world".to_string(),
                 });
-                let _ = self.events.send(ConversationEvent::TurnCompleted {
-                    turn_id: "vendor-turn".to_string(),
-                    status: Lifecycle::Completed,
-                });
                 let _ = self.events.send(ConversationEvent::TurnUsage {
                     turn_id: "vendor-turn".to_string(),
                     usage: TurnUsage {
-                        input_tokens: 20,
-                        output_tokens: 2,
+                        input_tokens: Some(20),
+                        output_tokens: Some(2),
                         ..TurnUsage::default()
                     },
+                });
+                let _ = self.events.send(ConversationEvent::TurnCompleted {
+                    turn_id: "vendor-turn".to_string(),
+                    status: Lifecycle::Completed,
                 });
             }
             Ok(())

@@ -85,6 +85,7 @@ lf auth status                   # every connected service
 lf auth accounts claude          # cached subscription state
 lf auth accounts --verify        # compare every credential with its provider
 lf usage                         # subscription windows and process token spend
+lf performance                   # provider spend coverage and budgets over 14 days
 ```
 
 `auth accounts --verify` records a revoked credential as missing and prints

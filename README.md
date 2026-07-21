@@ -91,6 +91,7 @@ lf ps                  # rank live call trees by cumulative completed output
 lf top                 # refresh call-tree rates, age, idle time, and health
 lf prune --dry-run     # inspect dead receipts and registered orphan providers
 lf usage               # subscription state and spend, per account and repo
+lf performance         # 14-day latency, verification, and spend scorecard
 ```
 
 ## The model

@@ -1391,6 +1391,9 @@ fn main() -> anyhow::Result<()> {
                 refresh,
                 cached,
             }) => loopflow::lf::commands::usage::run(*json, *days, *refresh, *cached),
+            Some(Commands::Performance { json }) => in_repo_runtime(&args, |repo| {
+                loopflow::lf::commands::performance::run(*json, repo)
+            }),
             Some(Commands::Ci {
                 since,
                 wave,
@@ -1648,9 +1651,29 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "desktop", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task",
-            "project", "flow", "skill", "chat", "usage", "top", "list", "ls", "status", "runs",
-            "trace", "help",
+            ":",
+            "desktop",
+            "pr",
+            "wt",
+            "rebase",
+            "commit",
+            "auth",
+            "release",
+            "pm",
+            "task",
+            "project",
+            "flow",
+            "skill",
+            "chat",
+            "usage",
+            "performance",
+            "top",
+            "list",
+            "ls",
+            "status",
+            "runs",
+            "trace",
+            "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }

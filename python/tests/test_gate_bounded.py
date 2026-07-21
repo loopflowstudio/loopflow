@@ -325,6 +325,12 @@ def test_full_and_host_gates_reject_reuse():
             raise AssertionError(f"reuse unexpectedly accepted for {args}")
 
 
+def test_deleted_python_test_falls_back_to_the_full_suite():
+    command = gate._python_commands(["python/tests/test_removed.py"])[0]
+
+    assert command.argv == ["uv", "run", "pytest", "python/tests/"]
+
+
 def test_all_never_runs_the_required_host_gate():
     plans = gate.build_plan(changed=[], run_all=True, forced=set())
     ui = next(p for p in plans if p.suite.name == "ui-host")

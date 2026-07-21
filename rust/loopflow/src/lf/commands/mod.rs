@@ -14,6 +14,7 @@ pub mod install;
 pub mod invocation;
 pub mod list;
 pub mod ops;
+pub mod performance;
 pub mod profile;
 pub mod run;
 pub mod runs;

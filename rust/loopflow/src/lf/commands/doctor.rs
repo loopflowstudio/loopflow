@@ -955,8 +955,8 @@ mod tests {
         capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
             turn_id: "turn-1".to_string(),
             usage: crate::chat::types::TurnUsage {
-                input_tokens: 40,
-                output_tokens: 5_197,
+                input_tokens: Some(40),
+                output_tokens: Some(5_197),
                 ..Default::default()
             },
         });

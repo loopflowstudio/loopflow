@@ -8,10 +8,10 @@ proof that can change the next decision.
 ```bash
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary
-uv run pytest python/tests/test_test_time.py           # trace timing toolkit
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run python scripts/test_time.py --days 7            # where agent verification time went
+cargo test -p loopflow performance                     # scorecard behavior
+lf performance                                         # real 14-day local evidence
 ```
 
 Escalate from a focused behavior to affected suites when crossing a component
@@ -63,16 +63,17 @@ Records contain operational identity, exact-tree and plan fingerprints,
 phase status, and elapsed time—not commands or output. Persistence failure is
 a warning and never replaces the underlying test result.
 
-Use the trace ledger for time analysis:
+Read the same gate evidence through the scorecard:
 
 ```bash
-uv run python scripts/test_time.py --days 7
-uv run python scripts/test_time.py --days 7 --repo /path/to/main/repo
-uv run python scripts/test_time.py --days 7 --worktree /path/to/exact/worktree
+lf performance
+lf performance --json
 ```
 
-The report merges parallel intervals per launch and prints only aggregate
-categories and skills. It never prints commands, prompts, or output.
+The report joins accepted provider Turn usage with pre-land phase records. It
+prints aggregate values and coverage only—never commands, prompts, output, or
+task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
+small samples stay `COLLECTING` until 20 observations support p95.
 
 The summary states **what each suite proves**. The `loopflow` suite compiles
 the app and UI-test runners; it does **not** run hosted UI behavior. That real

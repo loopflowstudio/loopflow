@@ -365,6 +365,12 @@ pub enum Commands {
         #[arg(long)]
         cached: bool,
     },
+    /// Compare Loopflow's 14-day performance and provider spend with tracked budgets
+    Performance {
+        /// Emit the complete scorecard as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Show how failed CI is detected, repaired, and landed across this Home
     Ci {
         /// Relative window (7d, 24h, 30m) or RFC3339 start

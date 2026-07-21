@@ -1255,13 +1255,13 @@ impl TraceCapture {
     /// Copy the accumulated turn usage onto the turn row before persisting it.
     fn apply_usage_to_turn(&mut self) {
         if self.usage_observed {
-            self.turn.provider_input_tokens = Some(self.usage.input_tokens as i64);
+            self.turn.provider_input_tokens = self.usage.input_tokens.map(|value| value as i64);
             self.turn.provider_total_input_tokens =
                 self.usage.total_input_tokens.map(|value| value as i64);
             self.turn.peak_input_tokens = self.usage.peak_input_tokens.map(|value| value as i64);
             self.turn.context_window_tokens =
                 self.usage.context_window_tokens.map(|value| value as i64);
-            self.turn.provider_output_tokens = Some(self.usage.output_tokens as i64);
+            self.turn.provider_output_tokens = self.usage.output_tokens.map(|value| value as i64);
             self.turn.reasoning_tokens = self.usage.reasoning_tokens.map(|value| value as i64);
             self.turn.cache_read_tokens = self.usage.cache_read_tokens.map(|value| value as i64);
             self.turn.cache_write_tokens = self.usage.cache_write_tokens.map(|value| value as i64);
@@ -1319,14 +1319,25 @@ impl TraceCapture {
                 output_tokens,
                 cache_read_tokens,
             } => {
-                self.usage_observed = true;
-                self.usage.input_tokens += input_tokens.unwrap_or(0);
-                self.usage.output_tokens += output_tokens.unwrap_or(0);
-                self.usage.cache_read_tokens = Some(
-                    self.usage.cache_read_tokens.unwrap_or(0) + cache_read_tokens.unwrap_or(0),
-                );
-                self.usage.total_input_tokens =
-                    Some(self.usage.input_tokens + self.usage.cache_read_tokens.unwrap_or(0));
+                self.usage_observed |= input_tokens.is_some()
+                    || output_tokens.is_some()
+                    || cache_read_tokens.is_some();
+                if let Some(input) = input_tokens {
+                    self.usage.input_tokens = Some(self.usage.input_tokens.unwrap_or(0) + input);
+                }
+                if let Some(output) = output_tokens {
+                    self.usage.output_tokens = Some(self.usage.output_tokens.unwrap_or(0) + output);
+                }
+                if let Some(cache_read) = cache_read_tokens {
+                    self.usage.cache_read_tokens =
+                        Some(self.usage.cache_read_tokens.unwrap_or(0) + cache_read);
+                }
+                if self.usage.input_tokens.is_some() || self.usage.cache_read_tokens.is_some() {
+                    self.usage.total_input_tokens = Some(
+                        self.usage.input_tokens.unwrap_or(0)
+                            + self.usage.cache_read_tokens.unwrap_or(0),
+                    );
+                }
                 RecordedConversationPayload::Usage {
                     usage: self.usage.clone(),
                 }
@@ -1357,6 +1368,16 @@ impl TraceCapture {
                 self.turn.provider_turn_id = Some(turn_id.clone());
             }
             ConversationEvent::TurnUsage { usage, .. } => {
+                if !usage.is_reported() {
+                    return Err(StoreError::InvalidData(
+                        "provider emitted an empty usage receipt".to_string(),
+                    ));
+                }
+                if self.usage_observed && self.usage != *usage {
+                    return Err(StoreError::InvalidData(
+                        "provider emitted conflicting usage receipts for one Turn".to_string(),
+                    ));
+                }
                 self.usage_observed = true;
                 self.usage = usage.clone();
             }
@@ -1623,6 +1644,7 @@ mod tests {
         TraceCaptureContext,
     };
     use crate::id::{ExecId, TraceId};
+    use time::OffsetDateTime;
 
     #[test]
     fn prompt_manifest_covers_exact_bytes_and_tokens() {
@@ -1948,6 +1970,85 @@ mod tests {
                 & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn capture_keeps_the_first_reported_usage_and_marks_conflicts_partial() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let run_id = TraceId::new();
+        let capture = CaptureHandle::begin(
+            TraceCaptureContext {
+                run_id: run_id.clone(),
+                process_id: ExecId::new(),
+                repo: guard.home().to_path_buf(),
+                worktree: guard.home().to_path_buf(),
+                wave: Some("infrastructure".to_string()),
+                project: None,
+                task: Some("LOO-45".to_string()),
+                flow: None,
+                skill: Some("implement".to_string()),
+            },
+            PreparedTurnContext::from_prompts("system", "task"),
+            super::CaptureStart {
+                provider: "codex".to_string(),
+                model: Some("gpt-5".to_string()),
+                surface: "headless".to_string(),
+                input_op: "initial".to_string(),
+                gather_ms: 1,
+                render_ms: 2,
+                raw_provider: true,
+                basis: None,
+                supervision: None,
+            },
+        )
+        .unwrap();
+        let accepted = crate::chat::types::TurnUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(0),
+            ..Default::default()
+        };
+        capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
+            turn_id: "provider-turn".to_string(),
+            usage: accepted.clone(),
+        });
+        capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
+            turn_id: "provider-turn".to_string(),
+            usage: accepted,
+        });
+        capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
+            turn_id: "provider-turn".to_string(),
+            usage: crate::chat::types::TurnUsage {
+                input_tokens: Some(99),
+                output_tokens: Some(1),
+                ..Default::default()
+            },
+        });
+        capture.finish("completed", false).unwrap();
+
+        let store = crate::journal::open_ledger().unwrap();
+        let recent = store
+            .agent_invocations_with_turns_ended_since(
+                OffsetDateTime::now_utc().unix_timestamp() - 5,
+            )
+            .unwrap();
+        assert!(recent.iter().any(|row| row.run_id == run_id.as_str()));
+        let invocation = store
+            .agent_invocations_matching(run_id.as_str())
+            .unwrap()
+            .pop()
+            .expect("captured invocation");
+        assert_eq!(invocation.capture_status, "partial");
+        assert!(invocation
+            .incomplete_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("conflicting usage receipts")));
+        let turn = store
+            .agent_turns_for_invocations(&[invocation.id])
+            .unwrap()
+            .pop()
+            .expect("captured turn");
+        assert_eq!(turn.provider_input_tokens, Some(10));
+        assert_eq!(turn.provider_output_tokens, Some(0));
     }
 
     #[test]

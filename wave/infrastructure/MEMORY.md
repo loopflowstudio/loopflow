@@ -94,6 +94,15 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
   cannot persist, the Run stays open and recoverable. Automatic relaunch is
   progress-relative and bounded, and only durable progress or explicit User
   input resets its budget. An empty Run slot alone never authorizes retries.
+- **Performance evidence preserves missingness at every boundary** (learned
+  2026-07-21). A provider receipt absent, one missing field, and a reported
+  zero are distinct facts; the first accepted per-Turn receipt wins and a
+  conflicting repeat makes capture partial without rewriting spend. Window a
+  scorecard by the owning fact's terminal time, never its parent's start time,
+  and publish eligible/measured coverage beside every percentile. An absent
+  authority is a named `UNKNOWN`, not permission to infer from observer
+  timestamps, trace text, or zero. Budgets judge evidence; they do not change a
+  correctness result.
 
 ## Planning model (settled, PR #852)
 

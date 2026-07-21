@@ -22,16 +22,20 @@ struct ControlRoomView: View {
 
     var body: some View {
         @Bindable var model = model
-        HSplitView {
-            ControlRoomSidebar(model: model)
-                .frame(minWidth: 205, idealWidth: 245, maxWidth: 290)
+        VStack(spacing: 0) {
+            ControlRoomActivityStrip(model: model)
+            Divider()
+            HSplitView {
+                ControlRoomSidebar(model: model)
+                    .frame(minWidth: 205, idealWidth: 245, maxWidth: 290)
 
-            RoadmapView(model: model, selection: $model.selection)
-                .frame(minWidth: 390, idealWidth: 650, maxWidth: .infinity)
-                .accessibilityIdentifier("control-room-work")
+                RoadmapView(model: model, selection: $model.selection)
+                    .frame(minWidth: 390, idealWidth: 650, maxWidth: .infinity)
+                    .accessibilityIdentifier("control-room-work")
 
-            ControlRoomInspector(model: model)
-                .frame(minWidth: 245, idealWidth: 310, maxWidth: 390)
+                ControlRoomInspector(model: model)
+                    .frame(minWidth: 245, idealWidth: 310, maxWidth: 390)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)

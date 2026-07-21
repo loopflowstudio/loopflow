@@ -6,7 +6,7 @@
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
 // CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
 //
-// This runs `lf ls/status/roadmap/runs --json` as a subprocess and decodes the wire
+// This runs `lf ls/status/roadmap/ps/runs --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
 // `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it resolves and execs a local `lf`. There is no
@@ -86,6 +86,12 @@ public struct RegistryQuery: Sendable {
         args.append("--json")
         let stdout = try await run(args, nil)
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
+    }
+
+    /// Live Loopflow process trees and provider-measured output activity.
+    public func activity() async throws -> ActivitySnapshot {
+        let stdout = try await run(["ps", "--json"], nil)
+        return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
     /// Latest durable Wave turns from the local journal. This read does not

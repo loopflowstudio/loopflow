@@ -1234,6 +1234,34 @@ fn kernel_state_label(state: &str) -> &'static str {
 mod tests {
     use super::*;
 
+    #[test]
+    fn activity_fixture_round_trips_process_and_output_evidence() {
+        let fixture = include_str!("../../../../../tests/fixtures/dto/activity_snapshot.json");
+        let snapshot = serde_json::from_str::<ActivitySnapshot>(fixture).unwrap();
+
+        assert_eq!(snapshot.aggregate.measured_output_tokens, 48_200);
+        assert_eq!(snapshot.aggregate.output_tokens_per_second_fast, 4.0);
+        assert_eq!(
+            snapshot
+                .nodes
+                .iter()
+                .filter(|node| node.kind == ActivityNodeKind::ProviderLaunch)
+                .map(|node| node.state)
+                .collect::<Vec<_>>(),
+            vec![ActivityState::Working, ActivityState::Stalled]
+        );
+        assert_eq!(
+            snapshot.provider_processes[0].claim,
+            ProviderClaim::Orphaned
+        );
+
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ActivitySnapshot>(&encoded).unwrap(),
+            snapshot
+        );
+    }
+
     fn run_event(
         trace: &str,
         exec: &str,

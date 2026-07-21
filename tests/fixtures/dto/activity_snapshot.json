@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "observed_at": 1784606400,
+  "fast_window_seconds": 300,
+  "slow_window_seconds": 1800,
+  "aggregate": {
+    "measured_output_tokens": 48200,
+    "output_tokens_fast": 1200,
+    "output_tokens_slow": 2400,
+    "output_tokens_per_second_fast": 4.0,
+    "output_tokens_per_second_slow": 1.3333333333333333,
+    "measured_turns": 18,
+    "unmeasured_turns": 1
+  },
+  "nodes": [
+    {
+      "id": "exec:exec-control-room",
+      "parent_id": null,
+      "kind": "exec",
+      "label": "lf task pursue",
+      "pid": 4100,
+      "started_at": 1784602800,
+      "last_progress_at": 1784606380,
+      "state": "working",
+      "direct": {
+        "measured_output_tokens": 0,
+        "output_tokens_fast": 0,
+        "output_tokens_slow": 0,
+        "output_tokens_per_second_fast": 0.0,
+        "output_tokens_per_second_slow": 0.0,
+        "measured_turns": 0,
+        "unmeasured_turns": 0
+      },
+      "cumulative": {
+        "measured_output_tokens": 48200,
+        "output_tokens_fast": 1200,
+        "output_tokens_slow": 2400,
+        "output_tokens_per_second_fast": 4.0,
+        "output_tokens_per_second_slow": 1.3333333333333333,
+        "measured_turns": 18,
+        "unmeasured_turns": 1
+      }
+    },
+    {
+      "id": "launch:invocation-working",
+      "parent_id": "exec:exec-control-room",
+      "kind": "provider_launch",
+      "label": "codex 4101",
+      "pid": 4101,
+      "started_at": 1784602805,
+      "last_progress_at": 1784606380,
+      "state": "working",
+      "direct": {
+        "measured_output_tokens": 41000,
+        "output_tokens_fast": 1200,
+        "output_tokens_slow": 1200,
+        "output_tokens_per_second_fast": 4.0,
+        "output_tokens_per_second_slow": 0.6666666666666666,
+        "measured_turns": 15,
+        "unmeasured_turns": 0
+      },
+      "cumulative": {
+        "measured_output_tokens": 41000,
+        "output_tokens_fast": 1200,
+        "output_tokens_slow": 1200,
+        "output_tokens_per_second_fast": 4.0,
+        "output_tokens_per_second_slow": 0.6666666666666666,
+        "measured_turns": 15,
+        "unmeasured_turns": 0
+      }
+    },
+    {
+      "id": "launch:invocation-stalled",
+      "parent_id": "exec:exec-control-room",
+      "kind": "provider_launch",
+      "label": "claude 4201",
+      "pid": 4201,
+      "started_at": 1784599200,
+      "last_progress_at": 1784603400,
+      "state": "stalled",
+      "direct": {
+        "measured_output_tokens": 7200,
+        "output_tokens_fast": 0,
+        "output_tokens_slow": 1200,
+        "output_tokens_per_second_fast": 0.0,
+        "output_tokens_per_second_slow": 0.6666666666666666,
+        "measured_turns": 3,
+        "unmeasured_turns": 1
+      },
+      "cumulative": {
+        "measured_output_tokens": 7200,
+        "output_tokens_fast": 0,
+        "output_tokens_slow": 1200,
+        "output_tokens_per_second_fast": 0.0,
+        "output_tokens_per_second_slow": 0.6666666666666666,
+        "measured_turns": 3,
+        "unmeasured_turns": 1
+      }
+    }
+  ],
+  "provider_processes": [
+    {
+      "pid": 4301,
+      "ppid": 1,
+      "process_group": 4301,
+      "started_at": 1784595600,
+      "kernel_state": "S",
+      "provider": "opencode",
+      "command": "opencode serve",
+      "claim": "orphaned"
+    }
+  ]
+}

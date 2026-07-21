@@ -504,19 +504,42 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
     }
 }
 
-/// Durable Project Work that cannot join the current PM plan.
+/// Durable Project Work that cannot join the current PM plan, including
+/// non-terminal Tasks stranded under a terminal historical Project.
 public struct UnavailableProjectEvidence: Decodable, Sendable, Hashable {
     public let workId: String
     public let projectId: String
     public let projectSlug: String
+    public let status: WorkStatus
+    public let owner: WorkNextMoveOwner
+    public let reason: String
+    public let recovery: String
+    public let tasks: [UnavailableTaskEvidence]
+
+    enum CodingKeys: String, CodingKey {
+        case status, owner, reason, recovery, tasks
+        case workId = "work_id"
+        case projectId = "project_id"
+        case projectSlug = "project_slug"
+    }
+}
+
+/// Non-terminal durable Task Work whose historical Project is absent from the
+/// current PM plan.
+public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
+    public let workId: String
+    public let taskId: String
+    public let taskIdentifier: String
+    public let status: WorkStatus
+    public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String
 
     enum CodingKeys: String, CodingKey {
-        case reason, recovery
+        case status, owner, reason, recovery
         case workId = "work_id"
-        case projectId = "project_id"
-        case projectSlug = "project_slug"
+        case taskId = "task_id"
+        case taskIdentifier = "task_identifier"
     }
 }
 

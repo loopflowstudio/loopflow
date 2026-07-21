@@ -22,5 +22,6 @@ pub mod tokens;
 pub mod top;
 pub mod usage;
 pub mod util;
+pub mod wave_intent;
 pub mod waves;
 pub mod work;

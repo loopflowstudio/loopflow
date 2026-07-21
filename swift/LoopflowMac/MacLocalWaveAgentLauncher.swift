@@ -289,8 +289,8 @@ enum LocalWaveAgentLauncher {
         return candidates
     }
 
-    /// First candidate that has both wave lifecycle commands. Resolving `lf`
-    /// from PATH can find a build that predates `wave` or `stop`; treating an
+    /// First candidate that has the Wave lifecycle and turn-intent commands. Resolving `lf`
+    /// from PATH can find a build that predates one of them; treating an
     /// unknown lifecycle verb as a skill would launch the wrong work, so every
     /// candidate is capability-probed before it's trusted.
     ///
@@ -298,7 +298,7 @@ enum LocalWaveAgentLauncher {
     /// treats an unknown `wave` as a skill name, so `lf wave --help` prints the
     /// root help and exits 0 even on a build without the subcommand. `lf help
     /// wave` exits 0 only when the subcommand exists, and clap answers it without touching
-    /// any wave state. The same holds for `lf help stop`.
+    /// any wave state. The same holds for the other probed verbs.
     static func resolveWaveCapableLf(
         originRepo: String,
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
@@ -332,8 +332,9 @@ enum LocalWaveAgentLauncher {
             return candidate
         }
         throw WaveLaunchError.noUsableLf(
-            "No lf with the wave lifecycle commands. Rejected (each failed "
-                + "`lf help wave` or `lf help stop`): " + candidates.joined(separator: ", ")
+            "No lf with the Wave control commands. Rejected (each failed at least one of "
+                + "`lf help wave`, `lf help stop`, `lf help pause`, or `lf help resume`): "
+                + candidates.joined(separator: ", ")
         )
     }
 
@@ -341,6 +342,8 @@ enum LocalWaveAgentLauncher {
     static func hasWaveCommands(lfPath: String) -> Bool {
         run([lfPath, "help", "wave"])?.status == 0
             && run([lfPath, "help", "stop"])?.status == 0
+            && run([lfPath, "help", "pause"])?.status == 0
+            && run([lfPath, "help", "resume"])?.status == 0
     }
 
     /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its

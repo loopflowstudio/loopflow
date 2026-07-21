@@ -20,6 +20,8 @@ the CLI:
 lf start shipper                       # explicitly start the Wave on this machine
 lf chat --steer "invoices first"       # steer the live body, else queue
 lf status shipper                      # its Project → Task hierarchy
+lf pause shipper                       # refuse new turns; keep listening and queueing
+lf resume shipper                      # start the next queued turn
 lf stop shipper                        # stop this Wave; sibling Waves keep running
 ```
 
@@ -83,6 +85,19 @@ radius crosses storage, auth, or public APIs.
 names the OS user that should run the Wave. `home` accepts this machine's
 HomeId, hostname, or IP address. Omit either field to leave that dimension
 unrestricted. An explicit `lf start <name>` still starts that Wave here.
+
+Pause turn execution without stopping the listener:
+
+```bash
+lf pause shipper --json    # {"wave":"shipper","paused":true}
+lf ls                      # TURNS shows paused independently from LIVE
+lf resume shipper
+```
+
+Pause writes `paused: true` into the canonical `GOAL.md` frontmatter; resume
+removes it because enabled turns are the default. Messages continue to queue,
+and heartbeat and cron turn starts wait. For a Wave served from another Home,
+run the same command there: `lf ssh <home-id> pause shipper`.
 
 Builtin goals resolve by name, so the five Viable System Model charters ship
 as `s1`…`s5`:
@@ -178,6 +193,8 @@ lf home id                    # this machine's stable HomeId
 lf ls --json                  # Wave ids and their current Homes
 lf start shipper              # start one Wave on this machine
 lf start                      # start eligible repo Waves on this machine
+lf pause shipper              # keep serving but refuse new turns
+lf resume shipper             # enable queued and future turns
 lf stop shipper               # stop this machine's Wave
 ```
 

@@ -191,6 +191,8 @@ private struct ControlRoomSidebar: View {
 private struct ControlRoomInspector: View {
     @Bindable var model: ControlRoomModel
     @Environment(\.palette) private var palette
+    @State private var isSettingTurnIntent = false
+    @State private var turnIntentError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -265,10 +267,34 @@ private struct ControlRoomInspector: View {
             }
             facts([
                 ("State", roadmap.wave.status.label),
+                ("Turns", roadmap.wave.paused ? "Paused" : "Enabled"),
                 ("Home", roadmap.wave.home.route == "local" ? roadmap.wave.home.id : roadmap.wave.home.route),
                 ("Projects", String(roadmap.wave.activeProjects)),
                 ("Tasks", String(roadmap.wave.activeTasks)),
             ])
+            Button(roadmap.wave.paused ? "Resume turns" : "Pause turns") {
+                Task { await setPaused(!roadmap.wave.paused, waveId: roadmap.wave.id) }
+            }
+            .buttonStyle(.plain)
+            .font(Typography.body(11).weight(.semibold))
+            .foregroundStyle(Color.loopflowBurgundy)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.xs)
+            .background(Color.loopflowBurgundy.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+            .overlay {
+                RoundedRectangle(cornerRadius: CornerRadius.sm)
+                    .stroke(Color.loopflowBurgundy.opacity(0.35), lineWidth: 1)
+            }
+            .disabled(isSettingTurnIntent)
+            .accessibilityIdentifier("control-room-wave-turn-control")
+            if isSettingTurnIntent {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            if let turnIntentError {
+                unavailable(turnIntentError)
+            }
             if let reason = roadmap.projects.unavailableReason {
                 unavailable(reason)
             }
@@ -428,6 +454,18 @@ private struct ControlRoomInspector: View {
 
     private func waveName(_ waveId: String) -> String {
         model.wave(id: waveId)?.wave.name ?? model.rosterWave(id: waveId)?.displayName ?? "Wave"
+    }
+
+    @MainActor
+    private func setPaused(_ paused: Bool, waveId: String) async {
+        isSettingTurnIntent = true
+        turnIntentError = nil
+        defer { isSettingTurnIntent = false }
+        do {
+            try await model.setWavePaused(waveId: waveId, paused: paused)
+        } catch {
+            turnIntentError = error.localizedDescription
+        }
     }
 
     private func processLabel(_ task: RoadmapTask) -> String {

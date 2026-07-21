@@ -39,6 +39,29 @@ struct WaveLensTests {
         #expect(!lens.color.isLit)
     }
 
+    @Test("paused turn intent is blue while listener evidence stays explicit")
+    func pausedIsBlueWithListenerEvidence() {
+        let serving = WaveLens.forWave(
+            live: true,
+            paused: true,
+            status: .running(runID: "run_test"),
+            activeTasks: 1,
+            activeProjects: 1
+        )
+        #expect(serving.color == .blue)
+        #expect(serving.reason == "Paused · listener is serving and queueing input")
+
+        let stopped = WaveLens.forWave(
+            live: false,
+            paused: true,
+            status: .ready,
+            activeTasks: 0,
+            activeProjects: 0
+        )
+        #expect(stopped.color == .blue)
+        #expect(stopped.reason == "Paused · listener is stopped")
+    }
+
     // MARK: - The shared level maps 1:1, and unknown is lit (never off/black)
 
     @Test("attention levels map to lens colors one-to-one")

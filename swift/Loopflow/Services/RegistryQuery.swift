@@ -75,6 +75,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([WaveSnapshot].self, from: stdout)
     }
 
+    /// Pause or resume new Wave turns without changing listener residency.
+    public func setWavePaused(
+        wave: String,
+        paused: Bool,
+        cwd: String?
+    ) async throws -> WaveIntentReceipt {
+        let verb = paused ? "pause" : "resume"
+        let stdout = try await run([verb, wave, "--json"], cwd)
+        return try Self.decode(WaveIntentReceipt.self, from: stdout)
+    }
+
     /// Every durable plan row across the machine, joined to the same Task
     /// references and live evidence as `lf status`. One subprocess reads every
     /// Wave; an optional scope filters that shared snapshot at the source.
@@ -407,13 +418,14 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let activeTasks: Int
     public let activeProjects: Int
     public let live: Bool
+    public let paused: Bool
     public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, endpoint, home
+        case id, name, status, goal, repo, live, paused, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -422,18 +434,25 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
 
     /// Map the registry snapshot to the app's Wave row, carrying the shared
     /// liveness, active-work, and ancestry facts the surface renders.
-    func toWave() -> Wave {
+    public func toWave() -> Wave {
         Wave(
             id: id,
             name: name,
             repo: repo,
             status: status,
             live: live,
+            paused: paused,
             activeTasks: activeTasks,
             activeProjects: activeProjects,
             parentWaveId: parentWaveId
         )
     }
+}
+
+/// Receipt returned by `lf pause|resume <wave> --json`.
+public struct WaveIntentReceipt: Decodable, Sendable, Equatable {
+    public let wave: String
+    public let paused: Bool
 }
 
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {

@@ -303,6 +303,13 @@ struct RoadmapView: View {
                             selection = .wave(waveId: roadmap.wave.id)
                             openWave(roadmap.wave)
                         },
+                        onRefresh: { await refresh() },
+                        onSetPaused: { paused in
+                            try await model.setWavePaused(
+                                waveId: roadmap.wave.id,
+                                paused: paused
+                            )
+                        },
                         onError: { controlError = $0 },
                         onTaskAction: { task, action in
                             perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
@@ -426,6 +433,8 @@ struct RoadmapView: View {
 private struct HomeControl: View {
     let wave: WaveSnapshot
     let onOpen: () -> Void
+    let onRefresh: () async -> Void
+    let onSetPaused: (Bool) async throws -> Void
     let onError: (String) -> Void
 
     @Environment(\.palette) private var palette
@@ -450,16 +459,38 @@ private struct HomeControl: View {
                     stateChip(runtime.state)
                 }
             }
-            action
+            HStack(spacing: Spacing.xs) {
+                turnAction
+                homeAction
+            }
         }
         .task(id: wave.id) { await probe() }
     }
 
     @ViewBuilder
-    private var action: some View {
-        if isActing {
-            ProgressView().controlSize(.small)
-        } else if let runtime {
+    private var turnAction: some View {
+        Group {
+            if isActing {
+                ProgressView().controlSize(.small)
+            } else {
+                Button(wave.paused ? "Resume" : "Pause") {
+                    Task { await setPaused(!wave.paused) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(
+                    wave.paused
+                        ? "Enable new turns for this Wave"
+                        : "Refuse new turns while the listener keeps serving"
+                )
+                .accessibilityIdentifier("wave-turn-control-\(wave.id)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var homeAction: some View {
+        if !isActing, let runtime {
             switch runtime.action {
             case .attach:
                 Button("Open") { onOpen() }
@@ -520,7 +551,19 @@ private struct HomeControl: View {
         do {
             _ = try await RegistryQueryLocal.shared.start(wave: wave.name, cwd: wave.repo)
             runtime = try await RegistryQueryLocal.shared.homeProbe(wave: wave.name, cwd: wave.repo)
+            await onRefresh()
             onOpen()
+        } catch {
+            onError(error.localizedDescription)
+        }
+    }
+
+    @MainActor
+    private func setPaused(_ paused: Bool) async {
+        isActing = true
+        defer { isActing = false }
+        do {
+            try await onSetPaused(paused)
         } catch {
             onError(error.localizedDescription)
         }
@@ -533,6 +576,8 @@ private struct RoadmapWaveCard: View {
     let activeControlId: String?
     let onSelect: (ControlRoomSelection) -> Void
     let onOpen: () -> Void
+    let onRefresh: () async -> Void
+    let onSetPaused: (Bool) async throws -> Void
     let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onInterrupt: (RoadmapTask) -> Void
@@ -546,7 +591,11 @@ private struct RoadmapWaveCard: View {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack(spacing: Spacing.sm) {
                         Circle()
-                            .fill(roadmap.wave.live ? Color.statusSuccess : Color.statusNeutral)
+                            .fill(
+                                roadmap.wave.paused
+                                    ? WaveLensColor.blue.glow
+                                    : roadmap.wave.live ? Color.statusSuccess : Color.statusNeutral
+                            )
                             .frame(width: 7, height: 7)
                         Text(roadmap.wave.name)
                             .font(Typography.sectionTitle(18))
@@ -554,6 +603,16 @@ private struct RoadmapWaveCard: View {
                         Text(roadmap.wave.status.label)
                             .font(Typography.caption(10))
                             .foregroundStyle(palette.textSecondary)
+                        if roadmap.wave.paused {
+                            Text("paused")
+                                .font(Typography.caption(9).weight(.semibold))
+                                .foregroundStyle(WaveLensColor.blue.glow)
+                                .padding(.horizontal, Spacing.xs)
+                                .padding(.vertical, 1)
+                                .background(WaveLensColor.blue.glow.opacity(0.12))
+                                .clipShape(Capsule())
+                                .accessibilityIdentifier("wave-paused-\(roadmap.wave.id)")
+                        }
                     }
                     if !roadmap.wave.goal.isEmpty {
                         Text(roadmap.wave.goal)
@@ -568,7 +627,13 @@ private struct RoadmapWaveCard: View {
                     selection == .wave(waveId: roadmap.wave.id) ? [.isSelected] : []
                 )
                 Spacer()
-                HomeControl(wave: roadmap.wave, onOpen: onOpen, onError: onError)
+                HomeControl(
+                    wave: roadmap.wave,
+                    onOpen: onOpen,
+                    onRefresh: onRefresh,
+                    onSetPaused: onSetPaused,
+                    onError: onError
+                )
             }
 
             switch roadmap.projects {

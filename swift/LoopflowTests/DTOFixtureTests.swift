@@ -100,6 +100,7 @@ struct DTOFixtureTests {
 
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
+        #expect(!detail.wave.paused)
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.homeRuntime.state == .running)
         #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
@@ -135,6 +136,15 @@ struct DTOFixtureTests {
         #expect(detail.attention.items[0].ageSeconds == 7200)
         #expect(detail.projects[0].tasks[0].attention.level == .red)
         #expect(detail.projects[0].tasks[0].attention.reason == "merge pull request head 333333333333 on GitHub")
+
+        var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var legacyWave = try #require(legacy["wave"] as? [String: Any])
+        legacyWave.removeValue(forKey: "paused")
+        legacy["wave"] = legacyWave
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: legacyData)
+        }
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -146,6 +156,7 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
+        #expect(product.wave.paused)
         #expect(product.unavailableProjects[0].workId == "proj_3998f8611e9c9069f53c44dc831803d7")
         #expect(product.unavailableProjects[0].projectSlug == "wave-chat")
         #expect(product.unavailableProjects[0].recovery.contains("lf project abandon wave-chat"))

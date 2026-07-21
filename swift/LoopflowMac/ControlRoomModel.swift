@@ -55,6 +55,7 @@ struct ControlRoomActivitySummary: Equatable {
 
 struct ControlRoomFleetSummary: Equatable {
     let registeredWaves: Int
+    let pausedWaves: Int
     let activeRuns: Int
     let liveListeners: Int
     let unservedRuns: Int
@@ -136,6 +137,7 @@ final class ControlRoomModel {
         let registered = visibleWaves.filter(\.isRegistered).map(\.api)
         return ControlRoomFleetSummary(
             registeredWaves: registered.count,
+            pausedWaves: registered.count { $0.paused },
             activeRuns: registered.count { $0.status.isRunning },
             liveListeners: registered.count { $0.live },
             unservedRuns: registered.count { $0.status.isRunning && !$0.live },
@@ -206,6 +208,25 @@ final class ControlRoomModel {
     func setRepoPath(_ path: String?) {
         repoPath = path
         clearSelectionIfOutsideScope()
+    }
+
+    func setWavePaused(waveId: String, paused: Bool) async throws {
+        let target: (name: String, repo: String)? = if let roadmap = wave(id: waveId) {
+            (roadmap.wave.name, roadmap.wave.repo)
+        } else if let wave = rosterWave(id: waveId) {
+            (wave.name, wave.repo)
+        } else {
+            nil
+        }
+        guard let target else {
+            throw RegistryQueryError("Wave is absent from the latest control-room evidence")
+        }
+        _ = try await query.setWavePaused(
+            wave: target.name,
+            paused: paused,
+            cwd: target.repo
+        )
+        await refresh()
     }
 
     func select(_ selection: ControlRoomSelection?) {

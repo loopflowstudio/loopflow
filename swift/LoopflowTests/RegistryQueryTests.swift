@@ -11,8 +11,8 @@ struct RegistryQueryTests {
     func wavesDecodeAndScope() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
+          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"paused":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"paused":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
         ]
         """
         let query = RegistryQuery { args, _ in
@@ -24,14 +24,15 @@ struct RegistryQueryTests {
         #expect(waves.map(\.id) == ["goals"])
         #expect(waves[0].status.isRunning)
         #expect(waves[0].repo == "/tmp/repo-a")
+        #expect(waves[0].paused)
     }
 
     @Test("lf ls can be decoded once for every repo")
     func allWavesDecode() async throws {
         let json = """
         [
-          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
-          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
+          {"id":"goals","name":"goals","status":{"running":{"run_id":"run_00000000000000000000000000000001"}},"goal":"ship the roadmap","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":true,"paused":true,"endpoint":"127.0.0.1:5678","created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          {"id":"other","name":"other","status":"ready","goal":"g","repo":"/tmp/repo-b","active_tasks":0,"active_projects":0,"live":false,"paused":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}}
         ]
         """
         let counter = CallCounter()
@@ -51,7 +52,7 @@ struct RegistryQueryTests {
     func statusMapsWork() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":1,"active_projects":1,"live":false,"paused":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":"turning",
           "projects":[{
             "project":{"id":"project-1","slug":"developer-efficiency","name":"Developer efficiency","summary":"Keep flow.","definition":"Remove friction.","flows":{"first":"task-design","loop":"slice","finally":"ship"},"krs":[{"text":"Fast loops","holds":false}]},
@@ -159,7 +160,7 @@ struct RegistryQueryTests {
     func startReturnsWaveStatus() async throws {
         let json = #"""
         [{"id":"wave-1","name":"product","status":"ready","goal":"Ship product",
-          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":true,
+          "repo":"/tmp/repo","active_tasks":1,"active_projects":1,"live":true,"paused":false,
           "endpoint":"127.0.0.1:7777","created_at":"2026-07-17T00:00:00Z",
           "parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001",
           "route":"local","created_at":"2026-07-17T00:00:00Z",
@@ -177,13 +178,42 @@ struct RegistryQueryTests {
         #expect(result[0].home.id == "home_00000000000000000000000000000001")
     }
 
+    @Test("lf pause and resume return the authored turn intent")
+    func setWavePausedUsesIntentVerbs() async throws {
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == "/tmp/repo")
+            switch args {
+            case ["pause", "product", "--json"]:
+                return #"{"wave":"product","paused":true}"#
+            case ["resume", "product", "--json"]:
+                return #"{"wave":"product","paused":false}"#
+            default:
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+        }
+
+        let paused = try await query.setWavePaused(
+            wave: "product",
+            paused: true,
+            cwd: "/tmp/repo"
+        )
+        #expect(paused == WaveIntentReceipt(wave: "product", paused: true))
+
+        let resumed = try await query.setWavePaused(
+            wave: "product",
+            paused: false,
+            cwd: "/tmp/repo"
+        )
+        #expect(resumed == WaveIntentReceipt(wave: "product", paused: false))
+    }
+
     /// Unreadable evidence must reach the surface as its reason, never as an
     /// empty list — a broken ledger is not a quiet wave.
     @Test("lf status keeps unavailable evidence unavailable")
     func statusKeepsUnavailableEvidence() async throws {
         let json = """
         {
-          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
+          "wave":{"id":"goals","name":"goals","status":"ready","goal":"g","repo":"/tmp/repo-a","active_tasks":0,"active_projects":0,"live":false,"paused":false,"endpoint":null,"created_at":null,"parent_wave_id":null,"home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}},
           "loop_state":null,
           "projects":[],
           "unavailable_projects":[],

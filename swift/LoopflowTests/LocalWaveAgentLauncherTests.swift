@@ -204,6 +204,8 @@ struct LocalWaveAgentLauncherTests {
                 && detail.contains("/Users/jack/src/loopflow/target/release/lf")
                 && detail.contains("lf help wave")
                 && detail.contains("lf help stop")
+                && detail.contains("lf help pause")
+                && detail.contains("lf help resume")
         }
     }
 

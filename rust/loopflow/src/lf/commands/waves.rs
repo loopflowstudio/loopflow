@@ -2317,11 +2317,86 @@ fn truncate(value: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use time::OffsetDateTime;
 
-    use super::{next_move_for_task, NextMoveOwner};
+    use super::{
+        derive_task_attention, next_move_for_task, LocalProgressEvidence,
+        LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskAttentionEvidence,
+        TaskAttentionLevel, TaskProcessEvidence, TaskProcessEvidenceState, TaskRuntimeSnapshot,
+    };
+    use crate::child::{observe, BodyEvidence, BodyIntent};
     use crate::durable::WorkStatus;
     use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+
+    #[test]
+    fn only_a_durable_ask_marks_a_running_task_as_waiting_on_the_user() {
+        let runtime = TaskRuntimeSnapshot {
+            work_id: "task-1".to_string(),
+            project_id: "project-1".to_string(),
+            routing_project_id: Some("project-1".to_string()),
+            status: WorkStatus::Running {
+                run_id: crate::durable::RunId::new(),
+            },
+            reason: "Run is active".to_string(),
+            updated_at: "2026-07-21T00:00:00Z".to_string(),
+            provider: "codex".to_string(),
+            process_alive: true,
+            observation: observe(
+                &BodyEvidence {
+                    intent: BodyIntent::Active,
+                    observable: true,
+                    process_alive: true,
+                    progress_age: Duration::ZERO,
+                    step: Some("demo".to_string()),
+                    reason: "Run is active".to_string(),
+                },
+                Duration::from_secs(30 * 60),
+            ),
+        };
+        let next_move = NextMove {
+            owner: NextMoveOwner::Task,
+            reason: "Run is active".to_string(),
+        };
+        let evidence = |user_ask| TaskAttentionEvidence {
+            process: TaskProcessEvidence {
+                state: TaskProcessEvidenceState::Observed,
+                alive: Some(true),
+                reason: None,
+            },
+            local_progress: LocalProgressEvidence {
+                state: LocalProgressEvidenceState::Observed,
+                unsettled: Some(false),
+                dirty: Some(false),
+                authored_commits: Some(false),
+                recovery_required: Some(false),
+                reason: None,
+            },
+            user_ask,
+        };
+
+        let advisory = derive_task_attention(
+            false,
+            Some(&runtime),
+            &next_move,
+            evidence(false),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+        let asked = derive_task_attention(
+            false,
+            Some(&runtime),
+            &next_move,
+            evidence(true),
+            None,
+            OffsetDateTime::now_utc(),
+        );
+
+        assert_eq!(advisory.level, TaskAttentionLevel::Green);
+        assert_eq!(asked.level, TaskAttentionLevel::Blue);
+        assert_eq!(asked.reason, "Waiting for your answer");
+    }
 
     #[test]
     fn only_an_explicit_merge_request_owns_a_healthy_open_pr() {

@@ -49,14 +49,6 @@ struct StartedTaskStep {
     basis: Option<Basis>,
 }
 
-#[derive(Debug)]
-struct ActiveDemo {
-    invocation_id: crate::durable::AgentInvocationId,
-    session: String,
-    window: String,
-    completion_sent: bool,
-}
-
 pub(crate) async fn run(store: SharedStore, task_id: TaskId, lease: &RunLease) -> Result<()> {
     let result = run_task_with(
         store.clone(),
@@ -246,7 +238,6 @@ async fn run_task_with(
         capture.set_provider_session_id(task.provider_session_id.clone());
     }
     let mut active_basis = prepared.basis.clone();
-    let mut active_demo = None;
     let started = start_prepared_task_step(
         &store,
         &mut task,
@@ -254,7 +245,7 @@ async fn run_task_with(
         harness.as_mut(),
         &mut flow,
         capture.as_ref(),
-        &mut active_demo,
+        &runner_event_tx,
         prepared,
     )
     .await?;
@@ -308,27 +299,7 @@ async fn run_task_with(
                         capture.as_ref(),
                     ).await;
                 }
-                if let Some(demo) = active_demo.as_mut().filter(|demo| !demo.completion_sent) {
-                    let surface = store.invocation_surface(&demo.invocation_id).await?
-                        .ok_or_else(|| anyhow!("Demo Invocation {} disappeared", demo.invocation_id))?;
-                    if let Some(outcome) = surface.handback {
-                        let _ = tokio::process::Command::new("tmux")
-                            .args([
-                                "kill-window",
-                                "-t",
-                                &format!("{}:{}", demo.session, demo.window),
-                            ])
-                            .status()
-                            .await;
-                        let status = demo_handback_status(outcome);
-                        runner_event_tx.send(ConversationEvent::TurnCompleted {
-                            turn_id: format!("demo:{}", demo.invocation_id),
-                            status,
-                        })?;
-                        demo.completion_sent = true;
-                    }
-                }
-                let wake = if provider_turn_active || active_demo.is_some() {
+                let wake = if provider_turn_active {
                     None
                 } else if ci_fix_wake.is_none() {
                     arm_ci_fix_wake(&store, &task, lease).await?
@@ -362,7 +333,7 @@ async fn run_task_with(
                         .await?;
                     }
                 }
-                if !provider_turn_active && active_demo.is_none() {
+                if !provider_turn_active {
                     provider_turn_active = apply_next_pending(
                         &store,
                         &task,
@@ -383,12 +354,12 @@ async fn run_task_with(
                         capture.as_ref(),
                     ).await;
                 };
-                let demo_event = matches!(
+                let advisory_event = matches!(
                     &event,
                     ConversationEvent::TurnCompleted { turn_id, .. }
-                        if turn_id.starts_with("demo:")
+                        if turn_id.starts_with("interactive:")
                 );
-                if !demo_event {
+                if !advisory_event {
                     if let Some(capture) = &capture {
                         capture.record_conversation(event.clone());
                     }
@@ -412,16 +383,16 @@ async fn run_task_with(
                         }
                     }
                     ConversationEvent::TurnCompleted { status, .. } => {
-                        if demo_event {
-                            active_demo = None;
-                        } else if let Some(capture) = &capture {
-                            let outcome = match status {
-                                Lifecycle::Completed => "completed",
-                                Lifecycle::Interrupted => "interrupted",
-                                Lifecycle::Failed => "failed",
-                                _ => "failed",
-                            };
-                            capture.finish_turn(outcome)?;
+                        if !advisory_event {
+                            if let Some(capture) = &capture {
+                                let outcome = match status {
+                                    Lifecycle::Completed => "completed",
+                                    Lifecycle::Interrupted => "interrupted",
+                                    Lifecycle::Failed => "failed",
+                                    _ => "failed",
+                                };
+                                capture.finish_turn(outcome)?;
+                            }
                         }
                         provider_turn_active = false;
                         if status == Lifecycle::Failed {
@@ -599,7 +570,7 @@ async fn run_task_with(
                                         &mut flow,
                                         wave.name(),
                                         capture.as_ref(),
-                                        &mut active_demo,
+                                        &runner_event_tx,
                                     )
                                     .await?;
                                     if let Some(basis) = &started.basis {
@@ -631,7 +602,7 @@ async fn run_task_with(
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
-                                    &mut active_demo,
+                                    &runner_event_tx,
                                     prepared,
                                 )
                                 .await?;
@@ -735,7 +706,7 @@ async fn run_task_with(
                                     harness.as_mut(),
                                     &mut flow,
                                     capture.as_ref(),
-                                    &mut active_demo,
+                                    &runner_event_tx,
                                     prepared,
                                 )
                                 .await?;
@@ -788,7 +759,7 @@ async fn run_task_with(
                                         harness.as_mut(),
                                         &mut flow,
                                         capture.as_ref(),
-                                        &mut active_demo,
+                                        &runner_event_tx,
                                         prepared,
                                     )
                                     .await?;
@@ -850,7 +821,7 @@ async fn run_task_with(
                                     &mut flow,
                                     wave.name(),
                                     capture.as_ref(),
-                                    &mut active_demo,
+                                    &runner_event_tx,
                                 )
                                 .await?;
                                 if let Some(basis) = &started.basis {
@@ -1022,13 +993,100 @@ async fn start_task_flow_turn(
     Ok(())
 }
 
-async fn start_demo_step(
+async fn launch_interactive_window(
+    store: &SharedStore,
+    task: &Task,
+    lease: &RunLease,
+    prepared: &crate::lf::commands::run::PreparedHarnessTurn,
+    invocation: &crate::durable::AgentInvocation,
+    provider: &str,
+    model: Option<&str>,
+) -> Result<()> {
+    let run = store.current_run(&lease.work).await?.ok_or_else(|| {
+        anyhow!(
+            "Task Run {} disappeared before interactive launch",
+            lease.run_id
+        )
+    })?;
+    let crate::durable::Containment::Tmux { name: session } = run
+        .containment
+        .ok_or_else(|| anyhow!("Task Run {} has no interactive containment", run.id))?
+    else {
+        anyhow::bail!("Task interactive launch requires tmux containment");
+    };
+    let prompt = interactive_step_prompt(&prepared.input, invocation.id.as_str());
+    let command = crate::lf::commands::util::build_advisory_session_command(
+        provider,
+        model,
+        &task.worktree,
+        &prompt,
+    )?;
+    let mut argv = vec![command.program];
+    argv.extend(command.args);
+    let invocation_id = invocation.id.as_str().to_string();
+    let wave_id = task.wave_id.as_str().to_string();
+    let environment = [
+        (crate::engine::wave_context::WAVE_ID_ENV, wave_id.as_str()),
+        (crate::durable::RUN_CONTEXT_ENV, "agent"),
+        (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
+    ];
+    let window = format!("interactive-{}", &invocation.id.as_str()[4..12]);
+    crate::engine::process::start_tmux_window_with_env(
+        &session,
+        &window,
+        &command.cwd,
+        &argv,
+        &environment,
+    )
+    .await
+}
+
+fn interactive_step_prompt(input: &str, invocation_id: &str) -> String {
+    format!(
+        "{input}\n\n<lf:interactive-evidence>\nThis interactive surface is read-only and advisory. Do not edit files, run mutating commands, or trigger external side effects. Its launch, lifetime, and handback do not gate the owning Task, which continues automatically. To record the result, tell the User or operator to run `lf invocation handback {invocation_id} --outcome succeeded` after confirmation, or use `--outcome failed` after rejection; do not execute the command from this read-only surface. Closing, detaching, or omitting handback leaves the evidence unresolved without blocking the Task.\n</lf:interactive-evidence>"
+    )
+}
+
+fn complete_interactive_step(
+    event_tx: &mpsc::UnboundedSender<ConversationEvent>,
+    invocation_id: &crate::durable::AgentInvocationId,
+) -> Result<()> {
+    event_tx.send(ConversationEvent::TurnCompleted {
+        turn_id: format!("interactive:{invocation_id}"),
+        status: Lifecycle::Completed,
+    })?;
+    Ok(())
+}
+
+async fn settle_interactive_launch(
+    store: &SharedStore,
+    lease: &RunLease,
+    invocation_id: &crate::durable::AgentInvocationId,
+    result: Result<()>,
+) -> Result<bool> {
+    let Err(error) = result else {
+        return Ok(true);
+    };
+    tracing::warn!(%invocation_id, %error, "interactive Task phase launch failed; continuing");
+    store
+        .advance_run(
+            lease,
+            crate::durable::RunAdvance::InvocationEnded {
+                invocation_id: invocation_id.clone(),
+                outcome: crate::durable::BoundaryState::Failed,
+            },
+        )
+        .await?;
+    Ok(false)
+}
+
+async fn start_interactive_step(
     store: &SharedStore,
     task: &Task,
     lease: &RunLease,
     flow: &mut Playhead,
     prepared: &crate::lf::commands::run::PreparedHarnessTurn,
-) -> Result<ActiveDemo> {
+) -> Result<crate::durable::AgentInvocationId> {
     let (provider, model) = crate::engine::config::parse_agent(
         prepared
             .config
@@ -1054,67 +1112,25 @@ async fn start_demo_step(
     let crate::durable::AdvanceReceipt::Invocation(invocation) = receipt else {
         unreachable!("InvocationStarting returns an Invocation receipt")
     };
-    let run = store
-        .current_run(&lease.work)
-        .await?
-        .ok_or_else(|| anyhow!("Task Run {} disappeared before Demo", lease.run_id))?;
-    let crate::durable::Containment::Tmux { name: session } = run
-        .containment
-        .ok_or_else(|| anyhow!("Task Run {} has no Demo containment", run.id))?
-    else {
-        anyhow::bail!("Task Demo requires tmux containment");
-    };
-    let prompt = format!(
-        "{}\n\n<lf:demo-handback>\nWalk the User through the running behavior. Do not mark the Demo successful until the User explicitly confirms it. After confirmation, run `lf invocation handback {} --outcome succeeded`. If the User rejects the result, use `--outcome failed`. Closing or detaching without handback leaves this step waiting.\n</lf:demo-handback>",
-        prepared.input, invocation.id
-    );
-    let command = crate::lf::commands::util::build_session_command(
+    let result = launch_interactive_window(
+        store,
+        task,
+        lease,
+        prepared,
+        &invocation,
         &provider,
         model.as_deref(),
-        &task.worktree,
-        &prompt,
-    )?;
-    let mut argv = vec![command.program];
-    argv.extend(command.args);
-    let invocation_id = invocation.id.as_str().to_string();
-    let wave_id = task.wave_id.as_str().to_string();
-    let environment = [
-        (crate::engine::wave_context::WAVE_ID_ENV, wave_id.as_str()),
-        (crate::durable::RUN_CONTEXT_ENV, "agent"),
-        (crate::durable::AGENT_INVOCATION_ENV, invocation_id.as_str()),
-    ];
-    let window = format!("demo-{}", &invocation.id.as_str()[4..12]);
-    if let Err(error) = crate::engine::process::start_tmux_window_with_env(
-        &session,
-        &window,
-        &command.cwd,
-        &argv,
-        &environment,
     )
-    .await
-    {
-        let _ = store
-            .advance_run(
-                lease,
-                crate::durable::RunAdvance::InvocationEnded {
-                    invocation_id: invocation.id,
-                    outcome: crate::durable::BoundaryState::Failed,
-                },
-            )
-            .await;
-        return Err(error);
-    }
+    .await;
+    let _launched = settle_interactive_launch(store, lease, &invocation.id, result).await?;
     open_task_flow_body(flow, task)?;
     #[cfg(target_os = "macos")]
-    if let Err(error) = crate::lf::commands::desktop::run() {
-        tracing::warn!(%error, "could not present interactive Demo in Loopflow.app");
+    if _launched {
+        if let Err(error) = crate::lf::commands::desktop::run() {
+            tracing::warn!(%error, "could not present interactive Task phase in Loopflow.app");
+        }
     }
-    Ok(ActiveDemo {
-        invocation_id: invocation.id,
-        session,
-        window,
-        completion_sent: false,
-    })
+    Ok(invocation.id)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1125,14 +1141,16 @@ async fn start_prepared_task_step(
     harness: &mut dyn Harness,
     flow: &mut Playhead,
     capture: Option<&crate::trace::CaptureHandle>,
-    active_demo: &mut Option<ActiveDemo>,
+    event_tx: &mpsc::UnboundedSender<ConversationEvent>,
     prepared: PreparedTaskStep,
 ) -> Result<StartedTaskStep> {
     store
         .set_flow_position(lease, prepared.position.clone())
         .await?;
     if prepared.interactive {
-        *active_demo = Some(start_demo_step(store, task, lease, flow, &prepared.turn).await?);
+        let invocation_id =
+            start_interactive_step(store, task, lease, flow, &prepared.turn).await?;
+        complete_interactive_step(event_tx, &invocation_id)?;
         return Ok(StartedTaskStep {
             provider_turn_active: false,
             basis: Some(prepared.basis),
@@ -1157,19 +1175,12 @@ async fn start_resumed_task_phase(
     flow: &mut Playhead,
     wave_name: &str,
     capture: Option<&crate::trace::CaptureHandle>,
-    active_demo: &mut Option<ActiveDemo>,
+    event_tx: &mpsc::UnboundedSender<ConversationEvent>,
 ) -> Result<StartedTaskStep> {
     *flow = resume_task_phase(task)?;
     let prepared = prepare_task_flow_step(store, task, lease, wave_name, flow, None).await?;
     start_prepared_task_step(
-        store,
-        task,
-        lease,
-        harness,
-        flow,
-        capture,
-        active_demo,
-        prepared,
+        store, task, lease, harness, flow, capture, event_tx, prepared,
     )
     .await
 }
@@ -1189,14 +1200,6 @@ fn finish_task_flow_turn(flow: &mut Playhead, status: Lifecycle) -> Result<bool>
     Ok(events
         .iter()
         .any(|event| matches!(event, PlayheadEvent::InvocationCompleted { .. })))
-}
-
-fn demo_handback_status(outcome: crate::durable::BoundaryState) -> Lifecycle {
-    if outcome == crate::durable::BoundaryState::Succeeded {
-        Lifecycle::Completed
-    } else {
-        Lifecycle::Interrupted
-    }
 }
 
 async fn run_task_flow_ops(task: &Task, flow: &mut Playhead) -> Result<bool> {
@@ -1970,28 +1973,265 @@ fn progress_summary(text: &str) -> String {
 
 #[cfg(test)]
 mod planning_tests {
-    use super::{demo_handback_status, task_seed};
-    use crate::chat::types::Lifecycle;
-    use crate::durable::{Basis, BoundarySeed, BoundaryState, EpochId};
+    use super::{
+        complete_interactive_step, finish_task_flow_turn, interactive_step_prompt, task_seed,
+    };
+    use crate::chat::types::{ConversationEvent, Lifecycle};
+    use crate::durable::{
+        AgentInvocationId, Basis, BoundarySeed, Containment, EpochId, RunAdvance, RunTrigger,
+    };
+    use crate::engine::agent::AgentConfig;
+    use crate::harness::{Harness, SendCurrentOutcome};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::project::{Project, ProjectId};
+    use crate::store::{open_store, StorageConfig};
     use crate::task::{
         Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
         TaskPrId,
     };
+    use crate::wave::playhead::{BodyProvenance, Playhead, QueuedInvocation};
+    use crate::wave::Wave;
+
+    struct UnusedHarness;
+
+    #[async_trait::async_trait]
+    impl Harness for UnusedHarness {
+        async fn start(&mut self, _config: &AgentConfig) -> anyhow::Result<()> {
+            anyhow::bail!("interactive Task step must not start the writable harness")
+        }
+
+        async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {
+            anyhow::bail!("interactive Task step must not use the writable harness")
+        }
+
+        async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
+            SendCurrentOutcome::NotSteerable
+        }
+
+        async fn interrupt(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
+
+    #[tokio::test]
+    async fn interactive_step_completes_without_handback() {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let invocation_id = AgentInvocationId::new();
+
+        complete_interactive_step(&event_tx, &invocation_id).unwrap();
+
+        let event = event_rx.recv().await.unwrap();
+        assert!(matches!(
+            event,
+            ConversationEvent::TurnCompleted { turn_id, status }
+                if turn_id == format!("interactive:{invocation_id}")
+                    && status == Lifecycle::Completed
+        ));
+    }
 
     #[test]
-    fn only_successful_demo_handback_completes_the_step() {
+    fn interactive_prompt_names_read_only_advisory_handback_contract() {
+        let prompt = interactive_step_prompt("Demonstrate it.", "invocation_demo");
+
+        assert!(prompt.contains("read-only"));
+        assert!(prompt.contains("Do not edit files"));
+        assert!(prompt.contains("advisory"));
+        assert!(prompt.contains("do not gate the owning Task"));
+        assert!(prompt.contains("continues automatically"));
+        assert!(prompt.contains("lf invocation handback invocation_demo"));
+        assert!(prompt.contains("do not execute the command from this read-only surface"));
+        assert!(!prompt.contains("leaves this step waiting"));
+    }
+
+    #[test]
+    fn configured_demo_step_advances_without_handback() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let invocation = QueuedInvocation::load(&repo, "build").unwrap();
+        let demo_index = invocation
+            .steps
+            .iter()
+            .position(|step| step.name == "demo")
+            .expect("build flow has a demo step") as u32;
+        let (mut flow, _) = Playhead::resume_root(invocation, demo_index, 0).unwrap();
+        let step = flow.current().unwrap();
+        assert_eq!(step.step, "demo");
         assert_eq!(
-            demo_handback_status(BoundaryState::Succeeded),
-            Lifecycle::Completed
+            crate::engine::load_skill(&step.step, &repo)
+                .unwrap()
+                .interactive,
+            Some(true)
         );
-        for outcome in [
-            BoundaryState::Failed,
-            BoundaryState::Interrupted,
-            BoundaryState::Unknown,
-        ] {
-            assert_eq!(demo_handback_status(outcome), Lifecycle::Interrupted);
-        }
+        let body = BodyProvenance::for_step(&step, &repo);
+        flow.start_body(body).unwrap();
+
+        assert!(finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
+    }
+
+    #[tokio::test]
+    async fn configured_task_records_one_failed_advisory_launch_and_continues() {
+        let repository =
+            std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .unwrap();
+        let database = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(
+            open_store(&StorageConfig::sqlite(database.path().join("registry.db")))
+                .await
+                .unwrap(),
+        );
+        let now = time::OffsetDateTime::now_utc();
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "interactive-task-proof".to_string(),
+            repository.display().to_string(),
+        );
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("interactive-task-project").unwrap(),
+                slug: "interactive-task-proof".to_string(),
+                name: "Interactive Task proof".to_string(),
+                prompt_context: "Prove the configured Task lifecycle.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 0,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "opencode".to_string(),
+            provider: "opencode".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        let invocation = QueuedInvocation::load(&repository, "build").unwrap();
+        let demo_index = invocation
+            .steps
+            .iter()
+            .position(|step| step.name == "demo")
+            .unwrap() as u32;
+        let mut task = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("interactive-task-issue").unwrap(),
+                identifier: "TEST-1".to_string(),
+                title: "Interactive Task proof".to_string(),
+                description: "A failed advisory launch must not retry or block.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: repository.clone(),
+            workspace_slug: "interactive-task-proof".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("build", "slice", "ship"),
+            lifecycle_phase: TaskLifecyclePhase::First,
+            phase_epoch: 1,
+            phase_cursor: demo_index,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "opencode".to_string(),
+            provider: "opencode".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "test/interactive-task-proof".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_wave(&wave).await.unwrap();
+        store.create_project(&project).await.unwrap();
+        store.create_task(&task, &pr).await.unwrap();
+        let work = store
+            .work_for_child(&crate::child::ChildRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        let (_, lease) = store.reserve_run(&work, RunTrigger::User).await.unwrap();
+        store
+            .advance_run(
+                &lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "unused-advisory-proof".to_string(),
+                    },
+                    cwd: repository,
+                },
+            )
+            .await
+            .unwrap();
+        let mut flow = super::resume_task_phase(&task).unwrap();
+        let prepared = super::prepare_task_flow_step(
+            &store,
+            &mut task,
+            &lease,
+            "interactive-task-proof",
+            &flow,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(prepared.interactive);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut harness = UnusedHarness;
+
+        let started = super::start_prepared_task_step(
+            &store,
+            &mut task,
+            &lease,
+            &mut harness,
+            &mut flow,
+            None,
+            &event_tx,
+            prepared,
+        )
+        .await
+        .unwrap();
+
+        assert!(!started.provider_turn_active);
+        let event = event_rx.recv().await.unwrap();
+        assert!(matches!(
+            event,
+            ConversationEvent::TurnCompleted {
+                status: Lifecycle::Completed,
+                ..
+            }
+        ));
+        assert!(finish_task_flow_turn(&mut flow, Lifecycle::Completed).unwrap());
+        let invocations = store.invocations_for_run(&lease.run_id).await.unwrap();
+        assert_eq!(
+            invocations.len(),
+            1,
+            "the failed launcher is attempted once"
+        );
+        assert!(invocations[0].ended_at.is_some());
+        assert!(store.invocation_surfaces(true).await.unwrap().is_empty());
     }
 
     #[test]

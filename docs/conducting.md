@@ -80,6 +80,11 @@ AgentInvocation. `lf invocation present <id>` reopens its attach route, and `lf 
 handback <id> --outcome ...` records explicit terminal evidence without
 inventing a second Work identity.
 
+Interactive Task phases are different: they make one bounded launch attempt and
+advance immediately. Their read-only surfaces may remain in `invocation list
+--active`; launch failure or missing handback is advisory and never becomes a
+human blocker. Use `lf ask` when the Task truly needs an answer before continuing.
+
 ## The Mac app
 
 The Loopflow app is the podium. It opens on a repository rail, the wave list,

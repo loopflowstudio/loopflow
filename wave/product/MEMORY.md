@@ -128,9 +128,15 @@ they mean the Mac surface.
 - **There is no agent messaging substrate.** Radio commands, channel identity,
   bus tables, cursors, retention, and subscriptions are gone. Durable Steers and
   Work state replace message delivery as product truth.
-- **Human Wave Chat remains a presentation surface.** Its current HTTP/SSE
-  listener is not generalized into Project/Task communication and does not feed
-  ambient prompt context.
+- **Company Discord is the canonical human Wave Chat backing when configured
+  (settled 2026-07-21).** An inbound human message becomes one durable Wave
+  Steer and the Wave reply returns to the same channel. Restart catch-up,
+  deduplication, self-echo rejection, and outbound receipts preserve one
+  conversation. The active backing and conversation epoch are explicit: local
+  and Discord compose never operate simultaneously, and product surfaces must
+  not persist a second transcript. This listener is not generalized into
+  Project/Task communication and Discord history does not become ambient prompt
+  context.
 - **Home ownership is the next design.** Decide how Ready scanning, remote
   nudges, live deltas, and replaceable executors fit together before moving
   remaining lfd/Wave-listener behavior.

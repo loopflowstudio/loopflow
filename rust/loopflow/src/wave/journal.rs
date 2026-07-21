@@ -264,6 +264,12 @@ pub enum EventKind {
         text: String,
         source: DiscordMessageSource,
     },
+    DiscordAuthoredMessage {
+        id: MessageId,
+        op: MessageOp,
+        text: String,
+        source: DiscordMessageSource,
+    },
     DiscordChatCursorAdvanced {
         binding: DiscordChatBinding,
         message_id: String,
@@ -555,6 +561,16 @@ impl Narrator {
             )),
             EventKind::DiscordUserMessage { id, text, source } => info(format!(
                 "discord ← \"{}\" ({id}, {})",
+                ellipsize(text, 60),
+                source.message_id
+            )),
+            EventKind::DiscordAuthoredMessage {
+                id,
+                op,
+                text,
+                source,
+            } => info(format!(
+                "discord app ← ({op:?}) \"{}\" ({id}, {})",
                 ellipsize(text, 60),
                 source.message_id
             )),
@@ -1203,6 +1219,28 @@ pub fn fold_thread(events: &[Event]) -> ThreadFold {
                 }
                 messages.insert(id.clone(), message);
             }
+            EventKind::DiscordAuthoredMessage {
+                id,
+                op,
+                text,
+                source,
+            } => {
+                let turn_id = format!("turn-{}", event.seq);
+                let mut turn = ChatTurn::user(turn_id.clone(), text.clone());
+                turn.created_at = event.at_rfc3339();
+                turns.push(turn);
+                discord_turn_bindings.insert(turn_id, source.binding.clone());
+                let message = PendingMessage {
+                    id: id.clone(),
+                    op: *op,
+                    text: format!("[{}]\n{}", source.uri(), text),
+                    source: Some(source.clone()),
+                };
+                if !consumed_messages.contains(id) {
+                    pending_messages.push(message.clone());
+                }
+                messages.insert(id.clone(), message);
+            }
             EventKind::DiscordChatCursorAdvanced {
                 binding,
                 message_id,
@@ -1634,6 +1672,12 @@ mod tests {
                 text: "question".into(),
                 source: discord_source(),
             },
+            EventKind::DiscordAuthoredMessage {
+                id: MessageId("msg-3".into()),
+                op: MessageOp::Steer,
+                text: "change course".into(),
+                source: discord_source(),
+            },
             EventKind::DiscordChatCursorAdvanced {
                 binding: discord_binding(),
                 message_id: "101".into(),
@@ -1785,6 +1829,12 @@ mod tests {
             EventKind::DiscordUserMessage {
                 id: MessageId("msg-2".into()),
                 text: "question".into(),
+                source: discord_source(),
+            },
+            EventKind::DiscordAuthoredMessage {
+                id: MessageId("msg-3".into()),
+                op: MessageOp::Steer,
+                text: "change course".into(),
                 source: discord_source(),
             },
             EventKind::DiscordChatCursorAdvanced {

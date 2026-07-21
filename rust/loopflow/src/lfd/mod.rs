@@ -45,6 +45,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use fs2::FileExt;
 use hmac::{Hmac, Mac};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
@@ -104,11 +105,12 @@ async fn build_state(
     store: Arc<Store>,
     linear: Option<LinearConfig>,
     github: Option<GithubConfig>,
+    discord_token: Option<SecretString>,
 ) -> anyhow::Result<LfdState> {
     let local = store.local_home().await?;
     Ok(LfdState {
         repo_root,
-        wave_host: WaveHost::new(local.id, store.clone()),
+        wave_host: WaveHost::new(local.id, store.clone(), discord_token),
         control_token: Arc::new(uuid::Uuid::new_v4().to_string()),
         store,
         linear,
@@ -849,7 +851,16 @@ pub async fn serve(
              gate this listener at the network boundary"
         );
     }
-    let state = build_state(repo_root.clone(), store, linear, github_config(&repo_root)).await?;
+    let discord_token =
+        config_value(&repo_root, crate::wave::discord::TOKEN_ENV).map(SecretString::new);
+    let state = build_state(
+        repo_root.clone(),
+        store,
+        linear,
+        github_config(&repo_root),
+        discord_token,
+    )
+    .await?;
     let _home_lock = lock_home(state.wave_host.home_id())?;
     let wave_host = state.wave_host.clone();
     let reconciliation = tokio::spawn({
@@ -1103,7 +1114,7 @@ mod tests {
     }
 
     async fn make_state(repo: &Path, store: Arc<Store>, linear: Option<LinearConfig>) -> LfdState {
-        build_state(repo.to_path_buf(), store, linear, None)
+        build_state(repo.to_path_buf(), store, linear, None, None)
             .await
             .unwrap()
     }

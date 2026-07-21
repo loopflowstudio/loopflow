@@ -65,6 +65,13 @@ they mean the Mac surface.
 
 - `lf` and durable store projections define the product API; Mac and iOS
   consume that model rather than inventing a parallel lifecycle.
+- **Terminal-only and agent-embedded Loopflow are normal primary modes.** Chat
+  is an optional shared steering and observation surface, never a prerequisite
+  for operating Loopflow or an onboarding funnel every user must enter.
+- **Wave Chat is asynchronous steering, not a low-latency support chat.**
+  Durable inputs preserve order and may wait behind existing Wave work; surfaces
+  show delivered, queued, and working state instead of implying an immediate
+  conversational reply.
 - App surfaces navigate, present, and Steer Work. A view, terminal, provider
   process, or listener is never the source of Work or Ask/Answer truth.
 - A provider session is AgentInvocation continuity, not Work identity.

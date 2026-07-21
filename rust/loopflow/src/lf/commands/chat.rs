@@ -2,9 +2,10 @@
 //!
 //! One door, `POST /messages` on the wave's server. `--steer` uses the `steer`
 //! op, reaching a live steer-capable turn and otherwise queueing for the next
-//! one. The default `message` op queues for the loop, unattributed — the same
-//! human act journals the same way on every surface (the Mac composer sends
-//! the identical op).
+//! one. The default `message` op queues for the loop. Local chat commits it to
+//! the journal; Discord chat posts the same op through its provider-backed
+//! composer and queues the canonical provider echo. The Mac composer uses the
+//! identical door.
 //!
 //! # Targeting
 //! - default: the invoking context's wave from `LF_WAVE_ID`.
@@ -343,7 +344,11 @@ async fn post_message(endpoint: &str, text: &str, steer: bool) -> Result<()> {
     } else {
         MessageOp::Message
     };
-    let body = serde_json::json!({ "op": op, "text": text });
+    let body = serde_json::json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "op": op,
+        "text": text,
+    });
     post_json(endpoint, "/messages", &body).await?;
     Ok(())
 }

@@ -11,6 +11,39 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
+pub(crate) fn process_group_observation(
+    process_group: i64,
+) -> crate::durable::ContainmentObservation {
+    use crate::durable::ContainmentObservation;
+
+    #[cfg(unix)]
+    {
+        let Ok(process_group) = i32::try_from(process_group) else {
+            return ContainmentObservation::Unprovable;
+        };
+        if process_group <= 1 {
+            return ContainmentObservation::Unprovable;
+        }
+        // SAFETY: a negative pid selects one process group and signal 0 only
+        // probes its existence; no pointers are used and no signal is sent.
+        let result = unsafe { libc::kill(-process_group, 0) };
+        if result == 0 {
+            return ContainmentObservation::Present;
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => ContainmentObservation::Absent,
+            Some(libc::EPERM) => ContainmentObservation::Present,
+            _ => ContainmentObservation::Unprovable,
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = process_group;
+        ContainmentObservation::Unprovable
+    }
+}
+
 pub(crate) fn resolve_lf_binary() -> PathBuf {
     if let Some(path) = select_binary_override(
         crate::build_info::provenance(),
@@ -221,7 +254,7 @@ fn resolve_current_home_lf_binary() -> PathBuf {
 
 /// The current Home `lf`, resolved to an absolute path that exists. Mirrors
 /// [`resolve_pinned_lf_binary`] but over [`resolve_current_home_lf_binary`].
-fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
+pub(crate) fn resolve_current_home_lf_binary_checked() -> Result<PathBuf> {
     let candidate = resolve_current_home_lf_binary();
     if candidate.is_absolute() {
         return if candidate.exists() {

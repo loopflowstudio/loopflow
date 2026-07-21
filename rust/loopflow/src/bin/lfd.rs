@@ -222,6 +222,8 @@ fn main() -> anyhow::Result<()> {
                 lf_home: std::env::var_os("LF_HOME").map(std::path::PathBuf::from),
                 db_path: std::env::var_os("LF_DB_PATH").map(std::path::PathBuf::from),
                 path_env: std::env::var("PATH").ok(),
+                doppler_project: std::env::var("DOPPLER_PROJECT").ok(),
+                doppler_config: std::env::var("DOPPLER_CONFIG").ok(),
             };
             let file = lfd::service::install(&spec)?;
             println!(
@@ -229,9 +231,7 @@ fn main() -> anyhow::Result<()> {
                 file.platform,
                 file.path.display()
             );
-            println!(
-                "webhook credentials are read from the environment or Doppler at daemon startup"
-            );
+            println!("credentials are resolved from environment or Doppler at daemon startup");
             Ok(())
         }
         Commands::Status => {

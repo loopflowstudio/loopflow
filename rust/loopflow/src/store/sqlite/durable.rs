@@ -151,6 +151,13 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let epoch = current_epoch_in(&tx, work)?;
         let home_id = reserving_home_in(&tx, work)?;
+        if let Some(run) = run_for_epoch_in(&tx, &epoch.id)? {
+            return Err(StoreError::RunFenced {
+                target: format!("{} {}", work.kind(), work.id()),
+                run_id: run.id,
+                state: run.state,
+            });
+        }
         resolve_wait_for_trigger(&tx, &epoch, trigger)?;
         let token = RunLeaseToken::new();
         let run = Run {

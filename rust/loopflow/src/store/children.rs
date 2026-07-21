@@ -171,11 +171,7 @@ impl Store {
             .await
         {
             Ok(reserved) => reserved,
-            Err(super::StoreError::Sqlite(error))
-                if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) =>
-            {
-                return Ok(None);
-            }
+            Err(super::StoreError::RunFenced { .. }) => return Ok(None),
             Err(error) => return Err(error),
         };
         self.advance_run(
@@ -668,11 +664,7 @@ impl Store {
             .await
         {
             Ok(reserved) => reserved,
-            Err(super::StoreError::Sqlite(error))
-                if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) =>
-            {
-                return Ok(None);
-            }
+            Err(super::StoreError::RunFenced { .. }) => return Ok(None),
             Err(error) => return Err(error),
         };
         self.advance_run(

@@ -107,7 +107,7 @@ public enum ChatBacking: Codable, Sendable, Equatable {
 public enum WaveChatComposeRoute: Sendable, Equatable {
     case unavailable
     case local
-    case openDiscord(ChatAction)
+    case discord(ChatAction)
     case archived
 }
 
@@ -123,7 +123,7 @@ public func waveChatComposeRoute(
     case .local:
         return .local
     case let .discord(_, _, open):
-        return .openDiscord(open)
+        return .discord(open)
     }
 }
 
@@ -487,7 +487,7 @@ public enum WaveLoopState: String, Equatable, Sendable {
 }
 
 /// How a posted message asks to be handled — the required `op` of the
-/// `POST /messages {op, text}` body. Explicit at the API, never inferred.
+/// `POST /messages {id, op, text}` body. Explicit at the API, never inferred.
 public enum WaveMessageOp: String, Equatable, Sendable {
     /// Queued; the loop's next turn answers it.
     case message
@@ -631,7 +631,9 @@ public final class WaveChatConnection {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["op": op.rawValue, "text": trimmed])
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: ["id": UUID().uuidString, "op": op.rawValue, "text": trimmed]
+        )
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw WaveChatError.badStatus(-1)

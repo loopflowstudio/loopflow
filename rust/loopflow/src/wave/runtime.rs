@@ -194,6 +194,21 @@ pub struct DiscordSnapshot {
     pub deliveries: Vec<DiscordDelivery>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DiscordInput {
+    Provider,
+    Authored(MessageOp),
+}
+
+impl DiscordInput {
+    fn op(self) -> MessageOp {
+        match self {
+            Self::Provider => MessageOp::Message,
+            Self::Authored(op) => op,
+        }
+    }
+}
+
 /// The assistant turn in progress. `turn` is the snapshot the wire watches
 /// grow (status `Running`), re-broadcast on every content delta and committed
 /// to `thread` under the same id at finalization; the rest is bookkeeping that
@@ -595,6 +610,24 @@ impl WaveRuntime {
         text: String,
         source: DiscordMessageSource,
     ) -> Result<bool, JournalAppendError> {
+        self.try_deliver_discord_input(text, source, DiscordInput::Provider)
+    }
+
+    pub(crate) fn try_deliver_discord_authored(
+        &self,
+        text: String,
+        source: DiscordMessageSource,
+        op: MessageOp,
+    ) -> Result<bool, JournalAppendError> {
+        self.try_deliver_discord_input(text, source, DiscordInput::Authored(op))
+    }
+
+    fn try_deliver_discord_input(
+        &self,
+        text: String,
+        source: DiscordMessageSource,
+        input: DiscordInput,
+    ) -> Result<bool, JournalAppendError> {
         let mut inner = self.inner();
         let active_binding = inner
             .conversation_epochs
@@ -610,20 +643,29 @@ impl WaveRuntime {
         }) {
             return Ok(false);
         }
-        let event = inner
-            .journal
-            .try_append(|seq| EventKind::DiscordUserMessage {
-                id: MessageId(format!("msg-{seq}")),
-                text: text.clone(),
-                source: source.clone(),
-            })?;
+        let event = inner.journal.try_append(|seq| {
+            let id = MessageId(format!("msg-{seq}"));
+            match input {
+                DiscordInput::Provider => EventKind::DiscordUserMessage {
+                    id,
+                    text: text.clone(),
+                    source: source.clone(),
+                },
+                DiscordInput::Authored(op) => EventKind::DiscordAuthoredMessage {
+                    id,
+                    op,
+                    text: text.clone(),
+                    source: source.clone(),
+                },
+            }
+        })?;
         let id = MessageId(format!("msg-{}", event.seq));
         let mut turn = ChatTurn::user(format!("turn-{}", event.seq), text.clone());
         turn.created_at = event.at_rfc3339();
         self.commit_locked(&mut inner, turn);
         let pending = PendingMessage {
             id,
-            op: MessageOp::Message,
+            op: input.op(),
             text: format!("[{}]\n{}", source.uri(), text),
             source: Some(source.clone()),
         };
@@ -1131,9 +1173,10 @@ impl WaveRuntime {
     /// backing; authored text never falls through to a local shadow thread.
     ///
     /// # Errors
-    /// Discord-backed authored text is rejected; the active epoch owns its
-    /// Open-in-Discord action. Local journal append failures leave every
-    /// projection untouched.
+    /// Discord-backed authored text is rejected at this local write boundary;
+    /// the server routes it through the attached provider before calling here.
+    /// Without a provider attachment, the active epoch owns its Open-in-Discord
+    /// action. Local journal append failures leave every projection untouched.
     pub fn try_deliver_authored(
         &self,
         op: MessageOp,
@@ -2991,6 +3034,43 @@ mod tests {
                 .cursor
                 .as_deref(),
             Some("101")
+        );
+    }
+
+    #[test]
+    fn discord_app_steer_keeps_its_operation_after_restart() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let binding = DiscordChatBinding {
+            guild_id: "guild".into(),
+            channel_id: "channel".into(),
+        };
+        let source = DiscordMessageSource {
+            binding: binding.clone(),
+            message_id: "102".into(),
+            author_id: "bot".into(),
+        };
+        let rt = open_discord_runtime(tmp.path(), &binding);
+        rt.try_attach_discord(binding.clone(), "bot".into(), Some("101".into()))
+            .expect("attach at current head");
+
+        assert!(rt
+            .try_deliver_discord_authored("change course".into(), source.clone(), MessageOp::Steer)
+            .expect("journal app steer"));
+        assert!(!rt
+            .try_deliver_discord_authored("change course".into(), source.clone(), MessageOp::Steer)
+            .expect("deduplicate app steer"));
+        assert_eq!(rt.pending_messages()[0].op, MessageOp::Steer);
+
+        drop(rt);
+        let reopened = open_discord_runtime(tmp.path(), &binding);
+        assert_eq!(reopened.pending_messages().len(), 1);
+        assert_eq!(reopened.pending_messages()[0].op, MessageOp::Steer);
+        assert_eq!(
+            reopened.pending_messages()[0]
+                .source
+                .as_ref()
+                .expect("Discord source"),
+            &source
         );
     }
 

@@ -573,7 +573,7 @@ struct WaveChatView: View {
         switch composeRoute {
         case .unavailable, .local:
             localComposer
-        case let .openDiscord(action):
+        case let .discord(action):
             discordComposer(action)
         case .archived:
             archivedComposer
@@ -595,34 +595,27 @@ struct WaveChatView: View {
     }
 
     private func discordComposer(_ action: ChatAction) -> some View {
-        HStack(alignment: .center, spacing: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text("Discord is the active conversation")
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            HStack(spacing: Spacing.sm) {
+                Label("Synced with Discord", systemImage: "bubble.left.and.bubble.right")
                     .font(Typography.caption().weight(.semibold))
-                    .foregroundStyle(palette.text)
-                Text("Messages appear here live. Reply in Discord so the Wave keeps one thread.")
-                    .font(Typography.caption(11))
                     .foregroundStyle(palette.textSecondary)
-                if hasText {
-                    Text("Unsent draft: \(composerText)")
-                        .font(Typography.caption(11))
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
+                Spacer(minLength: 0)
+                if let url = action.url {
+                    Link(destination: url) {
+                        Label(action.label, systemImage: "arrow.up.right")
+                    }
+                    .font(Typography.caption(11))
+                    .accessibilityIdentifier("wave-chat-open-discord")
                 }
             }
-            Spacer(minLength: 0)
-            if let url = action.url {
-                Link(destination: url) {
-                    Label(action.label, systemImage: "arrow.up.right")
-                }
-                .buttonStyle(DarkButtonStyle())
-                .accessibilityIdentifier("wave-chat-open-discord")
-            } else {
-                Text("Discord link unavailable")
+            if let sendError {
+                Text(sendError)
                     .font(Typography.caption())
                     .foregroundStyle(Color.statusError)
+                    .accessibilityIdentifier("wave-chat-send-error")
             }
+            composerRow
         }
         .padding(Spacing.lg)
         .background(palette.background)

@@ -363,7 +363,7 @@ def _promote_with_candidate(
     app_source: Path | None = None,
     applications_dir: Path | None = None,
 ) -> None:
-    """Delegate every machine-global mutation to the freshly built lf."""
+    """Delegate every Home-global mutation to the freshly built lf."""
     _require_complete_schema_for_promotion(ROOT)
     # Resolve the /Applications target at call time so the module global stays
     # authoritative (a def-time default would freeze the real /Applications).

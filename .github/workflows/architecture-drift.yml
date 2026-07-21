@@ -1,0 +1,29 @@
+name: Architecture Drift
+
+on:
+  schedule:
+    - cron: "17 16 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Check the architecture map
+        run: |
+          uv run python scripts/check_architecture.py --json \
+            | tee architecture-report.json \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain the weekly evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: architecture-drift-${{ github.run_id }}
+          path: architecture-report.json
+          if-no-files-found: warn
+          retention-days: 90

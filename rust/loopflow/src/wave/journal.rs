@@ -162,6 +162,7 @@ pub struct DiscordMessageSource {
     pub author_id: String,
 }
 
+/// architecture-shim: legacy-chat-import
 /// One legacy epoch imported atomically when an old journal first adopts the
 /// explicit backing model. `turn_ids` keeps local projection exact even when
 /// the old journal alternated between local and Discord speech.

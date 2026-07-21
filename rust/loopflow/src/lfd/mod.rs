@@ -81,7 +81,7 @@ pub struct LfdState {
     linear: Option<LinearConfig>,
     /// GitHub webhook config. When absent, `/github/webhook` returns 503.
     github: Option<GithubConfig>,
-    /// The machine-local host for Wave listener tasks.
+    /// The Home-local keeper for Wave listener tasks.
     wave_host: WaveHost,
     /// Local capability required by the Wave control routes.
     control_token: Arc<String>,

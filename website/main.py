@@ -197,7 +197,7 @@ DOC_DESCRIPTIONS = {
     "authoring": "Writing skills, flows, directions, and goals",
     "agent-api": "How agents launch, steer, and prove control of other agents",
     "conducting": "Monitoring and steering many agents; the Mac podium",
-    "architecture": "Decentralized stores, Home identity, WaveHost, SSH, and lfd",
+    "architecture": "Concepts, truth owners, persistence, processes, APIs, and provider edges",
     "lf": "Every command, PR/planning/release operations, the builtin catalog",
     "config": "Config files, context assembly, models, and launch behavior",
     "subscriptions": "Claude and Codex identities, routes, health, and remote selection",

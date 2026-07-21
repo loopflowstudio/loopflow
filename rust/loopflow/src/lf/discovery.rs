@@ -206,6 +206,7 @@ pub fn discover_skill(repo: &Path, name: &str) -> Result<Skill> {
     }
 }
 
+/// architecture-shim: rams-alias
 /// Resolve an external skill reference like `npx/vercel-labs/deep-research` or
 /// `rams/rams` to a Skill.
 fn find_external_skill(name: &str, repo: Option<&Path>) -> Option<Skill> {

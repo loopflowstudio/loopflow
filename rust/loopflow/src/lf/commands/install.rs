@@ -1,7 +1,7 @@
 //! `lf install` — authorize global `lf` promotion against the shared migration
 //! frontier.
 //!
-//! A branch-local build must never silently become the machine-global command:
+//! A branch-local build must never silently become the Home-global command:
 //! on 2026-07-17 a `--use` promotion repointed `~/.local/bin/lf` at a binary
 //! whose migration registry ended at `0.11.026` while the shared store was at
 //! `0.11.027`, and every subsequent invocation — including active Runs mid-turn
@@ -10,7 +10,7 @@
 //! The candidate binary (the one running this command) reads the shared store's
 //! applied frontier and its own migration registry, counts active Runs, and
 //! renders a verdict. `promote` consumes that verdict under the
-//! machine-global reservation fence, retains immutable rollback bytes, and
+//! Home-global reservation fence, retains immutable rollback bytes, and
 //! activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
@@ -250,6 +250,7 @@ fn read_active_runs(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<ActiveR
     runs
 }
 
+/// architecture-shim: pre-run-promotion
 /// Promotion from the last Session-based release must prove the same drain
 /// that the `durable_input_spine` migration itself requires. The `runs` table
 /// does not exist yet at that frontier, so preflight reads the legacy leases
@@ -855,6 +856,7 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<()> {
 }
 
 #[derive(Debug)]
+// architecture-shim: retired-app-replacement
 struct AppPromotion<'a> {
     source: &'a Path,
     target: &'a Path,
@@ -1268,7 +1270,7 @@ pub fn promote(
     let bin_dir = lf_bin_dir();
     // Activate the published candidate before advancing the store. It knows
     // both the current and pending frontiers, so every later failure leaves a
-    // compatible machine-global command. The exclusive lock keeps reservations
+    // compatible Home-global command. The exclusive lock keeps reservations
     // out through the under-lock recount, activation, and migration.
     let daemon = DaemonPromotion {
         source: artifacts.daemon_source,

@@ -272,7 +272,7 @@ Foreground SSH work can use origin and target subscription accounts. Durable
 residents shed forwarded authority before detaching and use credentials
 installed on their machine.
 
-See [Architecture → Decentralized Home](architecture.md#decentralized-home).
+See [Architecture → Processes](architecture.md#processes).
 
 ## Projects and KRs
 

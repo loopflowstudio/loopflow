@@ -590,6 +590,7 @@ pub enum Commands {
         #[command(flatten)]
         target: WaveTargetArgs,
     },
+    // architecture-shim: retired-op
     // Same reservation for the retired `lf op` namespace, which held every
     // operation before the runtime collapsed to waves, projects, and tasks.
     // Without it, `lf op land` reports a missing skill named `op` instead of

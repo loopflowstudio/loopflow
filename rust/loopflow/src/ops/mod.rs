@@ -27,10 +27,14 @@ pub use abandon::{abandon_branch, AbandonOptions};
 pub(crate) use ask_comments::publish_pending_ask_comments;
 pub(crate) use child::{ambient_run_lease, required_run_lease};
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
+pub(crate) use cron::cron_receipt_ids;
 pub use cron::{
-    add_cron, daily_time_of, default_launch_agents_dir, list_crons, parse_schedule, remove_cron,
-    resolve_lf_path, schedule_from_cron, sync_crons, CronSpec, CronSyncResult, InstalledCron,
-    Schedule, SkippedCron, SystemLaunchctl,
+    add_cron, daily_time_of, default_launch_agents_dir, latest_cron_receipt, list_cron_receipts,
+    list_crons, parse_schedule, parse_wait_duration, receipt_is_stale, receipt_root,
+    record_cron_preflight_failure, remove_cron, resolve_lf_path, run_cron, schedule_from_cron,
+    sync_crons, trigger_cron, validate_cron_specs, wait_for_cron_receipt, CronHost, CronOutcome,
+    CronReceipt, CronSchedule, CronSource, CronSpec, CronSyncResult, CronTargetKind, InstalledCron,
+    SystemLaunchctl,
 };
 pub use error::{OpsError, OpsResult};
 pub use flow::execute_flow_ops;

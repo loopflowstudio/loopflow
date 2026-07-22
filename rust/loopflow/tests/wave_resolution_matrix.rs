@@ -86,7 +86,19 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// Commands whose optional `--wave` narrows a machine-wide result instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID` or
 /// reject names absent from the registry.
-const FILTER_ONLY: &[&[&str]] = &[&["activity"], &["ci"], &["runs"]];
+const FILTER_ONLY: &[&[&str]] = &[&["activity"], &["ci"], &["cron", "list"], &["runs"]];
+
+/// Commands that require a Wave on the command line and therefore never
+/// resolve ambient context. Cron keeps these explicit because scheduled host
+/// operations must name the installed Wave whose authority they validate.
+const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[
+    &["cron", "preflight"],
+    &["cron", "sync"],
+    &["cron", "run"],
+    &["cron", "history"],
+    &["cron", "trigger"],
+    &["cron", "remove"],
+];
 
 const COMMANDS: &[Cmd] = &[
     // ── Reads ────────────────────────────────────────────────────────────
@@ -711,10 +723,11 @@ fn find_clap_command<'a>(root: &'a clap::Command, path: &[&str]) -> Option<&'a c
 }
 
 /// The registry is complete: every `wave`-bearing clap leaf is classified as
-/// either a resolver or a machine-wide filter, every ambient-only command
-/// exists as a real clap leaf, and every registry entry maps to a real clap
-/// leaf. Adding a new `--wave`-bearing command without classifying it fails CI;
-/// removing a command leaves a stale entry that also fails.
+/// either a resolver or a machine-wide filter, every cron leaf has exactly one
+/// Wave-context classification, every ambient/explicit-only command exists as
+/// a real clap leaf, and every registry entry maps to a real clap leaf. Adding
+/// a new `--wave`-bearing command without classifying it fails CI; removing a
+/// command leaves a stale entry that also fails.
 #[test]
 fn registry_is_complete() {
     let root = Cli::command();
@@ -734,6 +747,10 @@ fn registry_is_complete() {
         .iter()
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
+    let explicit_paths: HashSet<Vec<String>> = EXPLICIT_WAVE_ONLY
+        .iter()
+        .map(|path| path.iter().map(|s| s.to_string()).collect())
+        .collect();
 
     // 3. Every wave-arg clap command must be classified.
     for path in &found {
@@ -745,8 +762,24 @@ fn registry_is_complete() {
         );
     }
 
-    // 4. Every ambient-only and filter-only command must exist as a real clap
-    //    leaf.
+    // 4. Every cron leaf must be classified exactly once. Required-wave cron
+    //    commands do not appear in the optional-wave discovery above.
+    let cron = root
+        .find_subcommand("cron")
+        .expect("cron command must exist");
+    for subcommand in cron.get_subcommands() {
+        let path = vec!["cron".to_string(), subcommand.get_name().to_string()];
+        let classifications = usize::from(registry_paths.contains(&path))
+            + usize::from(filter_paths.contains(&path))
+            + usize::from(explicit_paths.contains(&path));
+        assert_eq!(
+            classifications, 1,
+            "cron command {path:?} must have exactly one Wave-context classification"
+        );
+    }
+
+    // 5. Every ambient-only, filter-only, and explicit-only command must exist
+    //    as a real clap leaf. Explicit-only commands must require `wave`.
     for path in AMBIENT_ONLY.iter().chain(FILTER_ONLY) {
         assert!(
             find_clap_command(&root, path).is_some(),
@@ -754,8 +787,21 @@ fn registry_is_complete() {
             path
         );
     }
+    for path in EXPLICIT_WAVE_ONLY {
+        let command = find_clap_command(&root, path).unwrap_or_else(|| {
+            panic!("classified command {path:?} does not exist in the clap tree")
+        });
+        assert!(
+            command.get_arguments().any(|arg| {
+                (arg.get_long() == Some("wave") || arg.get_id() == "wave")
+                    && arg.is_required_set()
+                    && !matches!(arg.get_action(), ArgAction::Append)
+            }),
+            "explicit-only command {path:?} must require one `wave` argument"
+        );
+    }
 
-    // 5. Every registry entry must map to a real clap command (no stale
+    // 6. Every registry entry must map to a real clap command (no stale
     //    entries). Ambient-only commands are checked above.
     let ambient_set: HashSet<Vec<String>> = AMBIENT_ONLY
         .iter()
@@ -778,12 +824,12 @@ fn registry_is_complete() {
 
 // ─── Mutation targeting ─────────────────────────────────────────────────
 
-/// Cache-only mutations target exactly the resolved Wave. Seed two waves
-/// ("alpha" and "beta"); run `lf cron add` resolving to alpha; assert the
-/// plist names alpha, not beta. `cron add` writes the plist before calling
-/// `launchctl load`, so the file is on disk even when `launchctl` fails.
+/// Cron installation refuses a development binary before writing host state.
+/// The matrix above already proves the command resolves an ambient Wave; this
+/// boundary proves that successful resolution cannot leave a disposable binary
+/// in launchd.
 #[test]
-fn cache_mutations_target_the_resolved_wave() {
+fn cron_add_rejects_a_development_binary_before_mutation() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let home = tmp.path().join("home");
     let repo = tmp.path().join("repo");
@@ -812,19 +858,10 @@ fn cache_mutations_target_the_resolved_wave() {
         "alpha".to_string(),
         repo.display().to_string(),
     );
-    let beta = Wave::new(
-        WaveId::new(),
-        "beta".to_string(),
-        repo.display().to_string(),
-    );
     store.create_wave(&alpha).expect("register alpha");
-    store.create_wave(&beta).expect("register beta");
 
     let alpha_uuid = alpha.id().as_str();
 
-    // `lf cron add` with alpha's UUID → plist names alpha, not beta.
-    // `launchctl load` may fail (no launchd on CI); the plist is written
-    // before that call, so we can read it regardless.
     let cron = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
             "cron",
@@ -841,28 +878,17 @@ fn cache_mutations_target_the_resolved_wave() {
         .output()
         .expect("run cron add");
 
-    let launch_agents = home.join("Library/LaunchAgents");
-    let alpha_plist = launch_agents.join("loopflow.cron.alpha.mutation-test.plist");
-    let beta_plist = launch_agents.join("loopflow.cron.beta.mutation-test.plist");
-
     assert!(
-        alpha_plist.exists(),
-        "alpha plist should exist (cron add exit: {}, stderr: {})",
-        cron.status,
-        String::from_utf8_lossy(&cron.stderr).trim()
+        !cron.status.success(),
+        "development cron installation should fail"
+    );
+    let stderr = String::from_utf8_lossy(&cron.stderr);
+    assert!(
+        stderr.contains("requires an installed release binary"),
+        "unexpected cron add error: {stderr}"
     );
     assert!(
-        !beta_plist.exists(),
-        "beta plist should NOT exist — mutation targeted the wrong wave"
-    );
-
-    let plist = std::fs::read_to_string(&alpha_plist).expect("read plist");
-    assert!(
-        plist.contains("<string>alpha</string>"),
-        "plist should contain the resolved wave name 'alpha':\n{plist}"
-    );
-    assert!(
-        !plist.contains("<string>beta</string>"),
-        "plist must not contain 'beta':\n{plist}"
+        !home.join("Library/LaunchAgents").exists(),
+        "development cron installation must not create launchd state"
     );
 }

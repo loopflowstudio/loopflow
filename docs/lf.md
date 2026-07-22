@@ -797,19 +797,31 @@ never appears in process arguments or the service file.
 
 ## lf cron
 
-Install local launchd jobs that run `lf` commands on a schedule. (Wave crons
-in `GOAL.md` frontmatter are separate — the resident fires those; see
-[Waves](waves.md#crons).)
+Reconcile a Wave's `GOAL.md` schedules onto its placed macOS Home and inspect
+each launchd firing through durable receipts.
 
 ```bash
-lf cron add --wave coordination --flow govern-coordination --schedule daily
-lf cron list
-lf cron remove --wave coordination --flow govern-coordination
+lf cron preflight --wave infrastructure
+lf cron sync --wave infrastructure
+lf cron list --wave infrastructure --json
+lf cron trigger --wave infrastructure --flow telemetry-daily --wait --timeout 15m
+lf cron history --wave infrastructure --days 35
 ```
 
-`add` writes `~/Library/LaunchAgents/loopflow.cron.<wave>.<flow>.plist` and
-loads it with launchd; the job runs `lf <flow> --wave <wave>` from the
-current repo.
+`preflight` proves the installed release binary, Wave placement, authoritative
+checkout, target catalog, and fixed-daily schedules without changing launchd.
+`sync` repeats those checks before changing
+launchd, refuses a Home that does not own the Wave placement, and prunes jobs
+removed from the declaration. Jobs execute through the installed release `lf`
+with a secret-free host environment. Each firing writes a running receipt
+before the target starts and atomically replaces it with `succeeded` or
+`failed`; an interrupted runner remains visibly stale. Logs stay under
+`<repo>/.lf/logs/`, while receipts survive checkout replacement under
+`<LF_HOME>/cron/receipts/`.
+
+`trigger` asks launchd to fire the installed job; it never bypasses the
+configured path. `history` defaults to 35 days so nightly, weekly, credential,
+and host-drift observation windows share one evidence surface.
 
 ## lf pm
 

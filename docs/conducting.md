@@ -48,7 +48,7 @@ lf ps              # one call-tree snapshot ranked by completed output
 lf top             # continuously refresh rates, age, idle time, and health
 lf prune --dry-run # inspect safely removable process state
 lf usage           # subscription state per account, spend by repo/provider
-uv run python scripts/lifecycle_scorecard.py # repository maintainer report
+lf telemetry-daily # repository maintainer health and budget report
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf doctor          # audit the ledger: continuity, attribution, lineage

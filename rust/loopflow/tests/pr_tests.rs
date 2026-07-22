@@ -79,6 +79,20 @@ exit 0
 "#
 }
 
+fn gh_merged_pr_without_time_script() -> &'static str {
+    r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  head=$(git rev-parse HEAD)
+  printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"%s"}}\n' "$head"
+  exit 0
+fi
+exit 0
+"#
+}
+
 fn gh_merged_pr_logging_script(log_path: &str) -> String {
     format!(
         r#"#!/bin/sh
@@ -456,7 +470,7 @@ fn github_failure_leaves_publication_intent_observable() {
 #[test]
 fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     let home = tempfile::TempDir::new().expect("temp home");
-    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
+    let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_without_time_script())], home.path());
     let repo = TestRepo::new();
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
@@ -487,6 +501,14 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
             loopflow::task::Observation::Fresh { .. }
         ),
         "manual merge reconciliation should use the bounded REST observation: {persisted_task:?}"
+    );
+    let cached_task = task_status("INF-123").expect("reuse partial merge-time observation");
+    assert!(
+        matches!(
+            cached_task.observation,
+            loopflow::task::Observation::NotRequired
+        ),
+        "partial timing evidence must not degrade Task correctness: {cached_task:?}"
     );
 
     let prs = runtime

@@ -336,6 +336,7 @@ pub struct GithubObservation {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum GithubObservationResult {
     Fresh,
+    Partial { reason: String },
     Degraded { reason: String },
 }
 

@@ -99,7 +99,7 @@ Keep Loopflow development inside its local resource envelope:
 ```bash
 uv run python scripts/resource_envelope.py             # attribute disk use to its owner
 uv run python scripts/resource_envelope.py --recover   # clean only safe disposable pressure
-uv run python scripts/lifecycle_scorecard.py           # maintainer lifecycle and budget report
+lf telemetry-daily                                     # maintainer health and budget report
 uv run python scripts/test.py                          # preflight, then run affected suites
 ```
 

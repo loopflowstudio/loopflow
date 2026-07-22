@@ -32,6 +32,7 @@ CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
 WAVE_SERVER = Path("rust/loopflow/src/wave/server.rs")
 LFD_SERVER = Path("rust/loopflow/src/lfd/mod.rs")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
+FLOWS = Path(".lf/flows")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
@@ -42,6 +43,7 @@ SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 HEADER_LINE = re.compile(r"^--[ \t]*(name|id|depends_on):")
 DRAFT_NAME = re.compile(r"^--[ \t]*name:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
+FLOW_OP = re.compile(r"^\s*-\s*op:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
 TEXT_SUFFIXES = {".md", ".py", ".rs", ".sh", ".sql", ".swift", ".toml", ".yaml", ".yml"}
 SCAN_ROOTS = (
@@ -181,6 +183,19 @@ def _discover_commands(root: Path) -> tuple[set[str], set[str]]:
             internal.add(token)
         pending_attributes = ""
     return commands, internal
+
+
+def _discover_internal_flow_commands(root: Path, internal: set[str]) -> Counter[str]:
+    commands: set[str] = set()
+    flows = root / FLOWS
+    if not flows.is_dir():
+        return Counter()
+    for path in sorted((*flows.glob("*.yaml"), *flows.glob("*.yml"))):
+        for name in FLOW_OP.findall(path.read_text()):
+            command = f"lf {name}"
+            if command in internal:
+                commands.add(command)
+    return Counter(commands)
 
 
 def _discover_binaries(root: Path) -> set[str]:
@@ -528,12 +543,19 @@ def check_repository(root: Path = REPO_ROOT) -> Report:
 
         commands, internal_commands = _discover_commands(root)
         command_locations = public + processes + shim_tokens
-        coverage.append(_cover("public API", commands, command_locations, errors))
+        coverage.append(
+            _cover(
+                "public API",
+                commands - internal_commands,
+                command_locations,
+                errors,
+            )
+        )
         coverage.append(
             _cover(
                 "process boundary",
                 _discover_binaries(root) | internal_commands,
-                processes,
+                processes + _discover_internal_flow_commands(root, internal_commands),
                 errors,
             )
         )

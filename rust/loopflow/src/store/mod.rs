@@ -1707,7 +1707,7 @@ mod tests {
         let mut missing_merge_pr = prepare_pr(missing_merge_pr, 203);
         missing_merge_pr.github_observation = Some(GithubObservation {
             checked_at: merge_time,
-            result: GithubObservationResult::Degraded {
+            result: GithubObservationResult::Partial {
                 reason: "GitHub merged_at missing".to_string(),
             },
         });

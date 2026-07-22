@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""Render Loopflow's repository-maintainer lifecycle scorecard.
-
-This is deliberately a source-tree script, not an ``lf`` command, Skill, or
-Flow. It reads the Home database and pre-land receipts without modifying them.
-"""
+"""Generate the read-only lifecycle scorecard used by telemetry-daily."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import math
-import os
 import sqlite3
 import subprocess
 import sys
@@ -35,7 +30,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--database",
         type=Path,
-        help="read this Loopflow database instead of the Home database",
+        required=True,
+        help="read this Rust-resolved Loopflow Home database",
     )
     return parser.parse_args(argv)
 
@@ -63,17 +59,6 @@ def canonical_repo(repo: Path) -> Path:
 
 def git_common_dir(repo: Path) -> Path:
     return git_path(repo, "--git-common-dir") or repo / ".git"
-
-
-def home_database() -> Path:
-    home = Path(
-        os.environ.get("LF_CONTROL_HOME") or os.environ.get("LF_HOME") or Path.home() / ".lf"
-    )
-    configured = os.environ.get("LF_CONTROL_DB_PATH") or os.environ.get("LF_DB_PATH")
-    if configured:
-        candidate = Path(configured)
-        return candidate if candidate.is_absolute() else home / candidate
-    return home / "loopflow.db"
 
 
 def open_read_only(database: Path) -> sqlite3.Connection:
@@ -695,7 +680,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         repo = canonical_repo(args.repo)
         policy = load_policy(repo)
-        database = args.database or home_database()
+        database = args.database
         generated_at = datetime.now(timezone.utc)
         since = int((generated_at - timedelta(days=policy["window_days"])).timestamp())
         with open_read_only(database) as connection:

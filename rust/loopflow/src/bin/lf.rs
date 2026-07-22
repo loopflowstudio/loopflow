@@ -815,7 +815,7 @@ fn print_project(project: &loopflow::project::Project, json: bool) -> anyhow::Re
             project.id,
             body,
             project.iteration,
-            work_status_label(&snapshot.status),
+            snapshot.reason,
         );
     }
     Ok(())

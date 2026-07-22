@@ -50,6 +50,15 @@ pub struct ProjectPlan {
     pub pm_snapshot_synced_at: i64,
 }
 
+impl ProjectPlan {
+    pub(crate) fn has_same_content(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.slug == other.slug
+            && self.name == other.name
+            && self.prompt_context == other.prompt_context
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPlan {
     pub id: LinearIssueId,

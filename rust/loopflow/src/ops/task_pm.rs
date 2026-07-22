@@ -132,6 +132,27 @@ pub fn resolve_project(
     Ok(ResolvedProject { snapshot, project })
 }
 
+pub(crate) async fn refresh_project(
+    repo: &Path,
+    wave: &str,
+    project_id: &str,
+) -> OpsResult<ResolvedProject> {
+    let team_id = crate::ops::pm::repository_team_id(repo)?;
+    let snapshot = load_wave_async(repo, wave, PmRefresh::Force).await?;
+    let project = snapshot
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .cloned()
+        .ok_or_else(|| {
+            OpsError::Message(format!(
+                "Linear Project {project_id} is absent from the refreshed wave/{wave} snapshot; it was removed, archived, or moved out of the Wave"
+            ))
+        })?;
+    validate_project_ownership(&snapshot, &project, &team_id)?;
+    Ok(ResolvedProject { snapshot, project })
+}
+
 fn repository_snapshots(repo: &Path, team_id: &str) -> OpsResult<Vec<PmShowResult>> {
     let mut snapshots = Vec::new();
     let mut ownership = PmPortfolioValidator::default();

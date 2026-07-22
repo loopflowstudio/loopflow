@@ -9,6 +9,7 @@ use time::OffsetDateTime;
 
 use crate::child::{AbandonIntent, ChildRef, ObservationRecipient};
 pub use crate::durable::ProjectId;
+use crate::durable::WorkStatus;
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::task::{TaskEventKind, TaskId};
@@ -91,6 +92,31 @@ pub enum ProjectEventKind {
 impl ProjectEventKind {
     pub fn is_wave_observable(&self) -> bool {
         !matches!(self, Self::Started | Self::TaskObserved { .. })
+    }
+
+    fn resumable_failure_reason(&self) -> Option<&str> {
+        match self {
+            Self::Failed {
+                error,
+                resumable: true,
+            } => Some(error),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn status_reason(status: &WorkStatus, latest: Option<&ProjectEventKind>) -> String {
+    if matches!(status, WorkStatus::Ready | WorkStatus::Waiting { .. }) {
+        if let Some(reason) = latest.and_then(ProjectEventKind::resumable_failure_reason) {
+            return reason.to_string();
+        }
+    }
+    match status {
+        WorkStatus::Running { run_id } => format!("Run {run_id} is active"),
+        WorkStatus::Waiting { .. } => "waiting for input or an event".to_string(),
+        WorkStatus::Ready => "ready".to_string(),
+        WorkStatus::Done => "done".to_string(),
+        WorkStatus::Abandoned => "abandoned".to_string(),
     }
 }
 

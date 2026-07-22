@@ -147,7 +147,7 @@ Intentional copies stay read projections:
 <!-- architecture-projections:start -->
 | Projection | Authority copied | Freshness and consumer |
 | --- | --- | --- |
-| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_snapshots` | Linear planning | Atomic sync/webhook replacement; `lf status`, `lf roadmap`, and the Mac app read it but never author through it. |
+| [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs) / `pm_snapshots` | Linear planning | Atomic sync or Project-phase refresh replacement; `lf status`, `lf roadmap`, and the Mac app read it but never author through it. |
 | [`TaskLinearObservation`](../rust/loopflow/src/task/mod.rs) / `task_linear_observations` | Linear Issue state | Reconciliation records provider evidence before applying lifecycle changes. |
 | [`GithubObservation`](../rust/loopflow/src/task/mod.rs) / `task_prs`, `ci_incidents` | GitHub PR/check state | Webhook or foreground reads update Task delivery evidence; GitHub remains merge truth. |
 | `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
@@ -199,6 +199,9 @@ and current runtime source do not.
   locators are unique, and bare slugs are never mutation authority.
 - Linear owns current Project/Task planning; SQLite projections never become an
   authoring fallback.
+- Active Project Work adopts one complete refreshed Linear plan between provider
+  turns; a refresh or ownership failure stops before the next turn rather than
+  serving the prior plan.
 - One non-ended Run exists per Epoch; only its current opaque lease writes as
   Work.
 - Run containment, not invocation ordering, is the interrupt and recovery

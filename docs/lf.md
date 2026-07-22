@@ -294,6 +294,10 @@ Bare `lf start` is the automatic form: it starts only repo Waves whose optional
 placement is local and enabled. The named form is the explicit override.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
 development. Project Work pursues one Linear Project's KRs without a worktree.
+Each Project phase refreshes Linear before it starts. Definition, Task-flow, and
+KR edits take effect together on the next phase without replacing the Project
+Work or its direction; an unavailable or invalid plan stops before another
+provider turn and status prints the restart reason.
 Each Linear Project has at most one current Work; terminal Work remains readable
 history and the next pursuit creates a successor. Every Task requires the
 current Project Work; `task start/run` ensures it before reserving the Task.

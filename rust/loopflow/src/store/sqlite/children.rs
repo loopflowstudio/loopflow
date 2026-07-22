@@ -1105,6 +1105,58 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn adopt_project_plan_for_run(
+        &self,
+        project_id: &ProjectId,
+        plan: &ProjectPlan,
+        lease: &RunLease,
+    ) -> StoreResult<(Project, bool)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_run_owns_child(&transaction, &ChildRef::Project(project_id.clone()), lease)?;
+        let mut project = transaction.query_row(
+            PROJECT_SELECT,
+            params![project_id.as_str()],
+            map_project_row,
+        )?;
+        if plan.id != project.plan.id {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} cannot adopt planning for Linear Project {}",
+                project.id,
+                plan.id.as_str()
+            )));
+        }
+        if plan.pm_snapshot_synced_at < project.plan.pm_snapshot_synced_at {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} cannot move its PM snapshot backward from {} to {}",
+                project.id, project.plan.pm_snapshot_synced_at, plan.pm_snapshot_synced_at
+            )));
+        }
+        let changed = !project.plan.has_same_content(plan);
+        if project.plan == *plan {
+            transaction.commit()?;
+            return Ok((project, false));
+        }
+        project.plan = plan.clone();
+        if changed {
+            project.updated_at = OffsetDateTime::now_utc();
+        }
+        validate_project(&project)?;
+        let parameters = project_params(&project);
+        if transaction.execute(
+            PROJECT_RUN_UPDATE,
+            rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        )? == 0
+        {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} cannot adopt planning for Project {}",
+                lease.run_id, project.id
+            )));
+        }
+        transaction.commit()?;
+        Ok((project, changed))
+    }
+
     pub(crate) fn finish_project_run(
         &self,
         project: &Project,
@@ -1397,6 +1449,21 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         Ok(seconds.map(crate::store::rows::unix_to_datetime))
+    }
+
+    pub fn latest_project_event(
+        &self,
+        project_id: &ProjectId,
+    ) -> StoreResult<Option<ProjectEvent>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT id, project_id, kind_json, created_at
+             FROM project_events WHERE project_id=?1 ORDER BY id DESC LIMIT 1",
+            params![project_id.as_str()],
+            map_project_event_row,
+        )
+        .optional()
+        .map_err(StoreError::from)
     }
 
     pub fn pending_observations(

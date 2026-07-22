@@ -28,6 +28,7 @@ pub struct ProjectSnapshot {
     pub project_name: String,
     pub wave: String,
     pub status: WorkStatus,
+    pub reason: String,
     pub iteration: u32,
     pub observation_cursor: i64,
     pub pending_observations: u32,
@@ -203,20 +204,13 @@ pub(crate) fn reserve_project(
                 ))
             })?;
         let now = time::OffsetDateTime::now_utc();
-        let context = crate::ops::task::project_context(&resolved.project);
+        let plan = project_plan(&resolved.project, resolved.snapshot.synced_at)?;
         let project = Project {
             id: predecessor
                 .as_ref()
                 .map(|project| project.id.clone())
                 .unwrap_or_else(ProjectId::new),
-            plan: ProjectPlan {
-                id: LinearProjectId::new(resolved.project.id.clone())
-                    .map_err(|error| project_error(error.to_string()))?,
-                slug: resolved.project.slug,
-                name: resolved.project.name,
-                prompt_context: context,
-                pm_snapshot_synced_at: resolved.snapshot.synced_at,
-            },
+            plan,
             wave_id: wave.id().clone(),
             iteration: 0,
             observation_cursor: 0,
@@ -255,6 +249,20 @@ pub(crate) fn reserve_project(
             return Err(project_error(format!("failed to reserve Project: {error}")));
         }
         Ok(project)
+    })
+}
+
+pub(crate) fn project_plan(
+    project: &crate::pm::PmProject,
+    pm_snapshot_synced_at: i64,
+) -> OpsResult<ProjectPlan> {
+    Ok(ProjectPlan {
+        id: LinearProjectId::new(project.id.clone())
+            .map_err(|error| project_error(error.to_string()))?,
+        slug: project.slug.clone(),
+        name: project.name.clone(),
+        prompt_context: crate::ops::task::project_context(project),
+        pm_snapshot_synced_at,
     })
 }
 
@@ -507,11 +515,9 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             None => false,
         };
         let latest_event = store
-            .project_events_after(&project.id, 0)
+            .latest_project_event(&project.id)
             .await
-            .map_err(|error| project_error(error.to_string()))?
-            .into_iter()
-            .last();
+            .map_err(|error| project_error(error.to_string()))?;
         let pending_observations = store
             .pending_project_observations(&project.id)
             .await
@@ -521,6 +527,8 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             .work_status(&work)
             .await
             .map_err(|error| project_error(error.to_string()))?;
+        let reason =
+            crate::project::status_reason(&status, latest_event.as_ref().map(|event| &event.kind));
         Ok(ProjectSnapshot {
             id: project.id.to_string(),
             external_project_id: project.plan.id.as_str().to_string(),
@@ -528,6 +536,7 @@ pub fn project_snapshot(project: &Project) -> OpsResult<ProjectSnapshot> {
             project_name: project.plan.name,
             wave: wave.name().to_string(),
             status,
+            reason,
             iteration: project.iteration,
             observation_cursor: project.observation_cursor,
             pending_observations,

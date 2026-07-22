@@ -1163,21 +1163,24 @@ async fn snapshot_project_runtime(
             .map_err(|err| anyhow!("failed to read Project observation outbox: {err}"))?
             .len() as u32
     };
-    let latest_event_at = store
-        .latest_project_event_at(&project.id)
+    let latest_event = store
+        .latest_project_event(&project.id)
         .await
         .map_err(|err| anyhow!("failed to read Project event log: {err}"))?;
+    let latest_event_at = latest_event.as_ref().map(|event| event.created_at);
+    let reason =
+        crate::project::status_reason(&status, latest_event.as_ref().map(|event| &event.kind));
     let evidence = BodyEvidence {
         intent: work_status_body_intent(&status),
         observable: liveness.liveness() == Liveness::Observable,
         process_alive,
         progress_age: body_progress_age(latest_event_at, project.updated_at, now),
         step: Some(format!("iteration {}", project.iteration)),
-        reason: work_status_reason(&status),
+        reason: reason.clone(),
     };
     Ok(ProjectRuntimeSnapshot {
         work_id: project.id.to_string(),
-        reason: work_status_reason(&status),
+        reason,
         status,
         updated_at: format_time(project.updated_at).unwrap_or_default(),
         iteration: project.iteration,

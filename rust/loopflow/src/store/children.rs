@@ -377,6 +377,17 @@ impl Store {
         .await
     }
 
+    pub async fn latest_project_event(
+        &self,
+        project_id: &ProjectId,
+    ) -> StoreResult<Option<ProjectEvent>> {
+        let project_id = project_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.latest_project_event(&project_id)
+        })
+        .await
+    }
+
     pub async fn get_task_pr(&self, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>> {
         let pr_id = pr_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_pr(&pr_id)).await
@@ -715,6 +726,21 @@ impl Store {
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.update_project_for_run(&project, &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn adopt_project_plan_for_run(
+        &self,
+        project_id: &ProjectId,
+        plan: &crate::planning::ProjectPlan,
+        lease: &RunLease,
+    ) -> StoreResult<(Project, bool)> {
+        let project_id = project_id.clone();
+        let plan = plan.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.adopt_project_plan_for_run(&project_id, &plan, &lease)
         })
         .await
     }

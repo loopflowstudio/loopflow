@@ -36,6 +36,7 @@ const TASK_SUPERVISION_INTERVAL: Duration = Duration::from_secs(5);
 struct PreparedProjectStep {
     turn: crate::lf::commands::run::PreparedHarnessTurn,
     basis: Basis,
+    planning: crate::ops::task_pm::ResolvedProject,
 }
 
 pub(crate) async fn run(store: SharedStore, project_id: ProjectId, lease: &RunLease) -> Result<()> {
@@ -125,6 +126,7 @@ async fn run_project_inner(
     let (mut flow, _) = Playhead::new(QueuedInvocation::load(Path::new(wave.repo()), "project")?);
     let prepared =
         prepare_project_flow_step(&store, &mut project, lease, &wave, &flow, &observations).await?;
+    let mut active_planning = prepared.planning.clone();
     let (harness_name, _) = crate::engine::config::parse_agent(&project.agent);
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let mut harness = default_create_harness(&harness_name, ApprovalPolicy::AutoApprove, event_tx)?;
@@ -420,6 +422,7 @@ async fn run_project_inner(
                                 &[],
                             )
                             .await?;
+                            active_planning = prepared.planning.clone();
                             active_basis = prepared.basis.clone();
                             start_project_flow_turn(
                                 &store,
@@ -447,7 +450,7 @@ async fn run_project_inner(
                                 },
                             ).await?;
                         }
-                        let mut outcome = inspect_outcome(&store, &project, &wave).await?;
+                        let mut outcome = inspect_outcome(&store, &project, &active_planning).await?;
                         if status == Lifecycle::Interrupted {
                             outcome.disposition = ProjectDisposition::Wait;
                         }
@@ -465,6 +468,7 @@ async fn run_project_inner(
                                 &[],
                             )
                             .await?;
+                            active_planning = prepared.planning.clone();
                             active_basis = prepared.basis.clone();
                             start_project_flow_turn(
                                 &store,
@@ -717,6 +721,7 @@ async fn prepare_project_flow_step(
     flow: &Playhead,
     observations: &[String],
 ) -> Result<PreparedProjectStep> {
+    let planning = refresh_project_plan(store, project, lease, wave).await?;
     let work = store
         .work_for_child(&ChildRef::Project(project.id.clone()))
         .await?;
@@ -731,7 +736,6 @@ async fn prepare_project_flow_step(
             step.kind
         );
     }
-    store.update_project_for_run(project, lease).await?;
     let seed = project_seed(project, wave.name(), &boundary, observations);
     let mut prepared =
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave.name(), None)?;
@@ -739,7 +743,50 @@ async fn prepare_project_flow_step(
     Ok(PreparedProjectStep {
         turn: prepared,
         basis: boundary.basis,
+        planning,
     })
+}
+
+async fn refresh_project_plan(
+    store: &SharedStore,
+    project: &mut Project,
+    lease: &RunLease,
+    wave: &Wave,
+) -> Result<crate::ops::task_pm::ResolvedProject> {
+    let planning = crate::ops::task_pm::refresh_project(
+        Path::new(wave.repo()),
+        wave.name(),
+        project.plan.id.as_str(),
+    )
+    .await
+    .map_err(|error| {
+        anyhow!(
+            "Project plan refresh blocked before the next phase: {error}. Project Work {} did not continue on its stale plan; repair Linear planning, then restart it with `lf project run {}`",
+            project.id,
+            project.plan.id.as_str()
+        )
+    })?;
+    let plan = crate::ops::project::project_plan(&planning.project, planning.snapshot.synced_at)
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let (adopted, changed) = store
+        .adopt_project_plan_for_run(&project.id, &plan, lease)
+        .await
+        .map_err(|error| {
+            anyhow!(
+                "Project plan refresh could not be adopted safely: {error}. Project Work {} did not continue on its stale plan; restart it after repairing the planning conflict",
+                project.id
+            )
+        })?;
+    if changed {
+        tracing::info!(
+            project = %project.id,
+            linear_project = %project.plan.id.as_str(),
+            snapshot = adopted.plan.pm_snapshot_synced_at,
+            "adopted refreshed Project planning at a phase boundary"
+        );
+    }
+    *project = adopted;
+    Ok(planning)
 }
 
 fn open_project_flow_body(flow: &mut Playhead, control_repo: &str) -> Result<()> {
@@ -869,27 +916,16 @@ struct ProjectOutcome {
 async fn inspect_outcome(
     store: &SharedStore,
     project: &Project,
-    wave: &Wave,
+    planning: &crate::ops::task_pm::ResolvedProject,
 ) -> Result<ProjectOutcome> {
-    let repo = wave.repo().to_string();
-    let project_id = project.plan.id.as_str().to_string();
-    let resolved = tokio::task::spawn_blocking(move || {
-        crate::ops::task_pm::resolve_project(
-            std::path::Path::new(&repo),
-            &project_id,
-            crate::ops::pm::PmRefresh::Never,
-        )
-    })
-    .await
-    .map_err(|error| anyhow!(error.to_string()))??;
     let tasks = crate::ops::task::reconcile_project_tasks(store, project)
         .await
         .map_err(|error| anyhow!(error.to_string()))?;
-    let pm_tasks = resolved
+    let pm_tasks = planning
         .snapshot
         .items
         .iter()
-        .filter(|item| item.project == project.plan.slug)
+        .filter(|item| item.project_id == project.plan.id.as_str())
         .collect::<Vec<_>>();
     let mut task_states = Vec::with_capacity(tasks.len());
     for task in &tasks {
@@ -903,12 +939,12 @@ async fn inspect_outcome(
         ));
     }
     let fingerprint_payload = serde_json::json!({
-        "project": resolved.project,
+        "project": planning.project,
         "pm_tasks": pm_tasks,
         "tasks": &task_states,
     });
     let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&fingerprint_payload)?));
-    if !resolved.project.krs.is_empty() && resolved.project.krs.iter().all(|kr| kr.holds) {
+    if !planning.project.krs.is_empty() && planning.project.krs.iter().all(|kr| kr.holds) {
         return Ok(ProjectOutcome {
             disposition: ProjectDisposition::Done,
             fingerprint,
@@ -1264,9 +1300,10 @@ mod tests {
     use time::OffsetDateTime;
 
     use crate::child::ChildRef;
-    use crate::durable::{BoundaryState, RunAdvance, RunLease, WorkStatus};
+    use crate::durable::{Author, BoundaryState, RunAdvance, RunLease, WorkStatus};
     use crate::id::WaveId;
     use crate::planning::{LinearProjectId, ProjectPlan};
+    use crate::pm::{PmKr, PmProject, ProjectFlowPlan};
     use crate::project::{Project, ProjectEventKind, ProjectId};
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::wave::Wave;
@@ -1337,6 +1374,95 @@ mod tests {
             super::bounded_summary(&"x".repeat(2_500)).chars().count(),
             2_000
         );
+    }
+
+    #[tokio::test]
+    async fn project_plan_refresh_reaches_the_next_boundary_once_with_all_krs() {
+        let (_directory, _database, store, mut project, lease, _invocation) =
+            project_fixture().await;
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        store
+            .append_steer(
+                &work,
+                Author::User,
+                "Preserve this direction across planning refresh.",
+                None,
+            )
+            .await
+            .unwrap();
+        project.observation_cursor = 17;
+        store
+            .update_project_for_run(&project, &lease)
+            .await
+            .unwrap();
+        let prior_event = store
+            .append_project_event_for_run(
+                &project.id,
+                &lease,
+                &ProjectEventKind::IterationCompleted {
+                    iteration: 0,
+                    summary: "prior evidence remains durable".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        let prior_basis = store.boundary_seed(&work).await.unwrap();
+        let prior_epoch = store.current_epoch(&work).await.unwrap();
+        let prior_id = project.id.clone();
+        let refreshed = PmProject {
+            id: project.plan.id.as_str().to_string(),
+            slug: project.plan.slug.clone(),
+            name: "Incident Prevention".to_string(),
+            summary: "Prevent recurrence after restoring service.".to_string(),
+            definition: "Prevent repeated incidents with evidence from production.".to_string(),
+            flows: Some(ProjectFlowPlan::empty()),
+            krs: (1..=6)
+                .map(|number| PmKr {
+                    text: format!("proof {number} holds"),
+                    holds: number == 6,
+                })
+                .collect(),
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: vec!["team-1".to_string()],
+        };
+        let refreshed_plan =
+            crate::ops::project::project_plan(&refreshed, project.plan.pm_snapshot_synced_at + 1)
+                .unwrap();
+
+        let (adopted, changed) = store
+            .adopt_project_plan_for_run(&project.id, &refreshed_plan, &lease)
+            .await
+            .unwrap();
+        let (same_plan, changed_again) = store
+            .adopt_project_plan_for_run(&project.id, &refreshed_plan, &lease)
+            .await
+            .unwrap();
+
+        assert!(changed);
+        assert!(!changed_again);
+        assert_eq!(same_plan.plan, adopted.plan);
+        assert_eq!(adopted.id, prior_id);
+        assert_eq!(adopted.observation_cursor, 17);
+        assert_eq!(store.current_epoch(&work).await.unwrap(), prior_epoch);
+        assert_eq!(store.boundary_seed(&work).await.unwrap(), prior_basis);
+        let events = store.project_events_after(&adopted.id, 0).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], prior_event);
+
+        let seed = super::project_seed(&adopted, "incident-management", &prior_basis, &[]);
+        assert!(seed.contains("Prevent repeated incidents with evidence from production."));
+        assert!(!seed.contains("Restore incidents before prevention."));
+        assert!(seed.contains("Preserve this direction across planning refresh."));
+        for number in 1..=6 {
+            let line = format!(
+                "- [{}] proof {number} holds",
+                if number == 6 { "x" } else { " " }
+            );
+            assert_eq!(seed.matches(&line).count(), 1, "missing or repeated {line}");
+        }
     }
 
     #[tokio::test]
@@ -1434,7 +1560,9 @@ mod tests {
             &store,
             &project.id,
             &lease,
-            &anyhow!("Linear project snapshot is unavailable"),
+            &anyhow!(
+                "Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
+            ),
         )
         .await;
 
@@ -1444,8 +1572,12 @@ mod tests {
         assert!(matches!(
             &events[0].kind,
             ProjectEventKind::Failed { error, resumable: true }
-                if error == "project runner failed: Linear project snapshot is unavailable"
+                if error == "project runner failed: Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
         ));
+        assert_eq!(
+            crate::project::status_reason(&WorkStatus::Ready, Some(&events[0].kind)),
+            "project runner failed: Project plan refresh blocked before the next phase: Linear Project was archived; restore it before restarting Project Work"
+        );
 
         let connection = rusqlite::Connection::open(database).unwrap();
         let run_state: String = connection

@@ -268,7 +268,7 @@ fn prepend_test_bin(command: &mut Command, home: &Path) {
     command.env("PATH", std::env::join_paths(paths).expect("test PATH"));
 }
 
-fn seed_stale_project_work(home: &Path) {
+fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
     const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
     const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
@@ -350,20 +350,22 @@ fn seed_stale_project_work(home: &Path) {
     store
         .insert_task(&stale_task, &stale_pr)
         .expect("seed orphaned Task");
-    let stale_work = store
-        .work_for_child(&ChildRef::Project(stale.id.clone()))
-        .expect("resolve stale Project Work");
-    let stale_basis = store
-        .current_epoch(&stale_work)
-        .expect("read stale Project epoch")
-        .current_basis;
-    store
-        .abandon(
-            &stale_work,
-            "Project is absent from the current PM snapshot",
-            &stale_basis,
-        )
-        .expect("retire stale Project Work");
+    if abandon_stale_project {
+        let stale_work = store
+            .work_for_child(&ChildRef::Project(stale.id.clone()))
+            .expect("resolve stale Project Work");
+        let stale_basis = store
+            .current_epoch(&stale_work)
+            .expect("read stale Project epoch")
+            .current_basis;
+        store
+            .abandon(
+                &stale_work,
+                "Project is absent from the current PM snapshot",
+                &stale_basis,
+            )
+            .expect("retire stale Project Work");
+    }
 
     let current = Project {
         id: ProjectId::new(),
@@ -701,7 +703,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
 #[test]
 fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
     let home = tempfile::tempdir().expect("tempdir");
-    seed_stale_project_work(home.path());
+    seed_stale_project_work(home.path(), true);
 
     let status = status_json(home.path(), &["product"], None);
     let status_projects = status["projects"].as_array().expect("status projects");
@@ -780,4 +782,35 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
         "PRD-52"
     );
     assert_eq!(wave["unavailable_projects"], status["unavailable_projects"]);
+}
+
+#[test]
+fn active_project_removed_from_planning_reports_truthful_recovery() {
+    let home = tempfile::tempdir().expect("tempdir");
+    seed_stale_project_work(home.path(), false);
+
+    let status = status_json(home.path(), &["product"], None);
+    let unavailable = status["unavailable_projects"]
+        .as_array()
+        .expect("status unavailable Projects");
+
+    assert_eq!(unavailable.len(), 1);
+    assert_eq!(unavailable[0]["project_slug"], "technical-architecture");
+    assert_eq!(unavailable[0]["status"], "ready");
+    assert_eq!(unavailable[0]["owner"], "wave");
+    assert_eq!(
+        unavailable[0]["reason"],
+        "Project is absent from the current PM snapshot"
+    );
+    assert_eq!(
+        unavailable[0]["recovery"],
+        "lf project abandon technical-architecture --reason \"Project is absent from the current PM snapshot\""
+    );
+    assert_eq!(
+        unavailable[0]["tasks"]
+            .as_array()
+            .expect("preserved Task evidence")
+            .len(),
+        1
+    );
 }

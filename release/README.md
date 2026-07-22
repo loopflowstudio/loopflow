@@ -25,6 +25,9 @@ install `lf` only when main moved or the install target is missing.
 
 Promotion stops before compilation while draft migrations remain. Cut the
 release first so the binary embeds the schema its runtime code expects.
+Promotion also snapshots the shared store, applies candidate migrations to the
+copy, and expands every lifecycle reachable by placed open Work. An unresolved
+flow or skill rejects the candidate before the installed binaries move.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.

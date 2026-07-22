@@ -8,10 +8,11 @@
 //! — hit a store its own binary could not read.
 //!
 //! The candidate binary (the one running this command) reads the shared store's
-//! applied frontier and its own migration registry, counts active Runs, and
-//! renders a verdict. `promote` consumes that verdict under the
-//! Home-global reservation fence, retains immutable rollback bytes, and
-//! activates the candidate before any migration advances the frontier.
+//! applied frontier and its own migration registry, counts active Runs, applies
+//! its migrations to an isolated snapshot, resolves every placed open Work's
+//! executable lifecycle, and renders a verdict. `promote` consumes that verdict
+//! under the Home-global reservation fence, retains immutable rollback bytes,
+//! and activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
 //! `store::migrations` functions the runtime trusts at open time, so a reject
@@ -21,6 +22,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use rusqlite::OpenFlags;
@@ -93,6 +95,28 @@ pub struct ActiveRun {
     pub state: String,
 }
 
+/// One persisted executable reference the candidate cannot resolve through the
+/// effective builtin and repository-local catalog.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExecutableFailure {
+    pub work_kind: String,
+    pub work_id: String,
+    pub flow: String,
+    pub catalog_root: String,
+    pub reason: String,
+}
+
+/// Whether the candidate can execute every phase still reachable by placed,
+/// nonterminal Work after applying its migrations to an isolated store copy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ExecutableCompatibility {
+    Compatible { references: usize },
+    Incompatible { failures: Vec<ExecutableFailure> },
+    Unreadable { reason: String },
+}
+
 /// The promotion decision. `Reject` carries every failing reason at once so one
 /// preflight names all blockers, not just the first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,6 +133,7 @@ pub struct PromotionPreview {
     pub candidate: CandidateIdentity,
     pub database_path: String,
     pub compatibility: Compatibility,
+    pub executable_compatibility: ExecutableCompatibility,
     pub active_runs: Vec<ActiveRun>,
     pub verdict: Verdict,
 }
@@ -121,6 +146,7 @@ pub fn decide(
     authority: MigrationAuthority,
     pending_migration_drafts: &[&str],
     compatibility: &Compatibility,
+    executable_compatibility: &ExecutableCompatibility,
     active_runs: &[ActiveRun],
 ) -> Verdict {
     let mut reasons = Vec::new();
@@ -153,6 +179,32 @@ pub fn decide(
                  promote a published build to advance the frontier"
             )),
         },
+    }
+
+    match executable_compatibility {
+        ExecutableCompatibility::Compatible { .. } => {}
+        ExecutableCompatibility::Incompatible { failures } => {
+            let first = failures
+                .first()
+                .map(|failure| {
+                    format!(
+                        "{} {} flow {:?} in {}: {}",
+                        failure.work_kind,
+                        failure.work_id,
+                        failure.flow,
+                        failure.catalog_root,
+                        failure.reason
+                    )
+                })
+                .unwrap_or_else(|| "no failure detail was recorded".to_string());
+            reasons.push(format!(
+                "candidate cannot execute {} persisted lifecycle reference(s) after migration; first failure: {first}",
+                failures.len()
+            ));
+        }
+        ExecutableCompatibility::Unreadable { reason } => reasons.push(format!(
+            "persisted lifecycle compatibility is unreadable, so promotion fails closed: {reason}"
+        )),
     }
 
     // Exact-frontier promotion only repoints the installed CLI. It never
@@ -334,23 +386,199 @@ fn read_store_evidence(store_path: &Path) -> (Compatibility, Vec<ActiveRun>) {
     }
 }
 
+fn _copy_store_for_candidate(source_path: &Path, destination_path: &Path) -> Result<()> {
+    if !source_path.exists() {
+        return Ok(());
+    }
+    let source = rusqlite::Connection::open_with_flags(
+        source_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    source.busy_timeout(Duration::from_secs(5))?;
+    let mut destination = rusqlite::Connection::open(destination_path)?;
+    let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
+    // Finish a typical Home snapshot between controller writes. Tiny chunks
+    // repeatedly restart against the live WAL and can make a read-only
+    // preflight effectively unbounded.
+    backup.run_to_completion(4096, Duration::from_millis(1), None)?;
+    Ok(())
+}
+
+fn _read_executable_references(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<Vec<(String, String, String, String)>> {
+    let mut statement = conn.prepare(
+        "SELECT 'wave', w.id, 'wave', w.repo
+         FROM work_placements placement
+         JOIN waves w ON w.id=placement.wave_id
+         JOIN epochs e ON e.wave_id=w.id AND e.state='open'
+         UNION
+         SELECT 'project', p.id, 'project', w.repo
+         FROM work_placements placement
+         JOIN projects p ON p.id=placement.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.project_id=p.id AND e.state='open'
+         UNION
+         SELECT 'task', t.id, COALESCE(t.kickoff_flow, ''), t.worktree
+         FROM work_placements placement
+         JOIN tasks t ON t.id=placement.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         UNION
+         SELECT 'task', t.id, COALESCE(t.iterate_flow, ''), t.worktree
+         FROM work_placements placement
+         JOIN tasks t ON t.id=placement.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         UNION
+         SELECT 'task', t.id, COALESCE(t.gate_flow, ''), t.worktree
+         FROM work_placements placement
+         JOIN tasks t ON t.id=placement.task_id
+         JOIN projects p ON p.id=t.project_id
+         JOIN waves w ON w.id=p.wave_id
+         JOIN epochs e ON e.task_id=t.id AND e.state='open'
+         ORDER BY 1, 2, 3, 4",
+    )?;
+    let references = statement
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect();
+    references
+}
+
+fn _validate_executable_skill(skill: &crate::engine::Skill, catalog_root: &Path) -> Result<()> {
+    if skill.content.is_none() {
+        return Err(anyhow!("skill not found: {}", skill.name));
+    }
+    for direction in &skill.directions {
+        crate::engine::load_direction(direction, catalog_root)?;
+    }
+    Ok(())
+}
+
+fn _validate_executable_steps(
+    steps: &[crate::engine::ConcreteStep],
+    catalog_root: &Path,
+) -> Result<()> {
+    for step in steps {
+        match step {
+            crate::engine::ConcreteStep::Skill(skill) => {
+                _validate_executable_skill(&skill.skill, catalog_root)?;
+            }
+            crate::engine::ConcreteStep::Op(_) => {}
+            crate::engine::ConcreteStep::Xor(branch) => {
+                if let Some(router) = &branch.router {
+                    let router = crate::engine::load_skill(router, catalog_root)?;
+                    _validate_executable_skill(&router, catalog_root)?;
+                }
+                for path in branch.paths.values() {
+                    for direction in &path.direction {
+                        crate::engine::load_direction(direction, catalog_root)?;
+                    }
+                    let path_steps = crate::engine::flow::load_xor_path_items(path, catalog_root)?;
+                    _validate_executable_steps(&path_steps, catalog_root)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate installed-state semantics against a migrated snapshot, never the
+/// live database. A migration may repair a persisted flow name, so checking the
+/// pre-migration rows would reject the candidate the migration makes valid.
+fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
+    let directory = match tempfile::tempdir() {
+        Ok(directory) => directory,
+        Err(error) => {
+            return ExecutableCompatibility::Unreadable {
+                reason: format!("create candidate validation directory: {error}"),
+            }
+        }
+    };
+    let candidate_path = directory.path().join("candidate.db");
+    if let Err(error) = _copy_store_for_candidate(store_path, &candidate_path) {
+        return ExecutableCompatibility::Unreadable {
+            reason: format!("copy shared store for candidate validation: {error}"),
+        };
+    }
+    let connection = match rusqlite::Connection::open(&candidate_path) {
+        Ok(connection) => connection,
+        Err(error) => {
+            return ExecutableCompatibility::Unreadable {
+                reason: format!("open candidate validation store: {error}"),
+            }
+        }
+    };
+    if let Err(error) = migrations::apply_sqlite(&connection) {
+        return ExecutableCompatibility::Unreadable {
+            reason: format!("apply candidate migrations to validation store: {error}"),
+        };
+    }
+    let references = match _read_executable_references(&connection) {
+        Ok(references) => references,
+        Err(error) => {
+            return ExecutableCompatibility::Unreadable {
+                reason: format!("read placed Work lifecycle references: {error}"),
+            }
+        }
+    };
+    let mut failures = Vec::new();
+    for (work_kind, work_id, flow, catalog_root) in &references {
+        let catalog_path = Path::new(catalog_root);
+        let result = if !catalog_path.is_dir() {
+            Err(anyhow!("catalog root does not exist"))
+        } else {
+            crate::engine::load_flow(flow, catalog_path)
+                .map_err(anyhow::Error::from)
+                .and_then(|loaded| {
+                    crate::engine::expand_flow(&loaded, catalog_path)
+                        .map_err(anyhow::Error::from)
+                        .and_then(|steps| _validate_executable_steps(&steps, catalog_path))
+                })
+        };
+        if let Err(error) = result {
+            failures.push(ExecutableFailure {
+                work_kind: work_kind.clone(),
+                work_id: work_id.clone(),
+                flow: flow.clone(),
+                catalog_root: catalog_root.clone(),
+                reason: error.to_string(),
+            });
+        }
+    }
+    if failures.is_empty() {
+        ExecutableCompatibility::Compatible {
+            references: references.len(),
+        }
+    } else {
+        ExecutableCompatibility::Incompatible { failures }
+    }
+}
+
 /// Assemble the read-only promotion preview for `store_path`, pairing the store
 /// evidence with this candidate's identity and the resulting verdict.
 pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
     let (compatibility, active_runs) = read_store_evidence(store_path);
+    let executable_compatibility = _read_executable_compatibility(store_path);
     let pending_migration_drafts = build_info::pending_migration_drafts();
     let verdict = decide(
         candidate.authority,
         &pending_migration_drafts,
         &compatibility,
+        &executable_compatibility,
         &active_runs,
     );
     PromotionPreview {
         candidate,
         database_path,
         compatibility,
+        executable_compatibility,
         active_runs,
         verdict,
     }
@@ -380,6 +608,33 @@ fn render_human(preview: &PromotionPreview) {
         ),
         Compatibility::Incompatible { reason } => println!("  INCOMPATIBLE: {reason}"),
         Compatibility::Unreadable { reason } => println!("  UNREADABLE: {reason}"),
+    }
+    match &preview.executable_compatibility {
+        ExecutableCompatibility::Compatible { references } => {
+            println!("  lifecycles     {references} executable reference(s) resolve")
+        }
+        ExecutableCompatibility::Incompatible { failures } => {
+            println!(
+                "  lifecycles     {} executable reference(s) do not resolve",
+                failures.len()
+            );
+            for failure in failures.iter().take(10) {
+                println!(
+                    "    - {} {} flow {:?} in {}: {}",
+                    failure.work_kind,
+                    failure.work_id,
+                    failure.flow,
+                    failure.catalog_root,
+                    failure.reason
+                );
+            }
+            if failures.len() > 10 {
+                println!("    - ... and {} more", failures.len() - 10);
+            }
+        }
+        ExecutableCompatibility::Unreadable { reason } => {
+            println!("  lifecycles     UNREADABLE: {reason}")
+        }
     }
     if preview.active_runs.is_empty() {
         println!("  active Runs    none");
@@ -434,18 +689,36 @@ pub fn preflight(json: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        decide as decide_with_drafts, read_active_runs, read_store_evidence, ActiveRun,
-        Compatibility, Verdict,
+        _read_executable_compatibility, decide as decide_with_drafts, read_active_runs,
+        read_store_evidence, ActiveRun, Compatibility, ExecutableCompatibility, Verdict,
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
+    use crate::child::ChildRef;
+    use crate::durable::WorkRef;
+    use crate::id::WaveId;
+    use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+    use crate::project::{Project, ProjectId};
     use crate::store::migrations::latest_known_version;
+    use crate::store::{open_store, StorageConfig};
+    use crate::task::{
+        Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
+        TaskPrId,
+    };
+    use crate::wave::Wave;
+    use time::OffsetDateTime;
 
     fn decide(
         authority: crate::build_info::MigrationAuthority,
         compatibility: &Compatibility,
         active_runs: &[ActiveRun],
     ) -> Verdict {
-        decide_with_drafts(authority, &[], compatibility, active_runs)
+        decide_with_drafts(
+            authority,
+            &[],
+            compatibility,
+            &ExecutableCompatibility::Compatible { references: 0 },
+            active_runs,
+        )
     }
 
     fn exact() -> Compatibility {
@@ -482,6 +755,7 @@ mod tests {
             Published,
             &["run_owns_execution", "durable_asks"],
             &exact(),
+            &ExecutableCompatibility::Compatible { references: 0 },
             &[],
         ) else {
             panic!("runtime code newer than the embedded schema must never become global");
@@ -559,6 +833,171 @@ mod tests {
             decide(Published, &ahead(), &[reserved]),
             Verdict::Reject { .. }
         ));
+    }
+
+    #[test]
+    fn an_unresolved_placed_lifecycle_rejects_an_exact_frontier() {
+        let incompatible = ExecutableCompatibility::Incompatible {
+            failures: vec![super::ExecutableFailure {
+                work_kind: "project".to_string(),
+                work_id: "project-incident-management".to_string(),
+                flow: "project".to_string(),
+                catalog_root: "/src/loopflow".to_string(),
+                reason: "skill not found: removed-project-step".to_string(),
+            }],
+        };
+
+        let Verdict::Reject { reasons } =
+            decide_with_drafts(Published, &[], &exact(), &incompatible, &[])
+        else {
+            panic!("an upgrade must preserve every reachable Work lifecycle");
+        };
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("project-incident-management"));
+        assert!(reasons[0].contains("removed-project-step"));
+    }
+
+    #[tokio::test]
+    async fn candidate_gate_expands_effective_lifecycles_for_placed_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        std::fs::create_dir_all(repo.join(".lf/flows")).unwrap();
+        let database = directory.path().join("loopflow.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "infrastructure".to_string(),
+            repo.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let now = OffsetDateTime::now_utc();
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                id: LinearProjectId::new("linear-project").unwrap(),
+                slug: "incident-management".to_string(),
+                name: "Incident Management".to_string(),
+                prompt_context: "Restore first.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: wave.id().clone(),
+            iteration: 14,
+            observation_cursor: 0,
+            last_state_fingerprint: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_project(&project).await.unwrap();
+        let home = store.local_home().await.unwrap();
+        let work = store
+            .work_for_child(&ChildRef::Project(project.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(work, WorkRef::Project(project.id.clone()));
+        store.place_work(&work, &home.id).await.unwrap();
+
+        let task_id = TaskId::new();
+        let task_worktree = repo.join("task-worktree");
+        std::fs::create_dir_all(&task_worktree).unwrap();
+        let task = Task {
+            id: task_id.clone(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("linear-issue").unwrap(),
+                identifier: "LOO-211".to_string(),
+                title: "Restore Project settlement".to_string(),
+                description: "Preserve the live Project boundary.".to_string(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: task_worktree,
+            workspace_slug: "project-settlement".to_string(),
+            lifecycle: TaskLifecyclePlan::standard("task-design", "slice", "removed-task-gate"),
+            lifecycle_phase: TaskLifecyclePhase::Loop,
+            phase_epoch: 1,
+            phase_cursor: 0,
+            phase_iteration: 0,
+            gate_cycle: 0,
+            gate_proposal: None,
+            agent: "codex".to_string(),
+            provider: "codex".to_string(),
+            provider_session_id: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let task_pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task_id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "jack/project-settlement".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        store.create_task(&task, &task_pr).await.unwrap();
+        let task_work = WorkRef::Task(task_id.clone());
+        store.place_work(&task_work, &home.id).await.unwrap();
+
+        std::fs::write(
+            repo.join(".lf/flows/project.yaml"),
+            "- removed-project-step\n",
+        )
+        .unwrap();
+        let compatibility = _read_executable_compatibility(&database);
+        let ExecutableCompatibility::Incompatible { failures } = compatibility else {
+            panic!("the candidate must expand the effective Project flow: {compatibility:?}");
+        };
+        assert_eq!(failures.len(), 2);
+        assert!(failures.iter().any(|failure| {
+            failure.work_kind == "project"
+                && failure.work_id == project.id.as_str()
+                && failure.flow == "project"
+                && failure.reason.contains("removed-project-step")
+        }));
+        assert!(failures.iter().any(|failure| {
+            failure.work_kind == "task"
+                && failure.work_id == task_id.as_str()
+                && failure.flow == "removed-task-gate"
+        }));
+
+        std::fs::remove_file(repo.join(".lf/flows/project.yaml")).unwrap();
+        let compatibility = _read_executable_compatibility(&database);
+        let ExecutableCompatibility::Incompatible { failures } = compatibility else {
+            panic!("all pinned Task phases must remain reachable: {compatibility:?}");
+        };
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].flow, "removed-task-gate");
+
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET gate_flow='ship' WHERE id=?1",
+                [task_id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            _read_executable_compatibility(&database),
+            ExecutableCompatibility::Compatible { references: 5 }
+        );
     }
 
     /// Under the exclusive promotion lock an absent store is a promotable

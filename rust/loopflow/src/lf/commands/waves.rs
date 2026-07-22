@@ -54,6 +54,8 @@ pub struct WaveSnapshot {
     pub live: bool,
     /// Whether authored policy currently refuses new turn starts.
     pub paused: bool,
+    /// Whether this Home is allowed to keep the Wave running.
+    pub enabled: bool,
     /// Loopback endpoint of the live server, `null` when stopped.
     pub endpoint: Option<String>,
     /// RFC3339 creation time, `null` when the row predates the column.
@@ -1040,9 +1042,13 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
     let repo = wave.repo().to_string();
     let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
         .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
-    let paused = crate::engine::wave_config::read_wave_config(&goal_repo, wave.name())
-        .and_then(|config| config.paused)
-        .unwrap_or(false);
+    let paused = match crate::engine::wave_config::try_read_wave_config(&goal_repo, wave.name()) {
+        Ok(config) => config.and_then(|config| config.paused).unwrap_or(false),
+        Err(error) => {
+            tracing::warn!(wave = wave.name(), %error, "Wave policy is unavailable");
+            false
+        }
+    };
     let endpoint = if repo.is_empty() {
         None
     } else {
@@ -1090,6 +1096,7 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         active_projects,
         live: endpoint.is_some(),
         paused,
+        enabled: placement.enabled,
         endpoint,
         created_at: wave.created_at().and_then(format_time),
         parent_wave_id: wave.parent_wave_id().map(ToString::to_string),
@@ -2020,12 +2027,13 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {repo:<28}  {status:<8}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  ENDPOINT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         repo = "REPOSITORY",
         status = "STATUS",
+        enabled = "ENABLED",
         turns = "TURNS",
         live = "LIVE",
         tasks = "TASKS",
@@ -2034,10 +2042,11 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {repo:<28}  {status:<8}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
+            "{name:<16}  {repo:<28}  {status:<8}  {enabled:<7}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
             status = work_status_label(&wave.status),
+            enabled = if wave.enabled { "yes" } else { "no" },
             turns = if wave.paused { "paused" } else { "enabled" },
             live = if wave.live { "yes" } else { "no" },
             tasks = wave.active_tasks,
@@ -2131,6 +2140,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         "  turns     {}",
         if wave.paused { "paused" } else { "enabled" }
     );
+    println!("  enabled   {}", wave.enabled);
     println!(
         "  home      {} ({})  [{}]",
         wave.home.id,

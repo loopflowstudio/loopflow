@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use loopflow::child::ObservationRecipient;
+use loopflow::durable::WorkRef;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::{open_store, StorageConfig};
@@ -125,6 +126,7 @@ fn live_snapshot(output: &std::process::Output, name: &str) -> serde_json::Value
     let snapshot = &body[0];
     assert_eq!(snapshot["name"], name);
     assert_eq!(snapshot["live"], true);
+    assert_eq!(snapshot["enabled"], true);
     assert!(snapshot["endpoint"].as_str().is_some());
     snapshot.clone()
 }
@@ -236,6 +238,28 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         "stop failed: {}",
         String::from_utf8_lossy(&stopped.stderr)
     );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("wave/good/GOAL.md")).expect("read stopped Wave goal"),
+        "A local test Wave.\n",
+        "machine control must not modify repository state"
+    );
+    assert!(
+        !store
+            .placement(&WorkRef::Wave(good.id().clone()))
+            .await
+            .expect("read stopped Wave control")
+            .enabled
+    );
+    let listed = run_lf(&repo, &home, &fake_bin, &["ls", "--json"]).await;
+    assert!(listed.status.success(), "lf ls failed after stop");
+    let waves: Vec<serde_json::Value> =
+        serde_json::from_slice(&listed.stdout).expect("parse stopped Wave list");
+    let stopped_wave = waves
+        .iter()
+        .find(|wave| wave["name"] == "good")
+        .expect("find stopped Wave snapshot");
+    assert_eq!(stopped_wave["enabled"], false);
+    assert_eq!(stopped_wave["live"], false);
 
     // A child event committed while the Wave is stopped remains durable until
     // the next start synchronously drains it.
@@ -301,6 +325,17 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         assert_eq!(snapshot["id"], first["id"]);
         assert_eq!(snapshot["endpoint"], endpoint);
     }
+    assert_eq!(
+        std::fs::read_to_string(repo.join("wave/good/GOAL.md")).expect("read restarted Wave goal"),
+        "A local test Wave.\n"
+    );
+    assert!(
+        store
+            .placement(&WorkRef::Wave(good.id().clone()))
+            .await
+            .expect("read restarted Wave control")
+            .enabled
+    );
     assert!(
         store
             .pending_observations(&recipient)
@@ -312,4 +347,16 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
 
     let stopped = run_lf(&repo, &home, &fake_bin, &["stop", "good"]).await;
     assert!(stopped.status.success());
+    assert_eq!(
+        std::fs::read_to_string(repo.join("wave/good/GOAL.md"))
+            .expect("read final stopped Wave goal"),
+        "A local test Wave.\n"
+    );
+    assert!(
+        !store
+            .placement(&WorkRef::Wave(good.id().clone()))
+            .await
+            .expect("read final Wave control")
+            .enabled
+    );
 }

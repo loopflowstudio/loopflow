@@ -121,19 +121,33 @@ pub fn stop(name: &str, repo: &Path) -> anyhow::Result<()> {
     let locator = crate::wave::WaveLocator::discover(repo, &name)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let stopped = runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
-            return Ok::<_, anyhow::Error>(None);
-        };
-        let Some(wave) = store.get_wave_at(&locator).await? else {
-            return Ok(None);
-        };
+        let store = crate::store::open_existing_store()
+            .await
+            .ok_or_else(|| anyhow!("lf stop needs an initialized local store"))?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await?
+            .ok_or_else(|| anyhow!("Wave '{name}' was not found"))?;
         let local = store.local_home().await?;
-        crate::lfd::stop_wave(&local.id, wave.id()).await
+        let work = crate::durable::WorkRef::Wave(wave.id().clone());
+        let placement = store.placement(&work).await?;
+        if placement.home_id != local.id {
+            return Err(anyhow!(
+                "Wave {name} is placed on {}, not local Home {}",
+                placement.home_id,
+                local.id
+            ));
+        }
+        if let Some(stopped) = crate::lfd::stop_wave(&local.id, wave.id()).await? {
+            return Ok(stopped);
+        }
+        store.set_work_enabled(&work, false).await?;
+        crate::wave::request_stop(Path::new(wave.repo()), wave.name()).await
     })?;
-    match stopped {
-        Some(true) => println!("stopped wave {name}"),
-        Some(false) => println!("wave {name} is already stopped"),
-        None => return crate::wave::stop(&name),
+    if stopped {
+        println!("stopped wave {name}");
+    } else {
+        println!("wave {name} is already stopped");
     }
     Ok(())
 }

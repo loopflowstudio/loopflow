@@ -112,6 +112,30 @@ impl SqliteStore {
         placement_in(&conn, work)
     }
 
+    pub fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        placement_in(&tx, work)?;
+        let enabled = if enabled { 1_i64 } else { 0_i64 };
+        match work {
+            WorkRef::Wave(id) => tx.execute(
+                "UPDATE work_placements SET enabled=?2 WHERE wave_id=?1",
+                params![id.as_str(), enabled],
+            )?,
+            WorkRef::Project(id) => tx.execute(
+                "UPDATE work_placements SET enabled=?2 WHERE project_id=?1",
+                params![id.as_str(), enabled],
+            )?,
+            WorkRef::Task(id) => tx.execute(
+                "UPDATE work_placements SET enabled=?2 WHERE task_id=?1",
+                params![id.as_str(), enabled],
+            )?,
+        };
+        let placement = placement_in(&tx, work)?;
+        tx.commit()?;
+        Ok(placement)
+    }
+
     pub(crate) fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1759,7 +1783,15 @@ fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
 }
 
 fn reserving_home_in(conn: &Connection, work: &WorkRef) -> StoreResult<HomeId> {
-    let placed = placement_in(conn, work)?.home_id;
+    let placement = placement_in(conn, work)?;
+    if !placement.enabled {
+        return Err(StoreError::InvalidData(format!(
+            "cannot reserve {} {}; it is disabled",
+            work.kind(),
+            work.id()
+        )));
+    }
+    let placed = placement.home_id;
     let local = map_local_home(conn)?.id;
     if placed != local {
         return Err(StoreError::InvalidData(format!(
@@ -1774,26 +1806,45 @@ fn reserving_home_in(conn: &Connection, work: &WorkRef) -> StoreResult<HomeId> {
 fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
     let row = match work {
         WorkRef::Wave(id) => conn.query_row(
-            "SELECT home_id, placed_at FROM work_placements WHERE wave_id=?1",
+            "SELECT home_id, enabled, placed_at FROM work_placements WHERE wave_id=?1",
             [id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         ),
         WorkRef::Project(id) => conn.query_row(
-            "SELECT home_id, placed_at FROM work_placements WHERE project_id=?1",
+            "SELECT home_id, enabled, placed_at FROM work_placements WHERE project_id=?1",
             [id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         ),
         WorkRef::Task(id) => conn.query_row(
-            "SELECT home_id, placed_at FROM work_placements WHERE task_id=?1",
+            "SELECT home_id, enabled, placed_at FROM work_placements WHERE task_id=?1",
             [id.as_str()],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
         ),
     }
     .optional()?;
-    row.map(|(home_id, placed_at)| {
+    row.map(|(home_id, enabled, placed_at)| {
         Ok(Placement {
             work: work.clone(),
             home_id: HomeId::parse(&home_id).map_err(invalid_durable)?,
+            enabled,
             placed_at: OffsetDateTime::from_unix_timestamp(placed_at).map_err(invalid_durable)?,
         })
     })
@@ -1808,22 +1859,22 @@ fn write_placement(
 ) -> StoreResult<()> {
     match work {
         WorkRef::Wave(id) => tx.execute(
-            "INSERT INTO work_placements (wave_id, home_id, placed_at)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
+             VALUES (?1, ?2, 1, ?3)
              ON CONFLICT(wave_id) DO UPDATE SET
                 home_id=excluded.home_id, placed_at=excluded.placed_at",
             params![id.as_str(), home_id.as_str(), placed_at],
         )?,
         WorkRef::Project(id) => tx.execute(
-            "INSERT INTO work_placements (project_id, home_id, placed_at)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO work_placements (project_id, home_id, enabled, placed_at)
+             VALUES (?1, ?2, 1, ?3)
              ON CONFLICT(project_id) DO UPDATE SET
                 home_id=excluded.home_id, placed_at=excluded.placed_at",
             params![id.as_str(), home_id.as_str(), placed_at],
         )?,
         WorkRef::Task(id) => tx.execute(
-            "INSERT INTO work_placements (task_id, home_id, placed_at)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO work_placements (task_id, home_id, enabled, placed_at)
+             VALUES (?1, ?2, 1, ?3)
              ON CONFLICT(task_id) DO UPDATE SET
                 home_id=excluded.home_id, placed_at=excluded.placed_at",
             params![id.as_str(), home_id.as_str(), placed_at],
@@ -3975,6 +4026,16 @@ mod durable_store_tests {
                 (task, project),
             ],
         )
+    }
+
+    #[test]
+    fn disabled_ancestor_does_not_block_a_manual_descendant_run() {
+        let (_directory, store, work_routes) = store_with_work_hierarchy();
+        let wave = &work_routes[0].0;
+        let task = &work_routes[2].0;
+
+        store.set_work_enabled(wave, false).unwrap();
+        store.reserve_run(task, &RunTrigger::User).unwrap();
     }
 
     fn start_turn(store: &SqliteStore, work: &WorkRef) -> crate::durable::TurnId {

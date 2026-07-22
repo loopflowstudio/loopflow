@@ -384,7 +384,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("create dir");
         fs::write(
             dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  home_id: home_39860354aaca640c2ccb50bf6ca609d8\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+            "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
         .expect("write");
         let config = try_read_wave_config(temp.path(), "scan")
@@ -393,7 +393,7 @@ mod tests {
         assert!(matches!(
             config.chat,
             Some(WaveChatConfig::Discord { home_id, guild_id, channel_id })
-                if home_id.as_str() == "home_39860354aaca640c2ccb50bf6ca609d8"
+                if home_id.as_str() == "home_11111111111111111111111111111111"
                     && guild_id == "guild"
                     && channel_id == "channel"
         ));

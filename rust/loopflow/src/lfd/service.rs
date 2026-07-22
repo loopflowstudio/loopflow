@@ -359,8 +359,8 @@ mod tests {
             lf_home: Some(PathBuf::from("/home/op/.lf")),
             db_path: None,
             path_env: Some("/opt/homebrew/bin:/usr/bin:/bin".to_string()),
-            doppler_project: Some("loopflow".to_string()),
-            doppler_config: Some("dev".to_string()),
+            doppler_project: Some("example-project".to_string()),
+            doppler_config: Some("example-config".to_string()),
         }
     }
 
@@ -380,9 +380,9 @@ mod tests {
         assert!(plist.contains("<key>PATH</key>"));
         assert!(plist.contains("/opt/homebrew/bin:/usr/bin:/bin"));
         assert!(plist.contains("<key>DOPPLER_PROJECT</key>"));
-        assert!(plist.contains("<string>loopflow</string>"));
+        assert!(plist.contains("<string>example-project</string>"));
         assert!(plist.contains("<key>DOPPLER_CONFIG</key>"));
-        assert!(plist.contains("<string>dev</string>"));
+        assert!(plist.contains("<string>example-config</string>"));
         assert_eq!(plist.matches("<string>/dev/null</string>").count(), 2);
         // Secrets must never appear in the file.
         assert!(!plist.contains("WEBHOOK_SECRET"));
@@ -402,8 +402,8 @@ mod tests {
         assert!(unit.contains("StandardError=null"));
         assert!(unit.contains("Environment=LF_HOME=/home/op/.lf"));
         assert!(unit.contains("Environment=PATH=/opt/homebrew/bin:/usr/bin:/bin"));
-        assert!(unit.contains("Environment=DOPPLER_PROJECT=loopflow"));
-        assert!(unit.contains("Environment=DOPPLER_CONFIG=dev"));
+        assert!(unit.contains("Environment=DOPPLER_PROJECT=example-project"));
+        assert!(unit.contains("Environment=DOPPLER_CONFIG=example-config"));
         assert!(unit.contains("WantedBy=default.target"));
         assert!(!unit.contains("WEBHOOK_SECRET"));
     }

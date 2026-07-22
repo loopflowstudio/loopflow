@@ -232,8 +232,9 @@ pub(super) const RECONCILE_AGE_GUARD_HOURS: i64 = 48;
 /// survives. Tombstones terminal captures whose conversation artifacts are
 /// gone, interrupts dead `capturing` invocations with intact evidence, acknowledges
 /// aged write loss, and removes artifact directories no invocation row claims.
-/// Dry-run by default; `--apply` writes. A red `lf doctor` capture check means
-/// unacknowledged loss — this is the explicit acknowledgment.
+/// Dry-run by default; `--apply` writes. This is lifecycle repair, not the
+/// recovery gate: `lf doctor` derives current capture health without mutating
+/// historical evidence.
 pub fn reconcile(apply: bool, all: bool, json: bool) -> Result<()> {
     let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
     let invocations = store

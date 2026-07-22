@@ -543,6 +543,13 @@ that PR. `--wave` and `--repo owner/repo` filter the same local report.
 `lf doctor` also prints the binary's build provenance, the resolved database
 path, and the latest known and applied migrations. Those fields still print
 when the database is too new or came from a divergent development build.
+
+The `capture` check keeps partial captures and unclaimed trace artifacts visible
+as historical evidence. A loss stays red until a later complete capture starts
+a 48-hour loss-free window; after that window it reports `capture recovered`
+without rewriting the ledger or deleting traces. Any recurrence resets the
+window and reports its UTC time, owner, provider or reason, and current `.lf`
+storage context. `lf doctor` and `lf doctor --json` apply the same gate.
 ## Measuring Codebase Weight
 
 ```bash

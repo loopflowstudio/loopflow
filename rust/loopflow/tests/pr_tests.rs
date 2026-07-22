@@ -556,7 +556,7 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
 }
 
 #[test]
-fn completing_land_discards_an_empty_successor_only_in_finally() {
+fn completing_land_requires_an_approved_final_gate_for_an_empty_successor() {
     let home = tempfile::TempDir::new().expect("temp home");
     let log_path = home.path().join("gh.log");
     let script = gh_merged_pr_logging_script(log_path.to_string_lossy().as_ref());
@@ -656,6 +656,45 @@ fn completing_land_discards_an_empty_successor_only_in_finally() {
         .expect("write final evidence");
     let calls_before = fs::read_to_string(&log_path).expect("read setup calls");
 
+    let refusal = land(repo.path(), &options, &NullProgress)
+        .expect_err("a continue proposal must not complete the Task");
+    assert!(
+        refusal
+            .to_string()
+            .contains("final gate did not approve completion"),
+        "expected an actionable completion-authority refusal, got: {refusal}"
+    );
+    assert!(
+        repo.path().join("scratch/review.md").exists(),
+        "refused completion must preserve final review evidence"
+    );
+    assert!(!matches!(
+        runtime.block_on(task.store.work_status(&work)).unwrap(),
+        WorkStatus::Done
+    ));
+    let refused = runtime
+        .block_on(task.store.get_task(&task.task.id))
+        .expect("read refused Task")
+        .expect("refused Task exists");
+    assert!(refused
+        .gate_proposal
+        .as_ref()
+        .is_some_and(|gate| !gate.done));
+
+    let approved_reason = "final review approved the merged slice";
+    final_task.gate_proposal = Some(TaskGateProposal {
+        done: true,
+        reason: approved_reason.to_string(),
+    });
+    conn.execute(
+        "UPDATE tasks SET gate_proposal_json=?2 WHERE id=?1",
+        rusqlite::params![
+            final_task.id.as_str(),
+            serde_json::to_string(&final_task.gate_proposal).expect("serialize approval")
+        ],
+    )
+    .expect("persist approved proposal");
+
     let result = land(repo.path(), &options, &NullProgress).expect("complete final Task");
 
     assert!(result.is_none(), "no empty GitHub PR should be created");
@@ -677,10 +716,14 @@ fn completing_land_discards_an_empty_successor_only_in_finally() {
         .block_on(task.store.get_task(&task.task.id))
         .expect("read completed Task")
         .expect("completed Task exists");
-    assert!(completed
-        .gate_proposal
-        .as_ref()
-        .is_some_and(|gate| gate.done));
+    assert_eq!(
+        completed.gate_proposal,
+        Some(TaskGateProposal {
+            done: true,
+            reason: approved_reason.to_string(),
+        }),
+        "completion must preserve the reviewed proposal"
+    );
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completed PR chain");

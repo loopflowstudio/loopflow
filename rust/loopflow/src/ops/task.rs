@@ -4017,8 +4017,11 @@ pub(crate) fn find_discardable_final_task(repo: &Path) -> OpsResult<Option<Strin
             return Ok(None);
         }
         let gate = task_completion_gate(&store, &task).await?;
-        Ok((gate.satisfied && gate.discardable_successor.is_some())
-            .then(|| task.plan.identifier.clone()))
+        if !gate.satisfied || gate.discardable_successor.is_none() {
+            return Ok(None);
+        }
+        require_approved_task_completion(&task)?;
+        Ok(Some(task.plan.identifier.clone()))
     })
 }
 
@@ -4027,6 +4030,19 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
     if summary.is_empty() {
         return Err(task_error("completion summary cannot be empty"));
     }
+    complete_task(issue, TaskCompletionAuthority::Explicit { summary })
+}
+
+pub(crate) fn task_complete_approved(issue: &str) -> OpsResult<Task> {
+    complete_task(issue, TaskCompletionAuthority::Approved)
+}
+
+enum TaskCompletionAuthority {
+    Explicit { summary: String },
+    Approved,
+}
+
+fn complete_task(issue: &str, authority: TaskCompletionAuthority) -> OpsResult<Task> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut task = store
@@ -4067,6 +4083,9 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
                 "Task worktree has uncommitted changes; publish or explicitly abandon them first",
             ));
         }
+        if matches!(&authority, TaskCompletionAuthority::Approved) {
+            require_approved_task_completion(&task)?;
+        }
         // The completion gate requires every active PR to be settled. Do not
         // bypass that fact or infer merge from a green head.
         let gate = task_completion_gate(&store, &task).await?;
@@ -4076,7 +4095,9 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
             // provoked.
             return Err(task_error(refusal));
         }
-        propose_task_done(&mut task, summary.clone())?;
+        if let TaskCompletionAuthority::Explicit { summary } = authority {
+            propose_task_done(&mut task, summary)?;
+        }
         // Every other condition is now proven, so the rotation's empty artifact
         // is dropped as part of completing — one transaction that deletes the row
         // and writes the terminal status together. There is no instant at which
@@ -4099,6 +4120,19 @@ pub fn task_complete(issue: &str, summary: String) -> OpsResult<Task> {
         }
         Ok(task)
     })
+}
+
+fn require_approved_task_completion(task: &Task) -> OpsResult<()> {
+    let proposal = task
+        .approved_gate_proposal()
+        .map_err(|error| task_error(error.to_string()))?;
+    if proposal.done {
+        return Ok(());
+    }
+    Err(task_error(format!(
+        "Task {} final gate did not approve completion: {}",
+        task.plan.identifier, proposal.reason
+    )))
 }
 
 fn propose_task_done(task: &mut Task, summary: String) -> OpsResult<()> {
@@ -4280,7 +4314,7 @@ pub(crate) struct CompletionGate {
     /// recorded base. It is the rotation's artifact, not work, so it does not
     /// block completion; it must not outlive one either.
     ///
-    /// Classification only, and exactly one thing acts on it: [`task_complete`]
+    /// Classification only, and exactly one thing acts on it: [`complete_task`]
     /// passes it as the completion transaction's `skipped_pr`, which drops the
     /// row and writes the terminal status together. Discarding it any earlier
     /// would leave a non-terminal Task with no active PR — the state

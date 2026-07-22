@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use crate::child::{
     AbandonIntent, ChildBodyHandoff, ChildBodyHandoffRequest, ChildRef, ObservationRecipient,
 };
-use crate::durable::{Author, Basis, RunLease};
+use crate::durable::{Author, Basis, Run, RunLease, RunTrigger};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::project::{
@@ -49,20 +49,29 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn insert_task_with_steer(
+    pub fn insert_task_run(
         &self,
         task: &Task,
         pr: &TaskPr,
-        author: &Author,
+        caller: Option<&RunLease>,
         text: &str,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<(Run, RunLease)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, task, pr)?;
         let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
-        Self::append_steer_in(&transaction, &work, author, text)?;
+        super::durable::validate_control_caller(&transaction, caller, &work)?;
+        let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
+        let steer = Self::append_steer_in(&transaction, &work, &author, text)?;
+        let reservation = super::durable::reserve_run_in(
+            &transaction,
+            &work,
+            &RunTrigger::Input {
+                basis: steer.steer.basis,
+            },
+        )?;
         transaction.commit()?;
-        Ok(())
+        Ok(reservation)
     }
 
     /// Reopen the stable Task as a new Epoch. Product identity, PR history,
@@ -71,12 +80,20 @@ impl SqliteStore {
         &self,
         task: &Task,
         pr: Option<&TaskPr>,
-        author: &Author,
+        caller: Option<&RunLease>,
         text: &str,
     ) -> StoreResult<()> {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
+        if caller.is_some() {
+            super::durable::validate_control_caller(&transaction, caller, &work)?;
+            return Err(StoreError::InvalidAuthority(
+                "Run cannot recover terminal Task Work; explicit User recovery is required"
+                    .to_string(),
+            ));
+        }
         let previous: String = transaction
             .query_row(
                 "SELECT state FROM epochs WHERE task_id=?1 ORDER BY number DESC LIMIT 1",
@@ -117,7 +134,7 @@ impl SqliteStore {
             work_for_child_in(&transaction, &ChildRef::Task(task.id.clone())).map_err(|error| {
                 StoreError::InvalidData(format!("resolve reopened Task Work: {error}"))
             })?;
-        Self::append_steer_in(&transaction, &work, author, text)
+        Self::append_steer_in(&transaction, &work, &Author::User, text)
             .map_err(|error| StoreError::InvalidData(format!("steer reopened Task: {error}")))?;
         transaction.commit()?;
         Ok(())
@@ -137,6 +154,30 @@ impl SqliteStore {
             return Err(StoreError::NotFound);
         }
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn validate_task_run_route(
+        &self,
+        task: &Task,
+        lease: &RunLease,
+        current_external_project_id: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        require_run_owns_child(&conn, &ChildRef::Task(task.id.clone()), lease)?;
+        let durable_external_project_id: String = conn.query_row(
+            "SELECT p.external_project_id
+             FROM tasks t JOIN projects p ON p.id=t.project_id
+             WHERE t.id=?1",
+            [task.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if durable_external_project_id != current_external_project_id {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {} durable history belongs to Linear Project {}, but current PM routing names {}; refusing automated Task authority",
+                task.plan.identifier, durable_external_project_id, current_external_project_id
+            )));
+        }
         Ok(())
     }
 

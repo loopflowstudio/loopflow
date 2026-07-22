@@ -149,54 +149,23 @@ impl SqliteStore {
     ) -> StoreResult<(Run, RunLease)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let epoch = current_epoch_in(&tx, work)?;
-        let home_id = reserving_home_in(&tx, work)?;
-        if let Some(run) = run_for_epoch_in(&tx, &epoch.id)? {
-            return Err(StoreError::RunFenced {
-                target: format!("{} {}", work.kind(), work.id()),
-                run_id: run.id,
-                state: run.state,
-            });
-        }
-        resolve_wait_for_trigger(&tx, &epoch, trigger)?;
-        let token = RunLeaseToken::new();
-        let run = Run {
-            id: RunId::new(),
-            work: work.clone(),
-            epoch_id: epoch.id.clone(),
-            home_id,
-            state: RunState::Reserved,
-            trigger: trigger.clone(),
-            retry_of: match trigger {
-                RunTrigger::Recovery { prior_run_id } => Some(prior_run_id.clone()),
-                _ => None,
-            },
-            containment: None,
-            cwd: None,
-            created_at: OffsetDateTime::now_utc(),
-            started_at: None,
-            ended_at: None,
-        };
-        tx.execute(
-            "INSERT INTO runs (
-                id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
-                lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
-             ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
-            params![
-                run.id.as_str(),
-                run.epoch_id.as_str(),
-                run.home_id.as_str(),
-                serde_json::to_string(trigger).expect("Run trigger must serialize"),
-                run.retry_of.as_ref().map(RunId::as_str),
-                token.hash(),
-                work.kind(),
-                work.id(),
-                run.created_at.unix_timestamp(),
-            ],
-        )?;
-        let lease = RunLease::new(run.id.clone(), work.clone(), epoch.current_basis, token);
+        let receipt = reserve_run_in(&tx, work, trigger)?;
         tx.commit()?;
-        Ok((run, lease))
+        Ok(receipt)
+    }
+
+    pub(crate) fn reserve_child_run(
+        &self,
+        caller: &RunLease,
+        work: &WorkRef,
+        trigger: &RunTrigger,
+    ) -> StoreResult<(Run, RunLease)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_control_caller(&tx, Some(caller), work)?;
+        let receipt = reserve_run_in(&tx, work, trigger)?;
+        tx.commit()?;
+        Ok(receipt)
     }
 
     pub(crate) fn reserve_recovery_run(&self, lease: &RunLease) -> StoreResult<(Run, RunLease)> {
@@ -1863,6 +1832,60 @@ fn write_placement(
     Ok(())
 }
 
+pub(super) fn reserve_run_in(
+    tx: &Transaction<'_>,
+    work: &WorkRef,
+    trigger: &RunTrigger,
+) -> StoreResult<(Run, RunLease)> {
+    let epoch = current_epoch_in(tx, work)?;
+    let home_id = reserving_home_in(tx, work)?;
+    if let Some(run) = run_for_epoch_in(tx, &epoch.id)? {
+        return Err(StoreError::RunFenced {
+            target: format!("{} {}", work.kind(), work.id()),
+            run_id: run.id,
+            state: run.state,
+        });
+    }
+    resolve_wait_for_trigger(tx, &epoch, trigger)?;
+    let token = RunLeaseToken::new();
+    let run = Run {
+        id: RunId::new(),
+        work: work.clone(),
+        epoch_id: epoch.id.clone(),
+        home_id,
+        state: RunState::Reserved,
+        trigger: trigger.clone(),
+        retry_of: match trigger {
+            RunTrigger::Recovery { prior_run_id } => Some(prior_run_id.clone()),
+            _ => None,
+        },
+        containment: None,
+        cwd: None,
+        created_at: OffsetDateTime::now_utc(),
+        started_at: None,
+        ended_at: None,
+    };
+    tx.execute(
+        "INSERT INTO runs (
+            id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+            lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
+         ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
+        params![
+            run.id.as_str(),
+            run.epoch_id.as_str(),
+            run.home_id.as_str(),
+            serde_json::to_string(trigger).expect("Run trigger must serialize"),
+            run.retry_of.as_ref().map(RunId::as_str),
+            token.hash(),
+            work.kind(),
+            work.id(),
+            run.created_at.unix_timestamp(),
+        ],
+    )?;
+    let lease = RunLease::new(run.id.clone(), work.clone(), epoch.current_basis, token);
+    Ok((run, lease))
+}
+
 fn inherit_placement(
     tx: &Transaction<'_>,
     work: &WorkRef,
@@ -2876,7 +2899,7 @@ fn query_answerable_asks(
         .collect()
 }
 
-fn validate_control_caller(
+pub(super) fn validate_control_caller(
     conn: &Connection,
     caller: Option<&RunLease>,
     target: &WorkRef,
@@ -2886,7 +2909,33 @@ fn validate_control_caller(
     };
     let run = validate_run_lease(conn, lease)?;
     if parent_work(conn, target)?.as_ref() == Some(&run.work) {
-        Ok(())
+        let parent_epoch = current_epoch_in(conn, &run.work)?;
+        let selected = conn
+            .query_row(
+                "SELECT t.epoch_id, t.basis_rev
+                 FROM agent_turns t
+                 JOIN agent_invocations i ON i.id=t.invocation_id
+                 WHERE i.supervising_run_id=?1
+                 ORDER BY (t.status='running') DESC, t.started_at DESC, t.rowid DESC
+                 LIMIT 1",
+                [run.id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?
+            .map(|(epoch_id, revision)| {
+                Ok::<Basis, StoreError>(Basis {
+                    epoch_id: EpochId::parse(&epoch_id).map_err(invalid_durable)?,
+                    revision: revision as u64,
+                })
+            })
+            .transpose()?
+            .ok_or_else(|| {
+                StoreError::InvalidAuthority(format!(
+                    "Run {} has no durable Turn Basis for child control",
+                    run.id
+                ))
+            })?;
+        validate_basis(&parent_epoch.current_basis, &selected)
     } else {
         Err(StoreError::InvalidAuthority(
             "Run may control only immediate child Work".to_string(),

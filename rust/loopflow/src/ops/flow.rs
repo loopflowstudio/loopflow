@@ -56,6 +56,7 @@ pub fn execute_flow_ops(repo: &Path, item: &Op, progress: &impl Progress) -> Ops
             push,
             no_add,
         }) => {
+            crate::ops::task::guard_task_mutation_authority(repo)?;
             commit_workflow(
                 repo,
                 &CommitOptions {

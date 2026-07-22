@@ -762,6 +762,22 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Allow this Home to pursue Work
+    Enable {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prevent this Home from starting new pursuit of Work
+    Disable {
+        #[arg(value_parser = ["wave", "project", "task"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Append authored direction through User or active parent Run authority
     Steer {
         #[arg(value_parser = ["wave", "project", "task"])]
@@ -2793,6 +2809,22 @@ mod tests {
             "home_00000000000000000000000000000001",
         ])
         .is_err());
+
+        let disable = Cli::try_parse_from([
+            "lf",
+            "work",
+            "disable",
+            "task",
+            "task_00000000000000000000000000000001",
+            "--json",
+        ])
+        .expect("parse Work disable");
+        assert!(matches!(
+            disable.command,
+            Some(Commands::Work {
+                cmd: WorkCommand::Disable { kind, id, json: true }
+            }) if kind == "task" && id == "task_00000000000000000000000000000001"
+        ));
     }
 
     #[test]

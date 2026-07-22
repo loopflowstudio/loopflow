@@ -133,6 +133,7 @@ struct DTOFixtureTests {
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
         #expect(!detail.wave.paused)
+        #expect(detail.wave.enabled)
         // The Home runtime evidence carries the state and the one contextual action.
         #expect(detail.homeRuntime.state == .running)
         #expect(detail.homeRuntime.action == .attach(endpoint: "127.0.0.1:7777"))
@@ -182,6 +183,15 @@ struct DTOFixtureTests {
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(WaveDetailSnapshot.self, from: legacyData)
         }
+
+        var missingEnabled = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var waveWithoutEnabled = try #require(missingEnabled["wave"] as? [String: Any])
+        waveWithoutEnabled.removeValue(forKey: "enabled")
+        missingEnabled["wave"] = waveWithoutEnabled
+        let missingEnabledData = try JSONSerialization.data(withJSONObject: missingEnabled)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingEnabledData)
+        }
     }
 
     @Test("roadmap fixture preserves sections and durable Task references")
@@ -194,6 +204,7 @@ struct DTOFixtureTests {
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
         #expect(product.wave.paused)
+        #expect(product.wave.enabled)
         #expect(product.unavailableProjects[0].workId == "proj_e972b70272fbb5e91c096ebe657f9f9b")
         #expect(product.unavailableProjects[0].projectSlug == "technical-architecture")
         #expect(product.unavailableProjects[0].tasks[0].taskIdentifier == "W2-127")
@@ -206,6 +217,7 @@ struct DTOFixtureTests {
         #expect(project.tasks[2].reference.issueUrl == nil)
         #expect(project.tasks[3].reference.workspace?.branch == "jack-heart/now-available-research")
         #expect(roadmap.waves[1].projects.unavailableReason?.contains("lf pm sync") == true)
+        #expect(!roadmap.waves[1].wave.enabled)
     }
 
     @Test("child activity preserves typed delivery evidence")

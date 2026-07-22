@@ -90,15 +90,21 @@ public struct WaveLens: Sendable, Hashable {
     ///
     /// - green: the Wave listener answered its health probe.
     /// - blue: authored policy pauses new turns; listener evidence stays in the reason.
-    /// - red: an active Run or planned work has no answering listener.
-    /// - black: off and clean — no live body, no active work.
+    /// - red: enabled and observed liveness have not converged.
+    /// - black: disabled and no listener remains.
     public static func forWave(
         live: Bool,
         paused: Bool = false,
+        enabled: Bool = true,
         status: WorkStatus,
         activeTasks: Int,
         activeProjects: Int
     ) -> WaveLens {
+        if !enabled {
+            return live
+                ? WaveLens(color: .red, reason: "Disabled · listener still answered")
+                : WaveLens(color: .black, reason: "Disabled on this Home")
+        }
         if paused {
             return WaveLens(
                 color: .blue,
@@ -121,7 +127,7 @@ public struct WaveLens: Sendable, Hashable {
                 reason: "Stopped · \(outstanding) active \(noun) still expect work"
             )
         }
-        return WaveLens(color: .black, reason: "Off · no active work")
+        return WaveLens(color: .red, reason: "Expected live · Wave listener did not answer")
     }
 
     /// Fold Task attention into the parent's single reading. Priority is

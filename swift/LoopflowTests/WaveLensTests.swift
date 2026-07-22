@@ -32,11 +32,30 @@ struct WaveLensTests {
         #expect(lens.reason.contains("3"))
     }
 
-    @Test("black when off and clean")
-    func blackWhenClean() {
-        let lens = WaveLens.forWave(live: false, status: .ready, activeTasks: 0, activeProjects: 0)
+    @Test("black only when disabled")
+    func disabledIsBlack() {
+        let lens = WaveLens.forWave(
+            live: false,
+            enabled: false,
+            status: .ready,
+            activeTasks: 0,
+            activeProjects: 0
+        )
         #expect(lens.color == .black)
+        #expect(lens.reason == "Disabled on this Home")
         #expect(!lens.color.isLit)
+    }
+
+    @Test("default-on without a listener is red")
+    func runningWithoutListenerIsRed() {
+        let lens = WaveLens.forWave(
+            live: false,
+            status: .ready,
+            activeTasks: 0,
+            activeProjects: 0
+        )
+        #expect(lens.color == .red)
+        #expect(lens.reason == "Expected live · Wave listener did not answer")
     }
 
     @Test("paused turn intent is blue while listener evidence stays explicit")

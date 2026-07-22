@@ -64,7 +64,8 @@ lf start designer                           # serve it from this Home's one keep
 lf chat --steer "ship the button audit first"
 lf pause designer                           # keep listening; queue new turn starts
 lf resume designer
-lf stop designer
+lf stop designer                            # stay off across Home restarts
+lf start designer                           # turn it back on
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a

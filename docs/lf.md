@@ -281,14 +281,17 @@ lf work status task task_... --json                  # stable Work projection
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
 lf work relocate wave wave_... --name platform       # rename a stopped Wave
 lf work relocate wave wave_... --repo ../moved-repo  # repair or move its repository
+lf work disable project project_...                  # exclude it from Wave selection
+lf work enable task task_...                         # restore Task eligibility
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
 `lf start <name>` asks this machine's shared keeper to serve the Wave and
-records this machine as its Home. It never follows a remote placement record.
+records this machine as its Home. It enables the Wave in this Home's registry
+and never follows a remote placement record.
 Bare `lf start` is the automatic form: it starts only repo Waves whose optional
 `owner` and `home` fields in `GOAL.md` match this machine and whose recorded
-placement is local. The named form is the explicit override.
+placement is local and enabled. The named form is the explicit override.
 `lf wave <name>` runs that Wave listener and resident in the foreground for
 development. Project Work pursues one Linear Project's KRs without a worktree.
 Each Linear Project has at most one current Work; terminal Work remains readable
@@ -343,9 +346,15 @@ second launch-result model. With no names it starts every eligible Wave in the
 current repo on this machine. `lfd` starts the same eligible set across all
 repositories known to its local store and reconciles it every 30 seconds.
 `lf stop` stops the selected Wave on this machine while `lfd` and sibling Waves
-continue. It suppresses reconciliation until an explicit `lf start` or the
-next `lfd` restart; change `owner`, `home`, or placement for a durable
-assignment change.
+continue. It disables the Wave in this Home's SQLite registry, so the Home
+leaves that Wave off across daemon and machine restarts without changing the
+repository. An explicit `lf start <name>` enables it again. Bare `lf start`
+does not start disabled Waves.
+
+`lf work enable|disable <wave|project|task> <id>` changes the same default-on
+machine control for every Work kind. The control applies only to that Work:
+disabling a Wave or Project does not prohibit a User from invoking an enabled
+Task directly, and it does not stop an already-running descendant.
 
 `lf pause` and `lf resume` change turn intent, not process residency. A paused
 listener keeps serving and queues messages while refusing message, heartbeat,

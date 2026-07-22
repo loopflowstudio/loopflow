@@ -39,16 +39,26 @@ fn pm_show_rejects_a_legacy_item_without_stable_ownership() {
 }
 
 #[test]
-fn wave_detail_requires_authored_turn_intent() {
+fn wave_detail_requires_machine_and_turn_controls() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert!(!snapshot.wave.paused);
+    assert!(snapshot.wave.enabled);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: WaveDetailSnapshot = serde_json::from_str(&encoded).unwrap();
     assert!(!decoded.wave.paused);
+    assert!(decoded.wave.enabled);
 
     let mut legacy: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
     legacy["wave"].as_object_mut().unwrap().remove("paused");
     let error = serde_json::from_value::<WaveDetailSnapshot>(legacy).unwrap_err();
     assert!(error.to_string().contains("paused"));
+
+    let mut missing_enabled: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
+    missing_enabled["wave"]
+        .as_object_mut()
+        .unwrap()
+        .remove("enabled");
+    let error = serde_json::from_value::<WaveDetailSnapshot>(missing_enabled).unwrap_err();
+    assert!(error.to_string().contains("enabled"));
 }

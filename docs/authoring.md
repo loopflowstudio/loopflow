@@ -183,6 +183,9 @@ Execution placement remains durable state: use
 `lf work place wave <wave-id> <home-id>`. Bare `lf start` and `lfd` require both
 the authored policy and recorded placement to match; named `lf start <wave>` is
 an explicit local override.
+Whether this machine may pursue Work is Home-local registry state. Change it
+with `lf work enable|disable <wave|project|task> <id>`; these commands never edit
+the goal or another repository file.
 
 ### Writing KRs
 

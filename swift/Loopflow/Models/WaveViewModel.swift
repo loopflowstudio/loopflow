@@ -40,6 +40,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
         return WaveLens.forWave(
             live: api.live,
             paused: api.paused,
+            enabled: api.enabled,
             status: api.status,
             activeTasks: api.activeTasks,
             activeProjects: api.activeProjects

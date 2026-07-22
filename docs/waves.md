@@ -84,7 +84,9 @@ radius crosses storage, auth, or public APIs.
 `owner` and `home` are independent, optional automatic-start filters. `owner`
 names the OS user that should run the Wave. `home` accepts this machine's
 HomeId, hostname, or IP address. Omit either field to leave that dimension
-unrestricted. An explicit `lf start <name>` still starts that Wave here.
+unrestricted. Locally placed Waves are enabled by default. `lf stop <name>`
+disables the Wave in this Home's registry; an explicit `lf start <name>` enables
+and starts it here. Neither command edits the goal.
 
 Pause turn execution without stopping the listener:
 
@@ -212,14 +214,16 @@ lf start                      # start eligible repo Waves on this machine
 lf pause shipper              # keep serving but refuse new turns
 lf resume shipper             # enable queued and future turns
 lf stop shipper               # stop this machine's Wave
+lf work disable task task_... # exclude one Task without stopping its current Run
+lf work enable task task_...  # restore eligibility
 ```
 
 With a name, `lf start` is an explicit instruction: it records this machine as
-the Wave's Home and starts it. Without names, it starts only Waves whose
-optional `owner` and `home` policy matches this process and whose recorded
-placement is already local. New Project or Task Work inherits its parent's
-recorded Home once. Record a different Home only while the Wave has no live
-Run:
+the Wave's Home, enables it in the local registry, and starts it. Without names,
+it starts only enabled Waves whose optional `owner` and `home` policy matches
+this process and whose recorded placement is already local. New Project or Task
+Work inherits its parent's recorded Home once. Record a different Home only
+while the Wave has no live Run:
 
 ```bash
 lf work place wave <wave-id> <home-id>
@@ -254,9 +258,11 @@ sibling Waves.
 chooses no work. Each hosted Wave body is the agent with a goal, memory, and
 conversation.
 
-`lf stop <wave>` suppresses automatic restart until the next explicit
-`lf start <wave>` or `lfd` restart. To keep a Wave off this Home across reboots,
-change its `owner`/`home` policy or recorded placement.
+`lf stop <wave>` records `enabled = false` in this Home's SQLite registry. A new
+`lfd` process reads the same control and leaves the Wave off. `lf start <wave>`
+enables it again. Change `owner`, `home`, or placement to move ownership; use
+`lf work enable|disable` to control otherwise assigned Work without producing a
+repository diff.
 
 `home: localhost`, `home: 127.0.0.1`, and `home: ::1` always match the current
 machine. Loopflow also matches its stable HomeId, hostname and short hostname,

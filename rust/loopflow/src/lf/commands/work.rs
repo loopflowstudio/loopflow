@@ -14,6 +14,7 @@ use crate::store::{open_store, storage_config_from_env, Store};
 struct WorkProjection {
     work: WorkRef,
     basis: crate::durable::Basis,
+    placement: Placement,
     status: WorkStatus,
     run: Option<Run>,
 }
@@ -23,6 +24,8 @@ struct WorkProjection {
 enum WorkReceipt {
     Placed(Placement),
     Relocated(crate::wave::relocate::WaveRelocationReceipt),
+    Enabled(Placement),
+    Disabled(Placement),
     Steer(SteerReceipt),
     Interrupted(InterruptReceipt),
     Abandoned(EpochReceipt),
@@ -77,6 +80,18 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             )
             .await?;
             print_receipt(&WorkReceipt::Relocated(receipt), *json)?;
+        }
+        WorkCommand::Enable { kind, id, json } => {
+            let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
+            let placement = set_local_work_enabled(&store, &work, true).await?;
+            print_receipt(&WorkReceipt::Enabled(placement), *json)?;
+        }
+        WorkCommand::Disable { kind, id, json } => {
+            let work = parse_work(kind, id)?;
+            require_work_repository(&store, &work, repo).await?;
+            let placement = set_local_work_enabled(&store, &work, false).await?;
+            print_receipt(&WorkReceipt::Disabled(placement), *json)?;
         }
         WorkCommand::Steer {
             kind,
@@ -209,10 +224,32 @@ async fn open_shared_store() -> anyhow::Result<Store> {
         .context("open the shared Loopflow store")
 }
 
+async fn set_local_work_enabled(
+    store: &Store,
+    work: &WorkRef,
+    enabled: bool,
+) -> anyhow::Result<Placement> {
+    let placement = store.placement(work).await?;
+    let local = store.local_home().await?;
+    if placement.home_id != local.id {
+        return Err(anyhow!(
+            "{} {} is placed on {}; run this command through that Home",
+            work.kind(),
+            work.id(),
+            placement.home_id
+        ));
+    }
+    store
+        .set_work_enabled(work, enabled)
+        .await
+        .map_err(anyhow::Error::from)
+}
+
 async fn projection(store: &Store, work: &WorkRef) -> anyhow::Result<WorkProjection> {
     Ok(WorkProjection {
         work: work.clone(),
         basis: store.current_epoch(work).await?.current_basis,
+        placement: store.placement(work).await?,
         status: store.work_status(work).await?,
         run: store.current_run(work).await?,
     })
@@ -268,10 +305,12 @@ fn print_projection(projection: &WorkProjection, json: bool) -> anyhow::Result<(
         println!("{}", serde_json::to_string_pretty(projection)?);
     } else {
         println!(
-            "{} {}  {:?}\n  basis: {}:{}\n  run: {}",
+            "{} {}  {:?}\n  enabled: {}\n  home: {}\n  basis: {}:{}\n  run: {}",
             projection.work.kind(),
             projection.work.id(),
             projection.status,
+            projection.placement.enabled,
+            projection.placement.home_id,
             projection.basis.epoch_id,
             projection.basis.revision,
             projection
@@ -301,6 +340,18 @@ fn print_receipt(receipt: &WorkReceipt, json: bool) -> anyhow::Result<()> {
                 relocation.from_name,
                 relocation.to_repo,
                 relocation.to_name
+            ),
+            WorkReceipt::Enabled(placement) => println!(
+                "enabled {} {} on {}",
+                placement.work.kind(),
+                placement.work.id(),
+                placement.home_id
+            ),
+            WorkReceipt::Disabled(placement) => println!(
+                "disabled {} {} on {}",
+                placement.work.kind(),
+                placement.work.id(),
+                placement.home_id
             ),
             WorkReceipt::Steer(receipt) => println!("steered {}", receipt.steer.id),
             WorkReceipt::Interrupted(receipt) => println!("interrupted {}", receipt.run_id),

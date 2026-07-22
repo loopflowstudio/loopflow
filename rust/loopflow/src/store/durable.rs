@@ -86,6 +86,14 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.placement(&work)).await
     }
 
+    pub async fn set_work_enabled(&self, work: &WorkRef, enabled: bool) -> StoreResult<Placement> {
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.set_work_enabled(&work, enabled)
+        })
+        .await
+    }
+
     pub(crate) async fn place_work(
         &self,
         work: &WorkRef,
@@ -1089,6 +1097,7 @@ mod tests {
         let (store, work) = wave_work().await;
         let local = store.placement(&work).await.unwrap();
         assert_eq!(local.home_id, store.local_home().await.unwrap().id);
+        assert!(local.enabled);
 
         let remote = store
             .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
@@ -1116,6 +1125,29 @@ mod tests {
             .unwrap();
         let moved = store.place_work(&work, &remote.id).await.unwrap();
         assert_eq!(moved.home_id, remote.id);
+    }
+
+    #[tokio::test]
+    async fn disabled_work_cannot_reserve_a_run_and_remains_disabled_when_moved() {
+        let (store, work) = wave_work().await;
+        let local = store.local_home().await.unwrap();
+
+        let disabled = store.set_work_enabled(&work, false).await.unwrap();
+        assert!(!disabled.enabled);
+        assert!(matches!(
+            store.reserve_run(&work, RunTrigger::User).await,
+            Err(StoreError::InvalidData(message)) if message.contains("is disabled")
+        ));
+
+        let remote = store
+            .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
+            .await
+            .unwrap();
+        assert!(!store.place_work(&work, &remote.id).await.unwrap().enabled);
+        assert!(!store.place_work(&work, &local.id).await.unwrap().enabled);
+
+        assert!(store.set_work_enabled(&work, true).await.unwrap().enabled);
+        store.reserve_run(&work, RunTrigger::User).await.unwrap();
     }
 
     #[tokio::test]

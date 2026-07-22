@@ -456,13 +456,14 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
     public let activeProjects: Int
     public let live: Bool
     public let paused: Bool
+    public let enabled: Bool
     public let endpoint: String?
     public let createdAt: String?
     public let parentWaveId: String?
     public let home: Home
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, live, paused, endpoint, home
+        case id, name, status, goal, repo, live, paused, enabled, endpoint, home
         case activeTasks = "active_tasks"
         case activeProjects = "active_projects"
         case createdAt = "created_at"
@@ -479,6 +480,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable {
             status: status,
             live: live,
             paused: paused,
+            enabled: enabled,
             activeTasks: activeTasks,
             activeProjects: activeProjects,
             parentWaveId: parentWaveId

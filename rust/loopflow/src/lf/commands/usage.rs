@@ -296,6 +296,7 @@ struct Totals {
     input: u64,
     output: u64,
     cache: u64,
+    cache_write: u64,
 }
 
 impl Totals {
@@ -303,17 +304,27 @@ impl Totals {
         self.input += row.input_tokens;
         self.output += row.output_tokens;
         self.cache += row.cache_read_tokens;
+        self.cache_write += row.cache_write_tokens;
     }
 
     fn total(&self) -> u64 {
         self.input + self.output
     }
 
-    fn cells(&self, grand_total: u64) -> [String; 5] {
+    /// Share of the full prompt served from provider cache. Stored `input` is
+    /// the uncached remainder on every harness (codex is normalized net of
+    /// cache reads at capture), so the denominator is the whole prompt.
+    fn hit_percent(&self) -> String {
+        format_share(self.cache, self.input + self.cache + self.cache_write)
+    }
+
+    fn cells(&self, grand_total: u64) -> [String; 7] {
         [
             format_int(self.input),
             format_int(self.output),
             format_int(self.cache),
+            format_int(self.cache_write),
+            self.hit_percent(),
             format_int(self.total()),
             format_share(self.total(), grand_total),
         ]
@@ -344,6 +355,7 @@ struct UsageRow {
     input_tokens: u64,
     output_tokens: u64,
     cache_read_tokens: u64,
+    cache_write_tokens: u64,
 }
 
 fn aggregate_spend(spend: &[TurnSpendRow]) -> Vec<UsageRow> {
@@ -352,7 +364,8 @@ fn aggregate_spend(spend: &[TurnSpendRow]) -> Vec<UsageRow> {
         let input = turn.input_tokens.unwrap_or(0).max(0) as u64;
         let output = turn.output_tokens.unwrap_or(0).max(0) as u64;
         let cache = turn.cache_read_tokens.unwrap_or(0).max(0) as u64;
-        if input == 0 && output == 0 && cache == 0 {
+        let cache_write = turn.cache_write_tokens.unwrap_or(0).max(0) as u64;
+        if input == 0 && output == 0 && cache == 0 && cache_write == 0 {
             continue;
         }
         let totals = rows
@@ -361,6 +374,7 @@ fn aggregate_spend(spend: &[TurnSpendRow]) -> Vec<UsageRow> {
         totals.input += input;
         totals.output += output;
         totals.cache += cache;
+        totals.cache_write += cache_write;
     }
     rows.into_iter()
         .map(|((repo, provider), totals)| UsageRow {
@@ -369,6 +383,7 @@ fn aggregate_spend(spend: &[TurnSpendRow]) -> Vec<UsageRow> {
             input_tokens: totals.input,
             output_tokens: totals.output,
             cache_read_tokens: totals.cache,
+            cache_write_tokens: totals.cache_write,
         })
         .collect()
 }
@@ -426,7 +441,19 @@ fn print_report(rows: &[UsageRow], days: u32) {
 /// distribution across repos, deliberately not a subscription measure (a repo
 /// can burn through many subscriptions' worth; subscription state lives in
 /// the ACCOUNTS section, always as percent *used*).
-const HEADINGS: [&str; 5] = ["INPUT", "OUTPUT", "CACHE READ", "TOTAL", "% TOKENS"];
+///
+/// `HIT %` is cache reads over the full prompt (input + cache read + cache
+/// write) — the canary for prefix-breaking regressions: a drop means agents
+/// stopped reusing their prompt prefixes.
+const HEADINGS: [&str; 7] = [
+    "INPUT",
+    "OUTPUT",
+    "CACHE READ",
+    "CACHE WRITE",
+    "HIT %",
+    "TOTAL",
+    "% TOKENS",
+];
 
 fn repo_lead(repo: &str, provider: &str) -> String {
     format!("{repo:<REPO_WIDTH$}  {provider:<PROVIDER_WIDTH$}")
@@ -436,18 +463,18 @@ fn provider_lead(provider: &str) -> String {
     format!("{provider:<PROVIDER_WIDTH$}")
 }
 
-/// Both tables are the same five columns behind a label; only the label differs,
+/// Both tables are the same seven columns behind a label; only the label differs,
 /// so one printer serves headers, rows, and totals.
-fn print_row(lead: &str, cells: [String; 5], bold: bool) {
+fn print_row(lead: &str, cells: [String; 7], bold: bool) {
     let colors = Colors::default();
     let (on, off) = if bold {
         (colors.bold, colors.reset)
     } else {
         ("", "")
     };
-    let [input, output, cache, total, share] = cells;
+    let [input, output, cache, cache_write, hit, total, share] = cells;
     println!(
-        "{on}{lead}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {total:>num_w$}  {share:>share_w$}{off}",
+        "{on}{lead}  {input:>num_w$}  {output:>num_w$}  {cache:>num_w$}  {cache_write:>num_w$}  {hit:>share_w$}  {total:>num_w$}  {share:>share_w$}{off}",
         num_w = NUM_WIDTH,
         share_w = SHARE_WIDTH,
     );
@@ -507,9 +534,11 @@ mod tests {
         assert_eq!(turns.len(), 2);
         assert_eq!(turns[0].turn_id, "turn-1");
         assert_eq!(turns[0].invocation_id, "invocation-1");
+        assert_eq!(turns[0].cache_write_tokens, Some(100));
         assert_eq!(turns[1].input_tokens, None);
         assert_eq!(turns[1].output_tokens, Some(0));
         assert_eq!(turns[1].cache_read_tokens, Some(150));
+        assert_eq!(turns[1].cache_write_tokens, None);
         assert_eq!(turns[1].cost_usd, None);
         assert_eq!(
             serde_json::to_value(&turns).expect("serialize turn spend"),
@@ -554,6 +583,7 @@ mod tests {
         invocation: &AgentInvocationRow,
         output: Option<i64>,
         cache_read: Option<i64>,
+        cache_write: Option<i64>,
     ) -> AgentTurnRow {
         AgentTurnRow {
             id: invocation.id.replacen("invocation", "turn", 1),
@@ -578,7 +608,7 @@ mod tests {
             provider_output_tokens: output,
             reasoning_tokens: None,
             cache_read_tokens: cache_read,
-            cache_write_tokens: None,
+            cache_write_tokens: cache_write,
             cost_usd: None,
             context_gather_ms: 0,
             context_render_ms: 0,
@@ -594,13 +624,14 @@ mod tests {
     fn spend_query_keeps_zero_and_cache_only_but_omits_absent_usage() {
         let directory = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).expect("store");
-        for (id, output, cache_read) in [
-            ("absent", None, None),
-            ("zero", Some(0), None),
-            ("cache", None, Some(150)),
+        for (id, output, cache_read, cache_write) in [
+            ("absent", None, None, None),
+            ("zero", Some(0), None, None),
+            ("cache", None, Some(150), None),
+            ("write", None, None, Some(75)),
         ] {
             let invocation = invocation(id);
-            let turn = measured_turn(&invocation, output, cache_read);
+            let turn = measured_turn(&invocation, output, cache_read, cache_write);
             store
                 .insert_trace_capture(&invocation, &turn, &[], &[])
                 .expect("insert capture");
@@ -608,7 +639,7 @@ mod tests {
 
         let rows = store.turn_spend_since(0).expect("turn spend");
 
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         assert!(rows.iter().all(|row| row.turn_id != "turn-absent"));
         let zero = rows
             .iter()
@@ -622,6 +653,11 @@ mod tests {
         assert_eq!(cache.input_tokens, None);
         assert_eq!(cache.output_tokens, None);
         assert_eq!(cache.cache_read_tokens, Some(150));
+        let write = rows
+            .iter()
+            .find(|row| row.turn_id == "turn-write")
+            .expect("cache-write-only report");
+        assert_eq!(write.cache_write_tokens, Some(75));
     }
 
     fn row(repo: &str, provider: &str, input: u64) -> UsageRow {
@@ -631,6 +667,7 @@ mod tests {
             input_tokens: input,
             output_tokens: 1,
             cache_read_tokens: 2,
+            cache_write_tokens: 3,
         }
     }
 
@@ -662,6 +699,26 @@ mod tests {
 
         assert_eq!(claude.input, 150);
         assert_eq!(grand.input, 157);
+    }
+
+    /// Hit % is cache reads over the whole prompt: uncached input + cache
+    /// reads + cache writes. A fully cold turn is 0%, a fully warm one
+    /// approaches 100%.
+    #[test]
+    fn hit_percent_is_cache_reads_over_full_prompt() {
+        let mut totals = Totals::default();
+        totals.add(&UsageRow {
+            repo: "/src/loopflow".to_string(),
+            provider: "claude".to_string(),
+            input_tokens: 100,
+            output_tokens: 500,
+            cache_read_tokens: 800,
+            cache_write_tokens: 100,
+        });
+
+        // 800 / (100 + 800 + 100) = 80%; output never enters the ratio.
+        assert_eq!(totals.hit_percent(), "80%");
+        assert_eq!(Totals::default().hit_percent(), "-");
     }
 
     #[test]
@@ -709,6 +766,7 @@ mod tests {
             input_tokens: Some(input),
             output_tokens: Some(0),
             cache_read_tokens: Some(0),
+            cache_write_tokens: None,
             cost_usd: Some(input as f64 / 100.0),
         }
     }

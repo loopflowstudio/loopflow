@@ -677,6 +677,7 @@ public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
     public let inputTokens: Int?
     public let outputTokens: Int?
     public let cacheReadTokens: Int?
+    public let cacheWriteTokens: Int?
     public let costUsd: Double?
 
     /// `provider:model` — the harness and the model it drove.
@@ -698,6 +699,7 @@ public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
         case cacheReadTokens = "cache_read_tokens"
+        case cacheWriteTokens = "cache_write_tokens"
         case costUsd = "cost_usd"
     }
 }

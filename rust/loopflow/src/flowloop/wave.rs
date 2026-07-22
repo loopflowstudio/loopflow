@@ -174,17 +174,21 @@ pub fn path_for_children() -> OsString {
     std::env::join_paths(paths).unwrap_or(inherited)
 }
 
-/// One pass's seed: the rendered goal seed, the orchestration discipline,
-/// the shared loopflow operating document (pass seeds bypass context
-/// assembly, so the `<lf:loopflow>` section is appended here), and the
-/// wake that opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN
-/// repo (reads are free; writes go through the listener's doors).
+/// One pass's seed: the shared loopflow operating document (pass seeds
+/// bypass context assembly, so the `<lf:loopflow>` section is emitted here),
+/// the orchestration discipline, the rendered goal seed, and the wake that
+/// opened the pass. Reads GOAL.md and MEMORY.md from the ORIGIN repo (reads
+/// are free; writes go through the listener's doors).
+///
+/// Order is stable → volatile so providers can prefix-cache fresh sessions:
+/// the doctrine and discipline are byte-identical every pass, the goal seed
+/// ends with rewritten-every-pass memory, and the wake is unique per pass.
 fn wave_pass_seed(origin_repo: &Path, wave: &str, wake: &str) -> String {
     let seed = build_goal_seed(origin_repo, wave);
     format!(
-        "{seed}\n\n{}\n\n{}\n\n<wake>\n{wake}\n</wake>",
+        "{}\n\n{}\n\n{seed}\n\n<wake>\n{wake}\n</wake>",
+        crate::engine::prompt::loopflow_section(),
         orchestration_discipline(wave),
-        crate::engine::prompt::loopflow_section()
     )
 }
 
@@ -2049,6 +2053,13 @@ mod tests {
         assert!(seed.contains("Ship the thing."));
         assert!(seed.contains("<lf:loopflow>"));
         assert!(seed.contains("<wake>\nhello from chat\n</wake>"));
+        // Stable → volatile: the byte-identical doctrine leads so fresh
+        // sessions prefix-cache it; per-pass memory and wake trail it.
+        let doctrine_at = seed.find("<lf:loopflow>").expect("doctrine");
+        let goal_at = seed.find("Ship the thing.").expect("goal");
+        let wake_at = seed.find("<wake>").expect("wake");
+        assert!(doctrine_at < goal_at, "doctrine precedes the goal seed");
+        assert!(goal_at < wake_at, "wake closes the seed");
         assert_eq!(
             LoopConfig::default().heartbeat_idle,
             Duration::from_secs(4 * 60 * 60)

@@ -1535,13 +1535,14 @@ impl SqliteStore {
         let mut stmt = conn.prepare(
             "SELECT t.id, l.id, l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill,
                     l.provider, l.model, COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
-                    t.provider_output_tokens, t.cache_read_tokens, t.cost_usd
+                    t.provider_output_tokens, t.cache_read_tokens, t.cache_write_tokens, t.cost_usd
              FROM agent_turns t
              JOIN agent_invocations l ON l.id = t.invocation_id
              WHERE COALESCE(t.ended_at, t.started_at) >= ?1
                AND (t.provider_input_tokens IS NOT NULL
                     OR t.provider_output_tokens IS NOT NULL
                     OR t.cache_read_tokens IS NOT NULL
+                    OR t.cache_write_tokens IS NOT NULL
                     OR t.cost_usd IS NOT NULL)
              ORDER BY COALESCE(t.ended_at, t.started_at), l.process_id, t.ordinal",
         )?;
@@ -1561,7 +1562,8 @@ impl SqliteStore {
                 input_tokens: row.get(11)?,
                 output_tokens: row.get(12)?,
                 cache_read_tokens: row.get(13)?,
-                cost_usd: row.get(14)?,
+                cache_write_tokens: row.get(14)?,
+                cost_usd: row.get(15)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()

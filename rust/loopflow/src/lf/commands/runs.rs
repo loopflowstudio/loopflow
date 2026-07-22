@@ -1832,6 +1832,7 @@ mod tests {
             input_tokens: Some(input),
             output_tokens: Some(0),
             cache_read_tokens: None,
+            cache_write_tokens: None,
             cost_usd: Some(cost),
         }
     }

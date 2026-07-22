@@ -131,12 +131,21 @@ impl OpenCodeHarness {
             return Err(err);
         }
 
-        let provider_session_id = match create_provider_session(&self.client, &base_url).await {
-            Ok(provider_session_id) => provider_session_id,
-            Err(err) => {
-                shutdown_child(&mut child).await;
-                return Err(err);
-            }
+        // Resume the stored session when this serve instance still has it —
+        // a resumed session keeps its conversation history, which providers
+        // serve from prompt cache. Any probe failure falls back to fresh.
+        let resumed =
+            resume_provider_session(&self.client, &base_url, self.provider_session_id.as_deref())
+                .await;
+        let provider_session_id = match resumed {
+            Some(provider_session_id) => provider_session_id,
+            None => match create_provider_session(&self.client, &base_url).await {
+                Ok(provider_session_id) => provider_session_id,
+                Err(err) => {
+                    shutdown_child(&mut child).await;
+                    return Err(err);
+                }
+            },
         };
 
         let event_tx = self.events.clone();
@@ -466,13 +475,14 @@ impl Harness for OpenCodeHarness {
         if let (Some(base_url), Some(provider_session_id)) =
             (&self.server_base_url, &self.provider_session_id)
         {
+            // Abort any in-flight turn but leave the session in opencode's
+            // storage — the persisted id lets the next launch resume the
+            // conversation (and its provider-side prompt cache) instead of
+            // starting cold, matching the claude/codex harnesses.
             let abort_url = format!("{base_url}/session/{provider_session_id}/abort");
             let _ =
                 send_request_with_retry(&self.client, Method::POST, &abort_url, Some(json!({})))
                     .await;
-
-            let delete_url = format!("{base_url}/session/{provider_session_id}");
-            let _ = send_request_with_retry(&self.client, Method::DELETE, &delete_url, None).await;
         }
 
         let opencode_pid = self.child.as_ref().and_then(|child| child.id());
@@ -507,7 +517,8 @@ impl Harness for OpenCodeHarness {
         }
 
         self.turn_in_progress.store(false, Ordering::SeqCst);
-        self.provider_session_id = None;
+        // Keep `provider_session_id`: the runner persists it after stop so the
+        // next launch can resume the session (see `resume_provider_session`).
         self.server_base_url = None;
 
         Ok(())
@@ -530,6 +541,25 @@ impl Harness for OpenCodeHarness {
 async fn shutdown_child(child: &mut Child) {
     let _ = child.start_kill();
     let _ = child.wait().await;
+}
+
+/// Probe a previously stored session id against this serve instance. opencode
+/// persists sessions in its project storage, so a new serve can pick up a
+/// session an earlier one created. `None` (missing id, dead session, or any
+/// transport error) means "create a fresh session instead" — resume is an
+/// optimization, never a failure.
+async fn resume_provider_session(
+    client: &reqwest::Client,
+    base_url: &str,
+    stored: Option<&str>,
+) -> Option<String> {
+    let session_id = stored?;
+    let session_url = format!("{base_url}/session/{session_id}");
+    let response = client.get(&session_url).send().await.ok()?;
+    response
+        .status()
+        .is_success()
+        .then(|| session_id.to_string())
 }
 
 async fn create_provider_session(client: &reqwest::Client, base_url: &str) -> Result<String> {
@@ -1036,6 +1066,46 @@ mod tests {
     use crate::chat::types::ConversationItem;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    /// A stored session id is reused when the serve instance still has it and
+    /// dropped when it's gone — resume is an optimization, never a failure.
+    #[tokio::test]
+    async fn resume_probe_reuses_live_sessions_and_drops_dead_ones() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{port}");
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = vec![0u8; 4096];
+                let n = socket.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let response = if request.starts_with("GET /session/live") {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+                } else {
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
+                };
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let client = reqwest::Client::new();
+        assert_eq!(
+            resume_provider_session(&client, &base_url, Some("live")).await,
+            Some("live".to_string())
+        );
+        assert_eq!(
+            resume_provider_session(&client, &base_url, Some("gone")).await,
+            None
+        );
+        assert_eq!(
+            resume_provider_session(&client, &base_url, None).await,
+            None
+        );
+    }
 
     /// Where the fake SSE stream dies relative to the turn lifecycle.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

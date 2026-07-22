@@ -37,9 +37,11 @@ struct DTOFixtureTests {
         #expect(turns[0].execId == "exec-1")
         #expect(turns[0].totalTokens == 1200)
         #expect(turns[0].agent == "claude:opus")
+        #expect(turns[0].cacheWriteTokens == 100)
         #expect(turns[1].inputTokens == nil)
         #expect(turns[1].outputTokens == 0)
         #expect(turns[1].cacheReadTokens == 150)
+        #expect(turns[1].cacheWriteTokens == nil)
         #expect(turns[1].costUsd == nil)
 
         let encoded = try JSONEncoder().encode(turns)

@@ -71,6 +71,7 @@ pub struct TurnSpendRow {
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub cache_read_tokens: Option<i64>,
+    pub cache_write_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
 }
 

@@ -34,6 +34,13 @@ Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Steers L
 - **Linear Project names are identity-bearing under the native hierarchy.** The CLI slug derives deterministically from the Project name, and the slug is the cache filename (`projects/<slug>.md`) and the `--project` argument to task commands. Renaming a Linear Project changes its slug, so it moves the cache file and changes every task command's input — a rename is a migration, not a cosmetic edit.
 - **Environment configures a process; it must never decide what the process is.** An earlier runtime chose between booting a listener and being a resident from inherited environment, so a promoted wave could attach to its parent's listener with the parent's token. The current `lf wave` surface keeps that role explicit.
 - **Current PM truth and durable Work history have different lifetimes** (learned 2026-07-21). A terminal Project omitted from the current PM snapshot can still own non-terminal historical Task Work. Wave reads must render the current PM hierarchy and classify the stranded Project/Task separately as Wave-owned degraded evidence; they must not fail the whole join, delete history, or synthesize a PM Project. Recovery must use the stable Work id (`lf work abandon task <work-id>`) because higher-level Task commands may inspect a historical worktree that no longer exists.
+- **Terminal Task state and current PM routing are authorization boundaries**
+  (learned 2026-07-21). An open Linear issue, inherited direction, or sibling
+  completion is evidence, never permission to reopen `Done` or `Abandoned`
+  Work. Recovery from abandonment requires explicit User authority. When
+  Linear moves an issue, historical Task Runs retain their evidence but lose
+  automated PR and completion authority; fail closed before side effects and
+  preserve the full Work, Run, Steer, and PR history for remediation.
 
 ## Model (design settled)
 

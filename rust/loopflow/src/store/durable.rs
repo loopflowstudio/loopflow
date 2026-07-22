@@ -115,6 +115,28 @@ impl Store {
         .await
     }
 
+    /// Reserve an immediate child only if the caller's selected Turn Basis is current.
+    pub(crate) async fn reserve_child_run(
+        &self,
+        caller: &RunLease,
+        work: &WorkRef,
+        trigger: RunTrigger,
+    ) -> StoreResult<(Run, RunLease)> {
+        let _promotion_lock = crate::promotion_lock::acquire_shared()
+            .await
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "acquire shared promotion lock before child Run reservation: {error}"
+                ))
+            })?;
+        let caller = caller.clone();
+        let work = work.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.reserve_child_run(&caller, &work, &trigger)
+        })
+        .await
+    }
+
     pub(crate) async fn reserve_recovery_run(
         &self,
         lease: &RunLease,

@@ -1,7 +1,7 @@
 //! Durable Project and Task compatibility rows and their observation outbox.
 
 use crate::child::{ChildBodyHandoffRequest, ObservationRecipient};
-use crate::durable::{Author, Basis, RunLease};
+use crate::durable::{Author, Basis, Run, RunLease};
 use crate::id::WaveId;
 use crate::project::{ObservationOutboxRow, Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::task::{
@@ -10,7 +10,7 @@ use crate::task::{
 };
 use time::OffsetDateTime;
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_sqlite, Store, StoreError, StoreResult};
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
@@ -35,34 +35,49 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
     }
 
-    pub async fn create_task_with_steer(
+    pub async fn create_task_run(
         &self,
+        context: &crate::durable::ControlCtx<'_>,
         task: &Task,
         pr: &TaskPr,
-        author: Author,
         text: &str,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<(Run, RunLease)> {
+        let _promotion_lock = crate::promotion_lock::acquire_shared()
+            .await
+            .map_err(|error| {
+                StoreError::InvalidData(format!(
+                    "acquire shared promotion lock before Task Run reservation: {error}"
+                ))
+            })?;
+        let caller = match context {
+            crate::durable::ControlCtx::User(_) => None,
+            crate::durable::ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
         let task = task.clone();
         let pr = pr.clone();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_with_steer(&task, &pr, &author, &text)
+            store.insert_task_run(&task, &pr, caller.as_ref(), &text)
         })
         .await
     }
 
     pub async fn reopen_task(
         &self,
+        context: &crate::durable::ControlCtx<'_>,
         task: &Task,
         pr: Option<&TaskPr>,
-        author: Author,
         text: &str,
     ) -> StoreResult<()> {
+        let caller = match context {
+            crate::durable::ControlCtx::User(_) => None,
+            crate::durable::ControlCtx::Run(lease) => Some((*lease).clone()),
+        };
         let task = task.clone();
         let pr = pr.cloned();
         let text = text.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.reopen_task(&task, pr.as_ref(), &author, &text)
+            store.reopen_task(&task, pr.as_ref(), caller.as_ref(), &text)
         })
         .await
     }
@@ -70,6 +85,21 @@ impl Store {
     pub async fn update_task(&self, task: &Task) -> StoreResult<()> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
+    }
+
+    pub(crate) async fn validate_task_run_route(
+        &self,
+        task: &Task,
+        lease: &RunLease,
+        current_external_project_id: &str,
+    ) -> StoreResult<()> {
+        let task = task.clone();
+        let lease = lease.clone();
+        let current_external_project_id = current_external_project_id.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.validate_task_run_route(&task, &lease, &current_external_project_id)
+        })
+        .await
     }
 
     pub async fn rebind_task_issue_identifier(

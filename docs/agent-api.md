@@ -95,8 +95,15 @@ later successful boundary's Basis is the proof that the direction was applied.
 
 Work survives its provider process. `lf task resume INF-123 --model codex`
 selects another provider without losing durable direction, the worktree, or
-the PR chain; `lf task recover` restarts abandoned Task pursuit on the same
-worktree.
+the PR chain. `lf task run` never reopens terminal Work: a person can use
+`lf task recover` to restart an abandoned Task on the same worktree, while a
+completed Task requires a new Linear task.
+
+Automated Task commit, PR, and completion commands also re-check current PM
+ownership. If Linear moved the issue to another Project, the historical Task
+Run fails closed before a commit, push, publication, merge request, rotation,
+or completion; a person retains explicit authority to inspect and remediate the
+preserved Work.
 
 `lf project` carries the same control verbs one level up: `steer`, `interrupt`,
 `wait`, `resume`, and `attach`.

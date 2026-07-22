@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -14,14 +15,14 @@ use crate::engine::config::{
     load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig,
 };
 use crate::engine::git::{
-    acquire_worktree_lease, delete_local_branch, get_default_branch, sync_main, worktree_remove,
-    worktree_remove_owned, WorktreeLease,
+    acquire_worktree_lease, delete_local_branch, fetch, get_default_branch, sync_main,
+    worktree_remove, worktree_remove_owned, WorktreeLease,
 };
 use crate::engine::naming::{git_user, sanitize_for_branch};
 use crate::engine::worktrees::{create_named_worktree, main_repo_root, worktree_path};
 use crate::ops::commit::{commit_workflow, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::land::{land, LandOptions};
+use crate::ops::land::{finish_land_after_rebase, LandOptions};
 use crate::ops::pr::PrCopy;
 use crate::ops::progress::Progress;
 use crate::ops::util::command_exists;
@@ -42,6 +43,42 @@ const RELEASE_NOTES_MAX_BYTES: usize = 60 * 1024;
 const FALLBACK_NOTES_MAX_COMMITS: usize = 50;
 const FALLBACK_NOTES_MAX_PRS: usize = 50;
 const RELEASE_NOTES_STATUS_PREFIX: &str = "<!-- loopflow:release-notes=";
+const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 5] = [
+    crate::durable::RUN_CONTEXT_ENV,
+    "LF_RUN_ID",
+    crate::durable::RUN_LEASE_ENV,
+    crate::durable::AGENT_INVOCATION_ENV,
+    crate::engine::wave_context::WAVE_ID_ENV,
+];
+
+struct ReleaseWorktreeContext {
+    previous: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl ReleaseWorktreeContext {
+    fn enter() -> Self {
+        let previous = RELEASE_WORKTREE_CONTEXT_ENV
+            .iter()
+            .map(|name| {
+                let value = std::env::var_os(name);
+                std::env::remove_var(name);
+                (*name, value)
+            })
+            .collect();
+        Self { previous }
+    }
+}
+
+impl Drop for ReleaseWorktreeContext {
+    fn drop(&mut self) {
+        for (name, value) in &self.previous {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}
 
 /// A merged PR with enough context for release notes.
 #[derive(Debug, Clone, Serialize)]
@@ -117,11 +154,6 @@ struct GhRunListEntry {
 }
 
 #[derive(Debug, Deserialize)]
-struct GhPrSummary {
-    number: u64,
-}
-
-#[derive(Debug, Deserialize)]
 struct GhPrMergeCommit {
     oid: String,
 }
@@ -129,6 +161,8 @@ struct GhPrMergeCommit {
 #[derive(Debug, Deserialize)]
 struct GhPrView {
     state: String,
+    #[serde(rename = "mergeStateStatus")]
+    merge_state_status: String,
     #[serde(default, rename = "mergeCommit")]
     merge_commit: Option<GhPrMergeCommit>,
     #[serde(default)]
@@ -143,6 +177,8 @@ struct GhReleasePr {
     merge_commit: Option<GhPrMergeCommit>,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default, rename = "headRefOid")]
+    head_ref_oid: Option<String>,
 }
 
 impl From<GhMergedPr> for MergedPr {
@@ -652,8 +688,25 @@ pub fn release_run(
                 ))
             })?,
             "OPEN" => {
+                let head_sha = pr.head_ref_oid.as_deref().ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "open release PR #{} has no observable head commit",
+                        pr.number
+                    ))
+                })?;
                 progress.status(&format!("Resuming release PR #{}...", pr.number));
-                wait_for_pr_merge(&main_repo, pr.number, progress)?
+                finish_release_pr(
+                    &main_repo,
+                    &wt_name,
+                    &branch,
+                    PreparedRelease {
+                        pr_number: pr.number,
+                        head_sha: head_sha.to_string(),
+                    },
+                    &target,
+                    &version,
+                    progress,
+                )?
             }
             _ => {
                 let url = pr.url.unwrap_or_else(|| format!("PR #{}", pr.number));
@@ -682,7 +735,9 @@ pub fn release_run(
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
-        wait_for_pr_merge(&main_repo, prepared.pr_number, progress)?
+        finish_release_pr(
+            &main_repo, &wt_name, &branch, prepared, &target, &version, progress,
+        )?
     };
 
     progress.status(&format!("Tagging {}...", target_tag(&target, &version)));
@@ -843,6 +898,7 @@ fn expand_publisher_command(repo: &Path, publisher: &[String]) -> Vec<String> {
 #[derive(Debug)]
 struct PreparedRelease {
     pr_number: u64,
+    head_sha: String,
 }
 
 fn prepare_release_in_worktree(
@@ -854,6 +910,9 @@ fn prepare_release_in_worktree(
     target: &ReleaseTarget,
     progress: &impl Progress,
 ) -> OpsResult<PreparedRelease> {
+    // Release preparation owns its branch independently of whichever Work
+    // launched the controller. Provider/account authority remains available.
+    let _context = ReleaseWorktreeContext::enter();
     progress.status(&format!(
         "Bumping manifests for {}...",
         target_tag(target, version)
@@ -893,30 +952,111 @@ fn prepare_release_in_worktree(
         progress,
     )?;
 
-    let pr = current_pr_summary(wt_path)?;
-    let pr_copy = release_pr_copy(wt_path, target, version)?;
-
     progress.status("Enqueuing release PR for merge...");
-    land(
-        wt_path,
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: false,
-            complete: false,
-            next_slug: None,
-            worktree: None,
-            commit_message: None,
-            pr_title: Some(pr_copy.title),
-            pr_body: Some(pr_copy.body),
-            agent: None,
-        },
-        progress,
-    )?;
+    let pr_copy = release_pr_copy(wt_path, target, version)?;
+    let options = LandOptions {
+        strict: true,
+        local: false,
+        create_pr: false,
+        complete: false,
+        next_slug: None,
+        worktree: None,
+        commit_message: None,
+        pr_title: Some(pr_copy.title),
+        pr_body: Some(pr_copy.body),
+        agent: None,
+    };
+    let pr = finish_land_after_rebase(wt_path, &options, progress)?.ok_or_else(|| {
+        OpsError::Message("release land completed without a pull request".to_string())
+    })?;
+    let head_sha = pr.head_sha.ok_or_else(|| {
+        OpsError::Message(format!(
+            "release pull request #{} has no observable head commit",
+            pr.number
+        ))
+    })?;
 
     Ok(PreparedRelease {
         pr_number: pr.number,
+        head_sha,
     })
+}
+
+fn finish_release_pr(
+    main_repo: &Path,
+    worktree_name: &str,
+    release_branch: &str,
+    mut prepared: PreparedRelease,
+    target: &ReleaseTarget,
+    version: &str,
+    progress: &impl Progress,
+) -> OpsResult<String> {
+    loop {
+        match wait_for_pr_merge(main_repo, prepared.pr_number, &prepared.head_sha, progress)? {
+            ReleasePrWait::Merged(commit) => return Ok(commit),
+            ReleasePrWait::NeedsIntegration(state) => {
+                progress.status(&format!(
+                    "Release PR #{} is {state}; rebuilding on current main...",
+                    prepared.pr_number
+                ));
+                fetch_release_branch(main_repo, release_branch, &prepared.head_sha)?;
+                let wt = create_named_worktree(main_repo, worktree_name, None, true)?;
+                let refreshed = rebuild_release_pr(
+                    main_repo,
+                    &wt.path,
+                    &prepared.head_sha,
+                    target,
+                    version,
+                    progress,
+                );
+                cleanup_release_worktree(main_repo, &wt.path, &wt.branch, None, progress);
+                prepared = refreshed?;
+            }
+        }
+    }
+}
+
+fn fetch_release_branch(repo: &Path, branch: &str, expected_head: &str) -> OpsResult<()> {
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let refspec = format!("+refs/heads/{branch}:{remote_ref}");
+    fetch(repo, "origin", &refspec)?;
+    let remote_head = crate::engine::git::rev_parse(repo, &remote_ref)?;
+    if remote_head != expected_head {
+        return Err(OpsError::Message(format!(
+            "release PR head changed while recovery was fetching it: expected {expected_head}, found {remote_head}"
+        )));
+    }
+    Ok(())
+}
+
+fn rebuild_release_pr(
+    main_repo: &Path,
+    worktree: &Path,
+    expected_head: &str,
+    target: &ReleaseTarget,
+    version: &str,
+    progress: &impl Progress,
+) -> OpsResult<PreparedRelease> {
+    let current_head = crate::engine::git::rev_parse(worktree, "HEAD")?;
+    if current_head != expected_head {
+        return Err(OpsError::Message(format!(
+            "release PR head changed while recovery was materializing it: expected {expected_head}, found {current_head}"
+        )));
+    }
+
+    let main_branch = get_default_branch(main_repo)?;
+    let main_ref = format!("origin/{main_branch}");
+    run_stdout(worktree, "git", &["reset", "--hard", &main_ref])?;
+    let changes = collect_release_changes(main_repo, target)?;
+    prepare_release_in_worktree(
+        worktree,
+        version,
+        changes.previous_tag.as_deref(),
+        &changes.commits,
+        &changes.merged_prs,
+        target,
+        progress,
+    )
 }
 
 #[derive(Debug, Serialize)]
@@ -1549,12 +1689,6 @@ fn release_pr_copy(repo: &Path, target: &ReleaseTarget, version: &str) -> OpsRes
     })
 }
 
-fn current_pr_summary(repo: &Path) -> OpsResult<GhPrSummary> {
-    let output = run_stdout(repo, "gh", &["pr", "view", "--json", "number"])?;
-    serde_json::from_str(&output)
-        .map_err(|err| OpsError::Parse(format!("failed to parse PR summary: {err}")))
-}
-
 fn release_branch_name(repo: &Path, worktree_name: &str) -> OpsResult<String> {
     let author = git_user(repo)?;
     Ok(format!("{author}/{}", sanitize_for_branch(worktree_name)))
@@ -1572,7 +1706,7 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
             "--state",
             "all",
             "--json",
-            "number,state,mergeCommit,url",
+            "number,state,mergeCommit,url,headRefOid",
             "--limit",
             "1",
         ],
@@ -1582,7 +1716,17 @@ fn find_release_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhReleasePr>> 
     Ok(prs.pop())
 }
 
-fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> OpsResult<String> {
+enum ReleasePrWait {
+    Merged(String),
+    NeedsIntegration(String),
+}
+
+fn wait_for_pr_merge(
+    repo: &Path,
+    pr_number: u64,
+    head_sha: &str,
+    progress: &impl Progress,
+) -> OpsResult<ReleasePrWait> {
     let started = Instant::now();
     let timeout = Duration::from_secs(60 * 60);
     let poll = Duration::from_secs(10);
@@ -1598,7 +1742,7 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
                 "view",
                 &pr_number_arg,
                 "--json",
-                "state,mergeCommit,url",
+                "state,mergeStateStatus,mergeCommit,url",
             ],
         )?;
         let view: GhPrView = serde_json::from_str(&output)
@@ -1611,7 +1755,7 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
                         "PR #{pr_number} is merged but merge commit is unavailable"
                     ))
                 })?;
-                return Ok(commit.oid);
+                return Ok(ReleasePrWait::Merged(commit.oid));
             }
             "CLOSED" => {
                 let url = view.url.unwrap_or_else(|| format!("PR #{pr_number}"));
@@ -1622,14 +1766,30 @@ fn wait_for_pr_merge(repo: &Path, pr_number: u64, progress: &impl Progress) -> O
             _ => {}
         }
 
+        if matches!(view.merge_state_status.as_str(), "BEHIND" | "DIRTY") {
+            return Ok(ReleasePrWait::NeedsIntegration(
+                view.merge_state_status.to_ascii_lowercase(),
+            ));
+        }
+
         if started.elapsed() >= timeout {
             return Err(OpsError::Message(format!(
                 "timed out waiting for PR #{pr_number} to merge"
             )));
         }
 
+        if !crate::ops::pr::auto_merge_enabled(repo, pr_number)? {
+            progress.status(&format!(
+                "Re-arming release PR #{pr_number} for exact-head auto-merge..."
+            ));
+            crate::ops::pr::enable_auto_merge(repo, pr_number, None, None, head_sha)?;
+        }
+
         if attempt.is_multiple_of(6) {
-            progress.status(&format!("PR #{pr_number} still in merge queue..."));
+            progress.status(&format!(
+                "PR #{pr_number} is open ({}) and awaiting GitHub auto-merge...",
+                view.merge_state_status.to_ascii_lowercase()
+            ));
         }
         attempt += 1;
         thread::sleep(poll);

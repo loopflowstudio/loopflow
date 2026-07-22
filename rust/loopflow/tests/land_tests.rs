@@ -915,7 +915,7 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
         "a failed Auto handoff must not leave GitHub as a false owner"
     );
     let log = fs::read_to_string(log_path).expect("read gh log");
-    assert!(log.contains("pr merge --squash --auto --match-head-commit"));
+    assert!(log.contains("pr merge 912 --squash --auto --match-head-commit"));
 }
 
 #[test]
@@ -1026,13 +1026,13 @@ fn latest_land_disposition_wins_before_merge() {
     assert_eq!(merge.next_slug.as_deref(), Some("follow-up-proof"));
     let log = fs::read_to_string(&log_path).expect("read gh log");
     assert!(log.contains(&format!(
-        "pr merge --squash --auto --match-head-commit {revised_head}"
+        "pr merge 912 --squash --auto --match-head-commit {revised_head}"
     )));
     let first_disable = log
         .find("pr merge 912 --disable-auto")
         .expect("pre-existing Auto is replaced");
     let first_arm = log
-        .find("pr merge --squash --auto --match-head-commit")
+        .find("pr merge 912 --squash --auto --match-head-commit")
         .expect("land arms the exact prepared head");
     assert!(
         first_disable < first_arm,
@@ -1211,7 +1211,7 @@ fn non_task_land_leaves_the_merge_queue_before_pushing_a_new_head() {
         .expect("queued Auto is revoked");
     let push = log.find("git-push").expect("prepared head is pushed");
     let arm = log
-        .rfind("pr merge --squash --auto --match-head-commit")
+        .rfind("pr merge 912 --squash --auto --match-head-commit")
         .expect("prepared head is re-armed");
     assert!(
         disable < push && push < arm,

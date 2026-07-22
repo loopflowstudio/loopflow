@@ -507,6 +507,49 @@ pub(crate) fn disable_auto_merge(repo: &Path, number: u32) -> OpsResult<()> {
     })
 }
 
+pub(crate) fn enable_auto_merge(
+    repo: &Path,
+    number: u64,
+    title: Option<&str>,
+    body: Option<&str>,
+    head_sha: &str,
+) -> OpsResult<()> {
+    if auto_merge_enabled(repo, number)? {
+        let number = u32::try_from(number).map_err(|_| {
+            OpsError::Message(format!("pull request #{number} exceeds supported range"))
+        })?;
+        // A pre-existing remote arm carries no durable Loopflow head binding.
+        // Replace it so every accepted Auto request crosses our exact-head
+        // command boundary, even when GitHub already reports auto-merge.
+        disable_auto_merge(repo, number)?;
+    }
+
+    let number_arg = number.to_string();
+    let mut command = Command::new("gh");
+    command
+        .arg("pr")
+        .arg("merge")
+        .arg(&number_arg)
+        .arg("--squash")
+        .arg("--auto")
+        .arg("--match-head-commit")
+        .arg(head_sha);
+    if let Some(title) = title {
+        command.arg("--subject").arg(title);
+    }
+    if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+        command.arg("--body").arg(body);
+    }
+    let output = command.current_dir(repo).output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(OpsError::CommandFailed {
+        command: format!("gh pr merge {number} --squash --auto --match-head-commit {head_sha}"),
+        stderr: stderr_from_output(&output),
+    })
+}
+
 /// The outcome of a bounded, single-PR remote observation. GitHub is a
 /// reconciliation input, never the Task's store of record: a transport, quota,
 /// or network failure must leave the cached Task/PR row standing rather than

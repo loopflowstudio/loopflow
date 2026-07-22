@@ -25,11 +25,10 @@ step "placed Home"
 local_home="$(lf home id)"
 placed_home="$(lf status "$wave" --json | jq -er '.wave.home.id')"
 if [ "$local_home" != "$placed_home" ]; then
-  printf 'Wave %s is placed on %s, not local Home %s\n' \
-    "$wave" "$placed_home" "$local_home" >&2
+  printf 'Wave %s is not placed on this Home\n' "$wave" >&2
   exit 1
 fi
-printf '%s\n' "$local_home"
+printf 'Wave %s is placed on this Home\n' "$wave"
 
 lf_home="${LF_CONTROL_HOME:-${LF_HOME:-$HOME/.lf}}"
 lf_db_path="${LF_CONTROL_DB_PATH:-${LF_DB_PATH:-$lf_home/loopflow.db}}"
@@ -45,7 +44,8 @@ minimal_env=(
 )
 
 step "installed binary + declared jobs"
-"${minimal_env[@]}" lf cron preflight --wave "$wave"
+"${minimal_env[@]}" lf cron preflight --wave "$wave" >/dev/null
+printf 'installed cron preflight passed for Wave %s\n' "$wave"
 
 step "unattended tool path"
 "${minimal_env[@]}" sh -c '
@@ -103,11 +103,11 @@ if sorted(actual) != sorted(expected):
     raise SystemExit(f"cron drift: GOAL.md={sorted(expected)!r} installed={sorted(actual)!r}")
 for entry in installed:
     if entry["wave"] != wave:
-        raise SystemExit(f"wrong Wave in installed cron: {entry!r}")
+        raise SystemExit(f"wrong Wave in installed cron: {entry['flow']}")
     if not entry["loaded"]:
         raise SystemExit(f"cron is not loaded: {entry['flow']}")
     if entry["home_id"] != os.environ["EXPECTED_HOME_ID"]:
-        raise SystemExit(f"wrong Home in installed cron: {entry!r}")
+        raise SystemExit(f"wrong Home in installed cron: {entry['flow']}")
 print(f"{len(installed)}/{len(expected)} jobs loaded and exact")
 PY
 
@@ -131,4 +131,4 @@ if [ "$result" -ne 0 ]; then
   printf '\nbootstrap installed the jobs, but a configured-path run is red; inspect the receipt and log above\n' >&2
   exit "$result"
 fi
-printf '\nbootstrap complete: %s owns Wave %s cron receipts\n' "$local_home" "$wave"
+printf '\nbootstrap complete: this Home owns Wave %s cron receipts\n' "$wave"

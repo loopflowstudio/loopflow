@@ -267,6 +267,10 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
     assert "loopflow-release-publisher" in bootstrap
+    assert "not local Home %s" not in bootstrap
+    assert "printf '%s\\n' \"$local_home\"" not in bootstrap
+    assert "bootstrap complete: %s owns" not in bootstrap
+    assert "wrong Home in installed cron: {entry!r}" not in bootstrap
     assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
         "scripts/publish_release.py check"
     )

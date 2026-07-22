@@ -489,7 +489,7 @@ fn finalize_remote(
                 )
             })?;
             progress.status("Enabling auto-merge...");
-            enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
+            crate::ops::pr::enable_auto_merge(repo_root, number, pr_title, pr_body, head_sha)?;
         }
         Finalize::UserMerge => {
             progress.status("Assigning PR for you to merge...");
@@ -641,45 +641,6 @@ fn update_pr_message(repo: &Path, title: &str, body: &str) -> OpsResult<()> {
 pub fn mark_ready(repo: &Path) -> OpsResult<()> {
     let mut cmd = Command::new("gh");
     cmd.arg("pr").arg("ready").current_dir(repo);
-    if let Err(err) = run_command(&mut cmd) {
-        return Err(OpsError::CommandFailed {
-            command: err.command_line(),
-            stderr: err.stderr,
-        });
-    }
-    Ok(())
-}
-
-fn enable_auto_merge(
-    repo: &Path,
-    number: u64,
-    title: Option<&str>,
-    body: Option<&str>,
-    head_sha: &str,
-) -> OpsResult<()> {
-    if crate::ops::pr::auto_merge_enabled(repo, number)? {
-        let number = u32::try_from(number).map_err(|_| {
-            OpsError::Message(format!("pull request #{number} exceeds supported range"))
-        })?;
-        // A pre-existing remote arm carries no durable Loopflow head binding.
-        // Replace it so every accepted Auto request crosses our exact-head
-        // command boundary, even when GitHub already reports auto-merge.
-        crate::ops::pr::disable_auto_merge(repo, number)?;
-    }
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("merge")
-        .arg("--squash")
-        .arg("--auto")
-        .arg("--match-head-commit")
-        .arg(head_sha);
-    if let Some(title) = title {
-        cmd.arg("--subject").arg(title);
-    }
-    if let Some(body) = body.filter(|b| !b.trim().is_empty()) {
-        cmd.arg("--body").arg(body);
-    }
-    cmd.current_dir(repo);
     if let Err(err) = run_command(&mut cmd) {
         return Err(OpsError::CommandFailed {
             command: err.command_line(),

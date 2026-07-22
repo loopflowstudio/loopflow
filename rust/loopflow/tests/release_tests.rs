@@ -33,6 +33,107 @@ fn write_gh_failed_release_script() -> &'static str {
     "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'release view') exit 1;;\n  'run list') cat <<'JSON'\n[{\"databaseId\":42,\"headBranch\":\"v0.9.1\",\"status\":\"completed\",\"conclusion\":\"failure\",\"url\":\"https://example.com/run/42\"}]\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
 }
 
+fn write_gh_dropped_auto_merge_script(log_path: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+log="{log_path}"
+armed="{log_path}.armed"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+printf '%s\n' "$*" >> "$log"
+case "$1 $2" in
+  'pr list')
+    case " $* " in
+      *' --head '*)
+        head="$(git rev-parse HEAD)"
+        printf '[{{"number":1176,"state":"OPEN","mergeCommit":null,"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$head"
+        ;;
+      *) echo '[]' ;;
+    esac
+    exit 0;;
+  'pr view')
+    head="$(git rev-parse HEAD)"
+    if [ -f "$armed" ]; then
+      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$head"
+    else
+      printf '{{"state":"OPEN","mergeStateStatus":"CLEAN","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+    fi
+    exit 0;;
+  'api graphql')
+    if [ -f "$armed" ]; then echo 'true'; else echo 'false'; fi
+    exit 0;;
+  'pr merge')
+    touch "$armed"
+    exit 0;;
+  'release view') exit 1;;
+esac
+echo "unexpected gh invocation: $*" >&2
+exit 1
+"#
+    )
+}
+
+fn write_gh_dirty_release_script(
+    log_path: &str,
+    release_branch: &str,
+    main_branch: &str,
+) -> String {
+    format!(
+        r#"#!/bin/sh
+log="{log_path}"
+integrated="{log_path}.integrated"
+seen="{log_path}.seen"
+release_branch="{release_branch}"
+main_branch="{main_branch}"
+if [ "$1" = "--version" ]; then
+  exit 0
+fi
+printf '%s\n' "$*" >> "$log"
+case "$1 $2" in
+  'pr list')
+    case " $* " in
+      *' --head '*)
+        head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
+        printf '[{{"number":1176,"state":"OPEN","isDraft":false,"mergeCommit":null,"url":"https://example.com/pr/1176","headRefOid":"%s"}}]\n' "$head"
+        ;;
+      *) echo '[]' ;;
+    esac
+    exit 0;;
+  'pr view')
+    release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
+    if [ -f "$integrated" ]; then
+      printf '{{"state":"MERGED","mergeStateStatus":"UNKNOWN","mergeCommit":{{"oid":"%s"}},"url":"https://example.com/pr/1176"}}\n' "$release_head"
+    elif [ ! -f "$seen" ]; then
+      touch "$seen"
+      printf '{{"state":"OPEN","mergeStateStatus":"DIRTY","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n'
+    else
+      main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
+      if git merge-base --is-ancestor "$main_head" "$release_head"; then
+        merge_state=CLEAN
+      else
+        merge_state=BEHIND
+      fi
+      printf '{{"state":"OPEN","mergeStateStatus":"%s","mergeCommit":null,"url":"https://example.com/pr/1176"}}\n' "$merge_state"
+    fi
+    exit 0;;
+  'api graphql') echo 'false'; exit 0;;
+  'pr merge')
+    release_head="$(git ls-remote origin "refs/heads/$release_branch" | cut -f1)"
+    main_head="$(git ls-remote origin "refs/heads/$main_branch" | cut -f1)"
+    if git merge-base --is-ancestor "$main_head" "$release_head"; then
+      touch "$integrated"
+    fi
+    exit 0;;
+  'pr ready'|'pr edit') exit 0;;
+  'release view') exit 1;;
+esac
+echo "unexpected gh invocation: $*" >&2
+exit 1
+"#
+    )
+}
+
 fn git(repo: &TestRepo, args: &[&str]) {
     let _ = git_output(repo, args);
 }
@@ -621,6 +722,163 @@ fn release_run_checks_the_host_local_publisher_role() {
             latest_tag: Some("v0.9.1".to_string()),
         }
     );
+}
+
+#[test]
+fn release_run_rearms_a_dropped_auto_merge_for_the_exact_head() {
+    let repo = TestRepo::new();
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::write(repo.path().join("feature.txt"), "release me\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Add release change"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    let head = git_output(&repo, &["rev-parse", "HEAD"]);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script = write_gh_dropped_auto_merge_script(&log_path.to_string_lossy());
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("release should re-arm and resume");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.version, "0.9.2");
+    assert_eq!(receipt.tag, "v0.9.2");
+    assert_eq!(receipt.commit, head);
+    let log = fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains("api graphql"));
+    assert!(log.contains(&format!(
+        "pr merge 1176 --squash --auto --match-head-commit {head}"
+    )));
+}
+
+#[test]
+fn release_run_reintegrates_a_dirty_existing_pr() {
+    let repo = TestRepo::new();
+    let main_branch = git_output(&repo, &["branch", "--show-current"]);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let prepare_runs = state.path().join("prepare-runs");
+    let advance_once = state.path().join("advance-once");
+    git(&repo, &["tag", "v0.9.1"]);
+    git(&repo, &["push", "origin", "v0.9.1"]);
+    fs::write(repo.path().join("feature.txt"), "release me\n").unwrap();
+    git(&repo, &["add", "feature.txt"]);
+    git(&repo, &["commit", "-m", "Add release change"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+
+    let release_branch = "jack/release-default-v0-9-2";
+    git(&repo, &["checkout", "-b", release_branch]);
+    fs::write(
+        repo.path().join("RELEASE_NOTES.md"),
+        "# v0.9.2\n\nRelease notes.\n",
+    )
+    .unwrap();
+    git(&repo, &["add", "RELEASE_NOTES.md"]);
+    git(&repo, &["commit", "-m", "release: v0.9.2"]);
+    git(&repo, &["push", "-u", "origin", release_branch]);
+    git(&repo, &["checkout", &main_branch]);
+    git(&repo, &["branch", "-D", release_branch]);
+    git(
+        &repo,
+        &[
+            "update-ref",
+            "-d",
+            &format!("refs/remotes/origin/{release_branch}"),
+        ],
+    );
+    fs::write(
+        repo.path().join("RELEASE_NOTES.md"),
+        "# v0.9.1\n\nCorrected prior release notes.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(repo.path().join(".lf")).unwrap();
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      prepare:\n      - sh prepare.sh {version}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("prepare.sh"),
+        format!(
+            "#!/bin/sh\nprintf 'run\\n' >> '{}'\nprintf '%s\\n' \"$1\" > prepared-version.txt\ngit -C '{}' rev-parse 'origin/{}' > prepared-main.txt\nif [ ! -f '{}' ]; then\n  : > '{}'\n  printf 'late main change\\n' > '{}/late-main.txt'\n  git -C '{}' add late-main.txt\n  git -C '{}' commit -m 'Advance main during release preparation'\n  git -C '{}' push origin HEAD\nfi\n",
+            prepare_runs.display(),
+            repo.path().display(),
+            main_branch,
+            advance_once.display(),
+            advance_once.display(),
+            repo.path().display(),
+            repo.path().display(),
+            repo.path().display(),
+            repo.path().display(),
+        ),
+    )
+    .unwrap();
+    git(
+        &repo,
+        &["add", "RELEASE_NOTES.md", ".lf/config.yaml", "prepare.sh"],
+    );
+    git(&repo, &["commit", "-m", "Correct prior release notes"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+
+    let gh_script =
+        write_gh_dirty_release_script(&log_path.to_string_lossy(), release_branch, &main_branch);
+    let lf_script = "#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.2\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nRegenerated release notes.\nEOF\n";
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str()), ("lf", lf_script)]);
+    std::env::set_var("LF_RUN_CONTEXT", "agent");
+    std::env::set_var("LF_RUN_ID", "run_stale");
+    std::env::set_var("LF_RUN_LEASE", "stale-lease");
+    std::env::set_var("LF_AGENT_INVOCATION_ID", "invocation_stale");
+    std::env::set_var("LF_WAVE_ID", "wave_stale");
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("release should reintegrate without inheriting Task authority");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    let integrated_head = git_output_bare(
+        &repo,
+        &["rev-parse", &format!("refs/heads/{release_branch}")],
+    );
+    let integrated_parent = git_output_bare(&repo, &["rev-parse", &format!("{integrated_head}^")]);
+    assert_eq!(receipt.commit, integrated_head);
+    assert_eq!(
+        fs::read_to_string(&prepare_runs)
+            .expect("read preparation runs")
+            .lines()
+            .count(),
+        2,
+        "a main advance after preparation must rerun preparation"
+    );
+    assert_eq!(
+        git_output_bare(
+            &repo,
+            &["show", &format!("{integrated_head}:prepared-main.txt")],
+        ),
+        integrated_parent
+    );
+    assert_eq!(
+        git_output_bare(
+            &repo,
+            &["show", &format!("{integrated_head}:RELEASE_NOTES.md")],
+        ),
+        "# v0.9.2\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nRegenerated release notes."
+    );
+    assert_eq!(
+        git_output_bare(
+            &repo,
+            &["show", &format!("{integrated_head}:prepared-version.txt")],
+        ),
+        "0.9.2"
+    );
+    let log = fs::read_to_string(log_path).expect("read gh log");
+    assert!(log.contains(&format!(
+        "pr merge 1176 --squash --auto --match-head-commit {integrated_head}"
+    )));
 }
 
 #[test]

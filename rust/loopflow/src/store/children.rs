@@ -287,6 +287,34 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn record_task_pr_repair_incident(
+        &self,
+        pr_id: &TaskPrId,
+        kind: crate::task::TaskPrRepairKind,
+        occurred_at: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let pr_id = pr_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_task_pr_repair_incident(&pr_id, kind, occurred_at)
+        })
+        .await
+    }
+
+    pub(crate) async fn record_task_pr_repair_incident_for_run(
+        &self,
+        pr_id: &TaskPrId,
+        kind: crate::task::TaskPrRepairKind,
+        occurred_at: OffsetDateTime,
+        lease: &RunLease,
+    ) -> StoreResult<bool> {
+        let pr_id = pr_id.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_task_pr_repair_incident_for_run(&pr_id, kind, occurred_at, &lease)
+        })
+        .await
+    }
+
     pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let pr = pr.clone();
         run_sqlite(&self.sqlite, move |store| store.heal_task_pr_base(&pr)).await
@@ -394,6 +422,32 @@ impl Store {
         let lease = lease.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.settle_task_pr_for_run(&settled, next.as_ref(), &lease)
+        })
+        .await
+    }
+
+    pub(crate) async fn settle_task_pr_merged(
+        &self,
+        settled: &TaskPr,
+        merged_at: Option<OffsetDateTime>,
+    ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
+        let settled = settled.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_task_pr_merged(&settled, merged_at)
+        })
+        .await
+    }
+
+    pub(crate) async fn settle_task_pr_merged_for_run(
+        &self,
+        settled: &TaskPr,
+        merged_at: Option<OffsetDateTime>,
+        lease: &RunLease,
+    ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
+        let settled = settled.clone();
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.settle_task_pr_merged_for_run(&settled, merged_at, &lease)
         })
         .await
     }

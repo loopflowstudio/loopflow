@@ -34,6 +34,8 @@ pub struct PrInfo {
     pub state: String,
     pub branch: String,
     pub merge_commit: Option<String>,
+    /// GitHub's authoritative merge instant from the single-PR REST response.
+    pub merged_at: Option<String>,
     /// The PR's current head commit (`headRefOid`), when GitHub reports one.
     pub head_sha: Option<String>,
 }
@@ -163,6 +165,7 @@ pub fn create_or_update_pr(
                 state: "open".to_string(),
                 branch: branch.clone(),
                 merge_commit: None,
+                merged_at: None,
                 head_sha: None,
             }),
         };
@@ -183,6 +186,7 @@ fn pr_info(branch: &str, pr: GhPr) -> PrInfo {
         },
         branch: branch.to_string(),
         merge_commit: pr.merge_commit.map(|commit| commit.oid),
+        merged_at: None,
         head_sha: pr.head_ref_oid,
     }
 }
@@ -442,6 +446,7 @@ pub fn current_pr(repo: &Path) -> OpsResult<Option<PrInfo>> {
             state,
             branch,
             merge_commit: pr.merge_commit.map(|commit| commit.oid),
+            merged_at: None,
             head_sha: pr.head_ref_oid,
         }));
     }
@@ -628,6 +633,8 @@ struct GhRestPr {
     draft: bool,
     #[serde(default, rename = "merge_commit_sha")]
     merge_commit_sha: Option<String>,
+    #[serde(default)]
+    merged_at: Option<String>,
     number: u64,
     #[serde(rename = "html_url")]
     html_url: String,
@@ -662,6 +669,7 @@ impl GhRestPr {
             } else {
                 None
             },
+            merged_at: if self.merged { self.merged_at } else { None },
             head_sha: self.head.sha,
         }
     }
@@ -943,6 +951,7 @@ pub(crate) fn create_pr_from_pushed_branch(
         state: "open".to_string(),
         branch,
         merge_commit: None,
+        merged_at: None,
         head_sha: Some(rev_parse(repo, "HEAD")?),
     })
 }
@@ -1326,6 +1335,7 @@ mod tests {
             state: state.to_string(),
             draft,
             merge_commit_sha: merged.then(|| "deadbeef".to_string()),
+            merged_at: merged.then(|| "2026-07-21T19:00:00Z".to_string()),
             number: 905,
             html_url: "https://github.com/loopflowstudio/loopflow/pull/905".to_string(),
             head: GhRestHead {
@@ -1341,6 +1351,7 @@ mod tests {
         let info = rest_pr("closed", true, false).into_info("jack/task-1");
         assert_eq!(info.state, "merged");
         assert_eq!(info.merge_commit.as_deref(), Some("deadbeef"));
+        assert_eq!(info.merged_at.as_deref(), Some("2026-07-21T19:00:00Z"));
         assert_eq!(info.head_sha.as_deref(), Some("headsha"));
         assert_eq!(info.branch, "jack/task-1");
     }

@@ -20,13 +20,14 @@ use crate::lf::{
 };
 use crate::ops::OpsError;
 use crate::ops::{
-    abandon_branch, abort_rebase_for_resolution, commit_workflow, continue_rebase_for_resolution,
-    create_or_update_pr, current_pr, finish_land_after_rebase, finish_submit_after_rebase, land,
-    plan_rebase, rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase,
-    release_bump, release_check, release_notes, release_publish, release_run, release_status,
-    release_tag, start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost,
-    CronOutcome, CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress,
-    RebaseOptions, SystemLaunchctl,
+    abandon_branch, abort_rebase_after_authorization, abort_rebase_for_resolution, commit_workflow,
+    continue_rebase_after_authorization, continue_rebase_for_resolution, create_or_update_pr,
+    current_pr, finish_land_after_rebase, finish_submit_after_rebase, land, plan_rebase,
+    rebase_class_name, rebase_strategy_name, rebase_with_recovery, recover_rebase, release_bump,
+    release_check, release_notes, release_publish, release_run, release_status, release_tag,
+    start_rebase_for_resolution, submit, AbandonOptions, CommitOptions, CronHost, CronOutcome,
+    CronSource, CronSpec, CronTargetKind, LandOptions, PrOptions, Progress, RebaseOptions,
+    SystemLaunchctl,
 };
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
@@ -205,12 +206,32 @@ pub fn run_rebase(
         ));
     }
     if continue_rebase {
-        continue_rebase_for_resolution(&repo_root, adopt)?;
+        if adopt {
+            continue_rebase_after_authorization(&repo_root, true, || {
+                crate::ops::task::record_task_pr_repair(
+                    &repo_root,
+                    crate::task::TaskPrRepairKind::ManualGitRepair,
+                )
+                .map(|_| ())
+            })?;
+        } else {
+            continue_rebase_for_resolution(&repo_root, false)?;
+        }
         progress.status("Rebase complete; branch remains local.");
         return Ok(());
     }
     if abort {
-        abort_rebase_for_resolution(&repo_root, adopt)?;
+        if adopt {
+            abort_rebase_after_authorization(&repo_root, true, || {
+                crate::ops::task::record_task_pr_repair(
+                    &repo_root,
+                    crate::task::TaskPrRepairKind::ManualGitRepair,
+                )
+                .map(|_| ())
+            })?;
+        } else {
+            abort_rebase_for_resolution(&repo_root, false)?;
+        }
         progress.status("Rebase aborted.");
         return Ok(());
     }
@@ -266,7 +287,14 @@ pub fn run_rebase(
             detail,
             recovery,
         }) => (
-            resolve_rebase_conflict(&repo_root, &onto, &detail, recovery, progress)?,
+            resolve_rebase_conflict(
+                &repo_root,
+                &onto,
+                &detail,
+                recovery,
+                is_avoidable_rebase_class(&plan.class),
+                progress,
+            )?,
             true,
         ),
         Err(err) => return Err(err.into()),
@@ -322,6 +350,7 @@ fn resolve_rebase_conflict(
     onto: &str,
     detail: &str,
     recovery: Option<Box<crate::ops::RebaseRecovery>>,
+    avoidable: bool,
     progress: &impl Progress,
 ) -> Result<crate::ops::RebaseVerification> {
     let recovery =
@@ -329,11 +358,41 @@ fn resolve_rebase_conflict(
     let context = format!(
         "<lf:rebase-conflict>\nRebase onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another rebase or push.\n</lf:rebase-conflict>"
     );
+    if avoidable {
+        crate::ops::task::record_task_pr_repair(
+            repo_root,
+            crate::task::TaskPrRepairKind::AvoidableRebaseAgent,
+        )?;
+    }
     progress.status("Launching rebase agent to resolve conflicts...");
     Ok(recover_rebase(*recovery, |env| {
         launch_skill_agent(repo_root, "rebase-conflicts", Some(&context), Some(env))
             .map_err(|error| OpsError::Message(error.to_string()))
     })?)
+}
+
+fn is_avoidable_rebase_class(class: &crate::ops::RebaseClass) -> bool {
+    matches!(
+        class,
+        crate::ops::RebaseClass::StaleEmpty
+            | crate::ops::RebaseClass::ScratchOnly
+            | crate::ops::RebaseClass::GeneratedOnly
+    )
+}
+
+#[cfg(test)]
+mod rebase_performance_tests {
+    use super::is_avoidable_rebase_class;
+    use crate::ops::RebaseClass;
+
+    #[test]
+    fn disposable_rebase_classes_make_an_agent_launch_a_repair_incident() {
+        assert!(is_avoidable_rebase_class(&RebaseClass::StaleEmpty));
+        assert!(is_avoidable_rebase_class(&RebaseClass::ScratchOnly));
+        assert!(is_avoidable_rebase_class(&RebaseClass::GeneratedOnly));
+        assert!(!is_avoidable_rebase_class(&RebaseClass::CleanAuthored));
+        assert!(!is_avoidable_rebase_class(&RebaseClass::Protected));
+    }
 }
 
 /// Run a PR-mutating op; on a rebase conflict, launch the rebase agent to
@@ -351,7 +410,7 @@ fn with_rebase_retry<T>(
             detail,
             recovery,
         }) => {
-            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, progress)?;
+            resolve_rebase_conflict(repo_root, &onto, &detail, recovery, false, progress)?;
             progress.status(&format!("Retrying {label} after rebase..."));
             op(repo_root, true).map_err(Into::into)
         }

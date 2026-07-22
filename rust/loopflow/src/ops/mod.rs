@@ -43,6 +43,7 @@ pub use land::{land, mark_ready, submit, LandOptions};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
+pub(crate) use rebase::{abort_rebase_after_authorization, continue_rebase_after_authorization};
 pub use rebase::{
     abort_rebase_for_resolution, continue_rebase_for_resolution, plan_rebase, rebase_class_name,
     rebase_strategy_name, rebase_with_recovery, recover_rebase, start_rebase_for_resolution,

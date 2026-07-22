@@ -310,6 +310,43 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn record_first_material_at(
+        &self,
+        lease: &RunLease,
+        observed_at: OffsetDateTime,
+    ) -> StoreResult<OffsetDateTime> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let run = validate_run_lease(&conn, lease)?;
+        if !matches!(run.work, WorkRef::Task(_)) || run.state != RunState::Active {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Run {} does not hold active Task progress authority",
+                run.id
+            )));
+        }
+        let started_at = run.started_at.ok_or_else(|| {
+            StoreError::InvalidData(format!("active Run {} has no start time", run.id))
+        })?;
+        if observed_at < started_at {
+            return Err(StoreError::InvalidData(format!(
+                "Run {} first material event precedes its start",
+                run.id
+            )));
+        }
+        conn.execute(
+            "UPDATE runs
+             SET first_material_at=COALESCE(first_material_at, ?2)
+             WHERE id=?1 AND state='active'",
+            params![run.id.as_str(), observed_at.unix_timestamp()],
+        )?;
+        let accepted: i64 = conn.query_row(
+            "SELECT first_material_at FROM runs WHERE id=?1",
+            [run.id.as_str()],
+            |row| row.get(0),
+        )?;
+        OffsetDateTime::from_unix_timestamp(accepted)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))
+    }
+
     pub fn advance_run(
         &self,
         lease: &RunLease,

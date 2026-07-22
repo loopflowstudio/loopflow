@@ -178,7 +178,16 @@ pub fn start_rebase_for_resolution(
 
 /// Continue a local rebase after its conflict paths have been resolved.
 pub fn continue_rebase_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
+    continue_rebase_after_authorization(repo, adopt, || Ok(()))
+}
+
+pub(crate) fn continue_rebase_after_authorization(
+    repo: &Path,
+    adopt: bool,
+    before_mutation: impl FnOnce() -> OpsResult<()>,
+) -> OpsResult<()> {
     let authorization = authorize_rebase_control(repo, adopt)?;
+    before_mutation()?;
     let result = continue_git_rebase(repo)?;
     if result.success {
         let owner = authorization.owner().clone();
@@ -196,7 +205,16 @@ pub fn continue_rebase_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()>
 
 /// Abort a local rebase that was left open for inline resolution.
 pub fn abort_rebase_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
+    abort_rebase_after_authorization(repo, adopt, || Ok(()))
+}
+
+pub(crate) fn abort_rebase_after_authorization(
+    repo: &Path,
+    adopt: bool,
+    before_mutation: impl FnOnce() -> OpsResult<()>,
+) -> OpsResult<()> {
     let authorization = authorize_rebase_control(repo, adopt)?;
+    before_mutation()?;
     abort_git_rebase(repo)?;
     authorization.complete()?;
     Ok(())

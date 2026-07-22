@@ -72,7 +72,7 @@ if [ "$1" = "--version" ]; then
 fi
 if [ "$1" = "api" ]; then
   head=$(git rev-parse HEAD)
-  printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"%s"}}\n' "$head"
+  printf '{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","merged_at":"2026-07-21T19:00:00Z","number":912,"html_url":"https://example.com/pr/912","head":{"sha":"%s"}}\n' "$head"
   exit 0
 fi
 exit 0
@@ -88,7 +88,7 @@ if [ "$1" = "--version" ]; then
 fi
 if [ "$1" = "api" ]; then
   head=$(git rev-parse HEAD)
-  printf '{{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
+  printf '{{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","merged_at":"2026-07-21T19:00:00Z","number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
   exit 0
 fi
 if [ "$1 $2" = "pr list" ]; then

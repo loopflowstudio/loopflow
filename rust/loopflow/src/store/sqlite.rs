@@ -16,6 +16,10 @@ use crate::store::{
     ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult, TurnSpendRow,
     WaveLocatorUpdate,
 };
+#[cfg(test)]
+use crate::store::{
+    PerformanceEvidenceSnapshot, TaskFirstProgressEvidenceRow, TaskPrPerformanceEvidenceRow,
+};
 use crate::trace::{
     AgentInvocationRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow,
     ContextChannel, ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
@@ -448,6 +452,13 @@ impl SqliteStore {
             }
             Err(error) => Err(error),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute_batch(&crate::store::migrations::migration_sql_for_test(name))?;
+        Ok(())
     }
 
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
@@ -2108,6 +2119,114 @@ impl SqliteStore {
         }
         turns.sort_by_key(|turn| (turn.started_at, turn.ordinal));
         Ok(turns)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn performance_evidence_since(
+        &self,
+        since: i64,
+    ) -> StoreResult<Option<PerformanceEvidenceSnapshot>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let schema_available: bool = conn.query_row(
+            "SELECT
+                 EXISTS(SELECT 1 FROM sqlite_schema
+                        WHERE type='table' AND name='performance_evidence_authority')
+                 AND EXISTS(SELECT 1 FROM pragma_table_info('runs')
+                            WHERE name='first_material_at')
+                 AND EXISTS(SELECT 1 FROM pragma_table_info('task_prs')
+                            WHERE name='merged_at')
+                 AND EXISTS(SELECT 1 FROM pragma_table_info('task_prs')
+                            WHERE name='merge_tracking_complete')
+                 AND EXISTS(SELECT 1 FROM pragma_table_info('task_prs')
+                            WHERE name='repair_tracking_complete')
+                 AND EXISTS(SELECT 1 FROM sqlite_schema
+                            WHERE type='table' AND name='task_pr_repair_incidents')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !schema_available {
+            return Ok(None);
+        }
+
+        let authority_started_at = conn.query_row(
+            "SELECT started_at FROM performance_evidence_authority
+             WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let mut run_statement = conn.prepare(
+            "SELECT COALESCE(r.cwd, t.worktree), r.started_at, r.ended_at,
+                    r.first_material_at
+             FROM runs r
+             JOIN epochs e ON e.id=r.epoch_id
+             JOIN tasks t ON t.id=e.task_id
+             WHERE e.task_id IS NOT NULL
+               AND r.started_at IS NOT NULL
+               AND r.ended_at >= ?1
+             ORDER BY r.ended_at, r.id",
+        )?;
+        let task_runs = run_statement
+            .query_map([since], |row| {
+                Ok(TaskFirstProgressEvidenceRow {
+                    worktree: row.get(0)?,
+                    started_at: row.get(1)?,
+                    ended_at: row.get(2)?,
+                    first_material_at: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut pr_statement = conn.prepare(
+            "SELECT t.worktree, pr.merge_requested_at, pr.merged_at,
+                    pr.merge_tracking_complete, pr.repair_tracking_complete,
+                    pr.github_observation,
+                    EXISTS(SELECT 1 FROM task_pr_repair_incidents incident
+                           WHERE incident.task_pr_id=pr.id
+                             AND incident.kind='avoidable_rebase_agent'),
+                    EXISTS(SELECT 1 FROM task_pr_repair_incidents incident
+                           WHERE incident.task_pr_id=pr.id
+                             AND incident.kind='manual_git_repair')
+             FROM task_prs pr
+             JOIN tasks t ON t.id=pr.task_id
+             WHERE pr.merge_requested_at IS NOT NULL
+               AND pr.merge_commit IS NOT NULL
+               AND (
+                   pr.merged_at >= ?1
+                   OR (pr.merge_tracking_complete = 1 AND pr.merged_at IS NULL)
+               )
+             ORDER BY COALESCE(pr.merged_at, pr.merge_requested_at), pr.id",
+        )?;
+        let task_prs = pr_statement
+            .query_map([since], |row| {
+                let observation = row
+                    .get::<_, Option<String>>(5)?
+                    .map(|json| serde_json::from_str::<crate::task::GithubObservation>(&json))
+                    .transpose()
+                    .map_err(to_sqlite_conversion_error)?;
+                Ok(TaskPrPerformanceEvidenceRow {
+                    worktree: row.get(0)?,
+                    requested_at: row.get(1)?,
+                    merged_at: row.get(2)?,
+                    merge_tracking_complete: row.get(3)?,
+                    repair_tracking_complete: row.get(4)?,
+                    merge_observation_complete: observation.is_some_and(|observation| {
+                        matches!(
+                            observation.result,
+                            crate::task::GithubObservationResult::Fresh
+                        )
+                    }),
+                    avoidable_rebase_agent: row.get(6)?,
+                    manual_git_repair: row.get(7)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(Some(PerformanceEvidenceSnapshot {
+            authority_started_at,
+            task_runs,
+            task_prs,
+        }))
     }
 
     pub fn ask_exchanges_for_turns(

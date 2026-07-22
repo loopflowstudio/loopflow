@@ -62,6 +62,11 @@ def _resource_report() -> dict[str, object]:
 @pytest.fixture(autouse=True)
 def _bounded_resource_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "_run_resource_check", lambda _recover: (_resource_report(), None))
+    monkeypatch.setattr(
+        gate,
+        "_free_disk_bytes",
+        lambda: int(gate.RESOURCE_ENVELOPE["minimum_free_disk_bytes"]) + 1,
+    )
 
 
 def _cmd(argv: list[str], label: str) -> "gate.Command":

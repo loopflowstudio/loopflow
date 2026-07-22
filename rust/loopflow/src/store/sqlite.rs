@@ -14,12 +14,13 @@ use crate::store::token_crypto;
 use crate::store::{
     AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
     ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult, TurnSpendRow,
+    WaveLocatorUpdate,
 };
 use crate::trace::{
     AgentInvocationRow, AgentTurnRow, ContextAsset, ContextAssetKind, ContextAssetRow,
     ContextChannel, ContextDecision, ContextDecisionKind, ContextDecisionRow, ContextScope,
 };
-use crate::wave::Wave;
+use crate::wave::{Wave, WaveLocator};
 
 mod children;
 mod ci_incidents;
@@ -452,16 +453,15 @@ impl SqliteStore {
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO pm_snapshots (repo, wave, provider, initiative, synced_at, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(repo, wave) DO UPDATE SET
+            "INSERT INTO pm_snapshots (wave_id, provider, initiative, synced_at, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(wave_id) DO UPDATE SET
                provider = excluded.provider,
                initiative = excluded.initiative,
                synced_at = excluded.synced_at,
                payload = excluded.payload",
             params![
-                snapshot.repo,
-                snapshot.wave,
+                snapshot.wave_id,
                 snapshot.provider,
                 snapshot.initiative,
                 snapshot.synced_at,
@@ -471,20 +471,19 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn pm_snapshot(&self, repo: &str, wave: &str) -> StoreResult<Option<PmSnapshotRow>> {
+    pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT repo, wave, provider, initiative, synced_at, payload
-             FROM pm_snapshots WHERE repo = ?1 AND wave = ?2",
-            params![repo, wave],
+            "SELECT wave_id, provider, initiative, synced_at, payload
+             FROM pm_snapshots WHERE wave_id = ?1",
+            params![wave_id],
             |row| {
                 Ok(PmSnapshotRow {
-                    repo: row.get(0)?,
-                    wave: row.get(1)?,
-                    provider: row.get(2)?,
-                    initiative: row.get(3)?,
-                    synced_at: row.get(4)?,
-                    payload: row.get(5)?,
+                    wave_id: row.get(0)?,
+                    provider: row.get(1)?,
+                    initiative: row.get(2)?,
+                    synced_at: row.get(3)?,
+                    payload: row.get(4)?,
                 })
             },
         )
@@ -531,9 +530,6 @@ impl SqliteStore {
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id, promoted_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
-               name = excluded.name,
-               repo = excluded.repo,
-               created_at = excluded.created_at,
                parent_wave_id = COALESCE(waves.parent_wave_id, excluded.parent_wave_id),
                promoted_at = COALESCE(waves.promoted_at, excluded.promoted_at)",
             params![
@@ -1286,16 +1282,77 @@ impl SqliteStore {
         wave.transpose()
     }
 
-    pub fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
+    pub fn get_wave_at(&self, locator: &WaveLocator) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
-             FROM waves WHERE name = ?1",
+             FROM waves WHERE repo = ?1 AND name = ?2",
         )?;
         let wave = stmt
-            .query_row(params![name], |row| Ok(map_wave_row(row)))
+            .query_row(params![locator.repo().to_string(), locator.slug()], |row| {
+                Ok(map_wave_row(row))
+            })
             .optional()?;
         wave.transpose()
+    }
+
+    pub(crate) fn repair_wave_repo(
+        &self,
+        wave_id: &WaveId,
+        expected_repo: &str,
+        target_repo: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = tx
+            .query_row(
+                "SELECT repo, name FROM waves WHERE id = ?1",
+                params![wave_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| StoreError::InvalidData(format!("Wave {wave_id} is not registered")))?;
+        if current.0 == target_repo {
+            tx.commit()?;
+            return Ok(());
+        }
+        if current.0 != expected_repo {
+            return Err(StoreError::InvalidData(format!(
+                "Wave {wave_id} repository changed from {expected_repo} while its canonical path was being repaired"
+            )));
+        }
+        let collision = tx
+            .query_row(
+                "SELECT id FROM waves WHERE repo = ?1 AND name = ?2 AND id != ?3",
+                params![target_repo, current.1, wave_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(collision) = collision {
+            return Err(StoreError::InvalidData(format!(
+                "cannot repair Wave {wave_id} repository to {target_repo}: locator belongs to Wave {collision}"
+            )));
+        }
+        tx.execute(
+            "UPDATE waves SET repo = ?2 WHERE id = ?1 AND repo = ?3",
+            params![wave_id, target_repo, expected_repo],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at
+             FROM waves WHERE name = ?1 ORDER BY repo",
+        )?;
+        let rows = stmt.query_map(params![slug], |row| Ok(map_wave_row(row)))?;
+        let mut waves = Vec::new();
+        for wave in rows {
+            waves.push(wave??);
+        }
+        Ok(waves)
     }
 
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -1304,6 +1361,84 @@ impl SqliteStore {
 
     pub fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave)
+    }
+
+    pub(crate) fn relocate_waves(&self, updates: &[WaveLocatorUpdate]) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for update in updates {
+            let current = tx
+                .query_row(
+                    "SELECT repo, name FROM waves WHERE id = ?1",
+                    params![update.wave_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?
+                .ok_or_else(|| {
+                    StoreError::InvalidData(format!("Wave {} is not registered", update.wave_id))
+                })?;
+            if current != (update.expected_repo.clone(), update.expected_slug.clone()) {
+                return Err(StoreError::InvalidData(format!(
+                    "Wave {} moved from {}/{} while relocation was staged",
+                    update.wave_id, update.expected_repo, update.expected_slug
+                )));
+            }
+
+            let collision = tx
+                .query_row(
+                    "SELECT id FROM waves
+                     WHERE repo = ?1 AND name = ?2 AND id != ?3",
+                    params![
+                        update.target.repo().to_string(),
+                        update.target.slug(),
+                        update.wave_id
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(collision) = collision {
+                return Err(StoreError::InvalidData(format!(
+                    "target {}/{} already belongs to Wave {collision}",
+                    update.target.repo(),
+                    update.target.slug()
+                )));
+            }
+
+            let active_run = tx
+                .query_row(
+                    "SELECT r.id
+                     FROM runs r
+                     JOIN epochs e ON e.id = r.epoch_id
+                     LEFT JOIN projects ep ON ep.id = e.project_id
+                     LEFT JOIN tasks et ON et.id = e.task_id
+                     LEFT JOIN projects tp ON tp.id = et.project_id
+                     WHERE r.state != 'ended'
+                       AND (e.wave_id = ?1 OR ep.wave_id = ?1 OR tp.wave_id = ?1)
+                     LIMIT 1",
+                    params![update.wave_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(run_id) = active_run {
+                return Err(StoreError::InvalidData(format!(
+                    "cannot relocate Wave {} while Run {run_id} is active",
+                    update.wave_id
+                )));
+            }
+        }
+
+        for update in updates {
+            tx.execute(
+                "UPDATE waves SET repo = ?2, name = ?3 WHERE id = ?1",
+                params![
+                    update.wave_id,
+                    update.target.repo().to_string(),
+                    update.target.slug()
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
@@ -1814,6 +1949,34 @@ impl SqliteStore {
                     account_id, resume_token, answer_ask_id
              FROM agent_invocations WHERE started_at >= ?1 ORDER BY started_at, rowid",
             params![since],
+        )
+    }
+
+    pub fn agent_invocations_for_wave_since(
+        &self,
+        wave_id: &WaveId,
+        since: i64,
+    ) -> StoreResult<Vec<AgentInvocationRow>> {
+        self.query_agent_invocations(
+            "SELECT ai.id, ai.run_id, ai.process_id, ai.started_at, ai.ended_at,
+                    ai.repo, ai.worktree, ai.wave, ai.flow, ai.skill, ai.project,
+                    ai.task, ai.provider, ai.model, ai.surface, ai.capture_status,
+                    ai.incomplete_reason, ai.outcome, ai.artifact_dir,
+                    ai.conversation_path, ai.provider_events_path,
+                    ai.provider_session_id, ai.provider_session_path,
+                    ai.conversation_event_count, ai.conversation_bytes,
+                    ai.supervising_run_id, ai.account_id, ai.resume_token,
+                    ai.answer_ask_id
+             FROM agent_invocations ai
+             JOIN runs r ON r.id = ai.supervising_run_id
+             JOIN epochs e ON e.id = r.epoch_id
+             LEFT JOIN projects ep ON ep.id = e.project_id
+             LEFT JOIN tasks et ON et.id = e.task_id
+             LEFT JOIN projects tp ON tp.id = et.project_id
+             WHERE ai.started_at >= ?2
+               AND (e.wave_id = ?1 OR ep.wave_id = ?1 OR tp.wave_id = ?1)
+             ORDER BY ai.started_at, ai.rowid",
+            params![wave_id, since],
         )
     }
 

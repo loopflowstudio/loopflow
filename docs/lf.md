@@ -279,6 +279,8 @@ lf task resume DES-123 --model codex --reason "Claude quota exhausted"
 lf project resume <linear-project-id> --model codex
 lf work status task task_... --json                  # stable Work projection
 lf work place wave wave_... home_...                 # move idle Wave Work to a Home
+lf work relocate wave wave_... --name platform       # rename a stopped Wave
+lf work relocate wave wave_... --repo ../moved-repo  # repair or move its repository
 lf flow scan-pass "scan the runtime"               # one pass, no loop worktree
 ```
 
@@ -298,6 +300,12 @@ Its provider process and transcript are replaceable execution state: plain
 Work, durable Steers, worktree, and PR chain while selecting another provider.
 The Task remains resumable through serial PRs, review, and explicit
 completion.
+Wave names are repository-scoped. Relocation requires the UUID because the
+repository and name may both change; it preserves authored Wave files, journal,
+PM binding, Work/Run history, and Home placement. It refuses live Wave,
+Project, or Task Runs and never keeps an old-name alias. UUID-addressed `lf
+work` reads and mutations also verify that the selected Work belongs to the
+invoking repository; a UUID from another repository is not a capability.
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
 `--finally` override them only while creating the Task. A skill that needs judgment runs

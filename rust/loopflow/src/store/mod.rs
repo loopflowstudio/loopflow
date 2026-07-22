@@ -9,7 +9,7 @@ use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
 };
 use crate::provider_auth::Provider;
-use crate::wave::Wave;
+use crate::wave::{Wave, WaveLocator};
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
@@ -78,12 +78,19 @@ pub struct TurnSpendRow {
 /// replaces this row atomically so readers never observe a partial refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmSnapshotRow {
-    pub repo: String,
-    pub wave: String,
+    pub wave_id: WaveId,
     pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
     pub payload: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WaveLocatorUpdate {
+    pub wave_id: WaveId,
+    pub expected_repo: String,
+    pub expected_slug: String,
+    pub target: WaveLocator,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -424,17 +431,42 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.put_pm_snapshot(&snapshot)).await
     }
 
-    pub async fn pm_snapshot(
-        &self,
-        repo: String,
-        wave: String,
-    ) -> StoreResult<Option<PmSnapshotRow>> {
-        run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&repo, &wave)).await
+    pub async fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
+        let wave_id = wave_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.pm_snapshot(&wave_id)).await
     }
 
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
-        let repo = repo.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| store.list_waves(repo.as_deref())).await
+        let Some(repo) = repo else {
+            return run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await;
+        };
+        let canonical = match crate::repository::CanonicalRepo::discover(Path::new(repo)) {
+            Ok(canonical) => canonical,
+            Err(_) => {
+                let repo = repo.to_string();
+                return run_sqlite(&self.sqlite, move |store| store.list_waves(Some(&repo))).await;
+            }
+        };
+        let all = run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await?;
+        for wave in all {
+            if wave.repo() == canonical.to_string() {
+                continue;
+            }
+            let equivalent = crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                .is_ok_and(|stored| stored == canonical);
+            if !equivalent {
+                continue;
+            }
+            let wave_id = wave.id().clone();
+            let expected_repo = wave.repo().to_string();
+            let target_repo = canonical.to_string();
+            run_sqlite(&self.sqlite, move |store| {
+                store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
+            })
+            .await?;
+        }
+        let repo = canonical.to_string();
+        run_sqlite(&self.sqlite, move |store| store.list_waves(Some(&repo))).await
     }
 
     /// A chord's contents: the waves whose `parent_wave_id` is `parent`,
@@ -449,9 +481,48 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.get_wave(&wave_id)).await
     }
 
-    pub async fn get_wave_by_name(&self, name: &str) -> StoreResult<Option<Wave>> {
-        let name = name.to_string();
-        run_sqlite(&self.sqlite, move |store| store.get_wave_by_name(&name)).await
+    pub async fn get_wave_at(&self, locator: &WaveLocator) -> StoreResult<Option<Wave>> {
+        let locator = locator.clone();
+        if let Some(wave) = run_sqlite(&self.sqlite, {
+            let locator = locator.clone();
+            move |store| store.get_wave_at(&locator)
+        })
+        .await?
+        {
+            return Ok(Some(wave));
+        }
+
+        let candidates = self.find_waves_by_slug(locator.slug()).await?;
+        let equivalent = candidates
+            .into_iter()
+            .filter(|wave| {
+                crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+                    .is_ok_and(|repo| &repo == locator.repo())
+            })
+            .collect::<Vec<_>>();
+        let [wave] = equivalent.as_slice() else {
+            if equivalent.len() > 1 {
+                return Err(StoreError::InvalidData(format!(
+                    "multiple stored Wave locators canonicalize to {}/{}",
+                    locator.repo(),
+                    locator.slug()
+                )));
+            }
+            return Ok(None);
+        };
+        let wave_id = wave.id().clone();
+        let expected_repo = wave.repo().to_string();
+        let target_repo = locator.repo().to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.repair_wave_repo(&wave_id, &expected_repo, &target_repo)
+        })
+        .await?;
+        self.get_wave(wave.id()).await
+    }
+
+    pub async fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
+        let slug = slug.to_string();
+        run_sqlite(&self.sqlite, move |store| store.find_waves_by_slug(&slug)).await
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -462,6 +533,10 @@ impl Store {
     pub async fn update_wave(&self, wave: &Wave) -> StoreResult<()> {
         let wave = wave.clone();
         run_sqlite(&self.sqlite, move |store| store.update_wave(&wave)).await
+    }
+
+    pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
+        run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
     }
 
     pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
@@ -2850,7 +2925,7 @@ mod tests {
 
         let updated = Wave::new(
             wave.id().clone(),
-            wave.name().to_string(),
+            "renamed-without-relocation".to_string(),
             "/repo-updated".to_string(),
         );
         assert!(updated.promoted_at().is_none());
@@ -2860,7 +2935,12 @@ mod tests {
             .await
             .expect("get wave")
             .expect("wave exists");
-        assert_eq!(loaded.repo(), "/repo-updated");
+        assert_eq!(
+            loaded.repo(),
+            "/repo",
+            "ordinary Wave updates cannot bypass relocation"
+        );
+        assert_eq!(loaded.name(), wave.name());
 
         store.delete_wave(wave.id()).await.expect("delete wave");
         assert!(store
@@ -2956,9 +3036,10 @@ mod tests {
         let store = open_store(&StorageConfig::sqlite(db_path.clone()))
             .await
             .expect("store should open");
+        let wave = Wave::new(WaveId::new(), "product".to_string(), "/repo".to_string());
+        store.create_wave(&wave).await.expect("create Wave");
         let mut snapshot = PmSnapshotRow {
-            repo: "/repo".to_string(),
-            wave: "product".to_string(),
+            wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: 1,
@@ -2976,10 +3057,7 @@ mod tests {
             .expect("replace snapshot");
 
         assert_eq!(
-            store
-                .pm_snapshot("/repo".to_string(), "product".to_string())
-                .await
-                .expect("read snapshot"),
+            store.pm_snapshot(wave.id()).await.expect("read snapshot"),
             Some(snapshot)
         );
         let _ = std::fs::remove_file(db_path);

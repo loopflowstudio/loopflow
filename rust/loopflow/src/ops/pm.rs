@@ -661,15 +661,6 @@ fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
         .map_err(|err| OpsError::Message(format!("failed to resolve credential store: {err}")))
 }
 
-fn pm_repo_key(repo: &Path) -> String {
-    let root =
-        crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    std::fs::canonicalize(&root)
-        .unwrap_or(root)
-        .to_string_lossy()
-        .into_owned()
-}
-
 async fn pm_store() -> OpsResult<Store> {
     open_store(&storage_config_from_env()?)
         .await
@@ -705,9 +696,18 @@ pub(crate) fn format_age(secs: i64) -> String {
 }
 
 async fn snapshot_row(repo: &Path, wave: &str) -> OpsResult<Option<PmSnapshotRow>> {
-    pm_store()
-        .await?
-        .pm_snapshot(pm_repo_key(repo), wave.to_string())
+    let store = pm_store().await?;
+    let locator = crate::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let Some(wave) = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to read Wave registry: {err}")))?
+    else {
+        return Ok(None);
+    };
+    store
+        .pm_snapshot(wave.id())
         .await
         .map_err(|err| OpsError::Message(format!("failed to read PM snapshot: {err}")))
 }
@@ -887,10 +887,12 @@ async fn store_pm_snapshot_with_store(
             "failed to serialize PM snapshot for wave/{wave}: {err}"
         ))
     })?;
+    let registered = crate::wave::registry::ensure_wave_row(store, repo, wave)
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
     store
         .put_pm_snapshot(PmSnapshotRow {
-            repo: pm_repo_key(repo),
-            wave: wave.to_string(),
+            wave_id: registered.id().clone(),
             provider: ctx.provider.as_str().to_string(),
             initiative: ctx.initiative.clone(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -2937,8 +2939,10 @@ async fn canonical_wave_title_path_with_store(
     wave: &str,
     store: &Store,
 ) -> OpsResult<String> {
+    let locator = crate::wave::WaveLocator::discover(repo, wave)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     let Some(mut current) = store
-        .get_wave_by_name(wave)
+        .get_wave_at(&locator)
         .await
         .map_err(|error| OpsError::Message(format!("failed to read Wave ancestry: {error}")))?
     else {
@@ -2965,14 +2969,6 @@ async fn canonical_wave_title_path_with_store(
         let current_repo = std::fs::canonicalize(current.repo())
             .unwrap_or_else(|_| Path::new(current.repo()).to_path_buf());
         if current_repo != main {
-            // Root Wave names are repository-local PM identity. The runtime
-            // registry still has a legacy machine-global name index, so a
-            // same-named root Wave in another repository must not steal this
-            // repository's Project title path. Nested Waves still require
-            // durable ancestry because their parent path cannot be inferred.
-            if !wave.contains('/') && main.join("wave").join(wave).join("GOAL.md").is_file() {
-                return Ok(title_case(wave));
-            }
             return Err(OpsError::Message(format!(
                 "Wave ancestry for wave/{wave} crosses repositories at {} ({})",
                 current.name(),

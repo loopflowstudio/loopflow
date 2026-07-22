@@ -467,6 +467,27 @@ def _link_errors(root: Path, text: str) -> list[str]:
     return errors
 
 
+def _wave_locator_errors(root: Path) -> list[str]:
+    errors: list[str] = []
+    source_root = root / "rust/loopflow/src"
+    for path in sorted(source_root.rglob("*.rs")):
+        source = _production_rust(path.read_text())
+        for number, line in enumerate(source.splitlines(), start=1):
+            if "get_wave_by_name(" in line:
+                relative = path.relative_to(root)
+                errors.append(
+                    f"bare Wave lookup get_wave_by_name at {relative}:{number}; "
+                    "resolve by WaveId or WaveLocator"
+                )
+            if "resolve_managed_wave_name" in line:
+                relative = path.relative_to(root)
+                errors.append(
+                    f"name-only Wave resolver at {relative}:{number}; "
+                    "resolve the Wave row and derive its display name at the leaf"
+                )
+    return errors
+
+
 def _cover(
     name: str,
     discovered: set[str],
@@ -525,6 +546,7 @@ def check_repository(root: Path = REPO_ROOT) -> Report:
         coverage.append(_shim_coverage(root, shim_tokens, errors))
         errors.extend(_vocabulary_errors(root, vocabulary_rows))
         errors.extend(_link_errors(root, map_section + projections_section + shims_section))
+        errors.extend(_wave_locator_errors(root))
     except (OSError, ValueError, IndexError, sqlite3.Error) as error:
         errors.append(str(error))
     return Report(coverage=coverage, errors=errors)

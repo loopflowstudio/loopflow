@@ -457,7 +457,7 @@ fn ensure_run_context(
     }
 
     let main_repo = main_repo_root(repo_root).ok();
-    let attribution = crate::engine::wave_context::run_attribution();
+    let attribution = crate::engine::wave_context::run_attribution(main_repo.as_deref());
     let wave_name = attribution.wave;
     if let Some(failure) = attribution.failure.as_deref() {
         debug!(
@@ -1141,7 +1141,7 @@ mod tests {
         std::env::set_var(crate::engine::wave_context::WAVE_ID_ENV, stale_id.as_str());
 
         // `with_runtime` resolves once and records wave + failure; mirror that.
-        let attribution = crate::engine::wave_context::run_attribution();
+        let attribution = crate::engine::wave_context::run_attribution(Some(&worktree));
         assert_eq!(
             attribution.wave, None,
             "stale identity attributes to no wave"

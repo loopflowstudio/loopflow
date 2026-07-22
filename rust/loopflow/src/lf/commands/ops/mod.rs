@@ -526,13 +526,13 @@ pub fn run_pm(cmd: &PmCommand) -> Result<()> {
     let progress = &CliProgress;
     let repo_root = find_repo_root()?;
     // The one ambient-Wave rule for every PM arm: `--wave` wins, else
-    // `LF_WAVE_ID` (durable UUID → registry name, hand-set name as fallback).
+    // `LF_WAVE_ID` (durable UUID or repository-scoped registered name).
     // `NoContext` stays `None` so a bare command keeps its "all waves" / "pass
     // --wave" behavior outside a managed process; a stale id is a loud error.
     let ambient_wave = |explicit: Option<&str>| -> Result<Option<String>> {
         use crate::engine::wave_context::WaveResolveError;
-        match crate::engine::wave_context::resolve_managed_wave_name_sync(explicit) {
-            Ok(name) => Ok(Some(name)),
+        match crate::engine::wave_context::resolve_managed_wave_sync(Some(&repo_root), explicit) {
+            Ok(wave) => Ok(Some(wave.name().to_string())),
             Err(WaveResolveError::NoContext) => Ok(None),
             Err(other) => Err(other.into()),
         }
@@ -1106,17 +1106,22 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             flow,
             schedule,
         } => {
+            let repo_root = find_repo_root()?;
             // The one ambient-Wave rule, like every PM arm: `--wave` wins, else
-            // `LF_WAVE_ID` (UUID → registry name, hand-set name as fallback). A
+            // `LF_WAVE_ID` (UUID or repository-scoped registered name). A
             // scheduled invocation needs a concrete wave, so `NoContext` is the
             // familiar "pass --wave" error.
-            let wave = crate::engine::wave_context::resolve_managed_wave_name_sync(wave.as_deref())
-                .map_err(|err| match err {
-                    crate::engine::wave_context::WaveResolveError::NoContext => {
-                        anyhow!("cannot determine wave; pass --wave <name>")
-                    }
-                    other => other.into(),
-                })?;
+            let wave = crate::engine::wave_context::resolve_managed_wave_sync(
+                Some(&repo_root),
+                wave.as_deref(),
+            )
+            .map(|wave| wave.name().to_string())
+            .map_err(|err| match err {
+                crate::engine::wave_context::WaveResolveError::NoContext => {
+                    anyhow!("cannot determine wave; pass --wave <name>")
+                }
+                other => other.into(),
+            })?;
             require_release_cron_binary()?;
             let authority = cron_authority(&wave)?;
             ensure_cron_placement(&wave, &authority)?;
@@ -1340,14 +1345,18 @@ struct CronAuthority {
 }
 
 fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
+    let repo_root = find_repo_root()?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::open_registry_for_authority()
             .await
             .map_err(cron_registry_error)?;
-        let wave = store
-            .get_wave_by_name(wave_name)
-            .await?
-            .ok_or_else(|| anyhow!("Wave '{wave_name}' was not found in the local registry"))?;
+        let wave = crate::engine::wave_context::resolve_managed_wave(
+            Some(&store),
+            Some(&repo_root),
+            Some(wave_name),
+            None,
+        )
+        .await?;
         let placement = store
             .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
             .await?;

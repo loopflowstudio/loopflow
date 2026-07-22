@@ -745,7 +745,7 @@ pub fn task_start(
         .map_err(|error| task_error(error.to_string()))?;
     let project =
         crate::ops::task_pm::resolve_project(&main, project_id, crate::ops::pm::PmRefresh::Auto)?;
-    crate::ops::project::require_registered_wave(&project.snapshot.wave)
+    crate::ops::project::require_registered_wave(&main, &project.snapshot.wave)
         .map_err(|error| task_error(error.to_string()))?;
     let project_flows = project
         .project

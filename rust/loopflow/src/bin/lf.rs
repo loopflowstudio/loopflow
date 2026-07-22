@@ -429,7 +429,7 @@ fn with_runtime<T>(
     command: &[String],
     run: impl FnOnce() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    let attribution = loopflow::engine::wave_context::run_attribution();
+    let attribution = loopflow::engine::wave_context::run_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
             error = failure,
@@ -1341,9 +1341,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Project {
                 cmd: ProjectCommand::Promote { slug, wave },
             }) => in_repo_runtime(&args, |repo| {
-                let parent =
-                    loopflow::engine::wave_context::resolve_managed_wave_name_sync(wave.as_deref())
-                        .map_err(|err| match err {
+                let parent = loopflow::engine::wave_context::resolve_managed_wave_sync(
+                    Some(repo),
+                    wave.as_deref(),
+                )
+                .map(|wave| wave.name().to_string())
+                .map_err(|err| match err {
                             loopflow::engine::wave_context::WaveResolveError::NoContext => {
                                 anyhow::anyhow!(
                                     "cannot determine parent wave; pass --wave <name>"
@@ -1372,7 +1375,7 @@ fn main() -> anyhow::Result<()> {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::invocation::run(cmd))
             }
             Some(Commands::Work { cmd }) => {
-                in_repo_runtime(&args, |_| loopflow::lf::commands::work::run(cmd))
+                in_repo_runtime(&args, |repo| loopflow::lf::commands::work::run(cmd, repo))
             }
             Some(Commands::WorkRunner { kind, work_id }) => {
                 let work = match kind.as_str() {

@@ -424,7 +424,7 @@ mod tests {
     use crate::durable::{Containment, HomeId, RunAdvance, RunState, RunTrigger, WorkRef};
     use crate::id::WaveId;
     use crate::store::{open_store, StorageConfig};
-    use crate::wave::Wave;
+    use crate::wave::{Wave, WaveLocator};
 
     use super::{waves_for_home, WaveHost, WaveStartState};
 
@@ -466,10 +466,11 @@ mod tests {
                 .expect("open store"),
         );
         let local = store.local_home().await.expect("read local Home");
+        let locator = WaveLocator::discover(&repo, "product").expect("discover Wave locator");
         let wave = Wave::new(
             WaveId::new(),
             "product".to_string(),
-            repo.display().to_string(),
+            locator.repo().to_string(),
         );
         store.create_wave(&wave).await.expect("create Wave");
         let work = WorkRef::Wave(wave.id().clone());
@@ -540,7 +541,7 @@ mod tests {
             .await
             .expect("observe remote Home");
         let remote_wave = store
-            .get_wave_by_name("remote-placement")
+            .get_wave_at(&crate::wave::WaveLocator::discover(&repo, "remote-placement").unwrap())
             .await
             .expect("read remote Wave")
             .expect("remote Wave exists");
@@ -615,10 +616,11 @@ mod tests {
             ),
         )
         .expect("write Wave goal");
+        let locator = WaveLocator::discover(&repo, "product").expect("discover Wave locator");
         let wave = Wave::new(
             WaveId::new(),
             "product".to_string(),
-            repo.display().to_string(),
+            locator.repo().to_string(),
         );
         store.create_wave(&wave).await.expect("create Wave");
         let host = WaveHost::new(local.id, store, None);

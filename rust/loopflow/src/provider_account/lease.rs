@@ -1406,9 +1406,13 @@ mod tests {
         let temp = tempdir().unwrap();
         let _home = RestoreEnv::capture("LF_HOME");
         let _database = RestoreEnv::capture("LF_DB_PATH");
+        let _control_home = RestoreEnv::capture("LF_CONTROL_HOME");
+        let _control_database = RestoreEnv::capture("LF_CONTROL_DB_PATH");
         let _lease = RestoreEnv::capture(ACCOUNT_LEASE_ENV);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_DB_PATH");
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(ACCOUNT_LEASE_ENV);
 
         let store = Arc::new(
@@ -1470,6 +1474,8 @@ mod tests {
         let temp = tempdir().unwrap();
         let _home = RestoreEnv::capture("LF_HOME");
         let _database = RestoreEnv::capture("LF_DB_PATH");
+        let _control_home = RestoreEnv::capture("LF_CONTROL_HOME");
+        let _control_database = RestoreEnv::capture("LF_CONTROL_DB_PATH");
         let _lease = RestoreEnv::capture(ACCOUNT_LEASE_ENV);
         let _selection = RestoreEnv::capture(ACCOUNT_SELECTION_ENV);
 
@@ -1477,6 +1483,8 @@ mod tests {
         let target_database = target_home.join("loopflow.db");
         std::env::set_var("LF_HOME", &target_home);
         std::env::set_var("LF_DB_PATH", &target_database);
+        std::env::set_var("LF_CONTROL_HOME", &target_home);
+        std::env::set_var("LF_CONTROL_DB_PATH", &target_database);
         std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::remove_var(ACCOUNT_SELECTION_ENV);
         let target_store = Arc::new(

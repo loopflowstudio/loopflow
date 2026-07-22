@@ -1486,8 +1486,16 @@ mod account_first_tests {
             permissions.set_mode(0o755);
             fs::set_permissions(&claude, permissions).unwrap();
         }
-        let _restore = EnvRestore::capture(&["LF_HOME", "PATH", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            "PATH",
+            lease::ACCOUNT_LEASE_ENV,
+        ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
             "PATH",
@@ -1532,8 +1540,15 @@ mod account_first_tests {
     async fn hard_limit_moves_the_route_to_the_next_account() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            lease::ACCOUNT_LEASE_ENV,
+        ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))
@@ -1706,8 +1721,15 @@ mod account_first_tests {
     async fn missing_routes_are_unmanaged_and_unusable_routes_fail() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            lease::ACCOUNT_LEASE_ENV,
+        ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
 
         assert!(resolve_provider_account(Provider::Claude, None)
@@ -1753,8 +1775,15 @@ mod account_first_tests {
     async fn accounts_form_an_implicit_route_when_no_route_is_configured() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&[
+            "LF_HOME",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            lease::ACCOUNT_LEASE_ENV,
+        ]);
         std::env::set_var("LF_HOME", temp.path());
+        std::env::set_var("LF_CONTROL_HOME", temp.path());
+        std::env::remove_var("LF_CONTROL_DB_PATH");
         std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             open_store(&StorageConfig::sqlite(temp.path().join("loopflow.db")))

@@ -10,6 +10,7 @@ use loopflow::child::ObservationRecipient;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::project::{Project, ProjectEventKind, ProjectId};
 use loopflow::store::{open_store, StorageConfig};
+use loopflow::wave::WaveLocator;
 use time::OffsetDateTime;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -171,13 +172,15 @@ async fn supported_wave_starts_reach_bounded_live_or_rolled_back_states() {
         .await
         .expect("open fresh Home registry");
     let local = store.local_home().await.expect("read Home");
+    let good_locator = WaveLocator::discover(&repo, "good").expect("locate good Wave");
     let good = store
-        .get_wave_by_name("good")
+        .get_wave_at(&good_locator)
         .await
         .expect("read good Wave")
         .expect("good Wave is registered");
+    let broken_locator = WaveLocator::discover(&repo, "broken").expect("locate broken Wave");
     assert!(store
-        .get_wave_by_name("broken")
+        .get_wave_at(&broken_locator)
         .await
         .expect("read broken Wave")
         .is_none());

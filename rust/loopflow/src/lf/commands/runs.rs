@@ -1105,12 +1105,21 @@ pub struct ExecLedgerEntry {
 }
 
 /// The skill runs one Wave produced, newest first.
-pub(crate) fn wave_runs(wave: &str) -> Result<(Vec<SkillRunEntry>, bool)> {
-    collect_runs(WorkFilter {
-        wave: Some(wave),
-        project: None,
-        task: None,
-    })
+pub(crate) fn wave_runs(wave_id: &crate::id::WaveId) -> Result<(Vec<SkillRunEntry>, bool)> {
+    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
+    let store = open_ledger().map_err(|err| anyhow!("run ledger unavailable: {err}"))?;
+    let events = store
+        .list_run_events_since(since)
+        .map_err(|err| anyhow!("failed to read run ledger: {err}"))?;
+    let invocations = store
+        .agent_invocations_for_wave_since(wave_id, since)
+        .map_err(|err| anyhow!("failed to read skill invocations: {err}"))?
+        .into_iter()
+        .filter(|invocation| invocation.skill.is_some())
+        .collect::<Vec<_>>();
+    let mut runs = summarize_filtered_runs(&store, events, invocations)?;
+    let truncated = cap_runs(&mut runs);
+    Ok((runs, truncated))
 }
 
 fn sort_runs(runs: &mut [SkillRunEntry]) {

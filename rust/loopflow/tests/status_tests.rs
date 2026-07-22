@@ -7,7 +7,9 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::child::ChildRef;
-use loopflow::durable::{Containment, RunAdvance, RunTrigger};
+use loopflow::durable::{
+    Containment, ContainmentObservation, RunAdvance, RunTrigger, StopCause, WorkRef,
+};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectId};
@@ -17,22 +19,46 @@ use loopflow::task::{
     Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
     TaskPrId,
 };
-use loopflow::trace::{AgentInvocationRow, AgentTurnRow};
+use loopflow::trace::{AgentInvocationRow, AgentTurnRow, SupervisedInvocation};
 use loopflow::wave::Wave;
 use time::OffsetDateTime;
+
+const INVOCATION_ID: &str = "invocation_00000000000000000000000000000001";
 
 /// A machine home holding one wave with lookup noise, a flow, and a skill. The
 /// registry and the ledgers are the same database.
 fn seed(home: &Path, wave_name: &str) -> Wave {
     std::fs::create_dir_all(home).expect("home");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("repo");
     let db = home.join("loopflow.db");
     let store = SqliteStore::new(&db).expect("open store");
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
-        home.join("repo").display().to_string(),
+        repo.display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
+    let work = WorkRef::Wave(wave.id().clone());
+    let (_, lease) = store
+        .reserve_run(&work, &RunTrigger::User)
+        .expect("reserve Run");
+    store
+        .advance_run(
+            &lease,
+            &RunAdvance::RunStarting {
+                containment: Containment::ProcessGroup { id: 1 },
+                cwd: repo.clone(),
+            },
+        )
+        .expect("start Run");
+    store
+        .stop_run(
+            &lease,
+            &StopCause::Requested,
+            ContainmentObservation::Absent,
+        )
+        .expect("stop Run");
 
     let now = chrono::Utc::now().timestamp();
     let event = |seq: i64, ts: i64, event: &str| RunEventRow {
@@ -92,7 +118,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         .expect("seed resident end");
 
     let invocation = AgentInvocationRow {
-        id: "invocation-wave-mutate".to_string(),
+        id: INVOCATION_ID.to_string(),
         run_id: "run-resident".to_string(),
         answer_ask_id: None,
         process_id: "proc-resident".to_string(),
@@ -118,7 +144,13 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         provider_session_path: None,
         conversation_event_count: 2,
         conversation_bytes: 10,
-        supervision: None,
+        supervision: Some(SupervisedInvocation {
+            invocation_id: loopflow::durable::AgentInvocationId::parse(INVOCATION_ID)
+                .expect("invocation id"),
+            supervising_run_id: lease.run_id,
+            account_id: None,
+            resume_token: None,
+        }),
     };
     let turn = AgentTurnRow {
         id: "turn-wave-mutate".to_string(),
@@ -171,7 +203,8 @@ fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> ser
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_WAVE_ID");
+        .env_remove("LF_WAVE_ID")
+        .current_dir(home.join("repo"));
     if let Some(id) = ambient_wave_id {
         command.env("LF_WAVE_ID", id);
     }
@@ -191,6 +224,9 @@ fn status_human(home: &Path, wave: &str) -> String {
         .args(["status", wave])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .current_dir(home.join("repo"))
         .output()
         .expect("lf status runs");
     assert!(
@@ -210,7 +246,8 @@ fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
         .env_remove("LF_CONTROL_HOME")
         .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_WAVE_ID");
+        .env_remove("LF_WAVE_ID")
+        .current_dir(home.join("repo"));
     prepend_test_bin(&mut command, home);
     let output = command.output().expect("lf roadmap runs");
     assert!(
@@ -410,11 +447,7 @@ fn seed_stale_project_work(home: &Path) {
     });
     store
         .put_pm_snapshot(&PmSnapshotRow {
-            repo: std::fs::canonicalize(repo)
-                .expect("canonical repo")
-                .display()
-                .to_string(),
-            wave: "product".to_string(),
+            wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
@@ -428,6 +461,8 @@ fn execs_json(home: &Path) -> serde_json::Value {
         .args(["execs", "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf execs runs");
     assert!(
@@ -443,6 +478,8 @@ fn runs_json(home: &Path) -> serde_json::Value {
         .args(["runs", "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf runs runs");
     assert!(
@@ -460,6 +497,8 @@ fn runs_json_filtered(home: &Path, filter: &[&str]) -> serde_json::Value {
         .arg("--json")
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf runs runs");
     assert!(
@@ -475,6 +514,8 @@ fn trace_json(home: &Path, exec_id: &str) -> serde_json::Value {
         .args(["trace", exec_id, "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
         .output()
         .expect("lf trace runs");
     assert!(
@@ -545,7 +586,7 @@ fn runs_are_skill_invocations_with_context_and_token_evidence() {
     let runs = runs.as_array().expect("run array");
     assert_eq!(runs.len(), 1);
     let run = &runs[0];
-    assert_eq!(run["id"], "invocation-wave-mutate");
+    assert_eq!(run["id"], INVOCATION_ID);
     assert_eq!(run["trace_id"], "run-resident");
     assert_eq!(run["exec_id"], "proc-resident");
     assert_eq!(run["skill"], "wave/mutate");
@@ -612,7 +653,7 @@ fn trace_opens_from_the_invocation_id_lf_runs_prints() {
     let home = tempfile::tempdir().expect("tempdir");
     seed(home.path(), "audit-trace-invocation");
 
-    let trace = trace_json(home.path(), "invocation-wave-mutate");
+    let trace = trace_json(home.path(), INVOCATION_ID);
     assert_eq!(trace["trace_id"], "run-resident");
     let spans = trace["spans"].as_array().expect("span array");
     assert!(spans
@@ -641,6 +682,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let home = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(home.path()).expect("home");
     let store = SqliteStore::new(&home.path().join("loopflow.db")).expect("open store");
+    std::fs::create_dir_all(home.path().join("repo")).expect("repo");
     let wave = Wave::new(
         WaveId::new(),
         "audit-c".to_string(),

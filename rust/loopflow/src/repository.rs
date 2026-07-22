@@ -1,9 +1,53 @@
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+
+/// The Home-local identity of a repository checkout.
+///
+/// Linked worktrees collapse to their main checkout and symlink spellings
+/// collapse to one absolute path. Provider repository identity remains
+/// [`RepoId`]; this type owns local Wave addressing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(transparent)]
+pub struct CanonicalRepo(PathBuf);
+
+#[derive(Debug, thiserror::Error)]
+#[error("cannot canonicalize repository {path}: {message}")]
+pub struct CanonicalRepoError {
+    path: PathBuf,
+    message: String,
+}
+
+impl CanonicalRepo {
+    pub fn discover(path: &Path) -> Result<Self, CanonicalRepoError> {
+        let main =
+            crate::engine::worktrees::main_repo_root(path).unwrap_or_else(|_| path.to_path_buf());
+        let canonical = main.canonicalize().map_err(|error| CanonicalRepoError {
+            path: main,
+            message: error.to_string(),
+        })?;
+        if !canonical.is_dir() {
+            return Err(CanonicalRepoError {
+                path: canonical,
+                message: "repository root is not a directory".to_string(),
+            });
+        }
+        Ok(Self(canonical))
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl fmt::Display for CanonicalRepo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.display().fmt(formatter)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct RepoId(String);

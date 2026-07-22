@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::engine::wave_context::{
-    read_endpoint_pointer, resolve_managed_wave_name, wave_origin, WaveResolveError,
+    read_endpoint_pointer, resolve_managed_wave, wave_origin, WaveResolveError,
 };
 use crate::lf::commands::thread;
 use crate::lf::commands::util::{find_repo_root, message_text};
@@ -437,21 +437,20 @@ pub(crate) async fn resolve_target(
     // is the ambient wave (default or `--parent`); an explicit `--wave` always
     // wins, so its stale/mis-set env is never consulted.
     let mut own_row: Option<Wave> = None;
-    let mut own_name: Option<String> = None;
     if args.wave.is_none() {
         if let Some(id) = env_wave_id {
-            // The shared ambient-Wave rule: `LF_WAVE_ID` as a durable UUID
-            // maps to its registry name, else a hand-set name is used
-            // directly. A UUID the registry has never seen is a loud
-            // `StaleIdentity` error, never a silent drop.
-            let name = resolve_managed_wave_name(store.map(|store| &**store), None, Some(id))
-                .await
-                .map_err(|err| anyhow!("{err}"))?;
-            own_row = match store {
-                Some(store) => store.get_wave_by_name(&name).await?,
-                None => None,
-            };
-            own_name = Some(name);
+            // The shared ambient-Wave rule: a durable UUID maps through the
+            // registry; a hand-set name resolves inside this repository. Stale
+            // context is a loud error, never a silent drop.
+            let row = resolve_managed_wave(
+                store.map(|store| &**store),
+                main_repo.as_deref(),
+                None,
+                Some(id),
+            )
+            .await
+            .map_err(|err| anyhow!("{err}"))?;
+            own_row = Some(row);
         }
     }
 
@@ -463,11 +462,9 @@ pub(crate) async fn resolve_target(
                 WaveResolveError::Registry("no wave registry on this machine".to_string())
             )
         })?;
-        let row = store
-            .get_wave_by_name(&name)
+        let row = resolve_managed_wave(Some(&**store), main_repo.as_deref(), Some(&name), None)
             .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-            .ok_or_else(|| anyhow!("{}", WaveResolveError::UnknownExplicit(name.clone())))?;
+            .map_err(|err| anyhow!("{err}"))?;
         (Some(row), name)
     } else if args.parent {
         let store = store.ok_or_else(|| {
@@ -489,13 +486,7 @@ pub(crate) async fn resolve_target(
                 let name = row.name().to_string();
                 (Some(row), name)
             }
-            None => {
-                // No wave context anywhere: the publish has no subscriber.
-                let Some(name) = own_name.clone() else {
-                    return Ok(None);
-                };
-                (None, name)
-            }
+            None => return Ok(None),
         }
     };
 

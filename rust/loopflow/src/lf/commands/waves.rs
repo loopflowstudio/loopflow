@@ -548,7 +548,7 @@ pub fn ls(json: bool) -> Result<()> {
         for wave in waves {
             snapshots.push(snapshot_wave(&store, &wave).await?);
         }
-        snapshots.sort_by(|a, b| a.name.cmp(&b.name));
+        snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
         if json {
             println!("{}", serde_json::to_string(&snapshots)?);
         } else {
@@ -610,7 +610,7 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let home_runtime =
             crate::ops::home::probe_home(wave.name(), &snapshot.home, Path::new(wave.repo())).await;
         let status = WaveDetailSnapshot {
-            runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.name())),
+            runs: Evidence::from_result(crate::lf::commands::runs::wave_runs(wave.id())),
             attention,
             wave: snapshot,
             loop_state,
@@ -649,22 +649,20 @@ pub fn roadmap(wave: Option<&str>, json: bool) -> Result<()> {
             return Ok(());
         };
         // The ONE ambient-Wave rule: `--wave` wins, else `LF_WAVE_ID` (durable
-        // UUID → registry name, hand-set name as fallback). Roadmap is the one
+        // UUID or repository-scoped registered name). Roadmap is the one
         // command where `NoContext` is a valid default — it lists every wave.
         // A stale UUID is a loud error, never a silent drop to global scope.
         let env_wave_id = std::env::var(crate::engine::wave_context::WAVE_ID_ENV).ok();
-        let waves = match crate::engine::wave_context::resolve_managed_wave_name(
+        let repo = crate::engine::repo::find_repo_root().ok();
+        let waves = match crate::engine::wave_context::resolve_managed_wave(
             Some(&store),
+            repo.as_deref(),
             wave,
             env_wave_id.as_deref(),
         )
         .await
         {
-            Ok(name) => vec![store
-                .get_wave_by_name(&name)
-                .await
-                .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-                .ok_or_else(|| anyhow!("wave '{name}' is not in the registry"))?],
+            Ok(wave) => vec![wave],
             Err(crate::engine::wave_context::WaveResolveError::NoContext) => store
                 .list_waves(None)
                 .await
@@ -872,22 +870,18 @@ fn project_section(project: &ProjectDetailSnapshot, liveness: Liveness) -> Roadm
 /// The wave `lf status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
-    // One shared rule for `--wave` and ambient `LF_WAVE_ID` (durable UUID
-    // first, hand-set name as an intentional fallback). Status needs the row,
-    // so it resolves the name, then requires a registry row for it — a wave
-    // with no row has no runs to report.
-    let name = crate::engine::wave_context::resolve_managed_wave_name(
+    // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
+    // repository-scoped registered name. Status consumes the resolved row
+    // directly, so no second lookup can cross repositories.
+    let repo = crate::engine::repo::find_repo_root().ok();
+    crate::engine::wave_context::resolve_managed_wave(
         Some(&**store),
+        repo.as_deref(),
         requested,
         ambient_wave().as_deref(),
     )
     .await
-    .map_err(|err| anyhow!("{err}"))?;
-    store
-        .get_wave_by_name(&name)
-        .await
-        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?
-        .ok_or_else(|| anyhow!("wave '{name}' is not in this machine's registry"))
+    .map_err(|err| anyhow!("{err}"))
 }
 
 /// One tmux reading for the whole command. `lf status` checks a handful of tmux
@@ -1215,11 +1209,8 @@ async fn child_run_alive(
 /// tell it apart from "the plan is empty" keeps the `Option`; `lf status`
 /// flattens it to an empty plan, `lf roadmap` renders it as unavailable.
 async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmSnapshot>> {
-    let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-        .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
-    let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
     let Some(row) = store
-        .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().to_string())
+        .pm_snapshot(wave.id())
         .await
         .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
     else {
@@ -1244,7 +1235,7 @@ async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()
             .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let Some(row) = store
-            .pm_snapshot(repo.to_string_lossy().into_owned(), wave.name().to_string())
+            .pm_snapshot(wave.id())
             .await
             .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
         else {
@@ -2029,10 +2020,11 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {status:<8}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  ENDPOINT{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  ENDPOINT{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
+        repo = "REPOSITORY",
         status = "STATUS",
         turns = "TURNS",
         live = "LIVE",
@@ -2042,8 +2034,9 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {status:<8}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
+            "{name:<16}  {repo:<28}  {status:<8}  {turns:<7}  {live:<5}  {tasks:>5}  {projects:>8}  {home:<16}  {endpoint}",
             name = truncate(&wave.name, 16),
+            repo = truncate_start(&wave.repo, 28),
             status = work_status_label(&wave.status),
             turns = if wave.paused { "paused" } else { "enabled" },
             live = if wave.live { "yes" } else { "no" },
@@ -2507,6 +2500,18 @@ fn truncate(value: &str, width: usize) -> String {
     format!("{head}\u{2026}")
 }
 
+fn truncate_start(value: &str, width: usize) -> String {
+    let length = value.chars().count();
+    if length <= width {
+        return value.to_string();
+    }
+    let tail = value
+        .chars()
+        .skip(length.saturating_sub(width.saturating_sub(1)))
+        .collect::<String>();
+    format!("\u{2026}{tail}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -2514,13 +2519,22 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{
-        derive_task_attention, next_move_for_task, LocalProgressEvidence,
+        derive_task_attention, next_move_for_task, truncate_start, LocalProgressEvidence,
         LocalProgressEvidenceState, NextMove, NextMoveOwner, TaskAttentionEvidence,
         TaskAttentionLevel, TaskProcessEvidence, TaskProcessEvidenceState, TaskRuntimeSnapshot,
     };
     use crate::child::{observe, BodyEvidence, BodyIntent};
     use crate::durable::WorkStatus;
     use crate::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
+
+    #[test]
+    fn repository_columns_keep_the_distinguishing_path_tail() {
+        assert_eq!(
+            truncate_start("/long/shared/prefix/alpha", 10),
+            "\u{2026}fix/alpha"
+        );
+        assert_eq!(truncate_start("beta", 10), "beta");
+    }
 
     #[test]
     fn only_a_durable_ask_marks_a_running_task_as_waiting_on_the_user() {

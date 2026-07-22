@@ -674,9 +674,8 @@ pub enum Commands {
 pub enum RunsCommand {
     /// Tombstone terminal captures whose conversation artifacts are gone, and
     /// finalize orphaned `capturing` invocations. Dry-run by default; `--apply`
-    /// writes. A red `lf doctor` capture check means un-acknowledged loss —
-    /// this is the explicit acknowledgment that turns historical loss green
-    /// while leaving fresh loss red.
+    /// writes. This repairs capture lifecycle state and may remove unclaimed
+    /// artifacts; `lf doctor` observes recovery without requiring reconciliation.
     Reconcile {
         /// Apply the tombstone/finalize transitions (default: dry-run report)
         #[arg(long)]

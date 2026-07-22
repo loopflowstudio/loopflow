@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::anyhow;
 
-use crate::engine::wave_context::resolve_managed_wave_name_sync;
+use crate::engine::wave_context::resolve_managed_wave_sync;
 use crate::engine::wave_home::{HomeActionDto, HomeRuntimeDto, HomeState};
 use crate::lf::HomeCommand;
 
@@ -70,17 +70,18 @@ fn observe_cmd(home_id: &crate::durable::HomeId, route: &str, json: bool) -> any
     Ok(())
 }
 
-fn probe_cmd(wave: Option<&str>, json: bool, _repo: &Path) -> anyhow::Result<()> {
-    let name = resolve_managed_wave_name_sync(wave).map_err(|err| anyhow!("{err}"))?;
+fn probe_cmd(wave: Option<&str>, json: bool, repo: &Path) -> anyhow::Result<()> {
+    let selected = resolve_managed_wave_sync(Some(repo), wave).map_err(|err| anyhow!("{err}"))?;
+    let wave_id = selected.id().clone();
     let rt = tokio::runtime::Runtime::new()?;
-    let runtime = rt.block_on(async {
+    let (wave, runtime) = rt.block_on(async {
         let store = crate::store::open_existing_store()
             .await
             .ok_or_else(|| anyhow!("lf home probe needs an initialized local store"))?;
         let wave = store
-            .get_wave_by_name(&name)
+            .get_wave(&wave_id)
             .await?
-            .ok_or_else(|| anyhow!("Wave '{name}' was not found"))?;
+            .ok_or_else(|| anyhow!("Wave {wave_id} was not found"))?;
         let placement = store
             .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
             .await?;
@@ -88,14 +89,14 @@ fn probe_cmd(wave: Option<&str>, json: bool, _repo: &Path) -> anyhow::Result<()>
             .home_by_id(&placement.home_id)
             .await?
             .ok_or_else(|| anyhow!("Home {} was not found", placement.home_id))?;
-        Ok::<_, anyhow::Error>(
-            crate::ops::home::probe_home(&name, &home, Path::new(wave.repo())).await,
-        )
+        let runtime =
+            crate::ops::home::probe_home(wave.name(), &home, Path::new(wave.repo())).await;
+        Ok::<_, anyhow::Error>((wave, runtime))
     })?;
     if json {
         println!("{}", serde_json::to_string(&runtime)?);
     } else {
-        print_runtime(&name, &runtime);
+        print_runtime(wave.name(), &runtime);
     }
     Ok(())
 }
@@ -114,15 +115,16 @@ pub fn start(waves: &[String], wave_ids: &[String], json: bool, repo: &Path) -> 
     Ok(())
 }
 
-pub fn stop(name: &str, _repo: &Path) -> anyhow::Result<()> {
+pub fn stop(name: &str, repo: &Path) -> anyhow::Result<()> {
     let name = crate::ops::util::normalize_wave_name(name)
         .ok_or_else(|| anyhow!("invalid wave name: '{name}'"))?;
+    let locator = crate::wave::WaveLocator::discover(repo, &name)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let stopped = runtime.block_on(async {
         let Some(store) = crate::store::open_existing_store().await else {
             return Ok::<_, anyhow::Error>(None);
         };
-        let Some(wave) = store.get_wave_by_name(&name).await? else {
+        let Some(wave) = store.get_wave_at(&locator).await? else {
             return Ok(None);
         };
         let local = store.local_home().await?;
@@ -148,8 +150,7 @@ async fn start_inner(
     );
     let local = store.local_home().await?;
     validate_expected_home(&local.id)?;
-    let repo =
-        crate::engine::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
+    let repo = crate::repository::CanonicalRepo::discover(repo)?;
     let wave_ids = parse_wave_ids(raw_wave_ids)?;
     let normalized_names = names
         .iter()
@@ -169,17 +170,17 @@ async fn start_inner(
             return Err(anyhow!("--wave-id names unselected Wave '{name}'"));
         }
     }
-    crate::lfd::ensure(&local.id, &repo).await?;
+    crate::lfd::ensure(&local.id, repo.as_path()).await?;
     let selected = if names.is_empty() {
         if !wave_ids.is_empty() {
             return Err(anyhow!("--wave-id requires explicit Wave names"));
         }
-        let repo_name = repo.display().to_string();
+        let repo_name = repo.to_string();
         let known = store.list_waves(Some(&repo_name)).await?;
         if known.is_empty() {
             return Err(anyhow!(
                 "no Waves found in {}; create one with `lf wave create <name>`",
-                repo.display()
+                repo
             ));
         }
         crate::wave_host::waves_for_home(&store, &local.id, Some(&repo_name))
@@ -194,7 +195,8 @@ async fn start_inner(
     } else {
         let mut candidates = Vec::with_capacity(normalized_names.len());
         for name in &normalized_names {
-            let existing_wave = store.get_wave_by_name(name).await?;
+            let locator = crate::wave::WaveLocator::new(repo.clone(), name)?;
+            let existing_wave = store.get_wave_at(&locator).await?;
             let prior_home = match existing_wave.as_ref() {
                 Some(wave) => Some(
                     store
@@ -211,9 +213,15 @@ async fn start_inner(
             let created = existing_wave.is_none();
             let wave_result = match wave_ids.get(&name) {
                 Some(id) => {
-                    crate::wave::registry::ensure_wave_row_with_id(&store, &repo, &name, id).await
+                    crate::wave::registry::ensure_wave_row_with_id(
+                        &store,
+                        repo.as_path(),
+                        &name,
+                        id,
+                    )
+                    .await
                 }
-                None => crate::wave::registry::ensure_wave_row(&store, &repo, &name).await,
+                None => crate::wave::registry::ensure_wave_row(&store, repo.as_path(), &name).await,
             };
             let wave = match wave_result {
                 Ok(wave) => wave,
@@ -310,11 +318,10 @@ async fn start_inner(
     if !failures.is_empty() {
         return Err(anyhow!(failures.join("; ")));
     }
-
     let mut responses = Vec::with_capacity(selected.len());
     for selection in &selected {
         let wave = store
-            .get_wave_by_name(selection.wave.name())
+            .get_wave(selection.wave.id())
             .await?
             .ok_or_else(|| anyhow!("Wave '{}' disappeared after start", selection.wave.name()))?;
         let snapshot = crate::lf::commands::waves::snapshot_wave(&store, &wave).await?;

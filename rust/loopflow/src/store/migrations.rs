@@ -1614,6 +1614,7 @@ mod tests {
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
+    const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
 
     fn _draft_is_canonical(name: &str) -> bool {
         let marker = format!("-- draft: {name}");
@@ -1940,6 +1941,151 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         conn.execute_batch(&sql[body_start..body_end]).unwrap();
+    }
+
+    fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
+        if _draft_is_canonical(name) {
+            apply_before_draft(conn, name);
+        } else {
+            apply_set(conn, MIGRATIONS).unwrap();
+        }
+    }
+
+    fn current_draft_sql(name: &str) -> String {
+        if !_draft_is_canonical(name) {
+            return migration_sql_for_test(name);
+        }
+        let (_, sql, draft_offset) = draft_location(name);
+        let body_start = sql[draft_offset..]
+            .find('\n')
+            .map(|offset| draft_offset + offset + 1)
+            .unwrap_or(sql.len());
+        let body_end = sql[body_start..]
+            .find("\n-- draft: ")
+            .map(|offset| body_start + offset)
+            .unwrap_or(sql.len());
+        sql[body_start..body_end].to_string()
+    }
+
+    #[test]
+    fn repository_owned_waves_preserve_uuid_projection_and_allow_duplicate_slugs() {
+        let conn = open();
+        apply_before_current_draft(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pm_snapshots (repo, wave, provider, initiative, synced_at, payload)
+             VALUES ('/repo/a', 'infrastructure', 'linear', 'initiative-a', 2, '{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO projects (id, wave_id, external_project_id, created_at)
+             VALUES ('project-a', 'wave-a', 'linear-project-a', 3);
+             INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, created_at)
+             VALUES ('task-a', 'project-a', 'linear-task-a', 'LOO-127', 4);
+             INSERT INTO epochs (
+                 id, number, task_id, state, current_rev, created_at, terminal_at
+             ) VALUES ('epoch-a', 1, 'task-a', 'done', 0, 5, 6);
+             INSERT INTO runs (
+                 id, epoch_id, home_id, state, trigger_json, source_kind,
+                 source_id, created_at, ended_at
+             ) VALUES (
+                 'run-a', 'epoch-a', (SELECT id FROM homes LIMIT 1), 'ended',
+                 '{\"kind\":\"migration\"}', 'task', 'task-a', 5, 6
+             );
+             INSERT INTO work_placements (task_id, home_id, placed_at)
+             VALUES ('task-a', (SELECT id FROM homes LIMIT 1), 4);",
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql(REPOSITORY_OWNED_WAVES_NAME))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-b', 'infrastructure', '/repo/b', 3)",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(
+            conn.query_row(
+                "SELECT wave_id || ':' || initiative FROM pm_snapshots",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "wave-a:initiative-a"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM waves WHERE name = 'infrastructure'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT waves.id || ':' || projects.id || ':' || tasks.id || ':' || runs.id
+                 FROM runs
+                 JOIN epochs ON epochs.id = runs.epoch_id
+                 JOIN tasks ON tasks.id = epochs.task_id
+                 JOIN projects ON projects.id = tasks.project_id
+                 JOIN waves ON waves.id = projects.wave_id
+                 WHERE runs.id = 'run-a'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "wave-a:project-a:task-a:run-a"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM work_placements WHERE task_id = 'task-a'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn repository_owned_waves_abort_on_an_unmatched_pm_projection() {
+        let mut conn = open();
+        apply_before_current_draft(&conn, REPOSITORY_OWNED_WAVES_NAME);
+        conn.execute(
+            "INSERT INTO waves (id, name, repo, created_at) VALUES ('wave-a', 'infrastructure', '/repo/a', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pm_snapshots (repo, wave, provider, initiative, synced_at, payload)
+             VALUES ('/missing', 'infrastructure', 'linear', 'orphan', 2, '{}')",
+            [],
+        )
+        .unwrap();
+
+        let transaction = conn.transaction().unwrap();
+        let error = transaction
+            .execute_batch(&current_draft_sql(REPOSITORY_OWNED_WAVES_NAME))
+            .unwrap_err();
+        assert!(error.to_string().contains("NOT NULL"));
+        transaction.rollback().unwrap();
+
+        assert_eq!(columns(&conn, "pm_snapshots")[..2], ["repo", "wave"]);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
@@ -3019,7 +3165,9 @@ mod tests {
         )
         .unwrap();
 
+        conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
         apply_set(&conn, MIGRATIONS).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
         let stale: String = conn
             .query_row(
                 "SELECT pm_writeback_json FROM tasks WHERE external_issue_id='issue-reopen'",
@@ -3355,9 +3503,10 @@ mod tests {
         );
         assert!(MIGRATIONS.len() > 2, "need a tail beyond the fixture");
 
-        // The generated tail advances it, and applying it again is a no-op.
-        apply_set(&conn, MIGRATIONS).unwrap();
-        apply_set(&conn, MIGRATIONS).unwrap();
+        // The generated tail advances it through the production transaction,
+        // and applying it again is a no-op.
+        apply_sqlite(&conn).unwrap();
+        apply_sqlite(&conn).unwrap();
 
         assert_eq!(applied_versions(&conn).unwrap().len(), MIGRATIONS.len());
         assert_eq!(

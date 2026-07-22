@@ -374,7 +374,7 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
             id: "stale-name",
             wave_id: Some("ghost".to_string()),
             explicit_wave: None,
-            default_expected: Outcome::Resolved,
+            default_expected: Outcome::StaleIdentity,
         },
         Env {
             id: "explicit-unknown",
@@ -397,13 +397,6 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // Creation flows may name the Wave being registered.
     if env.id == "explicit-unknown" && cmd.id == "pm init" {
         return Outcome::Resolved;
-    }
-
-    // Project start now resolves caller authority at the CLI surface before
-    // creating anything. An inherited hand-set name without a registry row is
-    // stale transport evidence, not an explicit target selection.
-    if cmd.id == "project start" && env.id == "stale-name" {
-        return Outcome::StaleIdentity;
     }
 
     if env.id == "absent" {
@@ -505,14 +498,9 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         repo.display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
-    let repo_key = std::fs::canonicalize(repo)
-        .expect("canonicalize repo")
-        .display()
-        .to_string();
     store
         .put_pm_snapshot(&PmSnapshotRow {
-            repo: repo_key,
-            wave: "product".to_string(),
+            wave_id: wave.id().clone(),
             provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
@@ -875,6 +863,12 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
         .env("LF_HOME", &home)
         .env("HOME", &home)
         .env("LF_WAVE_ID", alpha_uuid)
+        .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_HOME")
+        .env_remove("LF_CONTROL_DB_PATH")
+        .env_remove("LF_RUN_CONTEXT")
+        .env_remove("LF_RUN_LEASE")
+        .env_remove("LF_AGENT_INVOCATION_ID")
         .output()
         .expect("run cron add");
 

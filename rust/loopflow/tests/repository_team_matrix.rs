@@ -7,7 +7,7 @@ use loopflow::id::WaveId;
 use loopflow::ops::pm::{canonical_wave_title_path, list_local_waves};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
-use loopflow::wave::Wave;
+use loopflow::wave::{Wave, WaveLocator};
 
 fn git(repo: &Path, args: &[&str]) {
     let output = Command::new("git")
@@ -79,10 +79,13 @@ fn snapshot(
 }
 
 fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, initiative: &str, payload: String) {
+    let registered = store
+        .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
+        .unwrap()
+        .expect("registered Wave");
     store
         .put_pm_snapshot(&PmSnapshotRow {
-            repo: std::fs::canonicalize(repo).unwrap().display().to_string(),
-            wave: wave.to_string(),
+            wave_id: registered.id().clone(),
             provider: "linear".to_string(),
             initiative: initiative.to_string(),
             synced_at: chrono::Utc::now().timestamp(),
@@ -97,8 +100,10 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
+        .env("LF_CONTROL_HOME", home)
         .env("HOME", home)
         .env_remove("LF_DB_PATH")
+        .env_remove("LF_CONTROL_DB_PATH")
         .env_remove("LF_WAVE_ID");
     command
 }
@@ -166,25 +171,33 @@ fn repository_team_matrix() {
 
     let database = home.join("loopflow.db");
     let store = SqliteStore::new(&database).unwrap();
+    let repo_locator = WaveLocator::discover(&repo, "survival").unwrap();
     let survival = Wave::new(
         WaveId::new(),
         "survival".to_string(),
-        repo.display().to_string(),
+        repo_locator.repo().to_string(),
     );
     let infrastructure = Wave::new(
         WaveId::new(),
         "survival/infrastructure".to_string(),
-        repo.display().to_string(),
+        repo_locator.repo().to_string(),
     )
     .with_parent(survival.id().clone());
+    let intelligence = Wave::new(
+        WaveId::new(),
+        "intelligence".to_string(),
+        repo_locator.repo().to_string(),
+    );
     store.create_wave(&survival).unwrap();
     store.create_wave(&infrastructure).unwrap();
+    store.create_wave(&intelligence).unwrap();
     let foreign_repo = tempfile::tempdir().unwrap();
+    let foreign_locator = WaveLocator::discover(foreign_repo.path(), "intelligence").unwrap();
     store
         .create_wave(&Wave::new(
             WaveId::new(),
             "intelligence".to_string(),
-            foreign_repo.path().display().to_string(),
+            foreign_locator.repo().to_string(),
         ))
         .unwrap();
     put_snapshot(
@@ -248,11 +261,15 @@ fn repository_team_matrix() {
     );
     let old_home = std::env::var_os("LF_HOME");
     let old_db = std::env::var_os("LF_DB_PATH");
+    let old_control_home = std::env::var_os("LF_CONTROL_HOME");
+    let old_control_db = std::env::var_os("LF_CONTROL_DB_PATH");
     // SAFETY: this integration binary contains one test; no sibling thread can
     // observe the temporary storage selection.
     unsafe {
         std::env::set_var("LF_HOME", &home);
+        std::env::set_var("LF_CONTROL_HOME", &home);
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var("LF_CONTROL_DB_PATH");
     }
     assert_eq!(
         canonical_wave_title_path(&repo, "survival/infrastructure").unwrap(),
@@ -271,6 +288,14 @@ fn repository_team_matrix() {
         match old_db {
             Some(value) => std::env::set_var("LF_DB_PATH", value),
             None => std::env::remove_var("LF_DB_PATH"),
+        }
+        match old_control_home {
+            Some(value) => std::env::set_var("LF_CONTROL_HOME", value),
+            None => std::env::remove_var("LF_CONTROL_HOME"),
+        }
+        match old_control_db {
+            Some(value) => std::env::set_var("LF_CONTROL_DB_PATH", value),
+            None => std::env::remove_var("LF_CONTROL_DB_PATH"),
         }
     }
 
@@ -308,12 +333,12 @@ fn repository_team_matrix() {
     let control_survival = Wave::new(
         WaveId::new(),
         "survival".to_string(),
-        repo.display().to_string(),
+        repo_locator.repo().to_string(),
     );
     let control_infrastructure = Wave::new(
         WaveId::new(),
         "survival/infrastructure".to_string(),
-        repo.display().to_string(),
+        repo_locator.repo().to_string(),
     )
     .with_parent(control_survival.id().clone());
     control_store.create_wave(&control_survival).unwrap();
@@ -370,7 +395,7 @@ fn repository_team_matrix() {
 
     // Reopening the store preserves the local ancestry and foreign collision.
     let reopened = SqliteStore::new(&database).unwrap();
-    assert_eq!(reopened.list_waves(None).unwrap().len(), 3);
+    assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
     // A duplicated Project/Issue association fails before Work or worktree creation.
     put_snapshot(
@@ -448,11 +473,12 @@ fn repository_team_matrix() {
     git(&legacy_repo, &["add", "."]);
     git(&legacy_repo, &["commit", "-m", "seed legacy fixture"]);
     let legacy_store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let legacy_locator = WaveLocator::discover(&legacy_repo, "product").unwrap();
     legacy_store
         .create_wave(&Wave::new(
             WaveId::new(),
             "product".to_string(),
-            legacy_repo.display().to_string(),
+            legacy_locator.repo().to_string(),
         ))
         .unwrap();
     put_snapshot(

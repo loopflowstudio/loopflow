@@ -373,14 +373,21 @@ async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
     }
     let store = Arc::new(open_store(&storage_config_from_env()?).await?);
     let lease = crate::ops::required_run_lease(&store).await?;
-    let registered = store
-        .get_wave_by_name(wave)
-        .await?
-        .ok_or_else(|| anyhow!("Wave {wave} is absent from the control store"))?;
-    if lease.work != WorkRef::Wave(registered.id().clone()) {
+    let WorkRef::Wave(wave_id) = &lease.work else {
         return Err(anyhow!(
-            "ambient Run {} does not own Wave {wave}",
+            "ambient Run {} does not own Wave Work",
             lease.run_id
+        ));
+    };
+    let registered = store
+        .get_wave(wave_id)
+        .await?
+        .ok_or_else(|| anyhow!("Wave {wave_id} is absent from the control store"))?;
+    if registered.name() != wave {
+        return Err(anyhow!(
+            "ambient Run {} owns Wave '{}', not '{wave}'",
+            lease.run_id,
+            registered.name()
         ));
     }
     Ok(Some(WaveControl {
@@ -2050,13 +2057,15 @@ mod tests {
 
     #[tokio::test]
     async fn one_wake_runs_one_full_wave_flow_then_idles() {
-        let loop_ = boot(Duration::from_secs(600), "echo done").await;
+        let mut loop_ = boot(Duration::from_secs(600), "echo done").await;
 
         loop_
             .runtime
             .deliver(MessageOp::Message, "first wake".into())
             .expect("first wake");
-        wait_for("first Wave flow", || loop_.pass_count() == 3).await;
+        for _ in 0..3 {
+            loop_.next_seed().await;
+        }
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(
             loop_.pass_count(),
@@ -2068,7 +2077,9 @@ mod tests {
             .runtime
             .deliver(MessageOp::Message, "second wake".into())
             .expect("second wake");
-        wait_for("second Wave flow", || loop_.pass_count() == 6).await;
+        for _ in 0..3 {
+            loop_.next_seed().await;
+        }
     }
 
     #[tokio::test]
@@ -2147,12 +2158,12 @@ mod tests {
     /// and the next full Wave iteration drains the whole queue.
     #[tokio::test]
     async fn messages_during_a_pass_coalesce_into_one_boundary_pass() {
-        let loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
+        let mut loop_ = boot(Duration::from_secs(600), "sleep 0.4; echo done").await;
         loop_
             .runtime
             .deliver(MessageOp::Message, "first".into())
             .expect("user turn");
-        wait_for("pass 1 spawned", || loop_.pass_count() == 1).await;
+        loop_.next_seed().await;
 
         // Two messages land mid-pass: queued, never rejected. Give the SSE
         // hop time to reach the loop before the pass exits (the biased
@@ -2168,14 +2179,11 @@ mod tests {
 
         // Clarify, pursue, and mutate finish the current iteration before the
         // queued human direction starts the next one.
-        wait_for("next iteration spawned", || loop_.pass_count() == 4).await;
-        let wake = wake_of(&loop_.seed(3));
+        loop_.next_seed().await;
+        loop_.next_seed().await;
+        let wake = wake_of(&loop_.next_seed().await);
         assert!(wake.contains("second") && wake.contains("third"));
 
-        wait_for("next iteration TurnStarted journaled", || {
-            started_answers(&loop_.journal_events()).len() == 4
-        })
-        .await;
         let answers = started_answers(&loop_.journal_events());
         assert!(answers[1].is_empty());
         assert!(answers[2].is_empty());

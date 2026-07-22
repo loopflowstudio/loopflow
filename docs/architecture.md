@@ -31,10 +31,10 @@ User intent
 | **User** — the authenticated human or external harness | User authority authors root input and approves external effects; an in-Run process cannot impersonate it. | [`Author`](../rust/loopflow/src/durable.rs), [`AuthenticatedRequest`](../rust/loopflow/src/durable.rs) | No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop` | `exec:open`, `exec:osascript`, `exec:pbpaste`, `exec:id` |
 | **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf sync-skills`, `lf list` (Skill/Flow catalog) | `exec:python3` |
 | **Flow** — an ordered composition of Skills | Repository/builtin Flow YAML and the current playhead decide the next step. | [`Flow`](../rust/loopflow/src/engine/flow.rs), [`FlowPosition`](../rust/loopflow/src/durable.rs) | `.lf/flows/` | `lf __flow-step` | `lf flow` | — |
-| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/wave/types.rs), [`WaveConfig`](../rust/loopflow/src/engine/wave_config.rs) | `waves`; `wave/<name>/`; `.lf/journal/waves/<name>/journal.jsonl` | `lf __resident` behind the Wave listener | `lf wave`, `lf start`, `lf stop`, `lf pause`, `lf resume`, `lf chat`, `lf ls`, `lf status`, `lf roadmap`, `lf cron`; `wave GET /health`, `wave GET /conversation`, `wave GET /events`, `wave GET /playhead`, `wave POST /messages`, `wave POST /observations`, `wave POST /stop`, `wave POST /resident/attach`, `wave POST /resident/deltas`, `wave GET /resident/context` | Discord when configured |
+| **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity; canonical repository plus normalized slug is its mutable human locator. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/wave/types.rs), [`WaveLocator`](../rust/loopflow/src/wave/types.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/engine/wave_config.rs) | `waves`; `wave/<name>/`; `.lf/journal/waves/<name>/journal.jsonl`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | `lf __resident` behind the Wave listener; listener and relocation share the repository locator lock | `lf wave`, `lf start`, `lf stop`, `lf pause`, `lf resume`, `lf chat`, `lf ls`, `lf status`, `lf roadmap`, `lf cron`, `lf work relocate wave`; `wave GET /health`, `wave GET /conversation`, `wave GET /events`, `wave GET /playhead`, `wave POST /messages`, `wave POST /observations`, `wave POST /stop`, `wave POST /resident/attach`, `wave POST /resident/deltas`, `wave GET /resident/context` | Discord when configured |
 | **Project** — one measured bet inside exactly one Wave | The Linear Project definition and KRs are planning truth; the Project Work row owns pursuit lifecycle only. | [`Project`](../rust/loopflow/src/project/mod.rs), [`PmProject`](../rust/loopflow/src/pm/mod.rs) | `projects`, `project_events`, `observation_outbox`; Linear Project content | Project runner inside its Run | `lf project` | Linear |
 | **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status; Task Work owns execution lifecycle, one delivery worktree, and its serial PR chain. Git owns commits/branches; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/task/mod.rs), [`TaskPr`](../rust/loopflow/src/task/mod.rs), [`CiIncident`](../rust/loopflow/src/task/mod.rs) | `tasks`, `task_events`, `task_prs`, `ci_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | Task runner inside its Run; foreground mechanical operations and Home webhook reconciliation record delivery evidence. | `lf task`, `lf pr`, `lf wt`, `lf rebase`, `lf commit`, `lf ci` | Linear, `provider:github`, `exec:git`, `exec:gh` |
-| **PM projection** — locally readable current planning snapshot | Linear remains authoritative; sync atomically replaces the projection and reads never author through it. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync or Home webhook reconciliation | `lf pm` | `provider:linear` |
+| **PM projection** — locally readable current planning snapshot | Linear remains authoritative; the Wave UUID keys the projection so locator changes preserve it. Sync atomically replaces the projection and reads never author through it. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync or Home webhook reconciliation | `lf pm` | `provider:linear` |
 | **Epoch / Basis** — one attempt at Work truth and its authored-input revision | The Work controller opens/settles Epochs; only committed Steers advance Basis. Terminal Work outranks stale Run observations. | [`Epoch`](../rust/loopflow/src/durable.rs), [`Basis`](../rust/loopflow/src/durable.rs), [`DoneProposal`](../rust/loopflow/src/durable.rs) | `epochs`, `epoch_revisions`, `work_truth`, `work_flow_positions`, `done_proposals` | Current Work controller; active Run proposes completion against an exact Basis | `lf work`, `lf activity` | — |
 | **Steer** — durable authored correction to one Work | User or authorized parent Run writes it; incorporation is proven at a later successful Basis boundary. Live send is latency only. | [`Steer`](../rust/loopflow/src/durable.rs), [`Send`](../rust/loopflow/src/durable.rs) | `steers`, `sends`, `tool_responses` | Store transaction, then best-effort provider delivery | Work-specific `steer` commands and `lf work steer` | Model provider when delivery is live |
 | **Ask / Answer** — one Turn-local blocking question and immutable response | The route is derived from Work ancestry; the first authorized User or parent-Run answer wins. | [`AskExchange`](../rust/loopflow/src/durable.rs), [`Answer`](../rust/loopflow/src/durable.rs) | `ask_exchanges`, `ask_linear_comment_outbox` | Asking Turn blocks; authorized answerer commits; Linear comment outbox publishes later | `lf ask`, `lf work asks`, `lf work answer` | Linear comments for Task exchanges |
@@ -123,6 +123,19 @@ never writes the journal directly. `lfd` is Home keeper machinery, not an agent
 or remote-control authority. Crossing Homes is an explicit foreground `lf ssh`
 hop whose target proves its Home identity.
 
+Wave selection always resolves `(canonical repository, slug)` to one UUID.
+Bare-slug diagnostics fail when more than one repository owns the slug; no
+read or mutation chooses one by order. A scoped lookup repairs an equivalent
+legacy path spelling to the canonical repository in one transaction.
+`lf work relocate wave <uuid>` is the only semantic locator mutation: it fences
+the Wave chord, moves authored files and the journal, commits the new locator
+transactionally, and leaves PM, Work, Run, and Home-placement rows joined to the
+unchanged UUID. A target-local `.lf/tmp/wave-relocations/<uuid>.json` receipt
+bridges the filesystem/SQLite commit boundary; retrying after a committed crash
+finishes verified source cleanup, then removes the receipt. Repository moves
+also require compatible configured PM Teams so relocation cannot impersonate
+the separate `lf pm reteam` operation.
+
 ## Truth and projections
 
 The map is the ownership index. Truth remains distributed across Home-local
@@ -182,6 +195,8 @@ and current runtime source do not.
 
 - Wave → Project → Task is the complete planning hierarchy: no recursive or
   orphan Projects.
+- A Wave UUID is stable across rename and repository rehome; repository-scoped
+  locators are unique, and bare slugs are never mutation authority.
 - Linear owns current Project/Task planning; SQLite projections never become an
   authoring fallback.
 - One non-ended Run exists per Epoch; only its current opaque lease writes as

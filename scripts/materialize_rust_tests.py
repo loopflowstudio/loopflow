@@ -22,8 +22,13 @@ from typing import Iterator
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AMBIENT_WORK_AUTHORITY = (
+    "LF_AGENT_INVOCATION_ID",
+    "LF_CONTROL_BIN",
+    "LF_PROCESS_ID",
     "LF_RUN_CONTEXT",
+    "LF_RUN_ID",
     "LF_RUN_LEASE",
+    "LF_TRACE_ID",
     "LF_WAVE_ID",
     "LF_ACCOUNT_LEASE",
 )
@@ -171,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
             environment = os.environ.copy()
             for name in AMBIENT_WORK_AUTHORITY:
                 environment.pop(name, None)
+            environment["LF_CONTROL_HOME"] = str(worktree / ".lf-test-control")
+            environment.pop("LF_CONTROL_DB_PATH", None)
             environment.setdefault("CARGO_TARGET_DIR", str(REPO_ROOT / "target"))
             return subprocess.run(args.command, cwd=worktree, env=environment).returncode
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as exc:

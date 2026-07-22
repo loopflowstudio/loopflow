@@ -229,6 +229,22 @@ Project and Task movement stays closed while their Runs remain the
 executor. The shared Run supervisor will open that placement boundary without
 another Work-to-Run routing bridge.
 
+A Wave name is local to its canonical repository. Its UUID remains stable when
+the name or repository changes, so relocation is separate from Home placement:
+
+```bash
+lf work relocate wave <wave-id> --name platform
+lf work relocate wave <wave-id> --repo ../moved-repository
+```
+
+Stop the Wave and its descendants first. Relocation preserves its Linear
+Initiative projection, Work and Run history, journal, authored files, and Home
+placement. A repository move carries the complete Wave chord, and renaming a
+Wave carries descendants whose authored paths are nested below it. Configured
+source and target PM Teams must match; use `lf pm reteam` for an intentional
+provider ownership change. Divergent target files fail closed instead of being
+merged, and retry finishes cleanup if the locator committed before a crash.
+
 `lfd` is the one keeper process per Home. Its in-process `WaveHost` starts every
 eligible Wave known to the local store across repositories, then reconciles
 every 30 seconds. Starting or stopping one Wave does not kill `lfd` or disturb

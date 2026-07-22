@@ -182,6 +182,7 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
         .filter_map(|binding| binding.split_once('=').map(|(name, _)| name.to_string()))
         .collect::<std::collections::HashSet<_>>();
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    let repo = crate::engine::repo::find_repo_root().ok();
     let bindings = runtime.block_on(async {
         let Some(store) = crate::store::open_existing_store().await else {
             return Ok::<_, anyhow::Error>(Vec::new());
@@ -194,8 +195,17 @@ fn bind_home_start_wave_ids(target: &SshTarget, lf_args: &[String]) -> anyhow::R
             if existing.contains(&name) {
                 continue;
             }
-            if let Some(wave) = store.get_wave_by_name(&name).await? {
-                bindings.push(format!("{}={}", wave.name(), wave.id()));
+            match crate::engine::wave_context::resolve_managed_wave(
+                Some(&store),
+                repo.as_deref(),
+                Some(&name),
+                None,
+            )
+            .await
+            {
+                Ok(wave) => bindings.push(format!("{}={}", wave.name(), wave.id())),
+                Err(crate::engine::wave_context::WaveResolveError::UnknownExplicit(_)) => {}
+                Err(error) => return Err(anyhow!(error)),
             }
         }
         Ok(bindings)

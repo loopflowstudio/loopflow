@@ -334,6 +334,7 @@ mod tests {
     use crate::provider_account::new_account;
     use crate::store::{
         open_store, CredentialType, ProviderAccountId, ProviderToken, StorageConfig,
+        CONTROL_DB_PATH_ENV, CONTROL_HOME_ENV,
     };
     use std::ffi::OsString;
 
@@ -528,6 +529,8 @@ mod tests {
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
             "LF_DB_PATH",
+            CONTROL_HOME_ENV,
+            CONTROL_DB_PATH_ENV,
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "CLAUDE_CONFIG_DIR",
@@ -535,6 +538,8 @@ mod tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(CONTROL_HOME_ENV);
+        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("CLAUDE_CONFIG_DIR", "ambient");
 
@@ -590,6 +595,8 @@ mod tests {
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
             "LF_DB_PATH",
+            CONTROL_HOME_ENV,
+            CONTROL_DB_PATH_ENV,
             "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
@@ -597,6 +604,8 @@ mod tests {
         ]);
         std::env::set_var("LF_HOME", temp.path());
         std::env::remove_var("LF_DB_PATH");
+        std::env::remove_var(CONTROL_HOME_ENV);
+        std::env::remove_var(CONTROL_DB_PATH_ENV);
         std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
 

@@ -4,6 +4,49 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
+use crate::repository::{CanonicalRepo, CanonicalRepoError};
+
+/// A Wave's mutable human address inside one canonical repository.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WaveLocator {
+    repo: CanonicalRepo,
+    slug: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WaveLocatorError {
+    #[error(transparent)]
+    Repository(#[from] CanonicalRepoError),
+    #[error("invalid Wave slug {0:?}")]
+    InvalidSlug(String),
+}
+
+impl WaveLocator {
+    pub fn discover(repo: &std::path::Path, slug: &str) -> Result<Self, WaveLocatorError> {
+        Self::new(CanonicalRepo::discover(repo)?, slug)
+    }
+
+    pub fn new(repo: CanonicalRepo, slug: &str) -> Result<Self, WaveLocatorError> {
+        let slug = crate::ops::util::normalize_wave_name(slug)
+            .ok_or_else(|| WaveLocatorError::InvalidSlug(slug.to_string()))?;
+        if slug.contains('\\')
+            || slug
+                .split('/')
+                .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        {
+            return Err(WaveLocatorError::InvalidSlug(slug));
+        }
+        Ok(Self { repo, slug })
+    }
+
+    pub fn repo(&self) -> &CanonicalRepo {
+        &self.repo
+    }
+
+    pub fn slug(&self) -> &str {
+        &self.slug
+    }
+}
 
 /// The one-time typed wake derived from a child Wave's durable promotion occurrence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,7 +72,7 @@ impl PromotionWake {
 pub struct Wave {
     id: WaveId,
     name: String,
-    /// The single repo this wave targets. A wave = exactly one repo.
+    /// Current canonical repository half of the mutable locator.
     repo: String,
     #[serde(with = "time::serde::rfc3339::option")]
     created_at: Option<OffsetDateTime>,
@@ -153,5 +196,27 @@ mod tests {
         let unchanged = promoted.with_parent(other_parent);
         assert_eq!(unchanged.parent_wave_id(), Some(&parent));
         assert!(unchanged.promoted_at().is_some());
+    }
+
+    #[test]
+    fn locator_slugs_allow_safe_nesting_but_never_path_traversal() {
+        let repo = crate::repository::CanonicalRepo::discover(
+            &std::env::current_dir().expect("current directory"),
+        )
+        .unwrap();
+        assert_eq!(
+            WaveLocator::new(repo.clone(), "goals/release")
+                .unwrap()
+                .slug(),
+            "goals/release"
+        );
+        for unsafe_slug in [
+            "../escape",
+            "goals/../escape",
+            "goals//release",
+            "goals\\release",
+        ] {
+            assert!(WaveLocator::new(repo.clone(), unsafe_slug).is_err());
+        }
     }
 }

@@ -750,6 +750,18 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Rename or rehome stopped Wave Work without changing its identity
+    Relocate {
+        #[arg(value_parser = ["wave"])]
+        kind: String,
+        id: String,
+        #[arg(long)]
+        repo: Option<PathBuf>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Append authored direction through User or active parent Run authority
     Steer {
         #[arg(value_parser = ["wave", "project", "task"])]

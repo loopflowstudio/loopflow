@@ -23,11 +23,14 @@ scheduler and provider process. It reads the listener's inbox and returns
 ordered deltas; it never writes the journal directly.
 
 Repository mutations belong to Tasks in their own sibling worktrees.
-The Wave coordinates Projects and Tasks from the canonical checkout.
+The Wave coordinates Projects and Tasks from the canonical checkout. Its UUID
+is stable identity; canonical checkout plus normalized name is its mutable
+locator. Two repositories may each own a Wave named `product` without sharing
+state.
 
 ## Persistence and discovery
 
-The origin repository holds the Wave's durable files:
+The Wave's current canonical repository holds its durable files:
 
 ```text
 .lf/journal/waves/<name>/journal.jsonl
@@ -50,10 +53,27 @@ source-tagged authored input and never inherits `LF_DISCORD_TOKEN`. Binding
 ownership is explicit: the configured Home is the only Home allowed to attach,
 and an OS-held lease prevents concurrent listeners across its checkouts.
 
-The shared `~/.lf/loopflow.db` stores the Wave row and typed Project and Task
-observations. A Wave can still run when that store does not
-exist, but child observations are unavailable. The live endpoint enforces one
-listener per Wave; `--force` explicitly takes over a live endpoint.
+The shared `~/.lf/loopflow.db` stores the Wave UUID, its repository-scoped
+locator, and typed Project and Task observations. Human commands resolve the
+name only inside the invoking repository; a diagnostic bare-name lookup fails
+when several repositories own that name. A Wave can still run when that store
+does not exist, but child observations are unavailable. The live endpoint and
+locator lock enforce one listener per repository-scoped Wave; `--force`
+explicitly takes over a live endpoint.
+
+Rename or rehome a stopped Wave by UUID:
+
+```bash
+lf work relocate wave <wave-id> --name platform
+lf work relocate wave <wave-id> --repo ../moved-repository
+```
+
+Relocation preserves the UUID, PM projection, Work and Run history, Home
+placement, authored files, and journal. It moves a complete Wave chord when the
+repository changes, carries nested descendants through a rename, requires
+compatible configured PM Teams, and refuses live Work or divergent target
+files. Retry completes verified source cleanup after a crash at the commit
+boundary.
 
 ## Thread
 

@@ -52,6 +52,7 @@ pub(crate) mod discord;
 pub mod journal;
 pub(crate) mod memory;
 pub mod playhead;
+pub mod relocate;
 
 pub(crate) mod registry;
 pub mod resident;
@@ -64,7 +65,7 @@ mod types;
 pub mod wire;
 
 pub(crate) use types::PromotionWake;
-pub use types::Wave;
+pub use types::{Wave, WaveLocator, WaveLocatorError};
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -339,6 +340,37 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     let ListenerSignals { startup, shutdown } = signals;
+    let _locator_lock = match relocate::WaveLocatorLock::acquire(&repo_root, &wave) {
+        Ok(lock) => lock,
+        Err(lock_error) if force => {
+            if !request_stop(&repo_root, &wave).await? {
+                return Err(lock_error);
+            }
+            relocate::WaveLocatorLock::acquire(&repo_root, &wave)?
+        }
+        Err(lock_error) => return Err(lock_error),
+    };
+    if let Some(config) = registry_config.as_ref() {
+        let current = config
+            .store
+            .get_wave(config.wave.id())
+            .await?
+            .ok_or_else(|| {
+                anyhow!(
+                    "Wave {} disappeared before listener start",
+                    config.wave.id()
+                )
+            })?;
+        let locator = WaveLocator::discover(&repo_root, &wave)?;
+        if current.repo() != locator.repo().to_string() || current.name() != locator.slug() {
+            return Err(anyhow!(
+                "Wave {} moved to {}/{} before listener start",
+                current.id(),
+                current.repo(),
+                current.name()
+            ));
+        }
+    }
     // File-level one-brain floor, before anything else: an existing pointer
     // that answers /health for this wave is a live server — refuse (unless
     // --force takes over and overwrites); a dead pointer is stale and gets
@@ -1504,6 +1536,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn same_named_waves_in_two_repositories_serve_independently() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo_a = tmp.path().join("alpha");
+        let repo_b = tmp.path().join("beta");
+        for repo in [&repo_a, &repo_b] {
+            std::fs::create_dir_all(repo.join("wave/infrastructure")).unwrap();
+            std::fs::write(
+                repo.join("wave/infrastructure/GOAL.md"),
+                format!("# {}\n", repo.file_name().unwrap().to_string_lossy()),
+            )
+            .unwrap();
+        }
+
+        let store = Arc::new(
+            crate::store::open_store(&crate::store::StorageConfig::sqlite(
+                tmp.path().join("registry.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave_a = registry::ensure_wave_row(&store, &repo_a, "infrastructure")
+            .await
+            .unwrap();
+        let wave_b = registry::ensure_wave_row(&store, &repo_b, "infrastructure")
+            .await
+            .unwrap();
+        assert_ne!(wave_a.id(), wave_b.id());
+
+        let (stop_a_tx, stop_a_rx) = tokio::sync::oneshot::channel::<()>();
+        let (stop_b_tx, stop_b_rx) = tokio::sync::oneshot::channel::<()>();
+        let handle_a = tokio::spawn(run_listener(
+            repo_a.clone(),
+            "infrastructure".to_string(),
+            Some(registry::RegistryConfig {
+                store: store.clone(),
+                wave: wave_a.clone(),
+            }),
+            false,
+            false,
+            None,
+            async move {
+                let _ = stop_a_rx.await;
+            },
+        ));
+        let handle_b = tokio::spawn(run_listener(
+            repo_b.clone(),
+            "infrastructure".to_string(),
+            Some(registry::RegistryConfig {
+                store,
+                wave: wave_b.clone(),
+            }),
+            false,
+            false,
+            None,
+            async move {
+                let _ = stop_b_rx.await;
+            },
+        ));
+
+        let endpoint_a = server::endpoint_path(&repo_a, "infrastructure");
+        let endpoint_b = server::endpoint_path(&repo_b, "infrastructure");
+        wait_for(|| endpoint_a.exists() && endpoint_b.exists()).await;
+        let address_a = std::fs::read_to_string(&endpoint_a).unwrap();
+        let address_b = std::fs::read_to_string(&endpoint_b).unwrap();
+        assert_ne!(address_a, address_b);
+        for address in [&address_a, &address_b] {
+            let health: serde_json::Value =
+                reqwest::get(format!("http://{}/health", address.trim()))
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+            assert_eq!(health["wave"], "infrastructure");
+        }
+
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/messages", address_a.trim()))
+            .json(&serde_json::json!({ "op": "message", "text": "alpha only" }))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(
+            journal::read_events(&journal::journal_path(&repo_a, "infrastructure"))
+                .iter()
+                .filter(|event| matches!(event.kind, journal::EventKind::UserMessage { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            journal::read_events(&journal::journal_path(&repo_b, "infrastructure"))
+                .iter()
+                .filter(|event| matches!(event.kind, journal::EventKind::UserMessage { .. }))
+                .count(),
+            0
+        );
+
+        stop_a_tx.send(()).unwrap();
+        stop_b_tx.send(()).unwrap();
+        handle_a.await.unwrap().unwrap();
+        handle_b.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn serve_publishes_and_removes_discovery_pointer_and_token() {
         let tmp = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
@@ -1703,5 +1840,42 @@ mod tests {
         shutdown_tx.send(()).unwrap();
         first.await.unwrap().unwrap();
         assert!(!endpoint.exists(), "first server still owns its shutdown");
+    }
+
+    #[tokio::test]
+    async fn force_stops_the_current_listener_before_taking_its_locator_lock() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(tmp.path().join("wave/ship")).unwrap();
+        let repo = tmp.path().to_path_buf();
+
+        let (_first_stop_tx, first_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let first_repo = repo.clone();
+        let first = tokio::spawn(async move {
+            run_listener(first_repo, "ship".into(), None, false, false, None, async {
+                let _ = first_stop_rx.await;
+            })
+            .await
+        });
+        let endpoint = server::endpoint_path(&repo, "ship");
+        wait_for(|| endpoint.exists()).await;
+        let first_address = std::fs::read_to_string(&endpoint).unwrap();
+
+        let (second_stop_tx, second_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let second_repo = repo.clone();
+        let second = tokio::spawn(async move {
+            run_listener(second_repo, "ship".into(), None, true, false, None, async {
+                let _ = second_stop_rx.await;
+            })
+            .await
+        });
+        wait_for(|| {
+            std::fs::read_to_string(&endpoint).is_ok_and(|address| address != first_address)
+        })
+        .await;
+        first.await.unwrap().unwrap();
+
+        second_stop_tx.send(()).unwrap();
+        second.await.unwrap().unwrap();
+        assert!(!endpoint.exists());
     }
 }

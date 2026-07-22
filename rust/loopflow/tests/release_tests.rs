@@ -21,7 +21,7 @@ fn write_gh_script(pr_list: &str) -> String {
 
 fn write_gh_status_script(run_list: &str, release_view: &str) -> String {
     format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    case \"$*\" in *databaseId*) ;; *) echo 'databaseId was not requested' >&2; exit 1;; esac\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo 'gh version 2.0.0'\n  exit 0\nfi\ncase \"$1 $2\" in\n  'run list')\n    case \"$*\" in *databaseId*) ;; *) echo 'databaseId was not requested' >&2; exit 1;; esac\n    cat <<'JSON'\n{run_list}\nJSON\n    exit 0;;\n  'release view')\n    cat <<'JSON'\n{release_view}\nJSON\n    exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $@\" >&2\nexit 1\n"
     )
 }
 
@@ -581,6 +581,73 @@ fn release_run_is_a_green_noop_without_merged_changes() {
             latest_tag: Some("v0.9.1".to_string()),
         }
     );
+}
+
+#[test]
+fn release_run_checks_the_host_local_publisher_role() {
+    let gh_script = write_gh_status_script("[]", r#"{"isDraft":false}"#);
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    let checked = repo.path().join("publisher-checked");
+    let publisher = repo.path().join("publisher.sh");
+    fs::write(
+        &publisher,
+        format!(
+            "#!/bin/sh\n[ \"$1\" = check ] || exit 19\n: > '{}'\n",
+            checked.display()
+        ),
+    )
+    .expect("write publisher");
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"{repo}/publisher.sh\"]\n",
+    )
+    .expect("write config");
+    git(&repo, &["add", ".lf/config.yaml", "publisher.sh"]);
+    git(&repo, &["commit", "-m", "Configure publisher role"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    git(&repo, &["tag", "v0.9.1"]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("configured publisher should pass preflight");
+
+    assert!(checked.exists());
+    assert_eq!(
+        outcome,
+        ReleaseRunOutcome::NoChanges {
+            target: "default".to_string(),
+            latest_tag: Some("v0.9.1".to_string()),
+        }
+    );
+}
+
+#[test]
+fn release_run_fails_closed_when_the_publisher_role_is_missing() {
+    let gh_script = write_gh_script("[]");
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      publisher: [\"missing-release-publisher-role\"]\n",
+    )
+    .expect("write config");
+    git(&repo, &["add", ".lf/config.yaml"]);
+    git(&repo, &["commit", "-m", "Require publisher role"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    git(&repo, &["tag", "v0.9.1"]);
+    let head_before = git_output(&repo, &["rev-parse", "HEAD"]);
+    let tags_before = git_output(&repo, &["tag", "--list"]);
+
+    let error = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect_err("missing publisher authority must stop release");
+
+    assert!(error.to_string().contains("missing-release-publisher-role"));
+    assert_eq!(git_output(&repo, &["rev-parse", "HEAD"]), head_before);
+    assert_eq!(git_output(&repo, &["tag", "--list"]), tags_before);
 }
 
 #[test]

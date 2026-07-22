@@ -245,13 +245,7 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
 
     config = yaml.safe_load((ROOT / ".lf/config.yaml").read_text())
     assert config["release"]["targets"]["default"]["publisher"] == [
-        "doppler",
-        "run",
-        "--project",
-        "loopflow",
-        "--config",
-        "prd",
-        "--",
+        "loopflow-release-publisher",
         "uv",
         "run",
         "python",
@@ -272,12 +266,29 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
     assert 'lf cron history --wave "$wave" --days 35' in bootstrap
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
+    assert "loopflow-release-publisher" in bootstrap
     assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
         "scripts/publish_release.py check"
     )
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
         'lf cron sync --wave "$wave"'
     )
+
+    public_contract = "\n".join(
+        [
+            (ROOT / ".lf/config.yaml").read_text(),
+            bootstrap,
+            (ROOT / "release/CRON_HOST.md").read_text(),
+        ]
+    )
+    for private_selector in (
+        "doppler",
+        "--project",
+        "--config",
+        "DOPPLER_PROJECT",
+        "DOPPLER_CONFIG",
+    ):
+        assert private_selector not in public_contract
 
 
 def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():

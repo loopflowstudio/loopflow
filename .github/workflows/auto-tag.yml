@@ -47,4 +47,4 @@ jobs:
 
           # GITHUB_TOKEN tag pushes don't trigger other workflows,
           # so explicitly dispatch the release workflow.
-          gh workflow run release.yml --ref "$version" -f tag="$version"
+          gh workflow run release.yml --ref "$version"

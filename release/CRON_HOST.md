@@ -1,94 +1,92 @@
-# Maintained cron host
+# Maintained cron Home
 
-A maintained cron host runs `lf` on a schedule so health checks and patch
-releases happen whether or not anyone is at a keyboard. The runtime is explicit:
-**launchd invokes top-level `lf` commands** — no daemon, no resident wave
-listener required.
+Run the infrastructure Wave's declared telemetry and release jobs on the Home
+that owns its durable placement. Placement is the authority; a hostname in a
+document is not.
 
-## The host
+```bash
+lf home id
+lf status infrastructure --json | jq -r '.wave.home.id'
+scripts/bootstrap-cron-host.sh infrastructure
+lf cron history --wave infrastructure --days 35
+```
 
-| Host | Tailnet | Role |
-|------|---------|------|
-| `mini-heart` | `100.96.227.95` (`*.tail0eda02.ts.net`), macOS | First maintained `lf cron` host |
+The two Home ids must match. `bootstrap-cron-host.sh` fails before changing
+launchd when they differ.
 
-Reach it over Tailscale: `lf ssh mini-heart --version`. First contact needs
-the host key trusted and Tailscale up on both ends. `lf ssh` is bounded
-(`ConnectTimeout=10`, `BatchMode=yes`), so an unreachable host fails in seconds
-instead of hanging.
+## Host prerequisites
 
-The host is a committed fact on purpose — an agent should discover it by reading
-the repo, not by opening the Tailscale console.
+- Promote an installed release `lf`; cron installation rejects development and
+  task-worktree binaries.
+- Keep the repository's authoritative checkout on the placed Home.
+- Configure at least one managed Claude or Codex account in the Home store.
+- Install `doppler`, `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`,
+  `xcrun`, and `jq` on the host path.
+- Configure Doppler project `loopflow`, config `prd`, without storing or
+  printing secret values in the repository or launchd plist.
+- Install the Developer ID signing identity and host-native GitHub, registry,
+  R2, notarization, and Fly authority required by the release publisher.
 
-## Prerequisites on the host
+The bootstrap reconstructs a minimal environment containing only host paths,
+Home/store paths, and basic locale/temp settings. It verifies a managed provider
+account live, then runs the publisher's read-only check through:
 
-- `lf` on `PATH` (install/refresh via `scripts/install.py`).
-- Doppler configured for the release project so secrets resolve without ever
-  printing a value: `doppler setup` once, out of band. `lf cron sync` never reads
-  or forwards secrets; scheduled `lf` runs resolve their own via Doppler.
-- GitHub CLI auth able to create release PRs/tags, download workflow artifacts,
-  and publish releases; an app-scoped Fly deploy token; crates.io, R2,
-  notarization, and signing credentials available through Doppler.
-- An Apple Silicon Mac with the Developer ID signing identity installed, plus
-  `cargo`, `flyctl`, `gh`, `security`, `swift`, `uv`, and `xcrun` on `PATH`.
-- An agent provider available for the `release` flow. Release-note generation
-  has a deterministic fallback, but the flow itself is agent-owned.
-- A checkout of this repo; run `lf cron sync` from inside it.
+```bash
+doppler run --project loopflow --config prd -- \
+  uv run python scripts/publish_release.py check
+```
+
+Doppler injects values only into that process. The script never reads or prints
+a secret and never forwards a Task lease, provider lease, GitHub token, PM
+token, or invocation context.
 
 ## Repo-owned schedules
 
-Schedules live in the wave's `wave/<wave>/GOAL.md` frontmatter — one declaration,
-read by both the resident wave listener and the launchd host:
+Schedules live in `wave/infrastructure/GOAL.md`:
 
 ```yaml
 crons:
-  - flow: telemetry-daily      # runs `op: doctor`; exits non-zero on any red check
-    schedule: "0 0 9 * * *"    # 6-field cron expr: 09:00 daily
-  - flow: release-run          # runs `lf release run patch`
-    schedule: "0 0 10 * * *"   # after telemetry, host-local
+  - flow: telemetry-daily
+    schedule: "0 0 9 * * *"
+  - flow: release-run
+    schedule: "0 0 10 * * *"
 ```
 
-Install / update them on the host in one idempotent command:
+`lf cron sync --wave infrastructure` validates both targets and both fixed
+daily schedules before it writes a plist. It captures the non-secret host path,
+Home id, Home/store paths, authoritative checkout, installed binary, exact
+schedule, and log path. Scheduled execution repeats the placement check and
+fails with a receipt instead of running after ownership moves.
+
+`lf cron preflight --wave infrastructure` performs the installed-binary,
+placement, checkout, catalog, and schedule checks without changing launchd;
+the bootstrap runs it before any credential probe.
+
+launchd uses host-local time and coalesces missed calendar firings after wake.
+Receipts record the actual start; declarations alone never count as evidence of
+a nightly run. Place the Wave on an always-on Home when uninterrupted wall-clock
+cadence matters.
+
+## Durable evidence
 
 ```bash
-lf cron sync --wave infrastructure   # reconcile launchd jobs to match GOAL.md
-lf cron list                         # prove what's installed
+lf cron list --wave infrastructure --json
+lf cron trigger --wave infrastructure --flow telemetry-daily --wait --timeout 15m
+lf cron trigger --wave infrastructure --flow release-run --wait --timeout 3h
+lf cron history --wave infrastructure --days 35 --json
 ```
 
-`sync` installs a launchd job per declared cron, prunes jobs for the wave whose
-flow is no longer declared, and reports any schedule launchd can't run. Edit
-`GOAL.md`, re-run `sync`, and launchd matches the declaration.
+`list` reports the exact schedule, loaded state, installed Home, repo, binary,
+and latest receipt. `trigger` exercises launchd rather than invoking the target
+directly. Every firing writes a private, versioned receipt under
+`<LF_HOME>/cron/receipts/<wave>/<flow>/`; receipts contain identity, timing,
+outcome, exit status, and the log path, never environment values or output.
 
-## Bootstrap
+An early failure is `failed`, a successful no-op is `succeeded`, and a killed
+runner remains `running` but is rendered `stale`. Detailed output stays at
+`<repo>/.lf/logs/cron.<wave>.<flow>.log`. These rows begin the 14-night,
+four-release, and 30-day authority/host-drift observation windows; bootstrap
+does not claim that elapsed evidence in advance.
 
-```bash
-scripts/bootstrap-cron-host.sh mini-heart infrastructure
-```
-
-Probes reachability and host-native auth over bounded SSH,
-runs the release publisher's read-only credential/tool preflight, syncs the
-repo-owned schedules, and lists the result. Idempotent and secret-free; re-run
-it any time to reconcile.
-
-## Failure surfacing (v0)
-
-launchd writes each job's stdout+stderr to
-`<repo>/.lf/logs/cron.<wave>.<flow>.log`; the release publisher additionally
-writes redacted JSON receipts under `<repo>/.lf/logs/`. `lf doctor` (via
-`telemetry-daily`) exits non-zero on a failed check. A red run leaves a non-zero
-exit and a named stage in the log. No-change release runs exit successfully.
-
-## Known limitations (v0)
-
-- **Timezone.** launchd `StartCalendarInterval` fires on **host-local** time; the
-  resident listener reads the same cron expression as UTC. The declared HH:MM is
-  applied host-local on the launchd host. Fine for a daily health check; set the
-  host clock/timezone deliberately.
-- **Schedule shape.** Only a fixed daily time translates to launchd. Sub-daily,
-  weekly, or multi-time expressions are reported as skipped by `sync` (the resident
-  listener still honors the full expression). The launchd host is daily-only for now.
-
-## Scope
-
-Loopflow is the first real deployment. Cadenza mirrors this cadence as separate
-follow-on work once this host proves the shape — do not generalize a multi-product
-deploy layer before a second host needs it.
+Loopflow remains the concrete deployment. Mirror this shape into Cadenza only
+when its release needs it; do not extract a generic deployment platform.

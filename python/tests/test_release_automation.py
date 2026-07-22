@@ -205,6 +205,18 @@ def test_release_build_workflow_is_credential_free():
     assert not (ROOT / ".github/workflows/website-deploy.yml").exists()
 
 
+def test_auto_tag_dispatch_matches_the_input_free_release_contract():
+    release = yaml.load(
+        (ROOT / ".github/workflows/release.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    assert not release["on"]["workflow_dispatch"]
+
+    auto_tag = (ROOT / ".github/workflows/auto-tag.yml").read_text()
+    assert 'gh workflow run release.yml --ref "$version"' in auto_tag
+    assert "-f tag=" not in auto_tag
+
+
 def test_host_publisher_owns_credentialed_release_steps():
     publisher = (ROOT / "scripts/publish_release.py").read_text()
 
@@ -248,11 +260,23 @@ def test_infrastructure_cron_runs_the_host_release_after_telemetry():
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
-    assert 'lf ssh "$host" --version' in bootstrap
-    assert 'lf ssh "$host" cron sync --wave "$wave"' in bootstrap
-    assert 'lf ssh "$host" cron list' in bootstrap
+    assert 'local_home="$(lf home id)"' in bootstrap
+    assert 'placed_home="$(lf status "$wave" --json' in bootstrap
+    assert "--git-common-dir" in bootstrap
+    assert 'lf cron preflight --wave "$wave"' in bootstrap
+    assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
+    assert 'lf cron list --wave "$wave" --json' in bootstrap
+    assert 'lf cron trigger' in bootstrap
+    assert '--flow telemetry-daily --wait --timeout 15m' in bootstrap
+    assert '--flow release-run --wait --timeout 3h' in bootstrap
+    assert 'lf cron history --wave "$wave" --days 35' in bootstrap
+    assert "env -i" in bootstrap
+    assert "DOPPLER_TOKEN" not in bootstrap
+    assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
+        "scripts/publish_release.py check"
+    )
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
-        'lf ssh "$host" cron sync'
+        'lf cron sync --wave "$wave"'
     )
 
 

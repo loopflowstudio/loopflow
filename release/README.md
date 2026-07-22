@@ -8,8 +8,8 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-lf cron sync --wave infrastructure   # daily patch release on the maintained host
-lf cron list
+scripts/bootstrap-cron-host.sh infrastructure  # preflight, sync, and configured-path receipts
+lf cron history --wave infrastructure --days 35
 ```
 
 ```bash

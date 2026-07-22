@@ -1193,17 +1193,73 @@ pub enum CronCommand {
         /// Flow or skill name to run
         #[arg(long = "flow")]
         flow: String,
-        /// Schedule expression. v0 supports `daily`.
+        /// Fixed-daily cron expression, or the `daily` alias
         #[arg(long = "schedule", default_value = "daily")]
         schedule: String,
     },
     /// List installed loopflow cron jobs
-    List,
+    List {
+        /// Only jobs for this Wave
+        #[arg(short = 'w', long = "wave")]
+        wave: Option<String>,
+        /// Emit machine-readable job state
+        #[arg(long)]
+        json: bool,
+    },
+    /// Validate Home authority and declared jobs without changing launchd
+    Preflight {
+        /// Wave whose GOAL.md `crons:` are validated
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+    },
     /// Reconcile installed launchd jobs to match a wave's declared `crons:`
     Sync {
         /// Wave whose GOAL.md `crons:` drive the installed jobs
         #[arg(short = 'w', long = "wave")]
         wave: String,
+    },
+    /// Execute one installed cron job and persist its terminal receipt
+    #[command(hide = true)]
+    Run {
+        /// Wave whose installed declaration is executed
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+        /// Flow or skill name to run
+        #[arg(long = "flow")]
+        flow: String,
+        /// Mark a launchd-owned invocation
+        #[arg(long, hide = true)]
+        scheduled: bool,
+    },
+    /// Show durable cron receipts
+    History {
+        /// Wave whose receipts are shown
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+        /// Only receipts for this flow or skill
+        #[arg(long = "flow")]
+        flow: Option<String>,
+        /// Receipt window in days
+        #[arg(long, default_value_t = 35)]
+        days: u32,
+        /// Emit machine-readable receipts
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ask launchd to fire an installed job
+    Trigger {
+        /// Wave whose installed job is fired
+        #[arg(short = 'w', long = "wave")]
+        wave: String,
+        /// Flow or skill name to run
+        #[arg(long = "flow")]
+        flow: String,
+        /// Wait for and return the scheduled receipt
+        #[arg(long)]
+        wait: bool,
+        /// Maximum wait for a receipt
+        #[arg(long, default_value = "15m")]
+        timeout: String,
     },
     /// Uninstall a scheduled lf invocation
     Remove {

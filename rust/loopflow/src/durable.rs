@@ -93,6 +93,7 @@ durable_id!(SteerId, "steer_");
 durable_id!(SendId, "send_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(DoneProposalId, "done_");
+durable_id!(CronReceiptId, "cron_");
 
 impl ProjectId {
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {

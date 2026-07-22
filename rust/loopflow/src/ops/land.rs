@@ -73,16 +73,12 @@ fn prepare_pr(
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     if options.complete && (!options.strict || is_clean(&repo_root)?) {
         if let Some(issue) = crate::ops::task::find_discardable_final_task(&repo_root)? {
-            // The final flow reviewed work that already landed, and rotation left
-            // one unpublished branch at its recorded base. Reuse the Task completion
-            // gate instead of manufacturing an empty GitHub PR. Pre-final Tasks do
-            // not match the query and continue through the ordinary range refusal.
+            // The final flow approved work that already landed, and rotation left
+            // one unpublished branch at its recorded base. Consume that approval
+            // instead of manufacturing either an empty GitHub PR or a new outcome.
+            // Pre-final Tasks continue through the ordinary range refusal.
             clear_scratch(&repo_root, progress)?;
-            crate::ops::task::task_complete(
-                &issue,
-                "Final Task flow approved completion after its prior pull request merged"
-                    .to_string(),
-            )?;
+            crate::ops::task::task_complete_approved(&issue)?;
             progress.status("Completed Task over its merged pull request.");
             return Ok(None);
         }

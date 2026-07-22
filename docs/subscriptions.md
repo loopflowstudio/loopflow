@@ -85,7 +85,7 @@ lf auth status                   # every connected service
 lf auth accounts claude          # cached subscription state
 lf auth accounts --verify        # compare every credential with its provider
 lf usage                         # subscription windows and process token spend
-uv run python scripts/lifecycle_scorecard.py # repository maintainer report
+lf telemetry-daily               # repository maintainer health and budget report
 ```
 
 `auth accounts --verify` records a revoked credential as missing and prints

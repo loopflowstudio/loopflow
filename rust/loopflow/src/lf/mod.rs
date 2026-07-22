@@ -365,6 +365,13 @@ pub enum Commands {
         #[arg(long)]
         cached: bool,
     },
+    /// Internal: render the repository maintainer scorecard for telemetry-daily
+    #[command(name = "__telemetry-scorecard", hide = true)]
+    TelemetryScorecard {
+        /// Emit structured JSON for operator automation
+        #[arg(long)]
+        json: bool,
+    },
     /// Show how failed CI is detected, repaired, and landed across this Home
     Ci {
         /// Relative window (7d, 24h, 30m) or RFC3339 start
@@ -2000,6 +2007,20 @@ mod tests {
             .render_long_help()
             .to_string()
             .contains("__account-lease-probe"));
+    }
+
+    #[test]
+    fn telemetry_scorecard_is_parseable_but_hidden() {
+        let cli = Cli::try_parse_from(["lf", "__telemetry-scorecard", "--json"])
+            .expect("parse internal telemetry scorecard");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::TelemetryScorecard { json: true })
+        ));
+        assert!(!Cli::command()
+            .render_long_help()
+            .to_string()
+            .contains("__telemetry-scorecard"));
     }
 
     #[test]

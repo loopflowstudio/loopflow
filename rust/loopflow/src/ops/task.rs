@@ -2948,16 +2948,20 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
     let observation = pr.github_observation.as_ref()?;
     let retry_at = observation.checked_at
         + match observation.result {
-            GithubObservationResult::Fresh => PR_OBSERVATION_TTL,
+            GithubObservationResult::Fresh | GithubObservationResult::Partial { .. } => {
+                PR_OBSERVATION_TTL
+            }
             GithubObservationResult::Degraded { .. } => PR_OBSERVATION_DEGRADED_BACKOFF,
         };
     if retry_at <= now {
         return None;
     }
     Some(match &observation.result {
-        GithubObservationResult::Fresh => Observation::Cached {
-            observed_at: observation.checked_at,
-        },
+        GithubObservationResult::Fresh | GithubObservationResult::Partial { .. } => {
+            Observation::Cached {
+                observed_at: observation.checked_at,
+            }
+        }
         GithubObservationResult::Degraded { reason } => Observation::Degraded {
             reason: reason.clone(),
             cached_as_of: pr.updated_at,
@@ -3121,15 +3125,8 @@ async fn reconcile_task_pr_with_authority(
                         );
                         pr.github_observation = Some(GithubObservation {
                             checked_at: now,
-                            result: GithubObservationResult::Degraded {
-                                reason: reason.clone(),
-                            },
+                            result: GithubObservationResult::Partial { reason },
                         });
-                        task.observation = Observation::Degraded {
-                            reason,
-                            cached_as_of: pr.updated_at,
-                            retry_at: now + PR_OBSERVATION_DEGRADED_BACKOFF,
-                        };
                     }
                 },
                 None => {
@@ -3139,15 +3136,8 @@ async fn reconcile_task_pr_with_authority(
                     );
                     pr.github_observation = Some(GithubObservation {
                         checked_at: now,
-                        result: GithubObservationResult::Degraded {
-                            reason: reason.clone(),
-                        },
+                        result: GithubObservationResult::Partial { reason },
                     });
-                    task.observation = Observation::Degraded {
-                        reason,
-                        cached_as_of: pr.updated_at,
-                        retry_at: now + PR_OBSERVATION_DEGRADED_BACKOFF,
-                    };
                 }
             }
             // Record the merge, but withhold completion while an accepted
@@ -3244,15 +3234,8 @@ async fn reconcile_task_pr_with_authority(
                     format!("GitHub merged_at conflicts with first accepted value {accepted_at}");
                 pr.github_observation = Some(GithubObservation {
                     checked_at: now,
-                    result: GithubObservationResult::Degraded {
-                        reason: reason.clone(),
-                    },
+                    result: GithubObservationResult::Partial { reason },
                 });
-                task.observation = Observation::Degraded {
-                    reason,
-                    cached_as_of: pr.updated_at,
-                    retry_at: now + PR_OBSERVATION_DEGRADED_BACKOFF,
-                };
             }
         } else if pr.is_settled() {
             settle_task_pr_with_authority(store, &pr, None, lease)

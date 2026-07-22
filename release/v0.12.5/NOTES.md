@@ -31,7 +31,7 @@ The new operational surfaces keep process evidence, Work history, and planning d
 - `lf prune --dry-run` lists dead Exec receipts and registry-proven orphan OpenCode groups. Plain `lf prune` removes only those targets and never kills an unclaimed provider PID.
 - `lf activity` provides a bounded, newest-first timeline of Work creation, Runs, Task PRs, and Steers, with Wave, Project, and Task filters applied before the result cap.
 - The Mac app's Podium uses a repository-scoped Waves sidebar and a Wave → Project → Task → Exec output hierarchy. Selection focuses the Work and Activity panes, breadcrumbs preserve navigation, and exact captured traces or linked PRs open from their evidence (#1131, #1134, #1137, #1140, #1148, #1149, #1155, #1160).
-- `lf performance` compares the last 14 days of Task latency, verification time, provider token usage, and reported cost with versioned budgets. Every row publishes eligible/measured coverage beside p50 and p95; missing reports remain `UNKNOWN` rather than becoming estimates or zero (#1162).
+- The maintainer lifecycle scorecard compares the last 14 days of Task latency, verification time, provider token usage, and reported cost with versioned budgets. Every row publishes eligible/measured coverage beside p50 and p95; missing reports remain `UNKNOWN` rather than becoming estimates or zero (#1162).
 
 ## Planning and catalog names resolve through one authority
 

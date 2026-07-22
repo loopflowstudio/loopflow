@@ -517,12 +517,12 @@ Under forwarded account authority, subscription polling is unavailable so the
 remote account store is never consulted. `lf usage` still prints process token
 spend from the local execution ledger.
 
-The repository maintainer script `scripts/lifecycle_scorecard.py` combines the
-same accepted per-Turn evidence with pre-land records under the Git common
-directory. It is deterministic code, not a Skill or an `lf` API. Missing
-provider usage never becomes zero; an explicit provider-reported zero remains
-a measured sample. Versioned policy lives in `performance/budgets.json`, while
-generated reports remain runtime evidence.
+The repository's `telemetry-daily` operator flow combines the same accepted
+per-Turn evidence with pre-land records under the Git common directory. Its
+scorecard generator is deterministic internal code, not a general-user `lf`
+API. Missing provider usage never becomes zero; an explicit provider-reported
+zero remains a measured sample. Versioned policy lives in
+`performance/budgets.json`, while generated reports remain runtime evidence.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a

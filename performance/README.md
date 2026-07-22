@@ -1,14 +1,14 @@
 # Performance
 
-Run the repository maintainer script directly:
+Run the repository's daily operator flow:
 
 ```bash
-uv run python scripts/lifecycle_scorecard.py
-uv run python scripts/lifecycle_scorecard.py --json
+lf telemetry-daily
 ```
 
-The script is deterministic program code. It invokes no model and uses no
-Loopflow Skill, Flow, or hidden CLI operation.
+The flow runs the Home audit, then renders the deterministic lifecycle
+scorecard. The generator is an internal operation so it stays available to
+scheduled telemetry without becoming a general-user command or stable DTO.
 
 `budgets.json` is the policy source. Each scorecard row carries its budget,
 measured/eligible coverage, nearest-rank p50 and p95, verdict, and the exact

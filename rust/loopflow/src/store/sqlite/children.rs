@@ -2242,7 +2242,7 @@ fn settle_task_pr_merged_in(
             .unwrap_or_else(OffsetDateTime::now_utc);
         let observation = GithubObservation {
             checked_at,
-            result: crate::task::GithubObservationResult::Degraded {
+            result: crate::task::GithubObservationResult::Partial {
                 reason: format!(
                     "GitHub merged_at conflicts with first accepted value {accepted_at}"
                 ),

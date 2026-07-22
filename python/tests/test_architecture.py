@@ -151,6 +151,25 @@ def test_new_root_command_must_join_a_public_concept(repo: Path) -> None:
     assert "public API missing from map: lf task" in _errors(repo)
 
 
+def test_hidden_flow_command_is_internal_not_public(repo: Path) -> None:
+    commands = repo / "rust/loopflow/src/lf/mod.rs"
+    commands.write_text(
+        commands.read_text().replace(
+            "    Wave,",
+            '    Wave,\n    #[command(name = "__telemetry-scorecard", hide = true)]\n'
+            "    TelemetryScorecard,",
+        )
+    )
+
+    errors = _errors(repo)
+    assert "public API missing from map: lf __telemetry-scorecard" not in errors
+    assert "process boundary missing from map: lf __telemetry-scorecard" in errors
+
+    _write(repo, ".lf/flows/telemetry-daily.yaml", "- op: __telemetry-scorecard\n")
+
+    assert architecture.check_repository(repo).ok
+
+
 def test_new_binary_must_join_a_process_boundary(repo: Path) -> None:
     manifest = repo / "rust/loopflow/Cargo.toml"
     manifest.write_text(

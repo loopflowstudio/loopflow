@@ -1394,6 +1394,18 @@ fn main() -> anyhow::Result<()> {
                 refresh,
                 cached,
             }) => loopflow::lf::commands::usage::run(*json, *days, *refresh, *cached),
+            Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(&args, |repo| {
+                let item = loopflow::engine::flow::Op {
+                    command: "__telemetry-scorecard".to_string(),
+                    args: if *json {
+                        vec!["--json".to_string()]
+                    } else {
+                        Vec::new()
+                    },
+                };
+                loopflow::ops::execute_flow_ops(repo, &item, &loopflow::ops::NullProgress)
+                    .map_err(Into::into)
+            }),
             Some(Commands::Ci {
                 since,
                 wave,

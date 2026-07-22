@@ -27,7 +27,7 @@ use crate::task::{
     AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
     LinearObservationOutcome, PrMergeRequest, PrPhase, PrPublication, Task, TaskEvent,
     TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
-    TaskPhasePlan, TaskPr, TaskPrId,
+    TaskPhasePlan, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
 use super::durable::{
@@ -468,6 +468,42 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn record_task_pr_repair_incident(
+        &self,
+        pr_id: &TaskPrId,
+        kind: TaskPrRepairKind,
+        occurred_at: OffsetDateTime,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        record_task_pr_repair_incident_on(&conn, pr_id, kind, occurred_at)
+    }
+
+    pub(crate) fn record_task_pr_repair_incident_for_run(
+        &self,
+        pr_id: &TaskPrId,
+        kind: TaskPrRepairKind,
+        occurred_at: OffsetDateTime,
+        lease: &RunLease,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task_id = transaction
+            .query_row(
+                "SELECT task_id FROM task_prs WHERE id=?1",
+                [pr_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .map(TaskId::from_raw)
+            .map_err(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound,
+                error => StoreError::from(error),
+            })?;
+        require_run_owns_child(&transaction, &ChildRef::Task(task_id), lease)?;
+        let inserted = record_task_pr_repair_incident_on(&transaction, pr_id, kind, occurred_at)?;
+        transaction.commit()?;
+        Ok(inserted)
+    }
+
     pub fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if heal_task_pr_base(&conn, pr)? == 0 {
@@ -570,6 +606,38 @@ impl SqliteStore {
         settle_task_pr_in(&transaction, settled, next)?;
         transaction.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn settle_task_pr_merged(
+        &self,
+        settled: &TaskPr,
+        merged_at: Option<OffsetDateTime>,
+    ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
+        validate_task_pr_settlement(settled, None)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let outcome = settle_task_pr_merged_in(&transaction, settled, merged_at)?;
+        transaction.commit()?;
+        Ok(outcome)
+    }
+
+    pub(crate) fn settle_task_pr_merged_for_run(
+        &self,
+        settled: &TaskPr,
+        merged_at: Option<OffsetDateTime>,
+        lease: &RunLease,
+    ) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
+        validate_task_pr_settlement(settled, None)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_run_owns_child(
+            &transaction,
+            &ChildRef::Task(settled.task_id.clone()),
+            lease,
+        )?;
+        let outcome = settle_task_pr_merged_in(&transaction, settled, merged_at)?;
+        transaction.commit()?;
+        Ok(outcome)
     }
 
     pub fn complete_task_after_pr(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
@@ -1965,6 +2033,20 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
     Ok(())
 }
 
+fn record_task_pr_repair_incident_on(
+    conn: &Connection,
+    pr_id: &TaskPrId,
+    kind: TaskPrRepairKind,
+    occurred_at: OffsetDateTime,
+) -> StoreResult<bool> {
+    Ok(conn.execute(
+        "INSERT INTO task_pr_repair_incidents (task_pr_id, kind, occurred_at)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(task_pr_id, kind) DO NOTHING",
+        params![pr_id.as_str(), kind.as_str(), occurred_at.unix_timestamp()],
+    )? == 1)
+}
+
 fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
     validate_task_pr(pr)?;
     let publication = pr.publication.as_ref();
@@ -2115,6 +2197,69 @@ fn settle_task_pr_in(
         ))),
         None => insert_task_pr(conn, next),
     }
+}
+
+fn settle_task_pr_merged_in(
+    conn: &Connection,
+    settled: &TaskPr,
+    merged_at: Option<OffsetDateTime>,
+) -> StoreResult<crate::store::TaskPrMergeEvidenceOutcome> {
+    let has_authority_column: bool = conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM pragma_table_info('task_prs') WHERE name='merged_at'
+         )",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_authority_column {
+        settle_task_pr_in(conn, settled, None)?;
+        return Ok(crate::store::TaskPrMergeEvidenceOutcome::SchemaUnavailable);
+    }
+
+    let accepted_at = conn.query_row(
+        "SELECT merged_at FROM task_prs WHERE id=?1",
+        [settled.id.as_str()],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
+    let observed_at = merged_at.map(OffsetDateTime::unix_timestamp);
+    let outcome = match (accepted_at, observed_at) {
+        (None, Some(_)) => crate::store::TaskPrMergeEvidenceOutcome::Accepted,
+        (Some(accepted), Some(observed)) if accepted == observed => {
+            crate::store::TaskPrMergeEvidenceOutcome::Repeated
+        }
+        (Some(accepted), Some(_)) => crate::store::TaskPrMergeEvidenceOutcome::Conflict {
+            accepted_at: accepted,
+        },
+        (_, None) => crate::store::TaskPrMergeEvidenceOutcome::Missing,
+    };
+
+    settle_task_pr_in(conn, settled, None)?;
+    if let crate::store::TaskPrMergeEvidenceOutcome::Conflict { accepted_at } = outcome {
+        let checked_at = settled
+            .github_observation
+            .as_ref()
+            .map(|observation| observation.checked_at)
+            .unwrap_or_else(OffsetDateTime::now_utc);
+        let observation = GithubObservation {
+            checked_at,
+            result: crate::task::GithubObservationResult::Degraded {
+                reason: format!(
+                    "GitHub merged_at conflicts with first accepted value {accepted_at}"
+                ),
+            },
+        };
+        conn.execute(
+            "UPDATE task_prs SET github_observation=?2 WHERE id=?1",
+            params![settled.id.as_str(), serde_json::to_string(&observation)?],
+        )?;
+    }
+    if let Some(observed_at) = observed_at {
+        conn.execute(
+            "UPDATE task_prs SET merged_at=COALESCE(merged_at, ?2) WHERE id=?1",
+            params![settled.id.as_str(), observed_at],
+        )?;
+    }
+    Ok(outcome)
 }
 
 fn same_task_pr(left: &TaskPr, right: &TaskPr) -> bool {

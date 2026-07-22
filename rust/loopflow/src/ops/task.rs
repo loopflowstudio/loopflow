@@ -37,6 +37,7 @@ use crate::task::{
 use crate::wave::Wave;
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
+use time::format_description::well_known::Rfc3339;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskWaitUntil {
@@ -979,6 +980,22 @@ async fn settle_task_pr_with_authority(
     }
 }
 
+async fn settle_task_pr_merged_with_authority(
+    store: &SharedStore,
+    settled: &TaskPr,
+    merged_at: Option<time::OffsetDateTime>,
+    lease: Option<&RunLease>,
+) -> Result<crate::store::TaskPrMergeEvidenceOutcome, StoreError> {
+    match lease {
+        Some(lease) => {
+            store
+                .settle_task_pr_merged_for_run(settled, merged_at, lease)
+                .await
+        }
+        None => store.settle_task_pr_merged(settled, merged_at).await,
+    }
+}
+
 async fn append_task_event_with_authority(
     store: &SharedStore,
     task_id: &crate::task::TaskId,
@@ -1221,6 +1238,39 @@ async fn validate_automated_task_authority(
         .validate_task_run_route(task, lease, &current.project.id)
         .await
         .map_err(|error| task_error(format!("Task body lost Project authority: {error}")))
+}
+
+pub(crate) fn record_task_pr_repair(
+    repo: &Path,
+    kind: crate::task::TaskPrRepairKind,
+) -> OpsResult<bool> {
+    block_on_task(async move {
+        let TaskAuthority::Authority { store, task, lease } = resolve_task_authority(repo).await?
+        else {
+            return Ok(false);
+        };
+        let Some(pr) = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
+        else {
+            return Ok(false);
+        };
+        let occurred_at = time::OffsetDateTime::now_utc();
+        match lease.as_ref() {
+            Some(lease) => {
+                store
+                    .record_task_pr_repair_incident_for_run(&pr.id, kind, occurred_at, lease)
+                    .await
+            }
+            None => {
+                store
+                    .record_task_pr_repair_incident(&pr.id, kind, occurred_at)
+                    .await
+            }
+        }
+        .map_err(|error| task_error(format!("failed to record Task PR repair: {error}")))
+    })
 }
 
 pub(crate) fn request_task_pr_publication(repo: &Path) -> OpsResult<bool> {
@@ -3048,7 +3098,8 @@ async fn reconcile_task_pr_with_authority(
 
     let mut observed_incident = None;
     let mut green_at = None;
-    let mut merged_at = None;
+    let mut ci_merged_at = None;
+    let mut authoritative_merged_at = None;
     let pr_event = match github_pr.state.as_str() {
         "merged" => {
             let merge_commit = github_pr.merge_commit.clone().ok_or_else(|| {
@@ -3059,7 +3110,46 @@ async fn reconcile_task_pr_with_authority(
             })?;
             pr.merge_commit = Some(merge_commit.clone());
             pr.ci_observation = None;
-            merged_at = Some(now);
+            ci_merged_at = Some(now);
+            match github_pr.merged_at.as_deref() {
+                Some(value) => match time::OffsetDateTime::parse(value, &Rfc3339) {
+                    Ok(value) => authoritative_merged_at = Some(value),
+                    Err(error) => {
+                        let reason = format!(
+                            "GitHub returned malformed merged_at for pull request #{}: {error}",
+                            github_pr.number
+                        );
+                        pr.github_observation = Some(GithubObservation {
+                            checked_at: now,
+                            result: GithubObservationResult::Degraded {
+                                reason: reason.clone(),
+                            },
+                        });
+                        task.observation = Observation::Degraded {
+                            reason,
+                            cached_as_of: pr.updated_at,
+                            retry_at: now + PR_OBSERVATION_DEGRADED_BACKOFF,
+                        };
+                    }
+                },
+                None => {
+                    let reason = format!(
+                        "GitHub returned no merged_at for merged pull request #{}",
+                        github_pr.number
+                    );
+                    pr.github_observation = Some(GithubObservation {
+                        checked_at: now,
+                        result: GithubObservationResult::Degraded {
+                            reason: reason.clone(),
+                        },
+                    });
+                    task.observation = Observation::Degraded {
+                        reason,
+                        cached_as_of: pr.updated_at,
+                        retry_at: now + PR_OBSERVATION_DEGRADED_BACKOFF,
+                    };
+                }
+            }
             // Record the merge, but withhold completion while an accepted
             // directive is unincorporated — an auto-merge armed by `lf pr land`
             // must not silently erase direction accepted after it was armed — or
@@ -3144,7 +3234,27 @@ async fn reconcile_task_pr_with_authority(
     let pr_changed = pr != previous;
     if pr_changed {
         pr.updated_at = now;
-        if pr.is_settled() {
+        if pr.phase() == PrPhase::Merged {
+            let outcome =
+                settle_task_pr_merged_with_authority(store, &pr, authoritative_merged_at, lease)
+                    .await
+                    .map_err(|error| task_error(error.to_string()))?;
+            if let crate::store::TaskPrMergeEvidenceOutcome::Conflict { accepted_at } = outcome {
+                let reason =
+                    format!("GitHub merged_at conflicts with first accepted value {accepted_at}");
+                pr.github_observation = Some(GithubObservation {
+                    checked_at: now,
+                    result: GithubObservationResult::Degraded {
+                        reason: reason.clone(),
+                    },
+                });
+                task.observation = Observation::Degraded {
+                    reason,
+                    cached_as_of: pr.updated_at,
+                    retry_at: now + PR_OBSERVATION_DEGRADED_BACKOFF,
+                };
+            }
+        } else if pr.is_settled() {
             settle_task_pr_with_authority(store, &pr, None, lease)
                 .await
                 .map_err(|error| task_error(error.to_string()))?;
@@ -3166,7 +3276,7 @@ async fn reconcile_task_pr_with_authority(
             .await
             .map_err(|error| task_error(error.to_string()))?;
     }
-    if let Some(merged_at) = merged_at {
+    if let Some(merged_at) = ci_merged_at {
         store
             .mark_ci_incidents_merged(&pr.id, merged_at)
             .await

@@ -74,6 +74,36 @@ pub struct TurnSpendRow {
     pub cost_usd: Option<f64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
+pub(crate) struct TaskFirstProgressEvidenceRow {
+    pub worktree: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub first_material_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
+pub(crate) struct TaskPrPerformanceEvidenceRow {
+    pub worktree: String,
+    pub requested_at: i64,
+    pub merged_at: Option<i64>,
+    pub merge_tracking_complete: bool,
+    pub repair_tracking_complete: bool,
+    pub merge_observation_complete: bool,
+    pub avoidable_rebase_agent: bool,
+    pub manual_git_repair: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
+pub(crate) struct PerformanceEvidenceSnapshot {
+    pub authority_started_at: i64,
+    pub task_runs: Vec<TaskFirstProgressEvidenceRow>,
+    pub task_prs: Vec<TaskPrPerformanceEvidenceRow>,
+}
+
 /// One wave's locally readable PM projection. Linear owns the payload; sync
 /// replaces this row atomically so readers never observe a partial refresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +148,15 @@ pub enum StoreError {
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskPrMergeEvidenceOutcome {
+    Accepted,
+    Repeated,
+    Missing,
+    Conflict { accepted_at: i64 },
+    SchemaUnavailable,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {
@@ -1077,21 +1116,23 @@ mod tests {
         default_lf_home_dir_for, guard_development_database, may_apply_migrations, open_store,
         read_nonterminal_task_worktrees, select_store_env_value, CredentialState, PmSnapshotRow,
         ProviderAccount, ProviderAccountId, RoutingState, RunEventRow, StorageConfig,
+        TaskPrMergeEvidenceOutcome,
     };
     use crate::build_info::{BuildProvenance, MigrationAuthority};
     use crate::child::ChildRef;
     use crate::durable::{
-        AgentInvocation, AuthenticatedRequest, Author, Basis, BoundaryState, Containment,
-        ContainmentObservation, ControlCtx, EpochState, InvocationRoute, RunAdvance, RunLease,
-        RunTrigger, StopCause, Turn, WorkRef, WorkStatus,
+        AdvanceReceipt, AgentInvocation, AuthenticatedRequest, Author, Basis, BoundaryState,
+        Containment, ContainmentObservation, ControlCtx, EpochState, InvocationRoute, RunAdvance,
+        RunLease, RunTrigger, StopCause, Turn, WorkRef, WorkStatus,
     };
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::profile::EmailAddress;
     use crate::project::{Project, ProjectId};
     use crate::task::{
-        GithubPr, PmWritebackState, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
-        TaskPrId,
+        AfterMerge, GithubObservation, GithubObservationResult, GithubPr, PmWritebackState,
+        PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
+        TaskPrId, TaskPrRepairKind,
     };
     use crate::wave::Wave;
     use std::env;
@@ -1398,6 +1439,348 @@ mod tests {
             panic!("expected Turn receipt")
         };
         (lease, invocation, turn)
+    }
+
+    #[tokio::test]
+    async fn performance_authority_restart_preserves_missing_zero_and_incident() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("registry.db");
+        let store = open_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let wave = make_wave("/repo");
+        store.create_wave(&wave).await.unwrap();
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut legacy_task = make_task(&wave, &project);
+        legacy_task.plan.id = LinearIssueId::new("issue-legacy").unwrap();
+        legacy_task.plan.identifier = "INF-200".to_string();
+        legacy_task.worktree = PathBuf::from("/repo.legacy");
+        legacy_task.workspace_slug = "legacy-landing".to_string();
+        let legacy_pr = make_task_pr(&legacy_task);
+        store.create_task(&legacy_task, &legacy_pr).await.unwrap();
+        if store
+            .sqlite
+            .performance_evidence_since(0)
+            .unwrap()
+            .is_none()
+        {
+            store
+                .sqlite
+                .apply_migration_for_test("task_performance_authority")
+                .unwrap();
+        }
+
+        let mut clean_task = make_task(&wave, &project);
+        clean_task.plan.id = LinearIssueId::new("issue-clean").unwrap();
+        clean_task.plan.identifier = "INF-201".to_string();
+        clean_task.worktree = PathBuf::from("/repo.clean");
+        clean_task.workspace_slug = "clean-landing".to_string();
+        let clean_pr = make_task_pr(&clean_task);
+        store.create_task(&clean_task, &clean_pr).await.unwrap();
+
+        let mut repaired_task = make_task(&wave, &project);
+        repaired_task.plan.id = LinearIssueId::new("issue-repaired").unwrap();
+        repaired_task.plan.identifier = "INF-202".to_string();
+        repaired_task.worktree = PathBuf::from("/repo.repaired");
+        repaired_task.workspace_slug = "repaired-landing".to_string();
+        let repaired_pr = make_task_pr(&repaired_task);
+        store
+            .create_task(&repaired_task, &repaired_pr)
+            .await
+            .unwrap();
+
+        let mut missing_merge_task = make_task(&wave, &project);
+        missing_merge_task.plan.id = LinearIssueId::new("issue-missing-merge").unwrap();
+        missing_merge_task.plan.identifier = "INF-203".to_string();
+        missing_merge_task.worktree = PathBuf::from("/repo.missing-merge");
+        missing_merge_task.workspace_slug = "missing-merge-authority".to_string();
+        let missing_merge_pr = make_task_pr(&missing_merge_task);
+        store
+            .create_task(&missing_merge_task, &missing_merge_pr)
+            .await
+            .unwrap();
+
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE task_prs SET repair_tracking_complete=0 WHERE id=?1",
+                [legacy_pr.id.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT repair_tracking_complete FROM task_prs WHERE id=?1",
+                    [legacy_pr.id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT merge_tracking_complete FROM task_prs WHERE id=?1",
+                    [legacy_pr.id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1,
+            "an active cutover PR has complete future merge instrumentation"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT repair_tracking_complete FROM task_prs WHERE id=?1",
+                    [clean_pr.id.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        drop(connection);
+
+        let clean_work = store
+            .work_for_child(&ChildRef::Task(clean_task.id.clone()))
+            .await
+            .unwrap();
+        let (_, clean_lease) = store
+            .reserve_run(&clean_work, RunTrigger::User)
+            .await
+            .unwrap();
+        let AdvanceReceipt::Run(clean_run) = store
+            .advance_run(
+                &clean_lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "clean-progress".to_string(),
+                    },
+                    cwd: clean_task.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected a started Run")
+        };
+        let first = clean_run.started_at.unwrap();
+        assert_eq!(
+            store
+                .record_first_material_at(&clean_lease, first)
+                .await
+                .unwrap(),
+            first
+        );
+        assert_eq!(
+            store
+                .record_first_material_at(&clean_lease, first + time::Duration::seconds(5))
+                .await
+                .unwrap(),
+            first,
+            "the first accepted material receipt is immutable"
+        );
+        store
+            .stop_run(
+                &clean_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+
+        let repaired_work = store
+            .work_for_child(&ChildRef::Task(repaired_task.id.clone()))
+            .await
+            .unwrap();
+        let (_, missing_lease) = store
+            .reserve_run(&repaired_work, RunTrigger::User)
+            .await
+            .unwrap();
+        store
+            .advance_run(
+                &missing_lease,
+                RunAdvance::RunStarting {
+                    containment: Containment::Tmux {
+                        name: "missing-progress".to_string(),
+                    },
+                    cwd: repaired_task.worktree.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .stop_run(
+                &missing_lease,
+                StopCause::Requested,
+                ContainmentObservation::Absent,
+            )
+            .await
+            .unwrap();
+
+        let merge_time = OffsetDateTime::now_utc() + time::Duration::seconds(30);
+        let prepare_pr = |mut pr: TaskPr, number: u32| {
+            let requested_at = merge_time - time::Duration::seconds(10);
+            let head = format!("head-{number}");
+            pr.publication = Some(PrPublication {
+                requested_at: requested_at - time::Duration::seconds(5),
+                github: Some(GithubPr {
+                    number,
+                    url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
+                    head_sha: Some(head.clone()),
+                }),
+                merge: Some(PrMergeRequest {
+                    mode: PrMergeMode::Auto,
+                    requested_at,
+                    head_sha: head,
+                    after_merge: AfterMerge::CompleteTask,
+                    next_slug: None,
+                }),
+            });
+            pr.github_observation = Some(GithubObservation {
+                checked_at: merge_time,
+                result: GithubObservationResult::Fresh,
+            });
+            pr.updated_at = requested_at;
+            pr
+        };
+
+        let mut clean_pr = prepare_pr(clean_pr, 201);
+        store.update_task_pr(&clean_pr).await.unwrap();
+        clean_pr.merge_commit = Some("merge-clean".to_string());
+        clean_pr.updated_at = merge_time;
+        assert_eq!(
+            store
+                .settle_task_pr_merged(&clean_pr, Some(merge_time))
+                .await
+                .unwrap(),
+            TaskPrMergeEvidenceOutcome::Accepted
+        );
+        assert!(
+            store
+                .record_task_pr_repair_incident(
+                    &clean_pr.id,
+                    TaskPrRepairKind::ManualGitRepair,
+                    merge_time + time::Duration::seconds(1),
+                )
+                .await
+                .is_err(),
+            "a completed zero cannot become a later repair incident"
+        );
+
+        let mut repaired_pr = prepare_pr(repaired_pr, 202);
+        store.update_task_pr(&repaired_pr).await.unwrap();
+        assert!(store
+            .record_task_pr_repair_incident(
+                &repaired_pr.id,
+                TaskPrRepairKind::AvoidableRebaseAgent,
+                merge_time - time::Duration::seconds(2),
+            )
+            .await
+            .unwrap());
+        assert!(!store
+            .record_task_pr_repair_incident(
+                &repaired_pr.id,
+                TaskPrRepairKind::AvoidableRebaseAgent,
+                merge_time - time::Duration::seconds(1),
+            )
+            .await
+            .unwrap());
+        repaired_pr.merge_commit = Some("merge-repaired".to_string());
+        repaired_pr.updated_at = merge_time;
+        store
+            .settle_task_pr_merged(&repaired_pr, Some(merge_time))
+            .await
+            .unwrap();
+        repaired_pr = store.get_task_pr(&repaired_pr.id).await.unwrap().unwrap();
+        assert_eq!(
+            store
+                .settle_task_pr_merged(&repaired_pr, Some(merge_time + time::Duration::seconds(5)),)
+                .await
+                .unwrap(),
+            TaskPrMergeEvidenceOutcome::Conflict {
+                accepted_at: merge_time.unix_timestamp(),
+            },
+            "a conflicting replay preserves the first merge instant"
+        );
+
+        let mut missing_merge_pr = prepare_pr(missing_merge_pr, 203);
+        missing_merge_pr.github_observation = Some(GithubObservation {
+            checked_at: merge_time,
+            result: GithubObservationResult::Degraded {
+                reason: "GitHub merged_at missing".to_string(),
+            },
+        });
+        store.update_task_pr(&missing_merge_pr).await.unwrap();
+        missing_merge_pr.merge_commit = Some("merge-without-time".to_string());
+        missing_merge_pr.updated_at = merge_time;
+        assert_eq!(
+            store
+                .settle_task_pr_merged(&missing_merge_pr, None)
+                .await
+                .unwrap(),
+            TaskPrMergeEvidenceOutcome::Missing,
+            "correctness settles even when timing authority is absent"
+        );
+
+        drop(store);
+        let reader = SqliteStore::open_run_ledger_read_only(&database).unwrap();
+        let evidence = reader
+            .performance_evidence_since(0)
+            .unwrap()
+            .expect("authority schema survives restart");
+
+        assert_eq!(evidence.task_runs.len(), 2);
+        assert_eq!(
+            evidence
+                .task_runs
+                .iter()
+                .filter(|run| run.first_material_at.is_some())
+                .count(),
+            1
+        );
+        assert_eq!(evidence.task_prs.len(), 3);
+        assert_eq!(
+            evidence
+                .task_prs
+                .iter()
+                .filter(|pr| pr.merge_observation_complete)
+                .count(),
+            1,
+            "the conflicting merge receipt remains durable partial evidence"
+        );
+        assert!(evidence
+            .task_prs
+            .iter()
+            .all(|pr| pr.merge_tracking_complete));
+        assert!(evidence
+            .task_prs
+            .iter()
+            .all(|pr| pr.repair_tracking_complete));
+        assert_eq!(
+            evidence
+                .task_prs
+                .iter()
+                .find(|pr| pr.worktree == repaired_task.worktree.to_string_lossy())
+                .unwrap()
+                .merged_at,
+            Some(merge_time.unix_timestamp())
+        );
+        let missing_merge = evidence
+            .task_prs
+            .iter()
+            .find(|pr| pr.worktree == missing_merge_task.worktree.to_string_lossy())
+            .unwrap();
+        assert_eq!(missing_merge.merged_at, None);
+        assert!(!missing_merge.merge_observation_complete);
+        assert_eq!(
+            evidence
+                .task_prs
+                .iter()
+                .filter(|pr| pr.avoidable_rebase_agent)
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

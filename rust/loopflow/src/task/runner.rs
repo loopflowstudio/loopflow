@@ -272,6 +272,8 @@ async fn run_task_with(
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
+    let mut first_material_recorded = false;
+    let mut first_material_warning_emitted = false;
     'runner: loop {
         tokio::select! {
             line = attachment_rx.recv() => {
@@ -359,6 +361,22 @@ async fn run_task_with(
                     ConversationEvent::TurnCompleted { turn_id, .. }
                         if turn_id.starts_with("interactive:")
                 );
+                if !advisory_event && !first_material_recorded && event.is_material_progress() {
+                    let observed_at = time::OffsetDateTime::now_utc();
+                    match store.record_first_material_at(lease, observed_at).await {
+                        Ok(_) => first_material_recorded = true,
+                        Err(error) if !first_material_warning_emitted => {
+                            tracing::warn!(
+                                task = %task.id,
+                                run = %lease.run_id,
+                                %error,
+                                "Task first-material evidence did not persist; a later material event will retry"
+                            );
+                            first_material_warning_emitted = true;
+                        }
+                        Err(_) => {}
+                    }
+                }
                 if !advisory_event {
                     if let Some(capture) = &capture {
                         capture.record_conversation(event.clone());

@@ -11,8 +11,8 @@ uv run python scripts/resource_envelope.py             # attribute local disk pr
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-cargo test -p loopflow performance                     # scorecard behavior
-lf performance                                         # real 14-day local evidence
+uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
+uv run python scripts/lifecycle_scorecard.py           # maintainer report
 ```
 
 Escalate from a focused behavior to affected suites when crossing a component
@@ -83,14 +83,13 @@ growth. A product assertion remains a product failure; a stopped phase under
 sustained macOS `syspolicyd`/`trustd`/`amfid`/`taskgated` pressure is reported as
 host-security pressure with the product result explicitly unproven.
 
-Read the same gate evidence through the scorecard:
+Read the same gate evidence through the maintainer script:
 
 ```bash
-lf performance
-lf performance --json
+uv run python scripts/lifecycle_scorecard.py
 ```
 
-The report joins accepted provider Turn usage with pre-land phase records. It
+The script joins accepted provider Turn usage with pre-land phase records. It
 prints aggregate values and coverage only—never commands, prompts, output, or
 task ids. Missing evidence is `UNKNOWN`, reported zero remains measured, and
 small samples stay `COLLECTING` until 20 observations support p95.

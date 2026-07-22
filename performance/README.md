@@ -1,9 +1,14 @@
 # Performance
 
+Run the repository maintainer script directly:
+
 ```bash
-lf performance          # compare the last 14 days with tracked budgets
-lf performance --json   # consume the same scorecard as structured data
+uv run python scripts/lifecycle_scorecard.py
+uv run python scripts/lifecycle_scorecard.py --json
 ```
+
+The script is deterministic program code. It invokes no model and uses no
+Loopflow Skill, Flow, or hidden CLI operation.
 
 `budgets.json` is the policy source. Each scorecard row carries its budget,
 measured/eligible coverage, nearest-rank p50 and p95, verdict, and the exact
@@ -11,31 +16,26 @@ reason evidence is incomplete. `FAIL` outranks missing coverage when an
 observed value already breaches a budget. `PASS` requires complete coverage
 and at least 20 samples; smaller complete sets are `COLLECTING`.
 
-## Initial baseline
+Four lifecycle rows read durable owner facts rather than artifacts or observer
+timestamps:
 
-Observed through `2026-07-21T20:02:07Z` for the preceding 14 days:
+| Row | Eligible fact | Measured value |
+|---|---|---|
+| `task_first_progress_seconds` | Ended Task Run, windowed by `ended_at` | First material provider event minus Run start |
+| `land_to_merge_seconds` | Explicitly requested Task PR, windowed by GitHub `merged_at` | GitHub `merged_at` minus first merge-request time |
+| `avoidable_repairs` | Same requested-and-merged Task PR | `1` for a typed avoidable rebase-agent incident; tracked absence is `0` |
+| `manual_git_repairs` | Same requested-and-merged Task PR | `1` for a typed raw-sequencer adoption incident; tracked absence is `0` |
 
-| Measure | Coverage | p50 | p95 | Verdict |
-|---|---:|---:|---:|---|
-| Task launch → first progress | 0/0 | — | — | UNKNOWN — first material progress is not persisted |
-| Pre-land changed | 24/40 | 126.5 s | 273.2 s | UNKNOWN — failed runs are censored |
-| Pre-land full | 6/12 | 271.9 s | 702.1 s | UNKNOWN — failed runs are censored |
-| Land request → merge | 0/0 | — | — | UNKNOWN — GitHub `mergedAt` is not persisted |
-| Avoidable repair | 0/0 | — | — | UNKNOWN — no durable landing denominator |
-| Build/disk and CPU | 0/0 | — | — | UNKNOWN — resource envelopes belong to LOO-9 |
-| Agent total input / Turn | 779/1,315 | 927,350 | 5,270,416 | FAIL — p95 exceeds 5,000,000 |
-| Agent output / Turn | 783/1,315 | 3,433 | 18,134 | UNKNOWN — 532 missing reports |
-| Reported cost / Turn | 62/1,315 | $1.21 | $6.74 | UNKNOWN — 1,253 missing reports |
+Historical rows are never backfilled. Until a complete scorecard window lies
+after the lifecycle-authority cutover, clean rows remain `UNKNOWN`; an observed
+budget breach still reports `FAIL`. A missing or conflicting GitHub merge time
+also remains unmeasured. Merge correctness does not depend on performance
+evidence.
 
-Provider coverage exposes why the aggregate is incomplete:
+PRs still open at cutover begin merge tracking immediately, but not repair
+tracking: their future GitHub merge boundary is coverable, while their earlier
+repair history may already be incomplete.
 
-| Provider | Input coverage | Output coverage | Cost coverage |
-|---|---:|---:|---:|
-| Claude | 58/273 | 62/273 | 62/273 |
-| Codex | 721/936 | 721/936 | 0/936 |
-| OpenCode | 0/106 | 0/106 | 0/106 |
-
-Pre-land phase observations already support a p95 verdict for `clippy`,
-`python`, `rustfmt`, `swift`, and `website`; each is inside budget. Other
-phases remain `COLLECTING` below 20 samples or `UNKNOWN` where phase evidence is
-missing. This baseline does not backfill any absent value with zero.
+Generated reports are runtime evidence and stay out of source control. Examples
+and fixtures must be synthetic; repository history owns only metric definitions,
+budgets, schemas, and behavior tests.

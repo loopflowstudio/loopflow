@@ -190,6 +190,18 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.validate_run_lease(&lease)).await
     }
 
+    pub(crate) async fn record_first_material_at(
+        &self,
+        lease: &RunLease,
+        observed_at: time::OffsetDateTime,
+    ) -> StoreResult<time::OffsetDateTime> {
+        let lease = lease.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_first_material_at(&lease, observed_at)
+        })
+        .await
+    }
+
     pub async fn advance_run(
         &self,
         lease: &RunLease,

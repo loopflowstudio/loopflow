@@ -447,8 +447,6 @@ lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
 lf usage                        # subscription % per account + spend by repo/provider
 lf usage --refresh              # poll every account's provider now
 lf usage --json --days 30       # one additive row per measured provider Turn
-lf performance                  # 14-day performance and spend vs tracked budgets
-lf performance --json           # same scorecard as a stable machine-readable DTO
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
 lf ps                            # one live call-tree snapshot, ranked by completed output
@@ -519,14 +517,12 @@ Under forwarded account authority, subscription polling is unavailable so the
 remote account store is never consulted. `lf usage` still prints process token
 spend from the local execution ledger.
 
-`lf performance` reads that same accepted per-Turn evidence and the pre-land
-records under the Git common directory. Each row shows measured/eligible
-coverage, nearest-rank p50 and p95, its tracked budget, and one of `PASS`,
-`FAIL`, `COLLECTING`, or `UNKNOWN`. Missing provider usage never becomes zero;
-an explicit provider-reported zero remains a measured sample. Rows whose
-authoritative fact is not recorded name the gap instead of estimating from
-timestamps or trace text. Edit the versioned policy in
-`performance/budgets.json`.
+The repository maintainer script `scripts/lifecycle_scorecard.py` combines the
+same accepted per-Turn evidence with pre-land records under the Git common
+directory. It is deterministic code, not a Skill or an `lf` API. Missing
+provider usage never becomes zero; an explicit provider-reported zero remains
+a measured sample. Versioned policy lives in `performance/budgets.json`, while
+generated reports remain runtime evidence.
 
 A run is one agent-backed skill invocation. It owns the context, model, token,
 cost, and outcome evidence. An exec is one `lf` process; nested execs share a

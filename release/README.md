@@ -38,6 +38,11 @@ repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
 
+The repository names the logical `loopflow-release-publisher` command. The
+maintained Home supplies that executable on PATH and keeps its credential
+provider and selectors untracked. `lf release run` invokes its read-only
+`check` before changing release state, so missing host authority fails closed.
+
 | Path | What it does |
 |------|--------------|
 | `release/unreleased/DECISIONS.md` | Append-only ledger for release-worthy intent and policy decisions during the current cycle |

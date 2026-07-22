@@ -3,7 +3,7 @@
 #
 # Run this from the placed Home after promoting a release `lf`. The script
 # reconstructs the unattended environment from non-secret host-local paths;
-# Doppler injects publisher secrets only into its read-only preflight.
+# the Home-local publisher command injects authority only into its child.
 #
 # Usage: scripts/bootstrap-cron-host.sh [wave]
 #   scripts/bootstrap-cron-host.sh infrastructure
@@ -50,7 +50,7 @@ step "installed binary + declared jobs"
 step "unattended tool path"
 "${minimal_env[@]}" sh -c '
   missing=0
-  for tool in lf doppler uv gh cargo flyctl security swift xcrun jq; do
+  for tool in lf loopflow-release-publisher uv gh cargo flyctl security swift xcrun jq; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       printf "missing: %s\n" "$tool" >&2
       missing=1
@@ -70,11 +70,8 @@ if ! grep -q 'live active' <<<"$auth_status"; then
   exit 1
 fi
 
-step "Doppler publisher authority"
-"${minimal_env[@]}" doppler run \
-  --project loopflow \
-  --config prd \
-  -- \
+step "configured publisher authority"
+"${minimal_env[@]}" loopflow-release-publisher \
   uv run python scripts/publish_release.py check
 
 step "sync repo-owned schedules"

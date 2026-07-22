@@ -20,10 +20,12 @@ launchd when they differ.
   task-worktree binaries.
 - Keep the repository's authoritative checkout on the placed Home.
 - Configure at least one managed Claude or Codex account in the Home store.
-- Install `doppler`, `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`,
-  `xcrun`, and `jq` on the host path.
-- Configure Doppler project `loopflow`, config `prd`, without storing or
-  printing secret values in the repository or launchd plist.
+- Install `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`, `xcrun`, and
+  `jq` on the host path.
+- Install an executable named `loopflow-release-publisher` on the Home's PATH.
+  It must inject the host's private publisher authority, then execute the argv
+  it receives. Keep its implementation and provider selectors outside the
+  checkout.
 - Install the Developer ID signing identity and host-native GitHub, registry,
   R2, notarization, and Fly authority required by the release publisher.
 
@@ -32,13 +34,14 @@ Home/store paths, and basic locale/temp settings. It verifies a managed provider
 account live, then runs the publisher's read-only check through:
 
 ```bash
-doppler run --project loopflow --config prd -- \
+loopflow-release-publisher \
   uv run python scripts/publish_release.py check
 ```
 
-Doppler injects values only into that process. The script never reads or prints
-a secret and never forwards a Task lease, provider lease, GitHub token, PM
-token, or invocation context.
+The logical command is the public contract; its Home-local implementation owns
+the private provider binding. The bootstrap never reads or prints a secret and
+never forwards a Task lease, provider lease, GitHub token, PM token, or
+invocation context. A missing command or failed check stops before cron sync.
 
 ## Repo-owned schedules
 

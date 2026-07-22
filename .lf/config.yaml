@@ -17,13 +17,7 @@ release:
       - uv run python scripts/canonicalize_migrations.py {version} --release-cut
       completion: github-release
       publisher:
-      - doppler
-      - run
-      - --project
-      - loopflow
-      - --config
-      - prd
-      - --
+      - loopflow-release-publisher
       - uv
       - run
       - python

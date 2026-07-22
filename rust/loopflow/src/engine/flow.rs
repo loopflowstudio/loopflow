@@ -206,6 +206,10 @@ pub fn wave_memory_section(memory: &str) -> Option<String> {
     Some(format!("<lf:wave-memory>\n{trimmed}\n</lf:wave-memory>"))
 }
 
+/// Sections run stable → volatile so providers can prefix-cache the front of
+/// the seed: goal prompt and flow list rarely change between passes, while
+/// MEMORY.md is rewritten every pass — it goes last so a memory edit doesn't
+/// invalidate the cacheable bytes ahead of it.
 pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     let flows = if ctx.flows.is_empty() {
         "No flows are available.".to_string()
@@ -221,10 +225,10 @@ pub fn render_goal(goal: &Goal, ctx: &GoalRenderContext) -> String {
     });
 
     format!(
-        "{}\n\n{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>",
+        "{}\n\n<lf:goal-context>\nAvailable flows:\n{}\n</lf:goal-context>\n\n{}",
         goal.prompt.trim(),
-        memory,
         flows,
+        memory,
     )
 }
 
@@ -1201,6 +1205,11 @@ mod tests {
         assert!(rendered.contains("Last loop found the docs drift."));
         assert!(rendered.contains("- build"));
         assert!(rendered.contains("- qa"));
+        // Stable → volatile: memory is rewritten between passes, so it must
+        // trail the stable goal and flow list to keep the prefix cacheable.
+        let memory_at = rendered.find("<lf:wave-memory>").expect("memory section");
+        let flows_at = rendered.find("<lf:goal-context>").expect("flow section");
+        assert!(flows_at < memory_at, "memory renders after the flow list");
     }
 
     #[test]

@@ -14,6 +14,7 @@
     "input_tokens": 1000,
     "output_tokens": 200,
     "cache_read_tokens": 800,
+    "cache_write_tokens": 100,
     "cost_usd": 0.25
   },
   {
@@ -31,6 +32,7 @@
     "input_tokens": null,
     "output_tokens": 0,
     "cache_read_tokens": 150,
+    "cache_write_tokens": null,
     "cost_usd": null
   }
 ]

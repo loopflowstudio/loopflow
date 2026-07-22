@@ -18,6 +18,7 @@ since they dominate wall-clock time.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -33,7 +34,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import IO, Callable, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 XCODE_LOCAL_SIGNING = [
@@ -201,6 +202,15 @@ class Suite:
     # Refines a raw command failure using its captured log — e.g. recognising a
     # UI-runner bootstrap failure and naming the missing capability.
     classify: Optional[Callable[[str], Optional[str]]] = None
+    # Name of a machine-wide flock held for the suite's whole run. Suites that
+    # drive machine-global facilities (UI automation) must not interleave:
+    # overlapping hosted runs are how testmanagerd leaks Automation Mode
+    # clients (release/UI_HOST_GATE.md). None => no lock.
+    machine_lock: Optional[str] = None
+    # Runs after the suite's commands, pass or fail. The gate must leave the
+    # machine as it found it; a returned string fails a passing suite and is
+    # appended to an already-failing one.
+    postcheck: Optional[Callable[[], Optional[str]]] = None
 
 
 def _rust_commands(_changed: list[str]) -> list[Command]:
@@ -466,6 +476,87 @@ def _ui_host_classify(log_text: str) -> Optional[str]:
     return None
 
 
+# Deliberately /tmp, not the per-worktree artifact root: UI automation is a
+# machine-global facility (testmanagerd, Automation Mode), so runs launched
+# from different worktrees must contend on the same path. flock releases on
+# process death; /tmp clears on reboot.
+_MACHINE_LOCK_DIR = Path("/tmp")
+
+
+def _acquire_machine_lock(name: str) -> tuple[Optional[IO[str]], Optional[str]]:
+    """Take the named machine-wide lock without blocking.
+
+    Returns (handle, None) when acquired — closing the handle releases it — or
+    (None, actionable failure) when another run holds it.
+    """
+    path = _MACHINE_LOCK_DIR / f"lf-{name}.lock"
+    handle = open(path, "a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.seek(0)
+        holder = handle.read().strip() or "unknown pid"
+        handle.close()
+        return None, (
+            f"MACHINE LOCK HELD: another '{name}' run (pid {holder}) is live on "
+            f"this machine ({path}). Hosted UI runs must not interleave — "
+            "overlapping sessions leak Automation Mode clients. "
+            "NEXT ACTION: let it finish (`lf ps` shows live runs), then rerun."
+        )
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n")
+    handle.flush()
+    return handle, None
+
+
+# How long Automation Mode may stay enabled after the last session before the
+# gate calls it a leak. Disable normally lands within a second of the final
+# client releasing; the margin absorbs testmanagerd bookkeeping lag.
+_AUTOMATION_SETTLE_S = 15
+
+_UI_AUTOMATION_LEAK = (
+    "AUTOMATION MODE LEAKED: macOS still reports Automation Mode ENABLED after "
+    "the ui-host run. A UI-test runner died without releasing its automation "
+    "client, so the 'Automation Running' banner will squat on this host until "
+    "the count is repaired — SIP blocks deleting the state file or restarting "
+    "automationmode-writer, even as root. NEXT ACTION: `killall testmanagerd` "
+    "(user-owned; resets the stale client count), then rerun "
+    "`uv run python scripts/test.py --ui-host` so one session ends cleanly. "
+    "See release/UI_HOST_GATE.md."
+)
+
+
+def _automation_mode_enabled() -> bool:
+    """True when `automationmodetool` reports Automation Mode enabled. False on
+    a disabled report, a missing tool, or an unrecognised answer — only a
+    positive ENABLED is worth failing a gate over."""
+    tool = shutil.which("automationmodetool")
+    if tool is None:
+        return False
+    result = subprocess.run([tool], capture_output=True, text=True)
+    return "automation mode is enabled" in (result.stdout + result.stderr).lower()
+
+
+def _ui_host_postcheck() -> Optional[str]:
+    """The gate must leave the machine as it found it.
+
+    Automation Mode is machine-global state owned by testmanagerd; a client
+    that dies unobserved keeps it enabled forever, which surfaces to the
+    operator as an unkillable 'Automation Running' banner (the ⌥⌘. it
+    advertises targets a process that no longer exists). Poll briefly so a
+    normally-settling disable doesn't read as a leak.
+    """
+    if platform.system() != "Darwin":
+        return None
+    deadline = time.monotonic() + _AUTOMATION_SETTLE_S
+    while _automation_mode_enabled():
+        if time.monotonic() >= deadline:
+            return _UI_AUTOMATION_LEAK
+        time.sleep(3)
+    return None
+
+
 # Ordered fast -> slow. Slow suites are gated behind --all / their own flag.
 SUITES: list[Suite] = [
     Suite(
@@ -539,6 +630,8 @@ SUITES: list[Suite] = [
         host_gate=True,
         precheck=_ui_host_precheck,
         classify=_ui_host_classify,
+        machine_lock="ui-host",
+        postcheck=_ui_host_postcheck,
     ),
 ]
 
@@ -1063,27 +1156,40 @@ class SuiteOutcome:
     failure: Optional[str] = None
 
 
-def _kill_group(proc: "subprocess.Popen[str]") -> None:
+# The hosted UI-test runner is spawned by testmanagerd, NOT by xcodebuild, so
+# it lives outside the phase's process group and killpg can never reach it. A
+# lingering runner holds an Automation Mode client; when it later dies
+# unobserved, testmanagerd's client count leaks and the machine wedges in
+# 'Automation Running' (release/UI_HOST_GATE.md). Labels here get an explicit
+# runner reap after the group kill; the ui-host postcheck then verifies the
+# mode actually released.
+_UI_RUNNER_LABELS = {"ui-host"}
+_UI_RUNNER_PROCESS = "LoopflowUITests-Runner"
+
+
+def _kill_group(proc: "subprocess.Popen[str]", label: str) -> None:
     """SIGTERM the phase's whole process group, SIGKILL after a grace period.
 
-    A hung `xcodebuild` spawns a test-host child; killing only the parent leaves
-    the runner alive and the terminal wedged, so we signal the group.
+    The group covers xcodebuild and its direct helpers. It does NOT cover the
+    hosted UI-test runner (testmanagerd's child), so UI phases also reap any
+    leftover runner by name — SIGTERM, giving it a chance to release its
+    Automation Mode client on the way out.
     """
     try:
         pgid = os.getpgid(proc.pid)
     except ProcessLookupError:
-        return
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        proc.wait(timeout=KILL_GRACE_S)
-    except subprocess.TimeoutExpired:
+        pgid = None
+    if pgid is not None:
         try:
-            os.killpg(pgid, signal.SIGKILL)
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=KILL_GRACE_S)
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+    if label in _UI_RUNNER_LABELS:
+        subprocess.run(["pkill", "-x", _UI_RUNNER_PROCESS], capture_output=True)
 
 
 def _command_exists(cmd: Command) -> bool:
@@ -1224,7 +1330,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
             while proc.poll() is None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    _kill_group(proc)
+                    _kill_group(proc, cmd.label)
                     pump.join(timeout=5)
                     elapsed = time.monotonic() - started
                     return _finish(
@@ -1246,7 +1352,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
                     except OSError:
                         free = disk_floor
                     if free < disk_floor:
-                        _kill_group(proc)
+                        _kill_group(proc, cmd.label)
                         pump.join(timeout=5)
                         return _finish(
                             "resource_exhausted",
@@ -1267,7 +1373,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
                     else:
                         pressure_count = 0
                     if pressure_count >= security_samples and pressure is not None:
-                        _kill_group(proc)
+                        _kill_group(proc, cmd.label)
                         pump.join(timeout=5)
                         return _finish(
                             "host_pressure",
@@ -1283,7 +1389,7 @@ def _run_command(cmd: Command, artifact_dir: Path, suite: str) -> PhaseOutcome:
                             False,
                         )
         except KeyboardInterrupt:
-            _kill_group(proc)
+            _kill_group(proc, cmd.label)
             pump.join(timeout=5)
             raise
         pump.join(timeout=5)
@@ -1333,6 +1439,41 @@ def _run_suite(
             print(f"\n[{plan.suite.name}] {gap}", flush=True)
             return SuiteOutcome(False, time.monotonic() - started, phases, gap)
 
+    lock = None
+    if plan.suite.machine_lock is not None:
+        lock, held = _acquire_machine_lock(plan.suite.machine_lock)
+        if lock is None:
+            assert held is not None
+            print(f"\n[{plan.suite.name}] {held}", flush=True)
+            return SuiteOutcome(False, time.monotonic() - started, phases, held)
+    try:
+        result = _run_suite_commands(plan, artifact_dir, phases, started, checkpoint_phase)
+
+        # The postcheck runs whether the commands passed or failed — a failed
+        # or killed run is exactly when machine state is most likely to have
+        # leaked — and while the lock is still held, so a queued next run
+        # cannot re-enable the state mid-check and fake a leak.
+        if plan.suite.postcheck is not None:
+            leak = plan.suite.postcheck()
+            if leak is not None:
+                print(f"\n[{plan.suite.name}] {leak}", flush=True)
+                result.ok = False
+                result.failure = (
+                    leak if result.failure is None else f"{result.failure}\n{leak}"
+                )
+    finally:
+        if lock is not None:
+            lock.close()
+    return result
+
+
+def _run_suite_commands(
+    plan: Plan,
+    artifact_dir: Path,
+    phases: list[PhaseOutcome],
+    started: float,
+    checkpoint_phase: Callable[[PhaseOutcome], None],
+) -> SuiteOutcome:
     for index, cmd in enumerate(plan.commands):
         print(f"\n$ {_fmt_cmd(cmd)}  (budget {_budget_for(cmd.label)}s)", flush=True)
         outcome = _run_command(cmd, artifact_dir, plan.suite.name)

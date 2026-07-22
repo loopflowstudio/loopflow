@@ -18,6 +18,15 @@ It is never pulled in by `--all`. It runs `LoopflowUITests` for real
 budgets as every other phase, and writes an `.xcresult` bundle plus phase logs
 under `.lf/tmp/gate/run-<pid>/ui-host/` on failure.
 
+Because UI automation is a machine-global facility, the suite also:
+
+- holds a machine-wide lock (`/tmp/lf-ui-host.lock`) for the whole run, so two
+  hosted runs — from any worktree — can never interleave. A held lock is a
+  named failure, not a queue.
+- verifies after the run (pass or fail) that macOS Automation Mode returned to
+  disabled. A still-enabled mode is reported as `AUTOMATION MODE LEAKED` with
+  the repair steps below — never silently left to haunt the operator.
+
 ## What a pass proves
 
 `LoopflowUITests` (currently `ScreenshotPipelineTests`) actually executed on a
@@ -25,6 +34,14 @@ permissioned host — the app launched, the runner connected, and the UI
 assertions ran. This is the only signal `--all` cannot give.
 
 ## The maintained host
+
+The maintained host is the Mac mini cron host (W2-78 bootstraps it), not the
+operator's daily driver. Hosted UI automation takes over the machine it runs
+on — the app steals focus, input pauses the automation, and a leaked session
+plants an unkillable "Automation Running" banner (see below). On the mini
+those are log lines; on a laptop someone is using, they break the human.
+Until the mini is live, runs on the daily driver are the interim fallback and
+carry exactly those risks.
 
 Run this on a Mac with UI automation granted to the test runner. To grant it:
 
@@ -34,6 +51,39 @@ Run this on a Mac with UI automation granted to the test runner. To grant it:
 3. Re-run `uv run python scripts/test.py --ui-host`.
 
 Target: **5/5** clean runs on the maintained host.
+
+## Stuck Automation Mode ("Automation Running" banner)
+
+Symptom: the macOS pill "Automation Running — press ⌥⌘. to stop" persists with
+no test visibly running, dodges the cursor, and greys out while you use the
+machine. The advertised ⌥⌘. does nothing — it targets the test host process,
+which is already dead.
+
+Cause: testmanagerd disables Automation Mode only when its in-memory client
+count reaches zero. A runner that dies unobserved (SIGKILL, crash, or a hung
+run's cleanup) leaks a client, and every later run counts 1→2→1 without ever
+reaching zero. Verified on this repo 2026-07-20/21: three overlapping hosted
+runs leaked one client; the banner then survived ~18 hours and three clean
+runs.
+
+Do not fight SIP — these all fail, even as root:
+
+- `rm /var/db/com.apple.dt.automationmode/automation-enabled` → not permitted
+- `launchctl kickstart -k system/com.apple.dt.automationmode-writer` → not
+  permitted
+- `automationmodetool` has no disable subcommand (it only manages the
+  authentication requirement)
+
+Repair (no reboot needed):
+
+```bash
+killall testmanagerd     # user-owned; launchd respawns it with client count 0
+uv run python scripts/test.py --ui-host   # any session ending cleanly disables the mode
+```
+
+The state file under `/var/db/com.apple.dt.automationmode/` is deleted by the
+system itself during that clean teardown. A reboot also clears it, but is
+never required.
 
 ## Absent capability is a failure, never a silent skip
 

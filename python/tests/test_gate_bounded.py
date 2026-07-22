@@ -578,3 +578,72 @@ def test_loopflow_summary_says_it_does_not_run_hosted_ui():
     loopflow = next(s for s in gate.SUITES if s.name == "loopflow")
     assert loopflow.proves is not None
     assert "NOT run here" in loopflow.proves
+
+
+def test_machine_lock_is_exclusive_and_names_the_holder(tmp_path, monkeypatch):
+    # Two acquisitions must conflict (even in one process — flock is per open
+    # file description), and the loser gets an actionable message, not a queue.
+    monkeypatch.setattr(gate, "_MACHINE_LOCK_DIR", tmp_path)
+
+    first, first_msg = gate._acquire_machine_lock("probe")
+    assert first is not None and first_msg is None
+
+    second, second_msg = gate._acquire_machine_lock("probe")
+    assert second is None
+    assert second_msg is not None
+    assert "MACHINE LOCK HELD" in second_msg
+    assert str(gate.os.getpid()) in second_msg  # holder pid is named
+
+    first.close()  # releasing frees the lock for the next run
+    third, third_msg = gate._acquire_machine_lock("probe")
+    assert third is not None and third_msg is None
+    third.close()
+
+
+def test_ui_host_leak_is_named_with_the_repair(monkeypatch):
+    # Automation Mode still enabled after the settle window is a leak: the
+    # failure must name the state and the exact repair (killall testmanagerd +
+    # a clean rerun), because SIP blocks every other escape.
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gate, "_automation_mode_enabled", lambda: True)
+    monkeypatch.setattr(gate, "_AUTOMATION_SETTLE_S", 0)
+
+    leak = gate._ui_host_postcheck()
+
+    assert leak is not None
+    assert "AUTOMATION MODE LEAKED" in leak
+    assert "killall testmanagerd" in leak
+    assert "UI_HOST_GATE.md" in leak
+
+
+def test_ui_host_postcheck_is_quiet_when_the_mode_released(monkeypatch):
+    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gate, "_automation_mode_enabled", lambda: False)
+    assert gate._ui_host_postcheck() is None
+
+
+def test_suite_postcheck_fails_a_passing_run(tmp_path, monkeypatch, capsys):
+    # A suite whose commands all pass but whose postcheck reports leaked
+    # machine state must fail — a green gate that wedged the host is a lie.
+    monkeypatch.setattr(gate, "_gate_evidence_root", lambda: tmp_path / "evidence")
+    monkeypatch.setattr(gate, "_run_artifact_root", lambda: tmp_path / "artifacts")
+    monkeypatch.setattr(gate, "_tree_fingerprint", lambda: "tree")
+    command = _cmd(["bash", "-c", "exit 0"], "probe")
+    suite = gate.Suite(
+        name="probe",
+        slow=False,
+        trigger_desc="test fixture",
+        match=lambda _changed: True,
+        build=lambda _changed: [command],
+        postcheck=lambda: "AUTOMATION MODE LEAKED: fixture",
+    )
+    plan = gate.Plan(suite=suite, run=True, reason="test fixture", commands=[command])
+
+    assert gate.run_plans([plan], kind="changed") == 1
+    assert "AUTOMATION MODE LEAKED: fixture" in capsys.readouterr().out
+
+
+def test_ui_host_suite_serializes_and_checks_machine_state():
+    ui = next(s for s in gate.SUITES if s.name == "ui-host")
+    assert ui.machine_lock == "ui-host"
+    assert ui.postcheck is gate._ui_host_postcheck

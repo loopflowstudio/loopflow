@@ -1,47 +1,39 @@
-# v0.12.6
+# v0.12.7
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.12.6 makes the boundaries around verification, release recovery, Task authority, and installation explicit. Local gates stop rather than mistake host pressure for a product failure, while an interrupted release can resume from repaired control code without changing the immutable tag being published. Tasks and candidate binaries now fail closed when the durable evidence says they no longer own—or cannot execute—the work in front of them.
+v0.12.7 makes a verified published release the single unit of production Home upgrades. The same rule now governs release automation itself: generated release state is rebuilt when its source frontier changes, never rebased into something that only looks current. Wave agents also preserve more reusable prompt context and expose whether that reuse is paying off.
 
-## Verification stays inside a measured host budget
+## Homes move between verified runtime generations
 
-Local verification now accounts for the machine it runs on. The gate attributes disk and CPU use, applies repository-owned limits, and leaves a product result unproven when resource pressure makes that result unreliable (#1168).
+Production upgrades now activate a matched `lf`, `lfd`, Mac app, and schema generation from one pinned published release. The transition is durable and recoverable, so a Home cannot quietly split across source-built binaries, migrations, and application versions (#1186).
 
-- `uv run python scripts/resource_envelope.py` reports free space and attributes worktree builds, gate artifacts, traces, and shared caches to their owners.
-- `scripts/test.py` preflights the resource envelope, limits build and test concurrency to four low-priority workers, and monitors free disk plus macOS security-process pressure throughout each phase.
-- `--recover` removes only allowlisted disposable data: builds from inactive worktrees, expired gate output, and entries accepted by `uv cache prune`. Source, worktrees, traces, receipts, and SQLite state are preserved.
-- Schema-3 gate evidence records child CPU, minimum free disk, build bytes, and attributed growth. `lf performance` exposes build-disk and pre-land CPU measurements alongside the existing scorecard.
+- `refresh` pins the latest published tag, verifies the installer, native archive, and Mac app against published SHA-256 checksums, then upgrades through the external installation path.
+- The Home records each runtime generation, upgrade phase, affected Work, and generation-aware Run trigger before activation.
+- Upgrades fence new work, drain active Runs, advance migrations, activate the matched artifacts, restart the configured keeper, and reconcile enabled Waves, Projects, and Tasks.
+- Durable receipts and recovery guards let an interrupted transition resume or roll back instead of leaving mixed binaries and schemas active.
+- `lfd` health now exposes runtime identity, making the active generation observable after restart.
+- Source builds remain available for validation under `local-bin/`, but validation-only control-plane artifacts cannot be promoted into production.
 
-## Release recovery preserves the exact tag
+## Release recovery rebuilds stale generated state
 
-Publishing can now use repaired release control from current main while every artifact and product source remains pinned to the original tag. This lets `lf release run patch` resume an incomplete release instead of either changing its contents or cutting a newer tag around it (#1170, #1172).
+Release preparation now treats its output as immutable relative to the main revision that produced it. If main advances, or an existing release PR is dirty or behind, Loopflow starts preparation again from current main rather than rebasing already-generated migrations, manifests, or notes (#1187).
 
-- The tagged publisher worktree remains leased until its subprocess exits; concurrent cleanup cannot remove a checkout that is still publishing.
-- Publisher commands may use `{repo}` for the synchronized control repository. `LF_RELEASE_SOURCE_REPO` identifies the leased exact-tag source tree used for packaging and deployment.
-- An ambiguous Fly deploy failure triggers exact-tag production health checks before rollback. If `/healthz` reports the intended release and the root page is healthy, publication continues.
-- Release health probes carry an explicit identity accepted by the production edge, avoiding the HTTP 403 returned to Python's default `urllib` client.
+- Recovery fetches and verifies the exact remote release head before resetting controller-owned generated state.
+- A prepared head that is already integrated can finalize without another rebase; a head that falls behind is rebuilt through every preparation step.
+- Auto-merge is armed only for the observed exact head and can be re-armed safely if GitHub drops it.
+- Cron publishing keeps private Home topology out of repository output while preserving the configured provider authority needed for publish preflight.
 
-## Tasks act only under current direction
+This closes the recovery path that allowed v0.12.6 to publish artifacts containing draft migrations. Installed promotion correctly rejected those artifacts; v0.12.7 prevents release recovery from producing that state again.
 
-Historical routing and stale Project turns no longer retain authority over Task automation. Task creation and Run reservation are fenced by the immediate parent's current durable direction, and later side effects re-check the Task's current Linear Project ownership (#1167).
+## Prompt reuse is higher and measurable
 
-- Creating a Task now atomically records the Task, initial Steer, PR state, and reserved Run. A concurrent Project steer rolls the entire operation back rather than leaving partial Work.
-- Automated commit, push, publication, merge, abandonment, and completion stop before side effects when a newer direction or Linear Project move supersedes the Run's authority.
-- `lf task run` refuses terminal Work. A person may explicitly restart abandoned Work with `lf task recover`; completed Work requires a new Linear task.
-- Failed authority checks preserve the existing Work, Run, Steer, and PR history for inspection and remediation.
+Wave prompts now place stable doctrine and goals ahead of frequently changing memory and wake content, increasing the prefix providers can reuse. Persisted OpenCode conversations also survive harness restarts when the stored session remains available, with a clean fallback when it does not (#1185).
 
-## Upgrades prove they can execute durable Work
-
-Schema compatibility alone no longer permits a candidate to become the Home launcher. `lf install preflight --json` now proves that the candidate can expand every executable lifecycle reachable from placed, open Work before installed binaries move (#1174).
-
-- Preflight copies the shared SQLite store, applies candidate migrations to that isolated snapshot, and leaves live control state untouched.
-- Wave and Project lifecycles resolve from their Wave repository; each Task phase resolves from its Task worktree.
-- Validation follows nested flows, XOR routers and paths, skills, and directions through the effective builtin and repository-local catalogs.
-- A missing catalog or unresolved reference rejects promotion with the exact Work, flow, catalog root, and reason. Migrations may still repair a stored reference because validation runs against the migrated snapshot.
+- `lf usage --cached --days 7` reports cache writes and prompt-cache hit percentage by repository and provider.
+- `lf usage --days 7 --json` includes cache-write tokens in the shared usage record.
+- Cache-write accounting now persists through SQLite and the shared Rust/Swift usage DTO.
 
 ## Operational notes
 
-Local verification now expects at least 64 GiB of free disk and enforces repository-owned limits for builds, traces, caches, and gate artifacts. Run `uv run python scripts/resource_envelope.py --recover` when preflight identifies disposable pressure; unresolved pressure intentionally stops before product tests run.
-
-An installation blocked by executable compatibility requires repairing the named persisted lifecycle or its catalog before promotion. The check is read-only against live state, so rerunning `lf install preflight --json` is safe after remediation.
+Use `uv run python scripts/install.py local` to build validation-only artifacts. Use `uv run python scripts/install.py refresh` to pin, verify, and activate the latest published generation on the active Home; direct source-build promotion is no longer the production upgrade path.

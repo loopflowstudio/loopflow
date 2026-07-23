@@ -15,8 +15,8 @@ use loopflow::task::{
 };
 use loopflow_test_support::TestRepo;
 use support::{
-    counting_open_script, presentation_attempts, register_active_task, register_task,
-    register_unrun_task, EnvGuard,
+    codex_app_server_script, counting_open_script, presentation_attempts, register_active_task,
+    register_task, register_unrun_task, EnvGuard,
 };
 
 fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
@@ -30,16 +30,19 @@ fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
-fn agent_script() -> &'static str {
-    "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+fn agent_script() -> String {
+    codex_app_server_script(r#"{"title":"generated title","body":"generated body"}"#, "")
 }
 
-fn mutating_agent_script() -> &'static str {
-    "#!/bin/sh\nprintf 'provider mutation\\n' > provider.txt\ngit add provider.txt\ngit commit -m 'provider mutation' >/dev/null\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+fn mutating_agent_script() -> String {
+    codex_app_server_script(
+        r#"{"title":"generated title","body":"generated body"}"#,
+        "printf 'provider mutation\\n' > provider.txt\ngit add provider.txt\ngit commit -m 'provider mutation' >/dev/null",
+    )
 }
 
 fn codex_script(output: &str) -> String {
-    format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\nexit 0\n")
+    codex_app_server_script(output, "")
 }
 
 fn write_gh_script_reject_base(expected_reject: &str) -> String {
@@ -227,7 +230,7 @@ fn pr_create_calls_gh() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
         ],
         Some(home.path()),
     );
@@ -262,7 +265,7 @@ fn publish_makes_no_presentation_attempt() {
             ("gh", gh_script.as_str()),
             ("open", open_script.as_str()),
             ("xdg-open", open_script.as_str()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
         ],
         Some(home.path()),
     );
@@ -370,7 +373,7 @@ fn publication_refuses_if_copy_generation_changes_the_pushed_head() {
     let gh_script = write_gh_script("[]", None);
     let _env = EnvGuard::new(&[
         ("gh", gh_script.as_str()),
-        ("codex", mutating_agent_script()),
+        ("codex", &mutating_agent_script()),
     ]);
     let repo = TestRepo::new();
     repo.create_branch("feature");
@@ -1244,7 +1247,7 @@ fn pr_update_refreshes_body() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
         ],
         Some(home.path()),
     );
@@ -1274,7 +1277,7 @@ fn pr_create_uses_default_base_when_upstream_matches_head() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
         ],
         Some(home.path()),
     );
@@ -1320,7 +1323,7 @@ fn pr_auto_generates_title_when_missing() {
         &[
             ("gh", gh_script.as_str()),
             ("open", noop_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
         ],
         Some(home.path()),
     );

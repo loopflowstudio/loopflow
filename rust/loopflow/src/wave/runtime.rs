@@ -42,7 +42,7 @@ use crate::wave::journal::{
     fold_thread, journal_path, project_observation_message, promotion_wake_message,
     restore_pending, task_observation_message, ConversationEpochImport, DiscordAttachment,
     DiscordChatBinding, DiscordDelivery, DiscordMessagePart, DiscordMessageSource, EventKind,
-    Journal, JournalAppendError, MessageId, MessageOp, PendingMessage, Usage,
+    Journal, JournalAppendError, MessageId, MessageOp, PendingMessage,
 };
 use crate::wave::playhead::{
     now_rfc3339, BodyProvenance, Playhead, PlayheadEvent, PlayheadView, QueuedInvocation,
@@ -216,8 +216,6 @@ impl DiscordInput {
 #[derive(Debug)]
 struct OpenTurn {
     turn: ChatTurn,
-    /// Usage accrued from this turn's `TurnUsage` deltas.
-    usage: Usage,
     /// Prose fragments so far, for `Message` item ids (`"text-<n>"`).
     text_items: usize,
     /// Message ids this turn claimed (`TurnOpened.answers` plus any mid-turn
@@ -353,7 +351,6 @@ impl WaveRuntime {
             let finished = journal.append(|_| EventKind::TurnFinished {
                 turn_id: turn.id.clone(),
                 status: Lifecycle::Failed,
-                usage: Usage::empty(),
                 termination_reason: Some(ABANDONED.to_string()),
             });
             turn.status = Lifecycle::Failed;
@@ -1081,7 +1078,6 @@ impl WaveRuntime {
             let finished = inner.journal.append(|_| EventKind::TurnFinished {
                 turn_id: turn.id.clone(),
                 status,
-                usage: Usage::empty(),
                 termination_reason: Some(reason.to_string()),
             });
             if status != Lifecycle::Completed {
@@ -1344,7 +1340,6 @@ impl WaveRuntime {
         inner.journal.append(|_| EventKind::TurnFinished {
             turn_id: turn_id.clone(),
             status: turn.status,
-            usage: Usage::empty(),
             termination_reason: None,
         });
         let committed = ChatTurn {
@@ -1376,16 +1371,9 @@ impl WaveRuntime {
             ResidentDelta::TurnOpened { answers } => self.resident_turn_opened(answers),
             ResidentDelta::TurnText { text } => self.resident_turn_text(text),
             ResidentDelta::TurnItem { item } => self.resident_turn_item(item),
-            ResidentDelta::TurnUsage {
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-            } => self.resident_turn_usage(input_tokens, output_tokens, cache_read_tokens),
-            ResidentDelta::TurnFinished {
-                status,
-                cost_usd,
-                reason,
-            } => self.resident_turn_finished(status, cost_usd, reason),
+            ResidentDelta::TurnFinished { status, reason } => {
+                self.resident_turn_finished(status, reason)
+            }
             ResidentDelta::TurnSteered { answers } => self.resident_turn_steered(answers),
             ResidentDelta::MessagesRequeued { ids } => self.resident_requeue(ids),
             ResidentDelta::BodyStarted { body } => {
@@ -1438,7 +1426,6 @@ impl WaveRuntime {
         // answered it.
         if let Some(OpenTurn {
             turn: mut stale,
-            usage,
             claims,
             ..
         }) = inner.open.take()
@@ -1450,7 +1437,6 @@ impl WaveRuntime {
             inner.journal.append(|_| EventKind::TurnFinished {
                 turn_id: stale.id.clone(),
                 status: Lifecycle::Failed,
-                usage,
                 termination_reason: Some("stale open turn closed".to_string()),
             });
             self.requeue_locked(&mut inner, &claims);
@@ -1503,7 +1489,6 @@ impl WaveRuntime {
             .send(TurnBroadcast::Whole(TurnFrame::share(open.clone())));
         inner.open = Some(OpenTurn {
             turn: open,
-            usage: Usage::empty(),
             text_items: 0,
             claims,
         });
@@ -1558,50 +1543,22 @@ impl WaveRuntime {
         let _ = self.turn_tx.send(TurnBroadcast::Delta(frame));
     }
 
-    fn resident_turn_usage(
-        &self,
-        input_tokens: Option<u64>,
-        output_tokens: Option<u64>,
-        cache_read_tokens: Option<u64>,
-    ) {
-        let mut inner = self.inner();
-        if inner.drop_deltas_until_opened {
-            return;
-        }
-        let Some(open) = inner.open.as_mut() else {
-            return;
-        };
-        open.usage.input_tokens = add_opt(open.usage.input_tokens, input_tokens);
-        open.usage.output_tokens = add_opt(open.usage.output_tokens, output_tokens);
-        open.usage.cache_read_tokens = add_opt(open.usage.cache_read_tokens, cache_read_tokens);
-    }
-
-    fn resident_turn_finished(
-        &self,
-        status: Lifecycle,
-        cost_usd: Option<f64>,
-        reason: Option<String>,
-    ) {
+    fn resident_turn_finished(&self, status: Lifecycle, reason: Option<String>) {
         let mut inner = self.inner();
         if inner.drop_deltas_until_opened {
             tracing::debug!("late TurnFinished after a force-finalize; dropped");
             return;
         }
         let Some(OpenTurn {
-            mut turn,
-            mut usage,
-            claims,
-            ..
+            mut turn, claims, ..
         }) = inner.open.take()
         else {
             tracing::warn!("TurnFinished with no open turn; dropped");
             return;
         };
-        usage.cost_usd = cost_usd;
         inner.journal.append(|_| EventKind::TurnFinished {
             turn_id: turn.id.clone(),
             status,
-            usage,
             termination_reason: reason.clone(),
         });
         // Any non-Completed end requeues what the turn claimed: a failed or
@@ -1913,13 +1870,6 @@ fn split_discord_content(content: &str) -> Vec<String> {
     parts
 }
 
-fn add_opt(a: Option<u64>, b: Option<u64>) -> Option<u64> {
-    match (a, b) {
-        (None, None) => None,
-        (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1997,18 +1947,9 @@ mod tests {
         }
     }
 
-    fn d_usage(input: u64, output: u64) -> ResidentDelta {
-        ResidentDelta::TurnUsage {
-            input_tokens: Some(input),
-            output_tokens: Some(output),
-            cache_read_tokens: None,
-        }
-    }
-
     fn d_finished(status: Lifecycle) -> ResidentDelta {
         ResidentDelta::TurnFinished {
             status,
-            cost_usd: None,
             reason: None,
         }
     }
@@ -2258,10 +2199,8 @@ mod tests {
         );
         rt.apply_resident_delta(d_text("hello"));
         rt.apply_resident_delta(d_tool());
-        rt.apply_resident_delta(d_usage(10, 4));
         rt.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: Some(0.02),
             reason: None,
         });
 
@@ -2275,18 +2214,10 @@ mod tests {
         // The id comes from the journal seq domain (turn_seq panics otherwise).
         turn_seq(&turn.id);
 
-        // The journal's TurnFinished carries the accrued usage and the cost.
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
-        let usage = events
+        assert!(events
             .iter()
-            .find_map(|e| match &e.kind {
-                EventKind::TurnFinished { usage, .. } => Some(usage.clone()),
-                _ => None,
-            })
-            .expect("TurnFinished journaled");
-        assert_eq!(usage.input_tokens, Some(10));
-        assert_eq!(usage.output_tokens, Some(4));
-        assert_eq!(usage.cost_usd, Some(0.02));
+            .any(|event| matches!(event.kind, EventKind::TurnFinished { .. })));
     }
 
     #[test]
@@ -2428,7 +2359,6 @@ mod tests {
 
         // Finalization replaces the running turn under the same id — a WHOLE
         // frame that re-baselines the reconstruction.
-        rt.apply_resident_delta(d_usage(10, 5));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         let terminal = frames
             .try_recv()
@@ -2608,7 +2538,6 @@ mod tests {
         // Late deltas for the closed turn are dropped whole…
         let journal_len = events.len();
         rt.apply_resident_delta(d_text("late text"));
-        rt.apply_resident_delta(d_usage(1, 1));
         rt.apply_resident_delta(d_finished(Lifecycle::Completed));
         let (_, events) = Journal::open(&journal_path(tmp.path(), "ship")).expect("reopen");
         assert_eq!(events.len(), journal_len, "late deltas journal nothing");

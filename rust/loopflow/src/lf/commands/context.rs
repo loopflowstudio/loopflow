@@ -565,20 +565,19 @@ fn build_invocation_usage(
                 .unwrap_or_default();
             let input_values = invocation_turns
                 .iter()
-                .filter_map(|turn| normalized_total_input(invocation, turn))
+                .filter_map(|turn| normalized_total_input(turn))
                 .collect::<Vec<_>>();
             let lifetime_input_tokens = if input_values.is_empty() {
                 None
-            } else if invocation.provider == "codex" {
-                input_values.into_iter().max()
             } else {
                 Some(input_values.into_iter().sum())
             };
             let peak_context_percent = invocation_turns
                 .iter()
                 .filter_map(|turn| {
-                    let input = turn.peak_input_tokens.filter(|value| *value >= 0)? as f64;
-                    let window = turn.context_window_tokens.filter(|value| *value > 0)? as f64;
+                    let usage = turn.usage.as_ref()?;
+                    let input = usage.peak_input_tokens? as f64;
+                    let window = usage.context_window_tokens.filter(|value| *value > 0)? as f64;
                     Some(100.0 * input / window)
                 })
                 .max_by(f64::total_cmp);
@@ -593,20 +592,13 @@ fn build_invocation_usage(
         .collect()
 }
 
-fn normalized_total_input(invocation: &AgentInvocationRow, turn: &AgentTurnRow) -> Option<u64> {
-    if let Some(value) = turn.provider_total_input_tokens {
-        return Some(nonnegative(value));
+fn normalized_total_input(turn: &AgentTurnRow) -> Option<u64> {
+    let usage = turn.usage.as_ref()?;
+    if let Some(value) = usage.total_input_tokens {
+        return Some(value);
     }
-    let input = nonnegative(turn.provider_input_tokens?);
-    if invocation.provider == "codex" {
-        Some(input)
-    } else {
-        Some(
-            input
-                + turn.cache_read_tokens.map_or(0, nonnegative)
-                + turn.cache_write_tokens.map_or(0, nonnegative),
-        )
-    }
+    let input = usage.input_tokens?;
+    Some(input + usage.cache_read_tokens.unwrap_or(0) + usage.cache_write_tokens.unwrap_or(0))
 }
 
 fn build_totals(
@@ -2399,9 +2391,12 @@ mod tests {
     #[test]
     fn lifetime_input_and_peak_pressure_are_invocation_metrics() {
         let mut codex_initial = turn("codex-1", "invocation-codex", 1, "assembled", 10, None);
-        codex_initial.provider_total_input_tokens = Some(100);
-        codex_initial.peak_input_tokens = Some(50);
-        codex_initial.context_window_tokens = Some(100);
+        codex_initial.usage = Some(crate::chat::types::TurnUsage {
+            total_input_tokens: Some(100),
+            peak_input_tokens: Some(50),
+            context_window_tokens: Some(100),
+            ..Default::default()
+        });
         let mut codex_steer = turn(
             "codex-2",
             "invocation-codex",
@@ -2410,14 +2405,20 @@ mod tests {
             1,
             None,
         );
-        codex_steer.provider_total_input_tokens = Some(300);
-        codex_steer.peak_input_tokens = Some(80);
-        codex_steer.context_window_tokens = Some(100);
+        codex_steer.usage = Some(crate::chat::types::TurnUsage {
+            total_input_tokens: Some(300),
+            peak_input_tokens: Some(80),
+            context_window_tokens: Some(100),
+            ..Default::default()
+        });
 
         let mut claude_initial = turn("claude-1", "invocation-claude", 1, "assembled", 20, None);
-        claude_initial.provider_total_input_tokens = Some(100);
-        claude_initial.peak_input_tokens = Some(50);
-        claude_initial.context_window_tokens = Some(200);
+        claude_initial.usage = Some(crate::chat::types::TurnUsage {
+            total_input_tokens: Some(100),
+            peak_input_tokens: Some(50),
+            context_window_tokens: Some(200),
+            ..Default::default()
+        });
         let mut claude_steer = turn(
             "claude-2",
             "invocation-claude",
@@ -2426,9 +2427,12 @@ mod tests {
             1,
             None,
         );
-        claude_steer.provider_total_input_tokens = Some(200);
-        claude_steer.peak_input_tokens = Some(90);
-        claude_steer.context_window_tokens = Some(200);
+        claude_steer.usage = Some(crate::chat::types::TurnUsage {
+            total_input_tokens: Some(200),
+            peak_input_tokens: Some(90),
+            context_window_tokens: Some(200),
+            ..Default::default()
+        });
 
         let mut claude = invocation("invocation-claude", "run-b", "completed", "complete", 200);
         claude.provider = "claude".to_string();
@@ -2444,9 +2448,9 @@ mod tests {
 
         assert_eq!(snapshot.totals.initial_prompt_tokens, Some(30));
         assert_eq!(snapshot.totals.initial_prompt_invocations, 2);
-        assert_eq!(snapshot.totals.lifetime_input_tokens, Some(600));
+        assert_eq!(snapshot.totals.lifetime_input_tokens, Some(700));
         assert_eq!(snapshot.totals.median_lifetime_input_tokens, Some(300));
-        assert_eq!(snapshot.totals.p95_lifetime_input_tokens, Some(300));
+        assert_eq!(snapshot.totals.p95_lifetime_input_tokens, Some(400));
         assert_eq!(snapshot.totals.median_peak_context_percent, Some(45.0));
         assert_eq!(snapshot.totals.p95_peak_context_percent, Some(80.0));
         assert_eq!(snapshot.totals.peak_context_invocations, 2);
@@ -2846,15 +2850,10 @@ mod tests {
             system_tokens: 0,
             task_tokens: tokens,
             supplied_context_tokens: tokens,
-            provider_input_tokens: None,
-            provider_total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            provider_output_tokens: None,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd,
+            usage: cost_usd.map(|cost_usd| crate::chat::types::TurnUsage {
+                cost_usd: Some(cost_usd),
+                ..Default::default()
+            }),
             context_gather_ms: 1,
             context_render_ms: 1,
             context_persist_ms: 1,

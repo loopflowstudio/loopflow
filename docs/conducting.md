@@ -41,13 +41,13 @@ prompt-ordered lanes, and the trace addresses — the difference between "the
 agent did something odd" and "the agent was told something odd." Filter by
 wave, project, task, repo, flow, skill, provider, model, or outcome.
 
-## Health and spend
+## Health and usage
 
 ```bash
 lf ps              # one call-tree snapshot ranked by completed output
 lf top             # continuously refresh rates, age, idle time, and health
 lf prune --dry-run # inspect safely removable process state
-lf usage           # subscription state per account, spend by repo/provider
+lf usage           # subscriptions plus provider tokens, cache, and cost
 lf telemetry-daily # repository maintainer health and budget report
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed

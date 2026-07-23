@@ -10,7 +10,9 @@ use loopflow::ops::{
 };
 use loopflow::task::{AfterMerge, PrMergeMode, PrPhase};
 use loopflow_test_support::TestRepo;
-use support::{counting_open_script, presentation_attempts, register_task, EnvGuard};
+use support::{
+    codex_app_server_script, counting_open_script, presentation_attempts, register_task, EnvGuard,
+};
 
 fn push_branch(repo: &TestRepo, name: &str) {
     let _ = Command::new("git")
@@ -209,8 +211,8 @@ exit 0
     )
 }
 
-fn agent_script() -> &'static str {
-    "#!/bin/sh\necho '{\"title\":\"generated title\",\"body\":\"generated body\"}'\nexit 0\n"
+fn agent_script() -> String {
+    codex_app_server_script(r#"{"title":"generated title","body":"generated body"}"#, "")
 }
 
 #[test]
@@ -613,7 +615,7 @@ fn land_missing_pr_error_includes_branch_name() {
     let _env = EnvGuard::with_home(
         &[
             ("gh", gh_no_pr_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
         Some(home.path()),
@@ -1270,7 +1272,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
     let _env = EnvGuard::with_home(
         &[
             ("gh", gh_no_pr_script()),
-            ("codex", agent_script()),
+            ("codex", &agent_script()),
             ("open", noop_open_script()),
         ],
         Some(home.path()),

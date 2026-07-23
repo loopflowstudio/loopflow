@@ -820,7 +820,6 @@ fn assert_work_prompt_omits_unselected_wave_turn(skill: &str) {
     journal.append(|_| EventKind::TurnFinished {
         turn_id: "turn-2".to_string(),
         status: Lifecycle::Completed,
-        usage: loopflow::wave::journal::Usage::empty(),
         termination_reason: None,
     });
 

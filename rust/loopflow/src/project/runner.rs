@@ -546,7 +546,7 @@ async fn run_project_inner(
                     | ConversationEvent::ItemUpdated { .. }
                     | ConversationEvent::ReasoningDelta { .. }
                     | ConversationEvent::DiffUpdated { .. }
-                    | ConversationEvent::TurnUsage { .. }
+                    | ConversationEvent::UsageCheckpoint { .. }
                     | ConversationEvent::SuggestedActions { .. }
                     | ConversationEvent::StatusChanged { .. } => {}
                 }

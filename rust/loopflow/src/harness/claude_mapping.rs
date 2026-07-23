@@ -22,6 +22,9 @@ pub(super) struct ReaderState {
     /// Largest effective input observed for each model in this turn. Assistant
     /// events repeat usage snapshots, so retaining maxima also deduplicates them.
     peak_input_by_model: HashMap<String, u64>,
+    /// Per-response receipts keyed by Claude message id. Repeated assistant
+    /// snapshots replace one entry; distinct tool-loop responses accumulate.
+    assistant_usage: HashMap<String, TurnUsage>,
 }
 
 #[derive(Debug, Default)]
@@ -124,6 +127,48 @@ impl ReaderState {
             .entry(model.to_string())
             .and_modify(|peak| *peak = (*peak).max(input))
             .or_insert(input);
+    }
+
+    fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
+        let message = value.get("message")?;
+        let message_id = message.get("id").and_then(Value::as_str)?;
+        let usage = message.get("usage")?;
+        let input_tokens = usage.get("input_tokens").and_then(Value::as_u64);
+        let cache_read_tokens = usage.get("cache_read_input_tokens").and_then(Value::as_u64);
+        let cache_write_tokens = usage
+            .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64);
+        let receipt = TurnUsage {
+            input_tokens,
+            total_input_tokens: input_tokens.map(|input| {
+                input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)
+            }),
+            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
+            reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_u64),
+            cache_read_tokens,
+            cache_write_tokens,
+            model: message
+                .get("model")
+                .and_then(Value::as_str)
+                .map(ToString::to_string),
+            ..TurnUsage::default()
+        };
+        if !receipt.is_reported() {
+            return None;
+        }
+        self.assistant_usage.insert(message_id.to_string(), receipt);
+
+        let mut cumulative = TurnUsage::default();
+        for usage in self.assistant_usage.values() {
+            add_optional(&mut cumulative.input_tokens, usage.input_tokens);
+            add_optional(&mut cumulative.total_input_tokens, usage.total_input_tokens);
+            add_optional(&mut cumulative.output_tokens, usage.output_tokens);
+            add_optional(&mut cumulative.reasoning_tokens, usage.reasoning_tokens);
+            add_optional(&mut cumulative.cache_read_tokens, usage.cache_read_tokens);
+            add_optional(&mut cumulative.cache_write_tokens, usage.cache_write_tokens);
+            cumulative.model = usage.model.clone().or(cumulative.model);
+        }
+        Some(cumulative)
     }
 
     fn take_peak_pressure(&mut self, event: &Value) -> Option<(u64, u64)> {
@@ -362,9 +407,10 @@ pub(super) fn process_line(
                 Lifecycle::Completed
             };
             if let Some(usage) = usage {
-                let _ = events.send(ConversationEvent::TurnUsage {
+                let _ = events.send(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
                     usage,
+                    final_receipt: true,
                 });
             }
             let _ = events.send(ConversationEvent::TurnCompleted {
@@ -378,6 +424,13 @@ pub(super) fn process_line(
         // These contain tool_use blocks and text blocks.
         "assistant" => {
             state.observe_assistant_pressure(event);
+            if let Some(usage) = state.observe_assistant_usage(event) {
+                let _ = events.send(ConversationEvent::UsageCheckpoint {
+                    turn_id: turn_id.to_string(),
+                    usage,
+                    final_receipt: false,
+                });
+            }
             process_assistant_message(event, turn_id, events, state);
         }
 
@@ -390,6 +443,12 @@ pub(super) fn process_line(
     }
 
     false
+}
+
+fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *total = Some(total.unwrap_or(0).saturating_add(value));
+    }
 }
 
 fn map_turn_usage(event: &Value, state: &mut ReaderState) -> Option<TurnUsage> {
@@ -864,7 +923,7 @@ mod tests {
 
         let usage_event = rx.try_recv().expect("should have usage event");
         match usage_event {
-            ConversationEvent::TurnUsage { turn_id, usage } => {
+            ConversationEvent::UsageCheckpoint { turn_id, usage, .. } => {
                 assert_eq!(turn_id, "turn_1");
                 assert_eq!(usage.input_tokens, None);
                 assert_eq!(usage.output_tokens, None);
@@ -911,7 +970,7 @@ mod tests {
 
         let usage_event = rx.try_recv().expect("usage event");
         match usage_event {
-            ConversationEvent::TurnUsage { turn_id, usage } => {
+            ConversationEvent::UsageCheckpoint { turn_id, usage, .. } => {
                 assert_eq!(turn_id, "turn_42");
                 assert_eq!(usage.input_tokens, Some(321));
                 assert_eq!(usage.total_input_tokens, Some(337));
@@ -934,6 +993,39 @@ mod tests {
     }
 
     #[test]
+    fn assistant_usage_is_live_and_deduplicated_by_message() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut state = ReaderState::default();
+        let first = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}"#;
+        let repeated = r#"{"type":"assistant","message":{"id":"msg_1","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":20}}}"#;
+        let second = r#"{"type":"assistant","message":{"id":"msg_2","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5}}}"#;
+
+        assert!(!process_line(first, "turn_42", &tx, &mut state));
+        assert!(!process_line(repeated, "turn_42", &tx, &mut state));
+        assert!(!process_line(second, "turn_42", &tx, &mut state));
+
+        let checkpoints = [
+            rx.try_recv().unwrap(),
+            rx.try_recv().unwrap(),
+            rx.try_recv().unwrap(),
+        ];
+        let ConversationEvent::UsageCheckpoint {
+            usage,
+            final_receipt,
+            ..
+        } = &checkpoints[2]
+        else {
+            panic!("expected live usage checkpoint");
+        };
+        assert!(!final_receipt);
+        assert_eq!(usage.input_tokens, Some(13));
+        assert_eq!(usage.total_input_tokens, Some(38));
+        assert_eq!(usage.output_tokens, Some(6));
+        assert_eq!(usage.cache_read_tokens, Some(20));
+        assert_eq!(usage.cache_write_tokens, Some(5));
+    }
+
+    #[test]
     fn result_pairs_peak_assistant_input_with_its_model_window() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut state = ReaderState::default();
@@ -943,7 +1035,7 @@ mod tests {
         assert!(!process_line(assistant, "turn_42", &tx, &mut state));
         assert!(process_line(result, "turn_42", &tx, &mut state));
         let usage_event = rx.try_recv().expect("usage event");
-        let ConversationEvent::TurnUsage { usage, .. } = usage_event else {
+        let ConversationEvent::UsageCheckpoint { usage, .. } = usage_event else {
             panic!("expected usage event");
         };
         assert_eq!(usage.total_input_tokens, Some(104));

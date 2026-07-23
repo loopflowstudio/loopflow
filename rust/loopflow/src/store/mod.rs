@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use crate::chat::types::TurnUsage;
 use crate::id::WaveId;
 use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
@@ -23,9 +24,9 @@ mod token_crypto;
 /// One row of the machine-grain run ledger (`run_events`): a lifecycle event
 /// for a run, flow, or skill, written directly by `lf` into the local store.
 ///
-/// Lineage only. Spend lives on `agent_turns`, the grain the provider actually
-/// measures; readers join `run_events -> agent_invocations -> agent_turns` rather
-/// than reading tokens from here.
+/// Lineage only. Usage lives in `turn_usage_samples`, the grain the provider
+/// actually measures; readers join through the Turn rather than reading tokens
+/// from here.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEventRow {
     pub run_id: String,
@@ -45,34 +46,27 @@ pub struct RunEventRow {
     pub error: Option<String>,
 }
 
-/// One provider-measured Turn's spend, joined to the invocation that names where it
-/// was spent. This is the only additive usage grain: `lf usage`, `lf top`, and
-/// the trace tree all sum these rows, and every total is a grouping of them.
+/// One provider-measured Turn's latest cumulative usage, joined to the
+/// invocation that names where it ran.
 ///
 /// Token fields stay `Option`: a provider can report one measurement and omit
 /// another, and omission is not zero. Turns with no usage report at all do not
-/// materialize in this additive view. `lf usage --json` emits this shape, so
-/// every field is required or explicitly optional — no wire defaults.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TurnSpendRow {
+/// materialize in this internal additive view. Public consumers use
+/// `UsageSnapshot` instead.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AttributedTurnUsage {
     pub turn_id: String,
     pub invocation_id: String,
-    pub trace_id: String,
     pub exec_id: String,
     pub repo: String,
     pub wave: Option<String>,
     pub flow: Option<String>,
     pub skill: Option<String>,
     pub provider: String,
-    pub model: Option<String>,
     /// When the provider finished measuring. Falls back to the start for a turn
     /// still running, so a live turn still lands in a time bucket.
     pub at: i64,
-    pub input_tokens: Option<i64>,
-    pub output_tokens: Option<i64>,
-    pub cache_read_tokens: Option<i64>,
-    pub cache_write_tokens: Option<i64>,
-    pub cost_usd: Option<f64>,
+    pub usage: TurnUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +97,19 @@ pub(crate) struct PerformanceEvidenceSnapshot {
     pub authority_started_at: i64,
     pub task_runs: Vec<TaskFirstProgressEvidenceRow>,
     pub task_prs: Vec<TaskPrPerformanceEvidenceRow>,
+}
+
+/// One provider-reported cumulative observation for a Turn.
+///
+/// Checkpoints are cumulative so a lost observation cannot corrupt later
+/// totals. `output_tokens` is the provider's inclusive billed output total;
+/// `reasoning_tokens` is only its optional breakdown.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TurnUsageSample {
+    pub turn_id: String,
+    pub observed_at: i64,
+    pub final_receipt: bool,
+    pub usage: TurnUsage,
 }
 
 /// One wave's locally readable PM projection. Linear owns the payload; sync
@@ -165,6 +172,10 @@ pub(crate) enum TaskPrMergeEvidenceOutcome {
     Conflict { accepted_at: i64 },
     SchemaUnavailable,
 }
+
+/// Keep live checkpoints at one-second precision for the longest public usage
+/// window. Older Turns retain only their final or latest receipt.
+pub const TURN_USAGE_LIVE_RETENTION_SECONDS: i64 = 86_400;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorageConfig {

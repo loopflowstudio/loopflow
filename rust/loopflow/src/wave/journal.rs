@@ -69,29 +69,6 @@ pub enum MessageOp {
     Interrupt,
 }
 
-/// Token usage accrued over one turn. Providers report different subsets, so
-/// every field is explicitly optional.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Usage {
-    pub input_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub cache_read_tokens: Option<u64>,
-    pub cost_usd: Option<f64>,
-}
-
-impl Usage {
-    /// Explicitly-empty usage (nothing reported), e.g. for janitor-finalized
-    /// turns. Not a serde default — absent fields are still a parse error.
-    pub fn empty() -> Self {
-        Self {
-            input_tokens: None,
-            output_tokens: None,
-            cache_read_tokens: None,
-            cost_usd: None,
-        }
-    }
-}
-
 /// How an observed worker ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -325,7 +302,6 @@ pub enum EventKind {
     TurnFinished {
         turn_id: String,
         status: Lifecycle,
-        usage: Usage,
         termination_reason: Option<String>,
     },
     // -- loop lifecycle --
@@ -644,17 +620,13 @@ impl Narrator {
                 info(format!("messages requeued: {}", ids.join(", ")))
             }
             EventKind::TurnFinished {
-                turn_id,
-                status,
-                usage,
-                ..
+                turn_id, status, ..
             } => {
                 let items = self.finish_turn(turn_id);
                 let plural = if items == 1 { "" } else { "s" };
                 info(format!(
-                    "turn {turn_id} {} · {items} item{plural}{}",
-                    status.name(),
-                    usage_segment(usage)
+                    "turn {turn_id} {} · {items} item{plural}",
+                    status.name()
                 ))
             }
             EventKind::LoopState { from, to, reason } => {
@@ -762,43 +734,12 @@ pub(crate) fn ellipsize(text: &str, max: usize) -> String {
     cut
 }
 
-/// Humanized token count: `812`, `1.4k`, `192k`.
-fn fmt_tokens(n: u64) -> String {
-    if n < 1000 {
-        return n.to_string();
-    }
-    let k = n as f64 / 1000.0;
-    if k < 10.0 {
-        format!("{k:.1}k")
-    } else {
-        format!("{k:.0}k")
-    }
-}
-
 fn answers_segment(answers: &[MessageId]) -> String {
     if answers.is_empty() {
         return String::new();
     }
     let ids: Vec<&str> = answers.iter().map(|id| id.0.as_str()).collect();
     format!(" (answers: {})", ids.join(", "))
-}
-
-fn usage_segment(usage: &Usage) -> String {
-    let mut parts = Vec::new();
-    if let Some(input) = usage.input_tokens {
-        parts.push(format!("{} in", fmt_tokens(input)));
-    }
-    if let Some(output) = usage.output_tokens {
-        parts.push(format!("{} out", fmt_tokens(output)));
-    }
-    if parts.is_empty() {
-        return String::new();
-    }
-    let mut segment = format!(" · {}", parts.join(" / "));
-    if let Some(cached) = usage.cache_read_tokens {
-        segment.push_str(&format!(" ({} cached)", fmt_tokens(cached)));
-    }
-    segment
 }
 
 /// A ledger identity shortened for the console (ids correlate by prefix).
@@ -1715,12 +1656,6 @@ mod tests {
             EventKind::TurnFinished {
                 turn_id: "turn-2".into(),
                 status: Lifecycle::Completed,
-                usage: Usage {
-                    input_tokens: Some(10),
-                    output_tokens: Some(5),
-                    cache_read_tokens: None,
-                    cost_usd: Some(0.01),
-                },
                 termination_reason: None,
             },
             EventKind::LoopState {
@@ -1911,7 +1846,6 @@ mod tests {
             EventKind::TurnFinished {
                 turn_id: "turn-2".into(),
                 status: Lifecycle::Completed,
-                usage: Usage::empty(),
                 termination_reason: None,
             },
             EventKind::LoopState {
@@ -2099,18 +2033,9 @@ mod tests {
         let n = render(EventKind::TurnFinished {
             turn_id: "turn-4".into(),
             status: Lifecycle::Completed,
-            usage: Usage {
-                input_tokens: Some(192_400),
-                output_tokens: Some(1_400),
-                cache_read_tokens: Some(182_000),
-                cost_usd: Some(0.42),
-            },
             termination_reason: None,
         });
-        assert_eq!(
-            n.line,
-            "turn turn-4 completed · 4 items · 192k in / 1.4k out (182k cached)"
-        );
+        assert_eq!(n.line, "turn turn-4 completed · 4 items");
 
         let n = render(EventKind::RunObserved {
             run_id: "run-8c1d2e3f4a".into(),
@@ -2170,7 +2095,6 @@ mod tests {
             narrator.render(&EventKind::TurnFinished {
                 turn_id: turn.into(),
                 status: Lifecycle::Completed,
-                usage: Usage::empty(),
                 termination_reason: None,
             });
         }
@@ -2224,7 +2148,6 @@ mod tests {
         events.push(journal.append(|_| EventKind::TurnFinished {
             turn_id: turn_id.clone(),
             status: Lifecycle::Completed,
-            usage: Usage::empty(),
             termination_reason: None,
         }));
 

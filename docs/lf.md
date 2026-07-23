@@ -448,13 +448,13 @@ lf trace 66863649 --json        # inspect the same tree and its skill invocation
 lf trace 66863649 --json --content --invocation <invocation> --turn <turn>
 lf context --days 30 --repo "$PWD" --project context --task W2-71 --json
 lf context --days 30 --repo "$PWD" --steered-only --current-revision-only --json
-lf usage                        # subscription % per account + spend by repo/provider
+lf usage                        # subscriptions plus provider tokens, cache, and cost
 lf usage --refresh              # poll every account's provider now
-lf usage --json --days 30       # one additive row per measured provider Turn
+lf usage --json                 # fixed 5s, 5m, 1h, and 24h UsageSnapshot
 lf ci --since 7d                # CI repair attempts, latency, and outcomes
 lf ci --since 7d --json         # complete machine-wide incident receipt
 lf ps                            # one live call-tree snapshot, ranked by completed output
-lf ps --sort rate-5m             # rank siblings by five-minute completion throughput
+lf ps --sort rate                # rank siblings by five-second live output
 lf ps --json                     # versioned flat nodes with stable parent ids
 lf top                           # refresh the same snapshot every two seconds on a TTY
 lf top --json                    # emit once; redirected output also emits once without ANSI
@@ -472,10 +472,11 @@ Task or Project wake events.
 
 `lf ps` and `lf top` show OS-live processes only. Exact PID/start-time receipts
 attach `lf` processes to call records; exact ancestry attaches provider
-processes. Completed calls and launches disappear. A live provider's completed
-Turns supply cumulative tokens, while five- and thirty-minute rates divide
-tokens completed inside each exact window. Exec rows fold their live descendants
-once. Missing measurements stay explicit and elapsed time never implies death.
+processes. Completed calls and launches disappear. The embedded `UsageSnapshot`
+uses provider receipts for 5-second, 5-minute, 1-hour, and 24-hour windows;
+unattributed Loopflow Turns count globally but never leak into a Work rollup.
+Exec rows fold their live descendants once. Missing measurements stay explicit
+and elapsed time never implies death.
 
 Both commands open the live Home ledger and ownership registry read-only. This
 also applies under `scripts/dev-lf`: source builds can inspect real activity
@@ -512,14 +513,13 @@ reported plan, session and weekly windows as percent *used*, reset times —
 from stored observations (harness streams report them mid-run) topped up by a
 live poll when older than 15 minutes. `--refresh` polls everything now;
 `--cached` skips polling. A revoked credential shows the fix
-(`lf auth connect <provider> <email>`), not a blank. The spend table below it sums
-provider-measured Turn rows; TOTAL is input+output with cache reads their own
-column, and `% TOKENS` is each row's slice of all tokens in the window — a
-distribution across repos, not a subscription measure.
+(`lf auth connect <provider> <email>`), not a blank. The table below it keeps
+provider input, cache reads, cache writes, inclusive output, reasoning, and cost
+separate. Reasoning is already included in output and is never added twice.
 
 Under forwarded account authority, subscription polling is unavailable so the
-remote account store is never consulted. `lf usage` still prints process token
-spend from the local execution ledger.
+remote account store is never consulted. `lf usage` still prints provider usage
+from the local execution ledger.
 
 The repository's `telemetry-daily` operator flow combines the same accepted
 per-Turn evidence with pre-land records under the Git common directory. Its

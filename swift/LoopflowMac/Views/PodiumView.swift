@@ -77,6 +77,16 @@ struct PodiumView: View {
                 persistedRepos: portfolioService.repos
             )
         }
+        .task {
+            while !Task.isCancelled {
+                await model.refreshProcessActivity()
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+            }
+        }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
                 await model.refreshPortfolio(
@@ -172,16 +182,14 @@ enum PodiumSignalState: Equatable {
     case unknown
 
     static func from(_ snapshot: ActivitySnapshot) -> PodiumSignalState {
-        let state = from(nodes: snapshot.nodes)
-        if state == .off, !snapshot.providerProcesses.isEmpty { return .waiting }
-        return state
+        (snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond ?? 0) > 0
+            ? .producing : .off
     }
 
-    static func from(nodes: [ActivityNode]) -> PodiumSignalState {
+    static func from(nodes: [ActivityNode], usage: UsageReading?) -> PodiumSignalState {
         let providers = nodes.filter { $0.kind == .providerLaunch }
         if providers.contains(where: { $0.state == .stalled }) { return .blocked }
-        if providers.contains(where: { $0.direct.outputTokensPerSecondFast > 0 })
-            || providers.contains(where: { $0.state == .working }) {
+        if (usage?.interval(seconds: 5)?.outputTokensPerSecond ?? 0) > 0 {
             return .producing
         }
         if !providers.isEmpty { return .waiting }
@@ -239,12 +247,12 @@ private struct TokenOutputInstrument: View {
             }
 
             TokenOutputMeter(
-                fastRate: snapshot?.aggregate.outputTokensPerSecondFast ?? 0,
-                slowRate: snapshot?.aggregate.outputTokensPerSecondSlow ?? 0,
+                fastRate: snapshot?.usage.global?.interval(seconds: 5)?.outputTokensPerSecond ?? 0,
+                slowRate: snapshot?.usage.global?.interval(seconds: 300)?.outputTokensPerSecond ?? 0,
                 state: state
             )
         }
-        .help("Five-minute TOK/s; rail tick is the 30-minute baseline. \(state.label).")
+        .help("Five-second TOK/s; rail tick is the five-minute baseline. \(state.label).")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Output signal")
         .accessibilityValue("\(rateLabel), \(state.label). \(detailLabel)")
@@ -252,33 +260,18 @@ private struct TokenOutputInstrument: View {
 
     private var rateLabel: String {
         guard let snapshot else { return "— TOK/s" }
-        return "\(snapshot.aggregate.outputTokensPerSecondFast.formatted(.number.precision(.fractionLength(1)))) TOK/s"
+        let rate = snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond ?? 0
+        return "\(rate.formatted(.number.precision(.fractionLength(1)))) TOK/s"
     }
 
     private var detailLabel: String {
         guard let snapshot else { return reading.errorMessage ?? "Signal unavailable" }
-        let providers = snapshot.nodes.filter { $0.kind == .providerLaunch }
-        let stalled = providers.count { $0.state == .stalled }
-        if stalled > 0 {
-            return stalled == 1 ? "1 blocked" : "\(stalled) blocked"
+        let slowRate = snapshot.usage.global?.interval(seconds: 300)?.outputTokensPerSecond ?? 0
+        if slowRate > 0 {
+            return "\(slowRate.formatted(.number.precision(.fractionLength(1)))) TOK/s · 5m avg"
         }
-        let working = providers.count { $0.state == .working }
-        if working > 0 {
-            return working == 1 ? "1 working" : "\(working) working"
-        }
-        let waiting = providers.count { $0.state == .waiting }
-        if waiting > 0 {
-            return waiting == 1 ? "1 waiting" : "\(waiting) waiting"
-        }
-        let unclaimed = snapshot.providerProcesses.count { $0.claim == .unclaimed }
-        if unclaimed > 0 {
-            return unclaimed == 1 ? "1 unclaimed" : "\(unclaimed) unclaimed"
-        }
-        let orphaned = snapshot.providerProcesses.count { $0.claim == .orphaned }
-        if orphaned > 0 {
-            return orphaned == 1 ? "1 orphaned" : "\(orphaned) orphaned"
-        }
-        return "No output"
+        let day = snapshot.usage.global?.interval(seconds: 86_400)?.outputTokens ?? 0
+        return day > 0 ? "\(day.formatted()) output · 24h" : "No measured output · 24h"
     }
 }
 
@@ -337,7 +330,7 @@ private struct TokenOutputMeter: View {
                 let tick = CGRect(x: rail.minX - 2, y: y - 0.75, width: rail.width + 4, height: 1.5)
                 context.fill(
                     Path(roundedRect: tick, cornerRadius: 0.75),
-                    with: .color(Color.white.opacity(0.86))
+                    with: .color(WaveLensColor.green.glow.opacity(0.78))
                 )
             }
         }
@@ -485,13 +478,14 @@ private struct WavesSidebar: View {
         let roadmap = roadmap(for: wave)
         let projects = roadmap?.projects.items ?? []
         let nodes = outputNodes(wave: wave)
+        let usage = usageReading(kind: .wave, wave: wave)
         WaveTreeRow(
             identifier: "wave-\(wave.id)",
             kind: .wave,
             title: wave.displayName,
             level: baseLevel,
-            outputNodes: nodes,
-            state: outputState(nodes),
+            usage: usage,
+            state: outputState(nodes, usage: usage),
             hasChildren: !projects.isEmpty,
             isExpanded: expandedWaves.contains(wave.id),
             isSelected: model.selection == .wave(id: wave.id),
@@ -514,13 +508,14 @@ private struct WavesSidebar: View {
     ) -> some View {
         let key = "\(wave.id):\(project.id)"
         let nodes = outputNodes(wave: wave, project: project)
+        let usage = usageReading(kind: .project, wave: wave, project: project)
         WaveTreeRow(
             identifier: "project-\(project.id)",
             kind: .project,
             title: project.project.name,
             level: level,
-            outputNodes: nodes,
-            state: outputState(nodes),
+            usage: usage,
+            state: outputState(nodes, usage: usage),
             hasChildren: !project.tasks.isEmpty,
             isExpanded: expandedProjects.contains(key),
             isSelected: model.selection == .project(id: project.id),
@@ -547,13 +542,14 @@ private struct WavesSidebar: View {
         let key = "\(wave.id):\(task.id)"
         let nodes = outputNodes(wave: wave, project: project, task: task)
         let execs = execNodes(for: nodes)
+        let usage = usageReading(kind: .task, wave: wave, project: project, task: task)
         WaveTreeRow(
             identifier: "task-\(task.id)",
             kind: .task,
             title: task.task.name,
             level: level,
-            outputNodes: nodes,
-            state: outputState(nodes),
+            usage: usage,
+            state: outputState(nodes, usage: usage),
             hasChildren: !execs.isEmpty,
             isExpanded: expandedTasks.contains(key),
             isSelected: model.selection == .task(id: task.id),
@@ -564,13 +560,16 @@ private struct WavesSidebar: View {
         if expandedTasks.contains(key) {
             ForEach(execs) { exec in
                 let providers = nodes.filter { $0.parentId == exec.id }
+                let usage = model.processActivity.value?.usage.reading(
+                    scopeId: exec.usageScopeId
+                )
                 WaveTreeRow(
                     identifier: "exec-\(exec.id)",
                     kind: .exec,
                     title: exec.label,
                     level: level + 1,
-                    outputNodes: providers,
-                    state: outputState(providers),
+                    usage: usage,
+                    state: outputState(providers, usage: usage),
                     hasChildren: false,
                     isExpanded: false,
                     isSelected: false,
@@ -621,8 +620,35 @@ private struct WavesSidebar: View {
             .sorted { $0.startedAt < $1.startedAt }
     }
 
-    private func outputState(_ nodes: [ActivityNode]) -> PodiumSignalState {
-        model.processActivity.value == nil ? .unknown : .from(nodes: nodes)
+    private func usageReading(
+        kind: UsageScopeKind,
+        wave: WaveViewModel,
+        project: RoadmapProject? = nil,
+        task: RoadmapTask? = nil
+    ) -> UsageReading? {
+        guard let snapshot = model.processActivity.value else { return nil }
+        let projectNames = project.map { [$0.id, $0.project.slug] } ?? []
+        let taskNames = task.map { task in
+            [task.id, task.task.identifier, task.reference.workspace?.slug].compactMap { $0 }
+        } ?? []
+        return snapshot.usage.readings.first { reading in
+            let scope = reading.scope
+            guard scope.kind == kind,
+                  scope.wave == wave.api.name,
+                  scope.repo.map(normalized) == normalized(wave.api.repo) else {
+                return false
+            }
+            if !projectNames.isEmpty, !projectNames.contains(scope.project ?? "") { return false }
+            if !taskNames.isEmpty, !taskNames.contains(scope.task ?? "") { return false }
+            return true
+        }
+    }
+
+    private func outputState(
+        _ nodes: [ActivityNode],
+        usage: UsageReading?
+    ) -> PodiumSignalState {
+        model.processActivity.value == nil ? .unknown : .from(nodes: nodes, usage: usage)
     }
 
     private func normalized(_ path: String) -> String {
@@ -676,7 +702,7 @@ private struct WaveTreeRow: View {
     let kind: WaveTreeRowKind
     let title: String
     let level: Int
-    let outputNodes: [ActivityNode]
+    let usage: UsageReading?
     let state: PodiumSignalState
     let hasChildren: Bool
     let isExpanded: Bool
@@ -687,11 +713,11 @@ private struct WaveTreeRow: View {
     @State private var isHovering = false
 
     private var fastRate: Double {
-        outputNodes.reduce(0) { $0 + $1.direct.outputTokensPerSecondFast }
+        usage?.interval(seconds: 5)?.outputTokensPerSecond ?? 0
     }
 
     private var slowRate: Double {
-        outputNodes.reduce(0) { $0 + $1.direct.outputTokensPerSecondSlow }
+        usage?.interval(seconds: 300)?.outputTokensPerSecond ?? 0
     }
 
     var body: some View {

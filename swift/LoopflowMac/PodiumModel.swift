@@ -61,6 +61,7 @@ final class PodiumModel {
 
     private let query: RegistryQuery
     private var usesFixedFixture = false
+    private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
     init(query: RegistryQuery, repoPath: String? = nil) {
@@ -145,16 +146,32 @@ final class PodiumModel {
 
         async let roadmapResult = readRoadmap()
         async let wavesResult = readWaves()
-        async let processActivityResult = readProcessActivity()
+        if !processActivityRefreshInFlight {
+            processActivityRefreshInFlight = true
+            processActivity = reading(
+                from: await readProcessActivity(),
+                lastGood: previousProcessActivity
+            )
+            processActivityRefreshInFlight = false
+        }
         roadmap = reading(from: await roadmapResult, lastGood: previousRoadmap)
         waves = reading(from: await wavesResult, lastGood: previousWaves)
-        processActivity = reading(
-            from: await processActivityResult,
-            lastGood: previousProcessActivity
-        )
         selectRequestedWaveIfNeeded()
         clearSelectionIfOutsideScope()
         await refreshWorkActivity()
+    }
+
+    func refreshProcessActivity() async {
+        guard !usesFixedFixture, !isRefreshing, !processActivityRefreshInFlight else { return }
+        processActivityRefreshInFlight = true
+        defer { processActivityRefreshInFlight = false }
+
+        let previous = processActivity.value
+        if previous == nil { processActivity = .loading }
+        processActivity = reading(
+            from: await readProcessActivity(),
+            lastGood: previous
+        )
     }
 
     func refreshPortfolio(

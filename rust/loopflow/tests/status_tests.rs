@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::chat::types::TurnUsage;
 use loopflow::child::ChildRef;
 use loopflow::durable::{
     Containment, ContainmentObservation, RunAdvance, RunTrigger, StopCause, WorkRef,
@@ -14,7 +15,7 @@ use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::project::{Project, ProjectId};
 use loopflow::store::sqlite::SqliteStore;
-use loopflow::store::{PmSnapshotRow, RunEventRow};
+use loopflow::store::{PmSnapshotRow, RunEventRow, TurnUsageSample};
 use loopflow::task::{
     Observation, PmWritebackState, Task, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr,
     TaskPrId,
@@ -168,15 +169,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
         system_tokens: 0,
         task_tokens: 10,
         supplied_context_tokens: 10,
-        provider_input_tokens: Some(10),
-        provider_total_input_tokens: Some(10),
-        peak_input_tokens: Some(10),
-        context_window_tokens: Some(100),
-        provider_output_tokens: Some(5),
-        reasoning_tokens: None,
-        cache_read_tokens: Some(0),
-        cache_write_tokens: None,
-        cost_usd: Some(0.01),
+        usage: None,
         context_gather_ms: 1,
         context_render_ms: 1,
         context_persist_ms: 1,
@@ -188,6 +181,23 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     store
         .insert_trace_capture(&invocation, &turn, &[], &[])
         .expect("seed skill invocation");
+    store
+        .record_turn_usage_sample(&TurnUsageSample {
+            turn_id: turn.id,
+            observed_at: now - 20,
+            final_receipt: true,
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                total_input_tokens: Some(10),
+                peak_input_tokens: Some(10),
+                context_window_tokens: Some(100),
+                output_tokens: Some(5),
+                cache_read_tokens: Some(0),
+                cost_usd: Some(0.01),
+                ..TurnUsage::default()
+            },
+        })
+        .expect("seed provider usage");
     wave
 }
 

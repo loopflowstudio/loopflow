@@ -106,6 +106,7 @@ impl OpenCodeHarness {
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
         }
+        super::configure_agent_env(&mut command, config);
         if config.write_scope == AgentWriteScope::Worktree {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }

@@ -127,7 +127,7 @@ When editing docs in `scratch/`:
 
 When editing `*.rs` files:
 - Run `cargo fmt` before committing; CI enforces it
-- Run `cargo clippy -- -D warnings` locally; CI treats warnings as errors
+- Run `cargo clippy --all-targets -- -D warnings` locally; CI treats warnings as errors
 - Dead code must be deleted, not commented out (use git for history)
 - If code is intentionally unused (e.g., for FFI/PyO3), use `#[allow(dead_code)]` with a comment explaining why
 - Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
@@ -200,7 +200,7 @@ pytest python/tests/
 cargo build                   # Build all crates
 cargo test                    # Run all Rust tests
 cargo fmt                     # Format code
-cargo clippy -- -D warnings   # Lint (warnings = errors)
+cargo clippy --all-targets -- -D warnings # Lint (warnings = errors)
 ```
 
 See TESTING.md for the full test suite (Python, Swift, Rust, Loopflow UI). CI runs all.
@@ -424,7 +424,7 @@ Before committing, verify:
 
 **Rust:**
 - [ ] `cargo fmt` passes
-- [ ] `cargo clippy -- -D warnings` passes
+- [ ] `cargo clippy --all-targets -- -D warnings` passes
 - [ ] Public types derive `Debug`
 - [ ] No `unwrap()` outside tests; use `expect("reason")`
 

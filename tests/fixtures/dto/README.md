@@ -27,14 +27,9 @@ addresses. Revision evidence carries both Rust's effective-content hash and the
 current source-file hash used to reject a stale Task worktree without
 reimplementing prompt transformations in Swift.
 
-`turn_spend.json` is the additive `lf usage --json` wire. Each row names its
-Turn, AgentInvocation, trace, and exec, and carries both cache directions
-(read and write); the second row proves a cache-only measurement survives
-while absent token and cost fields remain explicit nulls. Rust and Swift both
-round-trip it.
-
-`activity_snapshot.json` pins `lf ps --json`: Exec and provider nodes retain
-their existing Work attribution, working/stalled state, and exact token rates, while a registered
+`activity_snapshot.json` pins `lf ps --json` and its embedded canonical usage
+snapshot: Exec and provider nodes retain their existing Work attribution,
+working/stalled state, and exact provider-output rates, while a registered
 orphan stays separate from the counted call tree. Rust and Swift both
 round-trip it; The Podium derives no process state of its own.
 

@@ -190,12 +190,10 @@ impl NotificationState {
         }
     }
 
-    /// Convert the latest cumulative snapshot into this turn's own usage and
-    /// advance the attributed baseline. Input is reported net of cache reads —
-    /// the same shape Claude reports — with the gross figure in
-    /// `total_input_tokens`.
-    fn take_turn_usage(&mut self) -> Option<TurnUsage> {
-        let snapshot = self.pending_usage.take()?;
+    /// Convert the latest thread-lifetime snapshot into this Turn's cumulative
+    /// usage without advancing the completed-Turn baseline.
+    fn current_turn_usage(&self) -> Option<TurnUsage> {
+        let snapshot = self.pending_usage.as_ref()?;
         if !snapshot.is_reported() {
             return None;
         }
@@ -212,6 +210,25 @@ impl NotificationState {
         let cached = snapshot
             .cache_read_tokens
             .map(|value| value.saturating_sub(baseline.cached));
+        Some(TurnUsage {
+            input_tokens: gross_input.map(|gross| gross.saturating_sub(cached.unwrap_or(0))),
+            output_tokens: output,
+            total_input_tokens: gross_input,
+            peak_input_tokens: snapshot.peak_input_tokens,
+            context_window_tokens: snapshot.context_window_tokens,
+            reasoning_tokens: reasoning,
+            cache_read_tokens: cached,
+            cache_write_tokens: None,
+            model: None,
+            cost_usd: None,
+        })
+    }
+
+    /// Finish the Turn and advance the attributed thread baseline.
+    fn take_turn_usage(&mut self) -> Option<TurnUsage> {
+        let usage = self.current_turn_usage()?;
+        let snapshot = self.pending_usage.take()?;
+        let baseline = self.reported.unwrap_or_default();
         self.reported = Some(ReportedTotals {
             gross_input: snapshot
                 .input_tokens
@@ -227,18 +244,7 @@ impl NotificationState {
                 .max(baseline.reasoning),
             cached: snapshot.cache_read_tokens.unwrap_or(0).max(baseline.cached),
         });
-        Some(TurnUsage {
-            input_tokens: gross_input.map(|gross| gross.saturating_sub(cached.unwrap_or(0))),
-            output_tokens: output,
-            total_input_tokens: gross_input,
-            peak_input_tokens: snapshot.peak_input_tokens,
-            context_window_tokens: snapshot.context_window_tokens,
-            reasoning_tokens: reasoning,
-            cache_read_tokens: cached,
-            cache_write_tokens: None,
-            model: None,
-            cost_usd: None,
-        })
+        Some(usage)
     }
 
     /// On the first snapshot of the process, everything the thread consumed
@@ -331,9 +337,10 @@ pub(super) fn process_notification(
             state.set_current_turn_id(None);
             let status = codex_mapping::map_turn_status(params);
             if let Some(usage) = state.take_turn_usage() {
-                let _ = events.send(ConversationEvent::TurnUsage {
+                let _ = events.send(ConversationEvent::UsageCheckpoint {
                     turn_id: tid.clone(),
                     usage,
+                    final_receipt: true,
                 });
             }
             let _ = events.send(ConversationEvent::TurnCompleted {
@@ -350,6 +357,20 @@ pub(super) fn process_notification(
                 retain_higher_context_pressure(&mut latest, &previous);
             }
             state.pending_usage = Some(latest);
+            if let (Some(turn_id), Some(usage)) = (
+                state
+                    .current_turn_id
+                    .lock()
+                    .expect("codex turn id lock poisoned")
+                    .clone(),
+                state.current_turn_usage(),
+            ) {
+                let _ = events.send(ConversationEvent::UsageCheckpoint {
+                    turn_id,
+                    usage,
+                    final_receipt: false,
+                });
+            }
         }
         "item/started" | "item/completed" => {
             // The server echoes the client's own input (turn/start and
@@ -928,6 +949,10 @@ impl CodexHarness {
             // Dropping the harness (e.g. a run task is aborted)
             // must not leak a live app-server.
             .kill_on_drop(true);
+        super::configure_agent_env(&mut command, launch);
+        if let Some(cwd) = &launch.cwd {
+            command.current_dir(cwd);
+        }
         if let Some(route) = &self.account_route {
             route.apply_tokio(&mut command);
         }

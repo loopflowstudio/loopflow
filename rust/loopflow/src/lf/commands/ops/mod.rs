@@ -2388,18 +2388,19 @@ fn launch_skill_agent(
         },
     )?;
 
+    let mut launch = prepared.config;
+    launch.env = env.cloned().unwrap_or_default();
     let process = ProcessConfig {
         auto: true,
         stream: true,
         capture: Some(capture.clone()),
-        env: env.cloned().unwrap_or_default(),
         ..Default::default()
     };
     let capabilities = AgentCapabilities {
         chrome: config.chrome,
     };
 
-    let result = launch_agent(&prepared.config, &process, &capabilities);
+    let result = launch_agent(&launch, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

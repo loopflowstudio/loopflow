@@ -2,19 +2,16 @@ import Charts
 import Loopflow
 import SwiftUI
 
-/// Where the tokens went. Every chart here reads one payload — `lf usage --json`,
-/// where each row is one provider-measured Turn. The rows are additive: they
-/// sum to the totals `lf usage` prints. If a chart disagrees with that table,
-/// the chart is wrong.
+/// Where provider-billed output went. Every chart reads the same Rust-derived
+/// `lf usage --json` snapshot as `lf top` and the Podium.
 struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
-    private static let windowDays = 30
     /// The codebase moves on a slower clock than a day's runs: a year shows the
     /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
     private static let codebaseDays = 365
 
-    @State private var spend: [TurnSpend] = []
+    @State private var usage: UsageSnapshot?
     @State private var doctor: DoctorReport?
     @State private var codebase: CodeNode?
     @State private var growth: [CodeSnapshot] = []
@@ -29,7 +26,7 @@ struct TelemetryDashboardView: View {
     /// Repos the ledger has seen, by absolute path. The codebase charts measure
     /// one repo at a time; the spend charts are machine-wide.
     private var repos: [String] {
-        Array(Set(spend.compactMap(\.repo))).sorted()
+        Array(Set(usage?.readings.compactMap(\.scope.repo) ?? [])).sorted()
     }
 
     var body: some View {
@@ -40,19 +37,21 @@ struct TelemetryDashboardView: View {
                 LazyVStack(alignment: .leading, spacing: Spacing.xl) {
                     ledgerHealth
 
+                    UsageProjectionStrip(interval: usage?.global?.interval(seconds: 300))
+
                     chartCard(
-                        "Tokens by skill · \(Self.windowDays) days",
-                        subtitle: "Input + output, per day. A run with no skill is inline work."
+                        "Provider output · 24 hours",
+                        subtitle: "Five-minute buckets. Output includes reasoning; the reasoning series is only its reported breakdown."
                     ) {
-                        DailyTokensChart(spend: spend, key: Self.skillKey)
+                        OutputHistoryChart(buckets: usage?.globalHistory ?? [])
                             .frame(height: 260)
                     }
 
                     chartCard(
-                        "Tokens by model · \(Self.windowDays) days",
-                        subtitle: "provider:model — the harness and the model it drove"
+                        "Output by Work · 24 hours",
+                        subtitle: "One Rust rollup across Waves, Projects, and Tasks."
                     ) {
-                        DailyTokensChart(spend: spend, key: { $0.agent })
+                        WorkUsageChart(snapshot: usage, repo: selectedRepo)
                             .frame(height: 260)
                     }
 
@@ -79,25 +78,12 @@ struct TelemetryDashboardView: View {
                         }
                     }
 
-                    chartCard(
-                        "Cache-hit ratio",
-                        subtitle: "cache read / (input + cache read)"
-                    ) {
-                        CacheRatioChart(spend: spend)
-                            .frame(height: 220)
-                    }
                 }
                 .padding(Spacing.xxl)
             }
         }
         .background(palette.background)
         .task { await refresh() }
-    }
-
-    /// A boundary with no skill is a run that never entered one — an inline
-    /// prompt. Naming it keeps the series honest rather than dropping the spend.
-    private static func skillKey(_ span: TurnSpend) -> String {
-        span.skill ?? "(inline)"
     }
 
     private var header: some View {
@@ -208,9 +194,10 @@ struct TelemetryDashboardView: View {
     }
 
     private var totalLabel: String {
-        let tokens = spend.reduce(0) { $0 + $1.totalTokens }
-        let cost = spend.reduce(0.0) { $0 + ($1.costUsd ?? 0) }
-        return "\(tokens.formatted()) tokens · \(cost.formatted(.currency(code: "USD")))"
+        guard let interval = usage?.global?.interval(seconds: 86_400) else {
+            return "— output tokens"
+        }
+        return "\(interval.outputTokens.formatted()) output tokens · 24h"
     }
 
     @ViewBuilder
@@ -271,7 +258,7 @@ struct TelemetryDashboardView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            spend = try await RegistryQueryLocal.shared.spend(days: Self.windowDays)
+            usage = try await RegistryQueryLocal.shared.usage()
             errorMessage = nil
             do {
                 doctor = try await RegistryQueryLocal.shared.doctor()
@@ -325,6 +312,77 @@ struct TelemetryDashboardView: View {
     }
 }
 
+private struct UsageProjectionStrip: View {
+    @Environment(\.palette) private var palette
+    let interval: UsageInterval?
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            tile(
+                "GENERATION · 5M",
+                interval.map { "\($0.outputTokens.formatted()) output" } ?? "—",
+                interval.map { String(format: "%.1f TOK/s", $0.outputTokensPerSecond) } ?? "provider output"
+            )
+            tile(
+                "INPUT / CACHE · 5M",
+                tokenValue(interval?.inputTokens, suffix: " input"),
+                "\(tokenValue(interval?.cacheReadTokens, suffix: " read")) · \(tokenValue(interval?.cacheWriteTokens, suffix: " write"))"
+            )
+            tile(
+                "COST · 5M",
+                interval?.costUsd.map { String(format: "$%.2f", $0) } ?? "—",
+                "provider receipt"
+            )
+            tile(
+                "CONTEXT PRESSURE",
+                pressure,
+                contextDetail
+            )
+        }
+    }
+
+    private var pressure: String {
+        guard let peak = interval?.peakInputTokens,
+              let window = interval?.contextWindowTokens,
+              window > 0
+        else { return "—" }
+        return String(format: "%.0f%%", Double(peak) * 100 / Double(window))
+    }
+
+    private var contextDetail: String {
+        guard let peak = interval?.peakInputTokens,
+              let window = interval?.contextWindowTokens
+        else { return "peak request / window" }
+        return "\(peak.formatted()) / \(window.formatted())"
+    }
+
+    private func tokenValue(_ value: UInt64?, suffix: String) -> String {
+        value.map { "\($0.formatted())\(suffix)" } ?? "—\(suffix)"
+    }
+
+    private func tile(_ label: String, _ value: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
+            Text(value)
+                .font(Typography.code(15))
+                .foregroundStyle(palette.text)
+            Text(detail)
+                .font(Typography.caption(10))
+                .foregroundStyle(palette.textSecondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.md)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.md))
+        .overlay {
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .stroke(palette.border, lineWidth: 1)
+        }
+    }
+}
+
 /// Integer division made 1,802,919 and 1,033,737 both read "1M" — two bars that
 /// differ by 770k tokens wearing the same label. Keep a decimal in the millions.
 private func compactTokens(_ tokens: Int) -> String {
@@ -340,57 +398,92 @@ private func compactTokens(_ tokens: Int) -> String {
     }
 }
 
-// MARK: - Daily tokens, stacked by a chosen dimension
+// MARK: - Provider output
 
-private struct DailyBucket: Identifiable {
-    let id: String
-    let day: Date
-    let series: String
-    let tokens: Int
-}
-
-/// One stacked bar per day. `key` picks the dimension — skill, or provider:model.
-private struct DailyTokensChart: View {
+private struct OutputHistoryChart: View {
     @Environment(\.palette) private var palette
-    let spend: [TurnSpend]
-    let key: (TurnSpend) -> String
-
-    private var buckets: [DailyBucket] {
-        var totals: [String: DailyBucket] = [:]
-        for span in spend where span.totalTokens > 0 {
-            let day = Calendar.current.startOfDay(
-                for: Date(timeIntervalSince1970: TimeInterval(span.at))
-            )
-            let series = key(span)
-            let id = "\(day.timeIntervalSince1970)-\(series)"
-            let running = totals[id]?.tokens ?? 0
-            totals[id] = DailyBucket(
-                id: id, day: day, series: series, tokens: running + span.totalTokens
-            )
-        }
-        return totals.values.sorted {
-            ($0.day, $0.series) < ($1.day, $1.series)
-        }
-    }
+    let buckets: [UsageBucket]
 
     var body: some View {
         if buckets.isEmpty {
             EmptyChartHint()
         } else {
             Chart(buckets) { bucket in
-                BarMark(
-                    x: .value("Day", bucket.day, unit: .day),
-                    y: .value("Tokens", bucket.tokens)
+                AreaMark(
+                    x: .value(
+                        "Time",
+                        Date(timeIntervalSince1970: TimeInterval(bucket.startedAt))
+                    ),
+                    y: .value("Output tokens", bucket.outputTokens)
                 )
-                .foregroundStyle(by: .value("Series", bucket.series))
+                .foregroundStyle(Color.loopflowBurgundy.opacity(0.72))
             }
-            .chartLegend(position: .bottom, spacing: Spacing.sm)
             .chartYAxis {
                 AxisMarks { value in
                     AxisGridLine().foregroundStyle(palette.border)
                     AxisValueLabel {
-                        if let tokens = value.as(Int.self) {
-                            Text(compactTokens(tokens))
+                        if let tokens = value.as(UInt64.self) {
+                            Text(compactTokens(Int(clamping: tokens)))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct WorkUsageChart: View {
+    @Environment(\.palette) private var palette
+    let snapshot: UsageSnapshot?
+    let repo: String?
+
+    private struct Bar: Identifiable {
+        let id: String
+        let label: String
+        let kind: String
+        let tokens: UInt64
+    }
+
+    private var bars: [Bar] {
+        (snapshot?.readings ?? [])
+            .filter { reading in
+                [.wave, .project, .task].contains(reading.scope.kind)
+                    && (repo == nil || reading.scope.repo == repo)
+            }
+            .compactMap { reading in
+                guard let interval = reading.interval(seconds: 86_400),
+                      interval.outputTokens > 0
+                else { return nil }
+                return Bar(
+                    id: reading.id,
+                    label: reading.scope.label,
+                    kind: reading.scope.kind.rawValue.capitalized,
+                    tokens: interval.outputTokens
+                )
+            }
+            .sorted { $0.tokens > $1.tokens }
+            .prefix(18)
+            .map { $0 }
+    }
+
+    var body: some View {
+        if bars.isEmpty {
+            EmptyChartHint(message: "No attributed output in this window")
+        } else {
+            Chart(bars) { bar in
+                BarMark(
+                    x: .value("Output tokens", bar.tokens),
+                    y: .value("Work", bar.label)
+                )
+                .foregroundStyle(by: .value("Kind", bar.kind))
+            }
+            .chartLegend(position: .bottom, spacing: Spacing.sm)
+            .chartXAxis {
+                AxisMarks { value in
+                    AxisGridLine().foregroundStyle(palette.border)
+                    AxisValueLabel {
+                        if let tokens = value.as(UInt64.self) {
+                            Text(compactTokens(Int(clamping: tokens)))
                         }
                     }
                 }
@@ -573,62 +666,6 @@ private struct IcicleNode: View {
     private var depthColor: Color {
         let ramp: [Color] = [.loopflowBurgundy, .statusInfo, .statusSuccess, .statusWarning]
         return ramp[min(depth, ramp.count - 1)]
-    }
-}
-
-// MARK: - Cache-hit ratio
-
-private struct CachePoint: Identifiable {
-    let id: String
-    let date: Date
-    let ratio: Double
-    let agent: String
-}
-
-private struct CacheRatioChart: View {
-    @Environment(\.palette) private var palette
-    let spend: [TurnSpend]
-
-    private var points: [CachePoint] {
-        spend
-            .compactMap { span in
-                let denominator = (span.inputTokens ?? 0) + (span.cacheReadTokens ?? 0)
-                guard denominator > 0 else { return nil }
-                return CachePoint(
-                    id: span.id,
-                    date: Date(timeIntervalSince1970: TimeInterval(span.at)),
-                    ratio: Double(span.cacheReadTokens ?? 0) / Double(denominator),
-                    agent: span.agent
-                )
-            }
-            .sorted { $0.date < $1.date }
-    }
-
-    var body: some View {
-        if points.isEmpty {
-            EmptyChartHint()
-        } else {
-            Chart(points) { point in
-                PointMark(
-                    x: .value("When", point.date),
-                    y: .value("Cache hit", point.ratio)
-                )
-                .foregroundStyle(by: .value("Agent", point.agent))
-                .opacity(0.8)
-            }
-            .chartYScale(domain: 0...1)
-            .chartYAxis {
-                AxisMarks { value in
-                    AxisGridLine().foregroundStyle(palette.border)
-                    AxisValueLabel {
-                        if let ratio = value.as(Double.self) {
-                            Text(ratio.formatted(.percent.precision(.fractionLength(0))))
-                        }
-                    }
-                }
-            }
-            .chartLegend(position: .bottom, spacing: Spacing.sm)
-        }
     }
 }
 

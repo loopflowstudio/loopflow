@@ -110,7 +110,7 @@ Path → suite mapping:
 
 | Changed | Suite | Runs |
 |---------|-------|------|
-| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `swift test --package-path swift -Xswiftc -gnone`, then the multiplatform boundary check |
@@ -181,7 +181,7 @@ aggregate `tests-result` check:
 |-----|--------|---------|
 | `architecture-check` | ubuntu-latest | map every durable owner, public boundary, provider edge, and named shim; reject stale control vocabulary |
 | `scratch-clear` | ubuntu-latest | reject landing-only scratch artifacts |
-| `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy` |
+| `rust-lint` | ubuntu-latest | `cargo fmt`, `cargo clippy --all-targets -- -D warnings` |
 | `rust-test` | ubuntu-latest | `cargo nextest run --all` |
 | `migration-check` | ubuntu-latest | verify migration namespaces/history |
 | `python-test` | ubuntu-latest | `uv run pytest python/tests/` |

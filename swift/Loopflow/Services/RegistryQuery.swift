@@ -4,7 +4,8 @@
 // The wave model has no telemetry hub (see `scratch/eventing.md`): durable
 // facts — which waves exist (running and stopped) and their work
 // — are QUERIES against the shared SQLite ledger, served by the daemonless `lf`
-// CLI. Live motion is a per-wave SSE stream (`WaveChatConnection`), never this.
+// CLI. The Podium re-queries the bounded process snapshot for live output;
+// Wave conversation motion remains a per-wave SSE stream (`WaveChatConnection`).
 //
 // This runs `lf ls/status/roadmap/ps/activity --json` as a subprocess and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
@@ -108,7 +109,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: stdout)
     }
 
-    /// Live Loopflow process trees and provider-measured output activity.
+    /// Live process trees, normalized output rates, and completed provider usage.
     public func processActivity() async throws -> ActivitySnapshot {
         let stdout = try await run(["ps", "--json"], nil)
         return try Self.decode(ActivitySnapshot.self, from: stdout)
@@ -236,11 +237,11 @@ public struct RegistryQuery: Sendable {
         )
     }
 
-    /// Provider-measured Turn spend over a window. Rows are additive and sum
-    /// exactly to the totals `lf usage` prints.
-    public func spend(days: Int = 30) async throws -> [TurnSpend] {
-        let stdout = try await run(["usage", "--json", "--days", String(days)], nil)
-        return try Self.decode([TurnSpend].self, from: stdout)
+    /// The same provider-billed output snapshot rendered by `lf usage`,
+    /// `lf ps`, `lf top`, and the Podium.
+    public func usage() async throws -> UsageSnapshot {
+        let stdout = try await run(["usage", "--json"], nil)
+        return try Self.decode(UsageSnapshot.self, from: stdout)
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
@@ -655,52 +656,6 @@ public struct TraceTurnIndex: Decodable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, ordinal
         case invocationId = "invocation_id"
-    }
-}
-
-/// One provider-measured Turn from `lf usage --json`. Mirrors Rust
-/// `TurnSpendRow` exactly; every absent provider measurement remains `nil`.
-public struct TurnSpend: Codable, Equatable, Sendable, Identifiable {
-    public var id: String { turnId }
-
-    public let turnId: String
-    public let invocationId: String
-    public let traceId: String
-    public let execId: String
-    public let repo: String
-    public let wave: String?
-    public let flow: String?
-    public let skill: String?
-    public let provider: String
-    public let model: String?
-    public let at: Int
-    public let inputTokens: Int?
-    public let outputTokens: Int?
-    public let cacheReadTokens: Int?
-    public let cacheWriteTokens: Int?
-    public let costUsd: Double?
-
-    /// `provider:model` — the harness and the model it drove.
-    public var agent: String {
-        switch model {
-        case let model?: return "\(provider):\(model)"
-        case nil: return provider
-        }
-    }
-
-    public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
-
-    enum CodingKeys: String, CodingKey {
-        case repo, wave, flow, skill, provider, model, at
-        case turnId = "turn_id"
-        case invocationId = "invocation_id"
-        case traceId = "trace_id"
-        case execId = "exec_id"
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
-        case cacheReadTokens = "cache_read_tokens"
-        case cacheWriteTokens = "cache_write_tokens"
-        case costUsd = "cost_usd"
     }
 }
 

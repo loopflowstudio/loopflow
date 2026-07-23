@@ -393,7 +393,7 @@ pub enum Commands {
         /// Emit the versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Rank siblings by cumulative completed tokens or five-minute rate
+        /// Rank siblings by cumulative completed tokens or live rate
         #[arg(long, value_enum, default_value_t)]
         sort: commands::top::ActivitySort,
     },
@@ -402,8 +402,8 @@ pub enum Commands {
         /// Emit one versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Rank siblings by cumulative completed tokens or five-minute rate
-        #[arg(long, value_enum, default_value = "rate-5m")]
+        /// Rank siblings by cumulative completed tokens or live rate
+        #[arg(long, value_enum, default_value = "rate")]
         sort: commands::top::ActivitySort,
     },
     /// Reap registered orphan providers and remove dead process receipts
@@ -2502,7 +2502,7 @@ mod tests {
             cli.command,
             Some(Commands::Top {
                 json: false,
-                sort: commands::top::ActivitySort::Rate5m,
+                sort: commands::top::ActivitySort::Rate,
             })
         ));
 

@@ -498,15 +498,11 @@ impl SqliteStore {
                         id, invocation_id, ordinal, provider_turn_id, started_at, ended_at,
                         status, input_op, context_coverage, tokenizer, system_prompt_path,
                         task_prompt_path, system_tokens, task_tokens, supplied_context_tokens,
-                        provider_input_tokens, provider_output_tokens, reasoning_tokens,
-                        cache_read_tokens, cache_write_tokens, cost_usd, context_gather_ms,
-                        context_render_ms, context_persist_ms, first_event_seq, last_event_seq,
-                        provider_total_input_tokens, peak_input_tokens, context_window_tokens,
-                        epoch_id, basis_rev
+                        context_gather_ms, context_render_ms, context_persist_ms,
+                        first_event_seq, last_event_seq, epoch_id, basis_rev
                      ) VALUES (
                         ?1, ?2, ?3, NULL, ?4, NULL, 'running', 'initial', 'unknown',
-                        'cl100k_base', NULL, '', 0, 0, 0, NULL, NULL, NULL, NULL, NULL,
-                        NULL, 0, 0, 0, NULL, NULL, NULL, NULL, NULL, ?5, ?6
+                        'cl100k_base', NULL, '', 0, 0, 0, 0, 0, 0, NULL, NULL, ?5, ?6
                      )",
                     params![
                         turn.id.as_str(),

@@ -91,7 +91,7 @@ lf trace <exec-id>     # what one agent did — and exactly what it was told
 lf ps                  # rank live call trees by cumulative completed output
 lf top                 # refresh call-tree rates, age, idle time, and health
 lf prune --dry-run     # inspect dead receipts and registered orphan providers
-lf usage               # subscription state and spend, per account and repo
+lf usage               # subscription state, provider tokens, cache, and cost
 ```
 
 Keep Loopflow development inside its local resource envelope:

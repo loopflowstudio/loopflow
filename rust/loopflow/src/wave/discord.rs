@@ -1298,7 +1298,6 @@ mod tests {
         });
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         assert_eq!(
@@ -1438,7 +1437,6 @@ mod tests {
         });
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         assert_eq!(
@@ -1730,7 +1728,6 @@ mod tests {
         });
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
 

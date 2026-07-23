@@ -69,6 +69,69 @@ struct PodiumModelTests {
         #expect(model.waveSummary?.waves == 2)
     }
 
+    @Test("Live refresh changes only process evidence and preserves its last good frame")
+    func liveRefreshChangesOnlyProcessEvidence() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let frames = LiveProcessFrames(frames: [
+            try fixture.processActivityJSON(rate: 2, observedAt: 1),
+            try fixture.processActivityJSON(rate: 4, observedAt: 2),
+        ])
+        let query = RegistryQuery { args, _ in
+            try await frames.next(args: args)
+        }
+        let model = PodiumModel(query: query)
+        model.applyFixture(
+            roadmap: .available(fixture.roadmap),
+            waves: .available(fixture.waves),
+            processActivity: .available(fixture.processActivity),
+            workActivity: .available(fixture.workActivity),
+            repos: []
+        )
+
+        await model.refreshProcessActivity()
+        #expect(model.processActivity.value?.observedAt == 1)
+        #expect(model.processActivity.value?.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 2)
+
+        await model.refreshProcessActivity()
+        #expect(model.processActivity.value?.observedAt == 2)
+        #expect(model.processActivity.value?.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 4)
+
+        await model.refreshProcessActivity()
+        #expect(model.processActivity.value?.observedAt == 2)
+        #expect(model.processActivity.errorMessage == "no process frame available")
+        #expect(await frames.commands == [
+            ["ps", "--json"],
+            ["ps", "--json"],
+            ["ps", "--json"],
+        ])
+    }
+
+    @Test("Live process refreshes never overlap")
+    func liveProcessRefreshesNeverOverlap() async throws {
+        let fixture = try PodiumTestFixture.load()
+        let deferred = DeferredProcessResponse()
+        let query = RegistryQuery { args, _ in
+            try await deferred.response(args: args)
+        }
+        let model = PodiumModel(query: query)
+        model.applyFixture(
+            roadmap: .available(fixture.roadmap),
+            waves: .available(fixture.waves),
+            processActivity: .available(fixture.processActivity),
+            workActivity: .available(fixture.workActivity),
+            repos: []
+        )
+
+        let first = Task { await model.refreshProcessActivity() }
+        await deferred.waitUntilRequested()
+        await model.refreshProcessActivity()
+        #expect(await deferred.requestCount == 1)
+
+        await deferred.release(try fixture.processActivityJSON(rate: 3, observedAt: 3))
+        await first.value
+        #expect(model.processActivity.value?.observedAt == 3)
+    }
+
     @Test("Wave summary identifies running Waves without listeners")
     func waveSummaryIdentifiesUnservedRuns() async throws {
         let fixture = try PodiumTestFixture.load()
@@ -210,18 +273,43 @@ struct PodiumModelTests {
 
 @Suite("Podium output signal")
 struct PodiumOutputSignalTests {
-    @Test("Black is off and blue is blocked without manufacturing output")
+    @Test("Global output ignores provider attention while hierarchy preserves it")
     func stateSeparatesRateFromAttention() throws {
+        let fixture = try PodiumTestFixture.load()
         let empty = try JSONDecoder().decode(
             ActivitySnapshot.self,
-            from: Data(#"{"schema_version":1,"observed_at":1784606400,"fast_window_seconds":300,"slow_window_seconds":1800,"aggregate":{"measured_output_tokens":0,"output_tokens_fast":0,"output_tokens_slow":0,"output_tokens_per_second_fast":0.0,"output_tokens_per_second_slow":0.0,"measured_turns":0,"unmeasured_turns":0},"nodes":[],"provider_processes":[]}"#.utf8)
+            from: Data(fixture.processActivityJSON(rate: 0, observedAt: 1).utf8)
         )
-        let fixture = try PodiumTestFixture.load()
 
         #expect(PodiumSignalState.from(empty) == .off)
         #expect(PodiumSignalState.from(empty).lens == .black)
-        #expect(PodiumSignalState.from(fixture.processActivity) == .blocked)
-        #expect(PodiumSignalState.from(fixture.processActivity).lens == .blue)
+        #expect(PodiumSignalState.from(fixture.processActivity) == .producing)
+        #expect(PodiumSignalState.from(fixture.processActivity).lens == .green)
+        #expect(PodiumSignalState.from(
+            nodes: fixture.processActivity.nodes,
+            usage: fixture.processActivity.usage.global
+        ) == .blocked)
+        #expect(PodiumSignalState.from(
+            nodes: fixture.processActivity.nodes,
+            usage: fixture.processActivity.usage.global
+        ).lens == .blue)
+
+        let silentWorker = ActivityNode(
+            id: "launch:silent",
+            parentId: nil,
+            kind: .providerLaunch,
+            label: "codex",
+            repo: "/src/loopflow",
+            wave: "product",
+            project: nil,
+            task: nil,
+            pid: 1,
+            startedAt: 1,
+            lastProgressAt: 1,
+            state: .working,
+            usageScopeId: "invocation:silent"
+        )
+        #expect(PodiumSignalState.from(nodes: [silentWorker], usage: nil) == .waiting)
     }
 
     @Test("The rail is logarithmic, monotonic, and capped")
@@ -308,6 +396,31 @@ private struct PodiumTestFixture {
         let data = try JSONSerialization.data(withJSONObject: object)
         return try #require(String(data: data, encoding: .utf8))
     }
+
+    func processActivityJSON(rate: Double, observedAt: Int64) throws -> String {
+        let encoded = try JSONEncoder().encode(processActivity)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var usage = try #require(object["usage"] as? [String: Any])
+        var readings = try #require(usage["readings"] as? [[String: Any]])
+        let globalIndex = try #require(readings.firstIndex { reading in
+            (reading["scope"] as? [String: Any])?["kind"] as? String == "global"
+        })
+        var global = readings[globalIndex]
+        var intervals = try #require(global["intervals"] as? [[String: Any]])
+        let fastIndex = try #require(intervals.firstIndex { interval in
+            interval["window_seconds"] as? Int == 5
+        })
+        intervals[fastIndex]["output_tokens"] = UInt64(max(rate * 5, 0))
+        intervals[fastIndex]["output_tokens_per_second"] = rate
+        global["intervals"] = intervals
+        readings[globalIndex] = global
+        usage["readings"] = readings
+        usage["observed_at"] = observedAt
+        object["usage"] = usage
+        object["observed_at"] = observedAt
+        let data = try JSONSerialization.data(withJSONObject: object)
+        return try #require(String(data: data, encoding: .utf8))
+    }
 }
 
 private actor ActivityArguments {
@@ -324,6 +437,53 @@ private actor DeferredActivityResponse {
 
     func response() async -> String {
         await withCheckedContinuation { continuation in
+            responseContinuation = continuation
+            requestContinuation?.resume()
+            requestContinuation = nil
+        }
+    }
+
+    func waitUntilRequested() async {
+        if responseContinuation != nil { return }
+        await withCheckedContinuation { continuation in
+            requestContinuation = continuation
+        }
+    }
+
+    func release(_ response: String) {
+        responseContinuation?.resume(returning: response)
+        responseContinuation = nil
+    }
+}
+
+private actor LiveProcessFrames {
+    private var frames: [String]
+    private(set) var commands: [[String]] = []
+
+    init(frames: [String]) {
+        self.frames = frames
+    }
+
+    func next(args: [String]) throws -> String {
+        commands.append(args)
+        guard !frames.isEmpty else {
+            throw RegistryQueryError("no process frame available")
+        }
+        return frames.removeFirst()
+    }
+}
+
+private actor DeferredProcessResponse {
+    private var responseContinuation: CheckedContinuation<String, Error>?
+    private var requestContinuation: CheckedContinuation<Void, Never>?
+    private(set) var requestCount = 0
+
+    func response(args: [String]) async throws -> String {
+        guard args == ["ps", "--json"] else {
+            throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
+        }
+        requestCount += 1
+        return try await withCheckedThrowingContinuation { continuation in
             responseContinuation = continuation
             requestContinuation?.resume()
             requestContinuation = nil

@@ -370,27 +370,26 @@ struct RegistryQueryTests {
         let snapshot = try await query.processActivity()
 
         #expect(snapshot.nodes.count == 3)
-        #expect(snapshot.aggregate.outputTokensPerSecondFast == 4.0)
+        #expect(snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 4.0)
         #expect(snapshot.providerProcesses[0].claim == .orphaned)
     }
 
-    @Test("lf usage --json decodes one additive Turn row")
-    func spendDecodes() async throws {
-        let json = """
-        [{"turn_id":"turn-1","invocation_id":"invocation-1","trace_id":"abc","exec_id":"child","repo":"/src/loopflow","wave":null,"flow":"build","skill":"gate","provider":"claude","model":"opus","at":100,"input_tokens":1000,"output_tokens":200,"cache_read_tokens":800,"cost_usd":0.25}]
-        """
+    @Test("lf usage --json decodes the canonical usage snapshot")
+    func usageDecodes() async throws {
+        let activityData = try Data(contentsOf: activityFixtureURL())
+        let activity = try #require(
+            JSONSerialization.jsonObject(with: activityData) as? [String: Any]
+        )
+        let usageData = try JSONSerialization.data(withJSONObject: #require(activity["usage"]))
+        let json = try #require(String(data: usageData, encoding: .utf8))
         let query = RegistryQuery { args, _ in
-            #expect(args == ["usage", "--json", "--days", "30"])
+            #expect(args == ["usage", "--json"])
             return json
         }
 
-        let turns = try await query.spend()
-        #expect(turns[0].id == "turn-1")
-        #expect(turns[0].invocationId == "invocation-1")
-        #expect(turns[0].traceId == "abc")
-        #expect(turns[0].execId == "child")
-        #expect(turns[0].totalTokens == 1200)
-        #expect(turns[0].agent == "claude:opus")
+        let snapshot = try await query.usage()
+        #expect(snapshot.global?.interval(seconds: 86_400)?.outputTokens == 48_200)
+        #expect(snapshot.globalHistory.count == 2)
     }
 
     @Test("lf doctor decodes every check")

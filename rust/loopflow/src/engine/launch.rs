@@ -180,6 +180,7 @@ pub fn prepare_launch_prompt(
         skip_permissions: yolo_mode,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
+        env: Default::default(),
     };
 
     Ok(PreparedLaunchPrompt {

@@ -547,6 +547,23 @@ pub(crate) fn migration_sql_for_test(name: &str) -> String {
     std::fs::read_to_string(path).expect("migration SQL")
 }
 
+#[cfg(test)]
+pub(crate) fn migration_is_applied_for_test(
+    conn: &rusqlite::Connection,
+    name: &str,
+) -> StoreResult<bool> {
+    let marker = format!("-- draft: {name}");
+    let Some(migration) = MIGRATIONS
+        .iter()
+        .find(|migration| migration.sql.lines().any(|line| line == marker))
+    else {
+        return Ok(false);
+    };
+    Ok(applied_versions(conn)?
+        .iter()
+        .any(|version| version == &migration.version()))
+}
+
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
 /// released. They remain here only long enough to recognize and converge that
@@ -1624,6 +1641,7 @@ mod tests {
     const REOPEN_REPAIR_NAME: &str = "retire_obsolete_pm_reopen_writebacks";
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
     const LEGACY_TASK_FLOW_REPAIR_NAME: &str = "repair_legacy_task_flow";
+    const TURN_USAGE_SAMPLES_NAME: &str = "add_turn_usage_samples";
     const REPOSITORY_OWNED_WAVES_NAME: &str = "repository_owned_waves";
 
     fn _draft_is_canonical(name: &str) -> bool {
@@ -1975,6 +1993,149 @@ mod tests {
             .map(|offset| body_start + offset)
             .unwrap_or(sql.len());
         sql[body_start..body_end].to_string()
+    }
+
+    #[test]
+    fn turn_usage_samples_move_provider_receipts_out_of_turn_lifecycle() {
+        let conn = open();
+        apply_before_current_draft(&conn, TURN_USAGE_SAMPLES_NAME);
+        conn.execute_batch(
+            "INSERT INTO agent_invocations (
+                id, run_id, process_id, started_at, ended_at, repo, worktree,
+                provider, model, surface, capture_status, outcome, artifact_dir,
+                conversation_path, conversation_event_count, conversation_bytes
+             ) VALUES (
+                'invocation-measured', 'run-measured', 'process-measured', 90, 110,
+                '/repo', '/repo', 'codex', 'gpt-5', 'headless', 'complete',
+                'completed', 'artifact', 'conversation.jsonl', 2, 100
+             );
+             INSERT INTO agent_turns (
+                id, invocation_id, ordinal, started_at, ended_at, status, input_op,
+                context_coverage, tokenizer, task_prompt_path, system_tokens,
+                task_tokens, supplied_context_tokens, provider_input_tokens,
+                provider_total_input_tokens, peak_input_tokens, context_window_tokens,
+                provider_output_tokens, reasoning_tokens, cache_read_tokens,
+                cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
+                context_persist_ms, root_output
+             ) VALUES (
+                'turn-measured', 'invocation-measured', 1, 100, 110, 'completed',
+                'initial', 'assembled', 'provider', 'task.md', 11, 12, 13,
+                101, 401, 390, 1000000, 202, 88, 303, 17, 1.25, 2, 3, 4,
+                'done'
+             );
+             INSERT INTO agent_turns (
+                id, invocation_id, ordinal, started_at, ended_at, status, input_op,
+                context_coverage, tokenizer, task_prompt_path, system_tokens,
+                task_tokens, supplied_context_tokens, context_gather_ms,
+                context_render_ms, context_persist_ms
+             ) VALUES (
+                'turn-unmeasured', 'invocation-measured', 2, 111, 112, 'completed',
+                'message', 'unknown', 'provider', 'task.md', 0, 0, 0, 0, 0, 0
+             );
+             INSERT INTO context_assets (
+                turn_id, position, channel, kind, scope, label, source_path,
+                included_by, content_sha256, byte_start, byte_end, bytes,
+                isolated_tokens, attributed_tokens
+             ) VALUES (
+                'turn-measured', 0, 'task', 'repo_instructions', 'repo',
+                'AGENTS.md', 'AGENTS.md', 'test', 'hash', 0, 12, 12, 3, 3
+             );",
+        )
+        .unwrap();
+
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql(TURN_USAGE_SAMPLES_NAME))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+
+        let turn_columns = columns(&conn, "agent_turns");
+        for removed in [
+            "provider_input_tokens",
+            "provider_total_input_tokens",
+            "peak_input_tokens",
+            "context_window_tokens",
+            "provider_output_tokens",
+            "reasoning_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "cost_usd",
+        ] {
+            assert!(!turn_columns.contains(&removed.to_string()));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT turn_id, observed_at, final_receipt, input_tokens,
+                        total_input_tokens, peak_input_tokens, context_window_tokens,
+                        output_tokens, reasoning_tokens, cache_read_tokens,
+                        cache_write_tokens, model, cost_usd
+                 FROM turn_usage_samples",
+                [],
+                |row| {
+                    Ok((
+                        (
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, bool>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ),
+                        (
+                            row.get::<_, i64>(7)?,
+                            row.get::<_, i64>(8)?,
+                            row.get::<_, i64>(9)?,
+                            row.get::<_, i64>(10)?,
+                            row.get::<_, String>(11)?,
+                            row.get::<_, f64>(12)?,
+                        ),
+                    ))
+                },
+            )
+            .unwrap(),
+            (
+                (
+                    "turn-measured".to_string(),
+                    110,
+                    true,
+                    101,
+                    401,
+                    390,
+                    1_000_000,
+                ),
+                (202, 88, 303, 17, "gpt-5".to_string(), 1.25),
+            )
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM agent_turns", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT root_output FROM agent_turns WHERE id='turn-measured'",
+                [],
+                |row| { row.get::<_, String>(0) }
+            )
+            .unwrap(),
+            "done"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT turn_id, label, attributed_tokens FROM context_assets",
+                [],
+                |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            )
+            .unwrap(),
+            ("turn-measured".to_string(), "AGENTS.md".to_string(), 3),
+            "Turn-owned context evidence survives the table rebuild"
+        );
     }
 
     #[test]

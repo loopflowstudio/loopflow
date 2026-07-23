@@ -1024,8 +1024,7 @@ mod tests {
             .json(&serde_json::json!({ "deltas": [
                 { "kind": "turn_opened", "answers": [] },
                 { "kind": "turn_text", "text": "over the wire" },
-                { "kind": "turn_usage", "input_tokens": 7, "output_tokens": 3, "cache_read_tokens": null },
-                { "kind": "turn_finished", "status": "completed", "cost_usd": 0.01 },
+                { "kind": "turn_finished", "status": "completed" },
             ] }))
             .send()
             .await
@@ -1033,7 +1032,7 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(deltas["accepted"], 4);
+        assert_eq!(deltas["accepted"], 3);
         let thread = runtime.thread_snapshot();
         assert_eq!(thread.len(), 1);
         assert_eq!(thread[0].text, "over the wire");
@@ -1345,7 +1344,6 @@ mod tests {
         // Finalization replaces it terminally, same id.
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         let frames = client
@@ -1378,7 +1376,6 @@ mod tests {
 
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         let states = client.states_until(|s| s.len() >= 3).await;
@@ -1409,7 +1406,6 @@ mod tests {
         // After finalization the same id is served exactly once, terminal.
         runtime.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         let body: ChatHistorySnapshot = reqwest::get(format!("{base}/conversation"))

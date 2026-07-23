@@ -531,7 +531,6 @@ mod tests {
         });
         runtime.apply_resident_delta(crate::wave::wire::ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         assert!(runtime.pending_messages().is_empty());

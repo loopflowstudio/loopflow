@@ -70,12 +70,12 @@ fn launch_captures_stderr() {
 #[test]
 fn launch_scopes_process_environment_to_child() {
     let _env = EnvGuard::new(&[("claude", "#!/bin/sh\nprintf '%s' \"$LF_TEST_SCOPED_ENV\"\n")]);
-    let process = ProcessConfig {
+    let launch = AgentConfig {
         env: BTreeMap::from([("LF_TEST_SCOPED_ENV".to_string(), "owned".to_string())]),
-        ..base_process()
+        ..base_launch()
     };
 
-    let result = launch_agent(&base_launch(), &process, &AgentCapabilities::default())
+    let result = launch_agent(&launch, &base_process(), &AgentCapabilities::default())
         .expect("launch with scoped environment");
 
     assert_eq!(result.stdout, "owned");
@@ -97,15 +97,24 @@ fn launch_nonzero_exit() {
 fn release_acceptance_recovers_from_a_revoked_selected_account() {
     let home = TempDir::new().expect("lf home");
     let codex = r#"#!/bin/sh
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
 case "$CODEX_HOME" in
   */revoked)
-    echo '{"type":"turn.failed","error":{"message":"Your authentication token has been invalidated. Please sign in again.","code":"token_invalidated"}}'
-    exit 1;;
+    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thread-test","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"failed"}}}';;
   */fallback)
-    echo '{"type":"result","subtype":"completed","result":"fallback account completed"}'
-    exit 0;;
+    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}';;
   *) echo "unexpected CODEX_HOME" >&2; exit 9;;
 esac
+while read -r line; do :; done
 "#;
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let revoked_home = home.path().join("accounts/codex/revoked");

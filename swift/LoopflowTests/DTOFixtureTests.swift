@@ -26,38 +26,20 @@ struct DTOFixtureTests {
         #expect(plan.projects[0].krs[0].proof == .holds)
     }
 
-    @Test("Turn spend fixture preserves additive identity and absent measurements")
-    func turnSpendFixtureRoundTrips() throws {
-        let data = try loadFixtureData("turn_spend.json")
-        let turns = try JSONDecoder().decode([TurnSpend].self, from: data)
-
-        #expect(turns.map(\.id) == ["turn-1", "turn-2"])
-        #expect(turns[0].invocationId == "invocation-1")
-        #expect(turns[0].traceId == "trace-1")
-        #expect(turns[0].execId == "exec-1")
-        #expect(turns[0].totalTokens == 1200)
-        #expect(turns[0].agent == "claude:opus")
-        #expect(turns[0].cacheWriteTokens == 100)
-        #expect(turns[1].inputTokens == nil)
-        #expect(turns[1].outputTokens == 0)
-        #expect(turns[1].cacheReadTokens == 150)
-        #expect(turns[1].cacheWriteTokens == nil)
-        #expect(turns[1].costUsd == nil)
-
-        let encoded = try JSONEncoder().encode(turns)
-        let decoded = try JSONDecoder().decode([TurnSpend].self, from: encoded)
-        #expect(decoded == turns)
-    }
-
     @Test("Activity fixture preserves process state and exact output evidence")
     func activityFixtureRoundTrips() throws {
         let data = try loadFixtureData("activity_snapshot.json")
         let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: data)
 
         #expect(snapshot.schemaVersion == 1)
-        #expect(snapshot.fastWindowSeconds == 300)
-        #expect(snapshot.aggregate.measuredOutputTokens == 48_200)
-        #expect(snapshot.aggregate.outputTokensPerSecondFast == 4.0)
+        #expect(snapshot.usage.windows == [5, 300, 3_600, 86_400])
+        #expect(snapshot.usage.global?.interval(seconds: 86_400)?.outputTokens == 48_200)
+        #expect(snapshot.usage.global?.interval(seconds: 5)?.outputTokensPerSecond == 4.0)
+        #expect(snapshot.usage.global?.interval(seconds: 300)?.inputTokens == 100)
+        #expect(snapshot.usage.global?.interval(seconds: 300)?.cacheReadTokens == 350)
+        #expect(snapshot.usage.global?.interval(seconds: 300)?.peakInputTokens == 120_000)
+        #expect(snapshot.usage.global?.interval(seconds: 300)?.costUsd == 0.2)
+        #expect(snapshot.usage.globalHistory.reduce(0) { $0 + $1.outputTokens } == 80)
         #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.state)
             == [.working, .stalled])
         #expect(snapshot.nodes.filter { $0.kind == .providerLaunch }.map(\.wave)

@@ -907,7 +907,7 @@ async fn run_task_with(
                     | ConversationEvent::ItemUpdated { .. }
                     | ConversationEvent::ReasoningDelta { .. }
                     | ConversationEvent::DiffUpdated { .. }
-                    | ConversationEvent::TurnUsage { .. }
+                    | ConversationEvent::UsageCheckpoint { .. }
                     | ConversationEvent::SuggestedActions { .. }
                     | ConversationEvent::StatusChanged { .. } => {}
                 }

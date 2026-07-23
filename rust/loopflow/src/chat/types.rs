@@ -100,7 +100,11 @@ pub struct SuggestedActionPayload {
     pub description: Option<String>,
 }
 
-/// Token usage for a single agent turn.
+/// Cumulative provider usage for one agent Turn.
+///
+/// A Turn can contain many provider requests separated by tool calls. Provider
+/// adapters add those request receipts here rather than creating a second
+/// request-level accounting model.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TurnUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,10 +209,12 @@ pub enum ConversationEvent {
         turn_id: String,
         status: Lifecycle,
     },
-    /// Provider-reported usage for a turn. Emitted before `TurnCompleted`.
-    TurnUsage {
+    /// Provider-reported cumulative usage for a Turn. Provisional checkpoints
+    /// make live output measurable; the final checkpoint is the durable receipt.
+    UsageCheckpoint {
         turn_id: String,
         usage: TurnUsage,
+        final_receipt: bool,
     },
 
     // Item lifecycle
@@ -263,7 +269,7 @@ impl ConversationEvent {
         match self {
             Self::TurnStarted { .. } => "turn_started",
             Self::TurnCompleted { .. } => "turn_completed",
-            Self::TurnUsage { .. } => "turn_usage",
+            Self::UsageCheckpoint { .. } => "usage_checkpoint",
             Self::ItemStarted { .. } => "item_started",
             Self::ItemUpdated { .. } => "item_updated",
             Self::ItemCompleted { .. } => "item_completed",
@@ -288,7 +294,7 @@ impl ConversationEvent {
             Self::SuggestedActions { actions, .. } => !actions.is_empty(),
             Self::TurnStarted { .. }
             | Self::TurnCompleted { .. }
-            | Self::TurnUsage { .. }
+            | Self::UsageCheckpoint { .. }
             | Self::StatusChanged { .. }
             | Self::Error { .. } => false,
         }

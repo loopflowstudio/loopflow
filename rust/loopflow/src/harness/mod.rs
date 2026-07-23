@@ -53,6 +53,15 @@ pub(crate) fn configure_agent_authority(
         .env_remove(crate::durable::AGENT_INVOCATION_ENV);
 }
 
+pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
+    command
+        .envs(&config.env)
+        .env_remove("LOOPFLOW_DIRECTIVE_FILE");
+    if let Some(path) = &config.directive_relay {
+        command.env("LOOPFLOW_DIRECTIVE_FILE", path);
+    }
+}
+
 fn vendor_control_context() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
 {
     let context = crate::engine::process::pinned_execution_context()?;

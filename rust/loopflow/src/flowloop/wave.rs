@@ -1011,7 +1011,6 @@ impl WaveLoop {
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
         let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
         answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut cost_usd = None;
         loop {
             tokio::select! {
                 biased;
@@ -1083,14 +1082,7 @@ impl WaveLoop {
                         ConversationEvent::ItemCompleted { item, .. } => {
                             self.send(vec![ResidentDelta::TurnItem { item }]).await;
                         }
-                        ConversationEvent::TurnUsage { usage: reported, .. } => {
-                            cost_usd = reported.cost_usd;
-                            self.send(vec![ResidentDelta::TurnUsage {
-                                input_tokens: reported.input_tokens,
-                                output_tokens: reported.output_tokens,
-                                cache_read_tokens: reported.cache_read_tokens,
-                            }]).await;
-                        }
+                        ConversationEvent::UsageCheckpoint { .. } => {}
                         ConversationEvent::TurnCompleted { status, .. } => {
                             let outcome = if status == Lifecycle::Completed {
                                 "completed"
@@ -1103,7 +1095,6 @@ impl WaveLoop {
                                 &body_id,
                                 &step,
                                 status,
-                                cost_usd,
                                 harness.as_mut(),
                             ).await;
                             finish_capture(capture.as_ref(), outcome);
@@ -1269,7 +1260,6 @@ impl WaveLoop {
         body_id: &str,
         step: &StepRef,
         status: Lifecycle,
-        cost_usd: Option<f64>,
         harness: &mut dyn Harness,
     ) {
         let _ = harness.stop().await;
@@ -1286,7 +1276,7 @@ impl WaveLoop {
                     return;
                 }
                 self.consecutive_failures = 0;
-                self.finish_pass(body_id, StepOutcome::Completed, None, cost_usd)
+                self.finish_pass(body_id, StepOutcome::Completed, None)
                     .await;
             }
             Lifecycle::Interrupted => self.finish_interrupted_pass(body_id, false).await,
@@ -1310,7 +1300,7 @@ impl WaveLoop {
             Ok(output) if output.status.success() => {
                 self.consecutive_failures = 0;
                 self.ship_output(output).await;
-                self.finish_pass(body_id, StepOutcome::Completed, None, None)
+                self.finish_pass(body_id, StepOutcome::Completed, None)
                     .await;
             }
             Ok(output) => {
@@ -1354,13 +1344,7 @@ impl WaveLoop {
     /// turn closes and the playhead's body closes with it. The outcome picks
     /// the turn's lifecycle — a skip is an interrupted turn whose playhead
     /// advances anyway — and names itself when the caller has nothing to add.
-    async fn finish_pass(
-        &mut self,
-        body_id: &str,
-        outcome: StepOutcome,
-        reason: Option<String>,
-        cost_usd: Option<f64>,
-    ) {
+    async fn finish_pass(&mut self, body_id: &str, outcome: StepOutcome, reason: Option<String>) {
         let status = match outcome {
             StepOutcome::Completed => Lifecycle::Completed,
             StepOutcome::Skipped | StepOutcome::Interrupted => Lifecycle::Interrupted,
@@ -1370,7 +1354,6 @@ impl WaveLoop {
         self.send(vec![
             ResidentDelta::TurnFinished {
                 status,
-                cost_usd,
                 reason: (status != Lifecycle::Completed).then(|| reason.clone()),
             },
             ResidentDelta::BodyFinished {
@@ -1390,12 +1373,12 @@ impl WaveLoop {
         } else {
             (StepOutcome::Interrupted, "interrupted by user")
         };
-        self.finish_pass(body_id, outcome, Some(reason.to_string()), None)
+        self.finish_pass(body_id, outcome, Some(reason.to_string()))
             .await;
     }
 
     async fn finish_failed_pass(&mut self, body_id: &str, reason: &str) {
-        self.finish_pass(body_id, StepOutcome::Failed, Some(reason.to_string()), None)
+        self.finish_pass(body_id, StepOutcome::Failed, Some(reason.to_string()))
             .await;
         self.consecutive_failures += 1;
         if self.consecutive_failures >= MAX_CONSECUTIVE_PASS_FAILURES {
@@ -1799,13 +1782,14 @@ mod tests {
                     turn_id: "vendor-turn".to_string(),
                     content: " world".to_string(),
                 });
-                let _ = self.events.send(ConversationEvent::TurnUsage {
+                let _ = self.events.send(ConversationEvent::UsageCheckpoint {
                     turn_id: "vendor-turn".to_string(),
                     usage: TurnUsage {
                         input_tokens: Some(20),
                         output_tokens: Some(2),
                         ..TurnUsage::default()
                     },
+                    final_receipt: true,
                 });
                 let _ = self.events.send(ConversationEvent::TurnCompleted {
                     turn_id: "vendor-turn".to_string(),

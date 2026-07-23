@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
 
+use crate::chat::types::TurnUsage;
 use crate::id::WaveId;
 use crate::profile::{
     AccessProfile, AccountAccessProfile, EmailAddress, ProfileId, ProviderRoute, RouteScope,
@@ -12,9 +13,9 @@ use crate::provider_auth::Provider;
 use crate::store::rows::{map_wave_row, now_unix};
 use crate::store::token_crypto;
 use crate::store::{
-    AccountLimitRow, CredentialState, PmSnapshotRow, ProviderAccount, ProviderAccountId,
-    ProviderAccountSelection, RoutingState, RunEventRow, StoreError, StoreResult, TurnSpendRow,
-    WaveLocatorUpdate,
+    AccountLimitRow, AttributedTurnUsage, CredentialState, PmSnapshotRow, ProviderAccount,
+    ProviderAccountId, ProviderAccountSelection, RoutingState, RunEventRow, StoreError,
+    StoreResult, TurnUsageSample, WaveLocatorUpdate,
 };
 #[cfg(test)]
 use crate::store::{
@@ -457,6 +458,9 @@ impl SqliteStore {
     #[cfg(test)]
     pub(crate) fn apply_migration_for_test(&self, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        if crate::store::migrations::migration_is_applied_for_test(&conn, name)? {
+            return Ok(());
+        }
         conn.execute_batch(&crate::store::migrations::migration_sql_for_test(name))?;
         Ok(())
     }
@@ -1523,49 +1527,161 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Every provider-measured Turn's spend since `since_unix`, attributed by
-    /// the launch that ran it.
+    /// Every provider-measured Turn's latest usage since `since_unix`,
+    /// attributed by the invocation that ran it.
     ///
     /// Turns with no provider report at all are dropped: they carry no spend to
-    /// sum, and keeping them would let a reader mistake silence for zero. Any
+    /// aggregate, and keeping them would let a reader mistake silence for zero. Any
     /// one measurement is enough to keep the turn — a report of cache reads
     /// alone is still something the provider measured.
-    pub fn turn_spend_since(&self, since_unix: i64) -> StoreResult<Vec<TurnSpendRow>> {
+    pub(crate) fn attributed_turn_usage_since(
+        &self,
+        since_unix: i64,
+    ) -> StoreResult<Vec<AttributedTurnUsage>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT t.id, l.id, l.run_id, l.process_id, l.repo, l.wave, l.flow, l.skill,
-                    l.provider, l.model, COALESCE(t.ended_at, t.started_at), t.provider_input_tokens,
-                    t.provider_output_tokens, t.cache_read_tokens, t.cache_write_tokens, t.cost_usd
-             FROM agent_turns t
+            "SELECT t.id, l.id, l.process_id, l.repo, l.wave, l.flow, l.skill,
+                    l.provider, COALESCE(u.model, l.model), u.observed_at, u.input_tokens,
+                    u.total_input_tokens, u.peak_input_tokens, u.context_window_tokens,
+                    u.output_tokens, u.reasoning_tokens, u.cache_read_tokens,
+                    u.cache_write_tokens, u.cost_usd
+             FROM turn_usage_samples u
+             JOIN agent_turns t ON t.id = u.turn_id
              JOIN agent_invocations l ON l.id = t.invocation_id
-             WHERE COALESCE(t.ended_at, t.started_at) >= ?1
-               AND (t.provider_input_tokens IS NOT NULL
-                    OR t.provider_output_tokens IS NOT NULL
-                    OR t.cache_read_tokens IS NOT NULL
-                    OR t.cache_write_tokens IS NOT NULL
-                    OR t.cost_usd IS NOT NULL)
-             ORDER BY COALESCE(t.ended_at, t.started_at), l.process_id, t.ordinal",
+             WHERE u.observed_at = (
+                    SELECT MAX(latest.observed_at)
+                    FROM turn_usage_samples latest
+                    WHERE latest.turn_id = u.turn_id
+                )
+               AND u.observed_at >= ?1
+             ORDER BY u.observed_at, l.process_id, t.ordinal",
         )?;
         let rows = stmt.query_map(params![since_unix], |row| {
-            Ok(TurnSpendRow {
+            let model: Option<String> = row.get(8)?;
+            let usage = map_turn_usage(row, 10, model)?.ok_or_else(|| {
+                rusqlite::Error::InvalidColumnType(
+                    10,
+                    "turn_usage_samples".to_string(),
+                    rusqlite::types::Type::Null,
+                )
+            })?;
+            Ok(AttributedTurnUsage {
                 turn_id: row.get(0)?,
                 invocation_id: row.get(1)?,
-                trace_id: row.get(2)?,
-                exec_id: row.get(3)?,
-                repo: row.get(4)?,
-                wave: row.get(5)?,
-                flow: row.get(6)?,
-                skill: row.get(7)?,
-                provider: row.get(8)?,
-                model: row.get(9)?,
-                at: row.get(10)?,
-                input_tokens: row.get(11)?,
-                output_tokens: row.get(12)?,
-                cache_read_tokens: row.get(13)?,
-                cache_write_tokens: row.get(14)?,
-                cost_usd: row.get(15)?,
+                exec_id: row.get(2)?,
+                repo: row.get(3)?,
+                wave: row.get(4)?,
+                flow: row.get(5)?,
+                skill: row.get(6)?,
+                provider: row.get(7)?,
+                at: row.get(9)?,
+                usage,
             })
         })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(StoreError::from)
+    }
+
+    /// Record one cumulative provider usage checkpoint. Providers may update
+    /// a checkpoint within the same second; the last value wins. Across
+    /// checkpoints token counters cannot decrease, and a final receipt cannot
+    /// become provisional again.
+    pub fn record_turn_usage_sample(&self, sample: &TurnUsageSample) -> StoreResult<()> {
+        if !sample.usage.is_reported() {
+            return Err(StoreError::InvalidData(
+                "provider emitted an empty usage checkpoint".to_string(),
+            ));
+        }
+        if let (Some(reasoning), Some(output)) =
+            (sample.usage.reasoning_tokens, sample.usage.output_tokens)
+        {
+            if reasoning > output {
+                return Err(StoreError::InvalidData(
+                    "reasoning tokens exceed inclusive output tokens".to_string(),
+                ));
+            }
+        }
+
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let previous = latest_turn_usage_sample_in(&transaction, &sample.turn_id)?;
+        if let Some(previous) = previous.as_ref() {
+            validate_usage_progress(previous, sample)?;
+        }
+        let usage = &sample.usage;
+        transaction.execute(
+            "INSERT INTO turn_usage_samples (
+                turn_id, observed_at, final_receipt, input_tokens, total_input_tokens,
+                peak_input_tokens, context_window_tokens, output_tokens, reasoning_tokens,
+                cache_read_tokens, cache_write_tokens, model, cost_usd
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(turn_id, observed_at) DO UPDATE SET
+                final_receipt=excluded.final_receipt,
+                input_tokens=excluded.input_tokens,
+                total_input_tokens=excluded.total_input_tokens,
+                peak_input_tokens=excluded.peak_input_tokens,
+                context_window_tokens=excluded.context_window_tokens,
+                output_tokens=excluded.output_tokens,
+                reasoning_tokens=excluded.reasoning_tokens,
+                cache_read_tokens=excluded.cache_read_tokens,
+                cache_write_tokens=excluded.cache_write_tokens,
+                model=excluded.model,
+                cost_usd=excluded.cost_usd",
+            params![
+                sample.turn_id,
+                sample.observed_at,
+                sample.final_receipt,
+                to_sql_i64(usage.input_tokens, "input_tokens")?,
+                to_sql_i64(usage.total_input_tokens, "total_input_tokens")?,
+                to_sql_i64(usage.peak_input_tokens, "peak_input_tokens")?,
+                to_sql_i64(usage.context_window_tokens, "context_window_tokens")?,
+                to_sql_i64(usage.output_tokens, "output_tokens")?,
+                to_sql_i64(usage.reasoning_tokens, "reasoning_tokens")?,
+                to_sql_i64(usage.cache_read_tokens, "cache_read_tokens")?,
+                to_sql_i64(usage.cache_write_tokens, "cache_write_tokens")?,
+                usage.model,
+                usage.cost_usd,
+            ],
+        )?;
+        if sample.final_receipt {
+            transaction.execute(
+                "DELETE FROM turn_usage_samples AS stale
+                 WHERE stale.final_receipt = 0
+                   AND stale.observed_at < ?1
+                   AND EXISTS (
+                       SELECT 1
+                       FROM turn_usage_samples AS newer
+                       WHERE newer.turn_id = stale.turn_id
+                         AND newer.observed_at > stale.observed_at
+                   )",
+                [sample.observed_at - crate::store::TURN_USAGE_LIVE_RETENTION_SECONDS],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Usage checkpoints at or after `since_unix`, plus the last checkpoint
+    /// before the boundary for every continuing Turn. The preceding row is a
+    /// baseline only; it prevents a window from claiming earlier output.
+    pub fn turn_usage_samples_since(&self, since_unix: i64) -> StoreResult<Vec<TurnUsageSample>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT turn_id, observed_at, final_receipt, input_tokens,
+                    total_input_tokens, peak_input_tokens, context_window_tokens,
+                    output_tokens, reasoning_tokens, cache_read_tokens,
+                    cache_write_tokens, model, cost_usd
+             FROM turn_usage_samples sample
+             WHERE observed_at >= ?1
+                OR observed_at = (
+                    SELECT MAX(baseline.observed_at)
+                    FROM turn_usage_samples baseline
+                    WHERE baseline.turn_id = sample.turn_id
+                      AND baseline.observed_at < ?1
+                )
+             ORDER BY turn_id, observed_at",
+        )?;
+        let rows = statement.query_map([since_unix], map_turn_usage_sample)?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(StoreError::from)
     }
@@ -1602,12 +1718,14 @@ impl SqliteStore {
     /// Events identifying one exec by process-id prefix. The caller resolves
     /// its trace, then reads that trace whole.
     pub fn run_events_matching_exec(&self, exec_id: &str) -> StoreResult<Vec<RunEventRow>> {
-        let prefix = format!("{}%", exec_id.replace(['%', '_'], ""));
+        let (operator, value) = exact_or_prefix(exec_id);
         self.query_run_events(
-            "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
+            &format!(
+                "SELECT run_id, process_id, parent_process_id, seq, ts, repo, worktree, wave, node, event, command,
                     flow, skill, step_index, error
-             FROM run_events WHERE process_id LIKE ?1 ORDER BY ts, seq",
-            params![prefix],
+             FROM run_events WHERE process_id {operator} ?1 ORDER BY ts, seq"
+            ),
+            params![value],
         )
     }
 
@@ -1937,18 +2055,20 @@ impl SqliteStore {
     }
 
     pub fn agent_invocations_matching(&self, run_id: &str) -> StoreResult<Vec<AgentInvocationRow>> {
-        let prefix = format!("{}%", run_id.replace(['%', '_'], ""));
+        let (operator, value) = exact_or_prefix(run_id);
         // Invocation timestamps use ledger-second precision. rowid preserves the
         // append order when a fast flow starts several agents in one second.
         self.query_agent_invocations(
-            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+            &format!(
+                "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
                     skill, project, task, provider, model, surface, capture_status,
                     incomplete_reason, outcome, artifact_dir, conversation_path,
                     provider_events_path, provider_session_id, provider_session_path,
                     conversation_event_count, conversation_bytes, supervising_run_id,
                     account_id, resume_token, answer_ask_id
-             FROM agent_invocations WHERE run_id LIKE ?1 ORDER BY started_at, rowid",
-            params![prefix],
+             FROM agent_invocations WHERE run_id {operator} ?1 ORDER BY started_at, rowid"
+            ),
+            params![value],
         )
     }
 
@@ -1961,6 +2081,27 @@ impl SqliteStore {
                     conversation_event_count, conversation_bytes, supervising_run_id,
                     account_id, resume_token, answer_ask_id
              FROM agent_invocations WHERE started_at >= ?1 ORDER BY started_at, rowid",
+            params![since],
+        )
+    }
+
+    /// Invocations whose lifecycle reaches `since`, including an invocation
+    /// that started earlier and is still open. Windowed usage readers need the
+    /// latter because its provider receipts can arrive inside the window.
+    pub fn agent_invocations_overlapping_since(
+        &self,
+        since: i64,
+    ) -> StoreResult<Vec<AgentInvocationRow>> {
+        self.query_agent_invocations(
+            "SELECT id, run_id, process_id, started_at, ended_at, repo, worktree, wave, flow,
+                    skill, project, task, provider, model, surface, capture_status,
+                    incomplete_reason, outcome, artifact_dir, conversation_path,
+                    provider_events_path, provider_session_id, provider_session_path,
+                    conversation_event_count, conversation_bytes, supervising_run_id,
+                    account_id, resume_token, answer_ask_id
+             FROM agent_invocations
+             WHERE ended_at IS NULL OR ended_at >= ?1
+             ORDER BY started_at, rowid",
             params![since],
         )
     }
@@ -2103,16 +2244,21 @@ impl SqliteStore {
         for invocation_ids in invocation_ids.chunks(500) {
             let placeholders = in_placeholders(invocation_ids.len());
             let sql = format!(
-                "SELECT id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status,
-                    input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
-                    system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
-                    provider_total_input_tokens, peak_input_tokens, context_window_tokens,
-                    provider_output_tokens, reasoning_tokens, cache_read_tokens,
-                    cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq, root_output,
-                    epoch_id, basis_rev
-             FROM agent_turns WHERE invocation_id IN ({placeholders})
-             ORDER BY started_at, rowid, ordinal"
+                "SELECT t.id, t.invocation_id, t.ordinal, t.provider_turn_id, t.started_at,
+                    t.ended_at, t.status, t.input_op, t.context_coverage, t.tokenizer,
+                    t.system_prompt_path, t.task_prompt_path, t.system_tokens, t.task_tokens,
+                    t.supplied_context_tokens, u.input_tokens, u.total_input_tokens,
+                    u.peak_input_tokens, u.context_window_tokens, u.output_tokens,
+                    u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cost_usd,
+                    t.context_gather_ms, t.context_render_ms, t.context_persist_ms,
+                    t.first_event_seq, t.last_event_seq, t.root_output, t.epoch_id, t.basis_rev
+             FROM agent_turns t
+             LEFT JOIN turn_usage_samples u ON u.turn_id=t.id AND u.observed_at=(
+                SELECT MAX(latest.observed_at) FROM turn_usage_samples latest
+                WHERE latest.turn_id=t.id
+             )
+             WHERE t.invocation_id IN ({placeholders})
+             ORDER BY t.started_at, t.rowid, t.ordinal"
             );
             let mut stmt = conn.prepare(&sql)?;
             let rows =
@@ -2266,15 +2412,20 @@ impl SqliteStore {
     pub fn agent_turn(&self, id: &str) -> StoreResult<Option<AgentTurnRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare(
-            "SELECT id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status,
-                    input_op, context_coverage, tokenizer, system_prompt_path, task_prompt_path,
-                    system_tokens, task_tokens, supplied_context_tokens, provider_input_tokens,
-                    provider_total_input_tokens, peak_input_tokens, context_window_tokens,
-                    provider_output_tokens, reasoning_tokens, cache_read_tokens,
-                    cache_write_tokens, cost_usd, context_gather_ms, context_render_ms,
-                    context_persist_ms, first_event_seq, last_event_seq, root_output,
-                    epoch_id, basis_rev
-             FROM agent_turns WHERE id=?1",
+            "SELECT t.id, t.invocation_id, t.ordinal, t.provider_turn_id, t.started_at,
+                    t.ended_at, t.status, t.input_op, t.context_coverage, t.tokenizer,
+                    t.system_prompt_path, t.task_prompt_path, t.system_tokens, t.task_tokens,
+                    t.supplied_context_tokens, u.input_tokens, u.total_input_tokens,
+                    u.peak_input_tokens, u.context_window_tokens, u.output_tokens,
+                    u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cost_usd,
+                    t.context_gather_ms, t.context_render_ms, t.context_persist_ms,
+                    t.first_event_seq, t.last_event_seq, t.root_output, t.epoch_id, t.basis_rev
+             FROM agent_turns t
+             LEFT JOIN turn_usage_samples u ON u.turn_id=t.id AND u.observed_at=(
+                SELECT MAX(latest.observed_at) FROM turn_usage_samples latest
+                WHERE latest.turn_id=t.id
+             )
+             WHERE t.id=?1",
         )?;
         let row = stmt.query_row(params![id], map_agent_turn).optional()?;
         Ok(row)
@@ -2432,19 +2583,136 @@ fn in_placeholders(count: usize) -> String {
         .join(", ")
 }
 
+fn exact_or_prefix(value: &str) -> (&'static str, String) {
+    if uuid::Uuid::parse_str(value).is_ok() {
+        ("=", value.to_string())
+    } else {
+        ("LIKE", format!("{}%", value.replace(['%', '_'], "")))
+    }
+}
+
+fn to_sql_i64(value: Option<u64>, field: &str) -> StoreResult<Option<i64>> {
+    value
+        .map(|value| {
+            i64::try_from(value).map_err(|_| {
+                StoreError::InvalidData(format!("{field} exceeds SQLite integer range"))
+            })
+        })
+        .transpose()
+}
+
+fn map_turn_usage_sample(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnUsageSample> {
+    Ok(TurnUsageSample {
+        turn_id: row.get(0)?,
+        observed_at: row.get(1)?,
+        final_receipt: row.get(2)?,
+        usage: TurnUsage {
+            input_tokens: read_u64(row, 3)?,
+            total_input_tokens: read_u64(row, 4)?,
+            peak_input_tokens: read_u64(row, 5)?,
+            context_window_tokens: read_u64(row, 6)?,
+            output_tokens: read_u64(row, 7)?,
+            reasoning_tokens: read_u64(row, 8)?,
+            cache_read_tokens: read_u64(row, 9)?,
+            cache_write_tokens: read_u64(row, 10)?,
+            model: row.get(11)?,
+            cost_usd: row.get(12)?,
+        },
+    })
+}
+
+fn read_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<Option<u64>> {
+    row.get::<_, Option<i64>>(index)?.map_or(Ok(None), |value| {
+        u64::try_from(value).map(Some).map_err(|_| {
+            rusqlite::Error::FromSqlConversionFailure(
+                index,
+                rusqlite::types::Type::Integer,
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "negative token count").into(),
+            )
+        })
+    })
+}
+
+fn latest_turn_usage_sample_in(
+    conn: &rusqlite::Connection,
+    turn_id: &str,
+) -> StoreResult<Option<TurnUsageSample>> {
+    conn.query_row(
+        "SELECT turn_id, observed_at, final_receipt, input_tokens,
+                total_input_tokens, peak_input_tokens, context_window_tokens,
+                output_tokens, reasoning_tokens, cache_read_tokens,
+                cache_write_tokens, model, cost_usd
+         FROM turn_usage_samples
+         WHERE turn_id=?1
+         ORDER BY observed_at DESC
+         LIMIT 1",
+        [turn_id],
+        map_turn_usage_sample,
+    )
+    .optional()
+    .map_err(StoreError::from)
+}
+
+fn validate_usage_progress(
+    previous: &TurnUsageSample,
+    sample: &TurnUsageSample,
+) -> StoreResult<()> {
+    if previous.final_receipt && !sample.final_receipt {
+        return Err(StoreError::InvalidData(
+            "final usage receipt cannot become provisional".to_string(),
+        ));
+    }
+    let counters = [
+        (
+            "input_tokens",
+            previous.usage.input_tokens,
+            sample.usage.input_tokens,
+        ),
+        (
+            "total_input_tokens",
+            previous.usage.total_input_tokens,
+            sample.usage.total_input_tokens,
+        ),
+        (
+            "output_tokens",
+            previous.usage.output_tokens,
+            sample.usage.output_tokens,
+        ),
+        (
+            "reasoning_tokens",
+            previous.usage.reasoning_tokens,
+            sample.usage.reasoning_tokens,
+        ),
+        (
+            "cache_read_tokens",
+            previous.usage.cache_read_tokens,
+            sample.usage.cache_read_tokens,
+        ),
+        (
+            "cache_write_tokens",
+            previous.usage.cache_write_tokens,
+            sample.usage.cache_write_tokens,
+        ),
+    ];
+    for (field, before, after) in counters {
+        if matches!((before, after), (Some(before), Some(after)) if after < before) {
+            return Err(StoreError::InvalidData(format!(
+                "{field} decreased within one Turn"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> StoreResult<()> {
     tx.execute(
         "INSERT INTO agent_turns (
             id, invocation_id, ordinal, provider_turn_id, started_at, ended_at, status, input_op,
             context_coverage, tokenizer, system_prompt_path, task_prompt_path, system_tokens,
-            task_tokens, supplied_context_tokens, provider_input_tokens,
-            provider_total_input_tokens, peak_input_tokens, context_window_tokens,
-            provider_output_tokens, reasoning_tokens, cache_read_tokens, cache_write_tokens,
-            cost_usd, context_gather_ms, context_render_ms, context_persist_ms,
-            first_event_seq, last_event_seq, root_output, epoch_id, basis_rev
+            task_tokens, supplied_context_tokens, context_gather_ms, context_render_ms,
+            context_persist_ms, first_event_seq, last_event_seq, root_output, epoch_id, basis_rev
          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29, ?30, ?31, ?32)",
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
         params![
             turn.id,
             turn.invocation_id,
@@ -2461,15 +2729,6 @@ fn insert_agent_turn(tx: &rusqlite::Transaction<'_>, turn: &AgentTurnRow) -> Sto
             turn.system_tokens,
             turn.task_tokens,
             turn.supplied_context_tokens,
-            turn.provider_input_tokens,
-            turn.provider_total_input_tokens,
-            turn.peak_input_tokens,
-            turn.context_window_tokens,
-            turn.provider_output_tokens,
-            turn.reasoning_tokens,
-            turn.cache_read_tokens,
-            turn.cache_write_tokens,
-            turn.cost_usd,
             turn.context_gather_ms,
             turn.context_render_ms,
             turn.context_persist_ms,
@@ -2545,26 +2804,13 @@ fn update_agent_turn(conn: &rusqlite::Connection, turn: &AgentTurnRow) -> StoreR
     conn.execute(
         "UPDATE agent_turns SET
             provider_turn_id = ?2, ended_at = ?3, status = ?4,
-            provider_input_tokens = ?5, provider_total_input_tokens = ?6,
-            peak_input_tokens = ?7, context_window_tokens = ?8,
-            provider_output_tokens = ?9, reasoning_tokens = ?10,
-            cache_read_tokens = ?11, cache_write_tokens = ?12, cost_usd = ?13,
-            first_event_seq = ?14, last_event_seq = ?15, root_output = ?16
+            first_event_seq = ?5, last_event_seq = ?6, root_output = ?7
          WHERE id = ?1",
         params![
             turn.id,
             turn.provider_turn_id,
             turn.ended_at,
             turn.status,
-            turn.provider_input_tokens,
-            turn.provider_total_input_tokens,
-            turn.peak_input_tokens,
-            turn.context_window_tokens,
-            turn.provider_output_tokens,
-            turn.reasoning_tokens,
-            turn.cache_read_tokens,
-            turn.cache_write_tokens,
-            turn.cost_usd,
             turn.first_event_seq,
             turn.last_event_seq,
             turn.root_output,
@@ -2590,15 +2836,7 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
         system_tokens: row.get(12)?,
         task_tokens: row.get(13)?,
         supplied_context_tokens: row.get(14)?,
-        provider_input_tokens: row.get(15)?,
-        provider_total_input_tokens: row.get(16)?,
-        peak_input_tokens: row.get(17)?,
-        context_window_tokens: row.get(18)?,
-        provider_output_tokens: row.get(19)?,
-        reasoning_tokens: row.get(20)?,
-        cache_read_tokens: row.get(21)?,
-        cache_write_tokens: row.get(22)?,
-        cost_usd: row.get(23)?,
+        usage: map_turn_usage(row, 15, None)?,
         context_gather_ms: row.get(24)?,
         context_render_ms: row.get(25)?,
         context_persist_ms: row.get(26)?,
@@ -2629,6 +2867,26 @@ fn map_agent_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurnRow> {
             }
         },
     })
+}
+
+fn map_turn_usage(
+    row: &rusqlite::Row<'_>,
+    start: usize,
+    model: Option<String>,
+) -> rusqlite::Result<Option<TurnUsage>> {
+    let usage = TurnUsage {
+        input_tokens: read_u64(row, start)?,
+        total_input_tokens: read_u64(row, start + 1)?,
+        peak_input_tokens: read_u64(row, start + 2)?,
+        context_window_tokens: read_u64(row, start + 3)?,
+        output_tokens: read_u64(row, start + 4)?,
+        reasoning_tokens: read_u64(row, start + 5)?,
+        cache_read_tokens: read_u64(row, start + 6)?,
+        cache_write_tokens: read_u64(row, start + 7)?,
+        model,
+        cost_usd: row.get(start + 8)?,
+    };
+    Ok(usage.is_reported().then_some(usage))
 }
 
 #[cfg(test)]

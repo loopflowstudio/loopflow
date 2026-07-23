@@ -15,7 +15,7 @@ use loopflow::wave::state::LoopState;
 use loopflow::wave::wire::ResidentDelta;
 
 /// One complete resident turn, as the loop emits it after a pass: an
-/// item, the pass's reply text, usage, then the finalized boundary.
+/// item, the pass's reply text, then the finalized boundary.
 fn resident_turn_deltas() -> Vec<ResidentDelta> {
     vec![
         ResidentDelta::TurnOpened { answers: vec![] },
@@ -33,14 +33,8 @@ fn resident_turn_deltas() -> Vec<ResidentDelta> {
         ResidentDelta::TurnText {
             text: "Implemented the feature.".into(),
         },
-        ResidentDelta::TurnUsage {
-            input_tokens: Some(10),
-            output_tokens: Some(5),
-            cache_read_tokens: None,
-        },
         ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         },
     ]

@@ -11,26 +11,6 @@ public enum ActivityState: String, Codable, Sendable, Hashable {
     case stalled
 }
 
-public struct OutputActivity: Codable, Sendable, Hashable {
-    public let measuredOutputTokens: UInt64
-    public let outputTokensFast: UInt64
-    public let outputTokensSlow: UInt64
-    public let outputTokensPerSecondFast: Double
-    public let outputTokensPerSecondSlow: Double
-    public let measuredTurns: UInt64
-    public let unmeasuredTurns: UInt64
-
-    enum CodingKeys: String, CodingKey {
-        case measuredOutputTokens = "measured_output_tokens"
-        case outputTokensFast = "output_tokens_fast"
-        case outputTokensSlow = "output_tokens_slow"
-        case outputTokensPerSecondFast = "output_tokens_per_second_fast"
-        case outputTokensPerSecondSlow = "output_tokens_per_second_slow"
-        case measuredTurns = "measured_turns"
-        case unmeasuredTurns = "unmeasured_turns"
-    }
-}
-
 public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let parentId: String?
@@ -44,14 +24,14 @@ public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {
     public let startedAt: Int64
     public let lastProgressAt: Int64?
     public let state: ActivityState
-    public let direct: OutputActivity
-    public let cumulative: OutputActivity
+    public let usageScopeId: String
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, label, repo, wave, project, task, pid, state, direct, cumulative
+        case id, kind, label, repo, wave, project, task, pid, state
         case parentId = "parent_id"
         case startedAt = "started_at"
         case lastProgressAt = "last_progress_at"
+        case usageScopeId = "usage_scope_id"
     }
 }
 
@@ -83,18 +63,14 @@ public struct ProviderProcess: Codable, Sendable, Hashable, Identifiable {
 public struct ActivitySnapshot: Codable, Sendable, Hashable {
     public let schemaVersion: UInt32
     public let observedAt: Int64
-    public let fastWindowSeconds: Int64
-    public let slowWindowSeconds: Int64
-    public let aggregate: OutputActivity
+    public let usage: UsageSnapshot
     public let nodes: [ActivityNode]
     public let providerProcesses: [ProviderProcess]
 
     enum CodingKeys: String, CodingKey {
-        case aggregate, nodes
+        case usage, nodes
         case schemaVersion = "schema_version"
         case observedAt = "observed_at"
-        case fastWindowSeconds = "fast_window_seconds"
-        case slowWindowSeconds = "slow_window_seconds"
         case providerProcesses = "provider_processes"
     }
 }

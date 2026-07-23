@@ -243,9 +243,10 @@ fn complete_turn(
     // Only report usage the provider actually reported. An empty receipt would
     // claim the provider measured zero instead of preserving missing evidence.
     if let Some(usage) = usage {
-        mapped.events.push(ConversationEvent::TurnUsage {
+        mapped.events.push(ConversationEvent::UsageCheckpoint {
             turn_id: turn_id.clone(),
             usage,
+            final_receipt: true,
         });
     }
     mapped
@@ -751,7 +752,7 @@ mod tests {
         assert_eq!(completed.events.len(), 2);
         assert!(matches!(
             &completed.events[0],
-            ConversationEvent::TurnUsage { turn_id, usage }
+            ConversationEvent::UsageCheckpoint { turn_id, usage, .. }
                 if turn_id == &started_turn_id
                     && usage.input_tokens == Some(222)
                     && usage.output_tokens == Some(77)

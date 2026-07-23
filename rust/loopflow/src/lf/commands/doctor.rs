@@ -875,12 +875,7 @@ fn check_usage_coverage(store: &crate::store::sqlite::SqliteStore) -> Result<Che
     let measured: HashSet<String> = store
         .agent_turns_for_invocations(&invocation_ids)?
         .into_iter()
-        .filter(|turn| {
-            turn.provider_input_tokens.is_some()
-                || turn.provider_output_tokens.is_some()
-                || turn.cache_read_tokens.is_some()
-                || turn.cost_usd.is_some()
-        })
+        .filter(|turn| turn.usage.is_some())
         .map(|turn| turn.invocation_id)
         .collect();
 
@@ -1287,13 +1282,14 @@ mod tests {
             },
         )
         .unwrap();
-        capture.record_conversation(crate::chat::types::ConversationEvent::TurnUsage {
+        capture.record_conversation(crate::chat::types::ConversationEvent::UsageCheckpoint {
             turn_id: "turn-1".to_string(),
             usage: crate::chat::types::TurnUsage {
                 input_tokens: Some(40),
                 output_tokens: Some(5_197),
                 ..Default::default()
             },
+            final_receipt: true,
         });
         capture.finish("completed", false).unwrap();
     }

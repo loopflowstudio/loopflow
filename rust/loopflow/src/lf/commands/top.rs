@@ -25,8 +25,9 @@ use crate::store::{sqlite::SqliteStore, RunEventRow};
 use crate::trace::{AgentInvocationRow, AgentTurnRow};
 
 const SCHEMA_VERSION: u32 = 1;
-const FAST_WINDOW_SECONDS: i64 = 300;
-const SLOW_WINDOW_SECONDS: i64 = 1_800;
+const FAST_WINDOW_SECONDS: i64 = 5;
+const SLOW_WINDOW_SECONDS: i64 = 300;
+const DAY_WINDOW_SECONDS: i64 = 86_400;
 const STALLED_AFTER_SECONDS: i64 = 1_800;
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const PROCESS_START_TOLERANCE_SECONDS: i64 = 3;
@@ -37,8 +38,7 @@ const COMMAND_WIDTH: usize = 82;
 pub enum ActivitySort {
     #[default]
     Tokens,
-    #[value(name = "rate-5m")]
-    Rate5m,
+    Rate,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,39 +68,19 @@ impl ActivityState {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct OutputActivity {
-    pub measured_output_tokens: u64,
-    pub output_tokens_fast: u64,
-    pub output_tokens_slow: u64,
-    pub output_tokens_per_second_fast: f64,
-    pub output_tokens_per_second_slow: f64,
-    pub measured_turns: u64,
-    pub unmeasured_turns: u64,
+#[derive(Debug, Clone, Copy, Default)]
+struct OutputWindows<'a> {
+    fast: Option<&'a crate::usage::UsageInterval>,
+    slow: Option<&'a crate::usage::UsageInterval>,
+    day: Option<&'a crate::usage::UsageInterval>,
 }
 
-impl OutputActivity {
-    fn add(&mut self, other: &Self) {
-        self.measured_output_tokens = self
-            .measured_output_tokens
-            .saturating_add(other.measured_output_tokens);
-        self.output_tokens_fast = self
-            .output_tokens_fast
-            .saturating_add(other.output_tokens_fast);
-        self.output_tokens_slow = self
-            .output_tokens_slow
-            .saturating_add(other.output_tokens_slow);
-        self.measured_turns = self.measured_turns.saturating_add(other.measured_turns);
-        self.unmeasured_turns = self.unmeasured_turns.saturating_add(other.unmeasured_turns);
-        self.finish_rates();
-    }
+fn output_tokens(interval: Option<&crate::usage::UsageInterval>) -> u64 {
+    interval.map_or(0, |interval| interval.output_tokens)
+}
 
-    fn finish_rates(&mut self) {
-        self.output_tokens_per_second_fast =
-            self.output_tokens_fast as f64 / FAST_WINDOW_SECONDS as f64;
-        self.output_tokens_per_second_slow =
-            self.output_tokens_slow as f64 / SLOW_WINDOW_SECONDS as f64;
-    }
+fn output_rate(interval: Option<&crate::usage::UsageInterval>) -> f64 {
+    interval.map_or(0.0, |interval| interval.output_tokens_per_second)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -117,8 +97,7 @@ pub struct ActivityNode {
     pub started_at: i64,
     pub last_progress_at: Option<i64>,
     pub state: ActivityState,
-    pub direct: OutputActivity,
-    pub cumulative: OutputActivity,
+    pub usage_scope_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -145,9 +124,7 @@ pub struct ProviderProcess {
 pub struct ActivitySnapshot {
     pub schema_version: u32,
     pub observed_at: i64,
-    pub fast_window_seconds: i64,
-    pub slow_window_seconds: i64,
-    pub aggregate: OutputActivity,
+    pub usage: crate::usage::UsageSnapshot,
     pub nodes: Vec<ActivityNode>,
     pub provider_processes: Vec<ProviderProcess>,
 }
@@ -169,6 +146,7 @@ struct ActivityData {
     events: Vec<RunEventRow>,
     launches: Vec<AgentInvocationRow>,
     turns: Vec<AgentTurnRow>,
+    usage: crate::usage::UsageSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -363,34 +341,70 @@ fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let lf_home = crate::store::observability_home_dir();
     let path = crate::store::observability_database_path()?;
-    let data = read_activity_data(&path)?;
     let processes = observe_processes(now, &lf_home)?;
+    let process_by_pid = processes
+        .processes
+        .iter()
+        .map(|process| (process.pid, process))
+        .collect::<HashMap<_, _>>();
+    let live_execs = processes
+        .receipts
+        .iter()
+        .filter(|receipt| receipt_matches_live_lf(receipt, &process_by_pid))
+        .cloned()
+        .collect::<Vec<_>>();
+    let data = read_activity_data(&path, &live_execs, now)?;
     collect_activity(data, processes, now)
 }
 
-fn read_activity_data(path: &Path) -> Result<ActivityData> {
+fn read_activity_data(
+    path: &Path,
+    live_execs: &[ExecProcessReceipt],
+    now: i64,
+) -> Result<ActivityData> {
     if !path.exists() {
         return Ok(ActivityData {
             events: Vec::new(),
             launches: Vec::new(),
             turns: Vec::new(),
+            usage: crate::usage::empty_snapshot(now),
         });
     }
     let store = SqliteStore::open_run_ledger_read_only(path)
         .map_err(|error| anyhow!("failed to read run ledger {}: {error}", path.display()))?;
     Ok(store.read_run_ledger_snapshot(|store| {
-        let events = store.list_run_events_since(0)?;
-        let launches = store.agent_invocations_since(0)?;
+        let mut events = Vec::new();
+        let mut trace_ids = HashSet::new();
+        for receipt in live_execs {
+            let exec_events = store.run_events_matching_exec(&receipt.exec_id)?;
+            trace_ids.extend(exec_events.iter().map(|event| event.run_id.clone()));
+            events.extend(exec_events);
+        }
+        let live_exec_ids = live_execs
+            .iter()
+            .map(|receipt| receipt.exec_id.as_str())
+            .collect::<HashSet<_>>();
+        let mut launches = Vec::new();
+        for trace_id in trace_ids {
+            launches.extend(
+                store
+                    .agent_invocations_matching(&trace_id)?
+                    .into_iter()
+                    .filter(|launch| live_exec_ids.contains(launch.process_id.as_str())),
+            );
+        }
         let launch_ids = launches
             .iter()
             .filter(|launch| launch.ended_at.is_none() && launch.outcome == "running")
             .map(|launch| launch.id.clone())
             .collect::<Vec<_>>();
         let turns = store.agent_turns_for_invocations(&launch_ids)?;
+        let usage = crate::usage::snapshot(store, now)?;
         Ok(ActivityData {
             events,
             launches,
             turns,
+            usage,
         })
     })?)
 }
@@ -490,9 +504,13 @@ fn collect_activity(
     processes: ProcessSnapshot,
     now: i64,
 ) -> Result<ActivitySnapshot> {
-    let execs = collect_execs(&data.events)
-        .into_values()
-        .collect::<Vec<_>>();
+    let ActivityData {
+        events,
+        launches,
+        turns,
+        usage,
+    } = data;
+    let execs = collect_execs(&events).into_values().collect::<Vec<_>>();
 
     let process_by_pid = processes
         .processes
@@ -534,15 +552,15 @@ fn collect_activity(
         .collect::<HashMap<_, _>>();
 
     let (launch_pid, provider_processes) =
-        claim_provider_processes(&processes, &process_by_pid, &owner_by_pid, &data.launches);
-    let live_launch_ids = launch_pid
-        .keys()
-        .map(String::as_str)
+        claim_provider_processes(&processes, &process_by_pid, &owner_by_pid, &launches);
+    let live_launch_ids = launches
+        .iter()
+        .filter(|launch| launch.ended_at.is_none() && launch.outcome == "running")
+        .map(|launch| launch.id.clone())
         .collect::<HashSet<_>>();
-    let turns = data
-        .turns
+    let turns = turns
         .into_iter()
-        .filter(|turn| live_launch_ids.contains(turn.invocation_id.as_str()))
+        .filter(|turn| live_launch_ids.contains(&turn.invocation_id))
         .collect::<Vec<_>>();
     let turns_by_launch = group_turns(&turns);
     let mut nodes = Vec::new();
@@ -571,19 +589,16 @@ fn collect_activity(
             started_at: exec.started_at,
             last_progress_at: None,
             state: ActivityState::Waiting,
-            direct: OutputActivity::default(),
-            cumulative: OutputActivity::default(),
+            usage_scope_id: format!("exec:{}", exec.id),
         });
     }
-    for launch in data
-        .launches
+    for launch in launches
         .into_iter()
-        .filter(|launch| live_launch_ids.contains(launch.id.as_str()))
+        .filter(|launch| live_launch_ids.contains(&launch.id))
     {
         let launch_turns = turns_by_launch
             .get(launch.id.as_str())
             .map_or(&[][..], Vec::as_slice);
-        let direct = output_activity(launch_turns, now);
         let last_progress_at = last_progress_at(&launch, launch_turns);
         let state = launch_state(launch_turns, last_progress_at, now);
         let pid = launch_pid.get(&launch.id).copied();
@@ -603,23 +618,16 @@ fn collect_activity(
             started_at: launch.started_at,
             last_progress_at,
             state,
-            cumulative: direct.clone(),
-            direct,
+            usage_scope_id: format!("invocation:{}", launch.id),
         });
     }
 
-    fold_cumulative(&mut nodes)?;
+    fold_activity_state(&mut nodes)?;
     nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    let mut aggregate = OutputActivity::default();
-    for node in &nodes {
-        aggregate.add(&node.direct);
-    }
     Ok(ActivitySnapshot {
         schema_version: SCHEMA_VERSION,
         observed_at: now,
-        fast_window_seconds: FAST_WINDOW_SECONDS,
-        slow_window_seconds: SLOW_WINDOW_SECONDS,
-        aggregate,
+        usage,
         nodes,
         provider_processes,
     })
@@ -825,29 +833,28 @@ fn group_turns(turns: &[AgentTurnRow]) -> HashMap<&str, Vec<&AgentTurnRow>> {
     by_launch
 }
 
-fn output_activity(turns: &[&AgentTurnRow], now: i64) -> OutputActivity {
-    let mut activity = OutputActivity::default();
-    for turn in turns {
-        match (turn.ended_at, turn.provider_output_tokens) {
-            (Some(ended_at), Some(tokens)) => {
-                let tokens = tokens.max(0) as u64;
-                activity.measured_turns += 1;
-                activity.measured_output_tokens =
-                    activity.measured_output_tokens.saturating_add(tokens);
-                if ended_at > now - SLOW_WINDOW_SECONDS && ended_at <= now {
-                    activity.output_tokens_slow =
-                        activity.output_tokens_slow.saturating_add(tokens);
-                }
-                if ended_at > now - FAST_WINDOW_SECONDS && ended_at <= now {
-                    activity.output_tokens_fast =
-                        activity.output_tokens_fast.saturating_add(tokens);
-                }
-            }
-            _ => activity.unmeasured_turns += 1,
-        }
+fn output_windows<'a>(
+    snapshot: &'a crate::usage::UsageSnapshot,
+    scope_id: &str,
+) -> OutputWindows<'a> {
+    let Some(reading) = snapshot
+        .readings
+        .iter()
+        .find(|reading| reading.scope.id == scope_id)
+    else {
+        return OutputWindows::default();
+    };
+    let interval = |window_seconds| {
+        reading
+            .intervals
+            .iter()
+            .find(|interval| interval.window_seconds == window_seconds)
+    };
+    OutputWindows {
+        fast: interval(FAST_WINDOW_SECONDS),
+        slow: interval(SLOW_WINDOW_SECONDS),
+        day: interval(DAY_WINDOW_SECONDS),
     }
-    activity.finish_rates();
-    activity
 }
 
 fn last_progress_at(launch: &AgentInvocationRow, turns: &[&AgentTurnRow]) -> Option<i64> {
@@ -928,7 +935,7 @@ fn launch_state(turns: &[&AgentTurnRow], last_progress_at: Option<i64>, now: i64
     ActivityState::Waiting
 }
 
-fn fold_cumulative(nodes: &mut [ActivityNode]) -> Result<()> {
+fn fold_activity_state(nodes: &mut [ActivityNode]) -> Result<()> {
     let index = nodes
         .iter()
         .enumerate()
@@ -970,7 +977,6 @@ fn fold_node(
         .get(id)
         .ok_or_else(|| anyhow!("activity node {id} is missing"))?;
     let child_ids = children.get(id).cloned().unwrap_or_default();
-    let mut cumulative = nodes[node_index].direct.clone();
     let mut last_progress = nodes[node_index].last_progress_at;
     let mut child_states = Vec::new();
     for child_id in child_ids {
@@ -978,7 +984,6 @@ fn fold_node(
         let child = &nodes[*index
             .get(&child_id)
             .ok_or_else(|| anyhow!("activity child {child_id} is missing"))?];
-        cumulative.add(&child.cumulative);
         last_progress = last_progress
             .into_iter()
             .chain(child.last_progress_at)
@@ -986,7 +991,6 @@ fn fold_node(
         child_states.push(child.state);
     }
     let node = &mut nodes[node_index];
-    node.cumulative = cumulative;
     node.last_progress_at = last_progress;
     if node.kind == ActivityNodeKind::Exec {
         node.state = fold_exec_state(node.state, &child_states);
@@ -1028,15 +1032,18 @@ fn print_snapshot(snapshot: &ActivitySnapshot, json: bool, sort: ActivitySort) -
 
 fn render_snapshot(snapshot: &ActivitySnapshot, sort: ActivitySort) -> String {
     let mut output = String::new();
+    let aggregate = output_windows(&snapshot.usage, "global");
     output.push_str("LOOPFLOW ACTIVITY\n");
     output.push_str(&format!(
-        "{} completed output tokens · 5m {} tok/s · 30m {} tok/s · {} unmeasured turns\n\n",
-        format_int(snapshot.aggregate.measured_output_tokens),
-        format_rate(snapshot.aggregate.output_tokens_per_second_fast),
-        format_rate(snapshot.aggregate.output_tokens_per_second_slow),
-        snapshot.aggregate.unmeasured_turns,
+        "{} output tokens / 24h · 5s {} tok/s · 5m {} tok/s · {} unmeasured live turns\n\n",
+        format_int(output_tokens(aggregate.day)),
+        format_rate(output_rate(aggregate.fast)),
+        format_rate(output_rate(aggregate.slow)),
+        aggregate
+            .fast
+            .map_or(0, |interval| interval.unmeasured_turns),
     ));
-    output.push_str("  TOKENS  TOK/S 5M  TOK/S 30M  ELAPSED    IDLE  STATE      CALL\n");
+    output.push_str("  TOKENS  TOK/S 5S  TOK/S 5M  ELAPSED    IDLE  STATE      CALL\n");
     if snapshot.nodes.is_empty() {
         output.push_str("  no live call trees recorded in this Home\n");
     } else {
@@ -1054,19 +1061,17 @@ fn render_snapshot(snapshot: &ActivitySnapshot, sort: ActivitySort) -> String {
             children.entry(parent).or_default().push(&node.id);
         }
         for nodes in children.values_mut() {
-            sort_node_ids(nodes, &index, sort);
+            sort_node_ids(nodes, &index, &snapshot.usage, sort);
         }
-        if let Some(roots) = children.get(&None) {
+        let tree = RenderTree {
+            index,
+            children,
+            usage: &snapshot.usage,
+            now: snapshot.observed_at,
+        };
+        if let Some(roots) = tree.children.get(&None) {
             for root in roots {
-                render_node(
-                    root,
-                    "",
-                    None,
-                    &index,
-                    &children,
-                    snapshot.observed_at,
-                    &mut output,
-                );
+                render_node(root, "", None, &tree, &mut output);
             }
         }
     }
@@ -1140,66 +1145,69 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     output
 }
 
-fn sort_node_ids(nodes: &mut [&str], index: &HashMap<&str, &ActivityNode>, sort: ActivitySort) {
+fn sort_node_ids(
+    nodes: &mut [&str],
+    index: &HashMap<&str, &ActivityNode>,
+    usage: &crate::usage::UsageSnapshot,
+    sort: ActivitySort,
+) {
     nodes.sort_by(|left, right| {
         let left_node = index[left];
         let right_node = index[right];
+        let left_windows = output_windows(usage, &left_node.usage_scope_id);
+        let right_windows = output_windows(usage, &right_node.usage_scope_id);
+        let left_tokens = output_tokens(left_windows.day);
+        let right_tokens = output_tokens(right_windows.day);
+        let left_rate = output_tokens(left_windows.fast);
+        let right_rate = output_tokens(right_windows.fast);
         let order = match sort {
-            ActivitySort::Tokens => right_node
-                .cumulative
-                .measured_output_tokens
-                .cmp(&left_node.cumulative.measured_output_tokens)
-                .then_with(|| {
-                    right_node
-                        .cumulative
-                        .output_tokens_fast
-                        .cmp(&left_node.cumulative.output_tokens_fast)
-                }),
-            ActivitySort::Rate5m => right_node
-                .cumulative
-                .output_tokens_fast
-                .cmp(&left_node.cumulative.output_tokens_fast)
-                .then_with(|| {
-                    right_node
-                        .cumulative
-                        .measured_output_tokens
-                        .cmp(&left_node.cumulative.measured_output_tokens)
-                }),
+            ActivitySort::Tokens => right_tokens
+                .cmp(&left_tokens)
+                .then_with(|| right_rate.cmp(&left_rate)),
+            ActivitySort::Rate => right_rate
+                .cmp(&left_rate)
+                .then_with(|| right_tokens.cmp(&left_tokens)),
         };
         order.then_with(|| left.cmp(right))
     });
+}
+
+struct RenderTree<'a> {
+    index: HashMap<&'a str, &'a ActivityNode>,
+    children: HashMap<Option<&'a str>, Vec<&'a str>>,
+    usage: &'a crate::usage::UsageSnapshot,
+    now: i64,
 }
 
 fn render_node(
     id: &str,
     prefix: &str,
     branch: Option<bool>,
-    index: &HashMap<&str, &ActivityNode>,
-    children: &HashMap<Option<&str>, Vec<&str>>,
-    now: i64,
+    tree: &RenderTree<'_>,
     output: &mut String,
 ) {
-    let node = index[id];
+    let node = tree.index[id];
     let connector = match branch {
         None => "",
         Some(true) => "└─",
         Some(false) => "├─",
     };
+    let usage = output_windows(tree.usage, &node.usage_scope_id);
     output.push_str(&format!(
         "{:>8}  {:>6}  {:>7}  {:>6}  {:>6}  {:<9}  {}{}{}\n",
-        format_int(node.cumulative.measured_output_tokens),
-        format_rate(node.cumulative.output_tokens_per_second_fast),
-        format_rate(node.cumulative.output_tokens_per_second_slow),
-        format_duration(now.saturating_sub(node.started_at)),
+        format_int(output_tokens(usage.day)),
+        format_rate(output_rate(usage.fast)),
+        format_rate(output_rate(usage.slow)),
+        format_duration(tree.now.saturating_sub(node.started_at)),
         node.last_progress_at
-            .map(|at| format_duration(now.saturating_sub(at)))
+            .map(|at| format_duration(tree.now.saturating_sub(at)))
             .unwrap_or_else(|| "—".to_string()),
         node.state.label(),
         prefix,
         connector,
         truncate(&node.label, COMMAND_WIDTH),
     ));
-    if let Some(child_ids) = children.get(&Some(id)) {
+    if let Some(child_ids) = tree.children.get(&Some(id)) {
         let child_prefix = match branch {
             None => String::new(),
             Some(true) => format!("{prefix}  "),
@@ -1207,15 +1215,7 @@ fn render_node(
         };
         for (position, child_id) in child_ids.iter().enumerate() {
             let last = position + 1 == child_ids.len();
-            render_node(
-                child_id,
-                &child_prefix,
-                Some(last),
-                index,
-                children,
-                now,
-                output,
-            );
+            render_node(child_id, &child_prefix, Some(last), tree, output);
         }
     }
 }
@@ -1261,8 +1261,23 @@ mod tests {
         let fixture = include_str!("../../../../../tests/fixtures/dto/activity_snapshot.json");
         let snapshot = serde_json::from_str::<ActivitySnapshot>(fixture).unwrap();
 
-        assert_eq!(snapshot.aggregate.measured_output_tokens, 48_200);
-        assert_eq!(snapshot.aggregate.output_tokens_per_second_fast, 4.0);
+        let global = output_windows(&snapshot.usage, "global");
+        assert_eq!(
+            global.day.expect("global daily usage").output_tokens,
+            48_200
+        );
+        assert_eq!(
+            global
+                .fast
+                .expect("global live usage")
+                .output_tokens_per_second,
+            4.0
+        );
+        let five_minutes = global.slow.expect("global five-minute usage");
+        assert_eq!(five_minutes.input_tokens, Some(100));
+        assert_eq!(five_minutes.cache_read_tokens, Some(350));
+        assert_eq!(five_minutes.peak_input_tokens, Some(120_000));
+        assert_eq!(five_minutes.cost_usd, Some(0.2));
         assert_eq!(
             snapshot
                 .nodes
@@ -1292,6 +1307,48 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ActivitySnapshot>(&encoded).unwrap(),
             snapshot
+        );
+    }
+
+    #[test]
+    fn activity_and_usage_commands_share_one_usage_snapshot() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("loopflow.db");
+        let store = SqliteStore::new(&path).expect("store");
+        store
+            .apply_migration_for_test("add_turn_usage_samples")
+            .expect("usage sample migration");
+        let now = 10_000;
+        let mut invocation = launch("launch-parity", "exec-parity", "codex", now - 10);
+        invocation.ended_at = Some(now - 1);
+        invocation.outcome = "completed".to_string();
+        let turn = turn("turn-parity", &invocation.id, now - 10, Some(now - 1), None);
+        store
+            .insert_trace_capture(&invocation, &turn, &[], &[])
+            .expect("insert capture");
+        store
+            .record_turn_usage_sample(&crate::store::TurnUsageSample {
+                turn_id: turn.id,
+                observed_at: now - 1,
+                final_receipt: true,
+                usage: crate::chat::types::TurnUsage {
+                    input_tokens: Some(120),
+                    output_tokens: Some(30),
+                    reasoning_tokens: Some(10),
+                    cache_read_tokens: Some(80),
+                    model: Some("gpt-5".to_string()),
+                    cost_usd: Some(0.25),
+                    ..Default::default()
+                },
+            })
+            .expect("record usage");
+
+        let usage_command = crate::usage::snapshot(&store, now).expect("lf usage snapshot");
+        let activity_command = read_activity_data(&path, &[], now).expect("lf ps data");
+
+        assert_eq!(
+            serde_json::to_value(&activity_command.usage).unwrap(),
+            serde_json::to_value(&usage_command).unwrap()
         );
     }
 
@@ -1382,15 +1439,10 @@ mod tests {
             system_tokens: 0,
             task_tokens: 0,
             supplied_context_tokens: 0,
-            provider_input_tokens: None,
-            provider_total_input_tokens: None,
-            peak_input_tokens: None,
-            context_window_tokens: None,
-            provider_output_tokens: output,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            cost_usd: None,
+            usage: output.map(|output_tokens| crate::chat::types::TurnUsage {
+                output_tokens: Some(output_tokens as u64),
+                ..Default::default()
+            }),
             context_gather_ms: 0,
             context_render_ms: 0,
             context_persist_ms: 0,
@@ -1423,13 +1475,7 @@ mod tests {
         }
     }
 
-    fn sortable_node(id: &str, tokens: u64, fast: u64) -> ActivityNode {
-        let mut cumulative = OutputActivity {
-            measured_output_tokens: tokens,
-            output_tokens_fast: fast,
-            ..OutputActivity::default()
-        };
-        cumulative.finish_rates();
+    fn sortable_node(id: &str) -> ActivityNode {
         ActivityNode {
             id: id.to_string(),
             parent_id: None,
@@ -1443,17 +1489,72 @@ mod tests {
             started_at: 0,
             last_progress_at: None,
             state: ActivityState::Waiting,
-            direct: OutputActivity::default(),
-            cumulative,
+            usage_scope_id: id.to_string(),
+        }
+    }
+
+    fn sortable_reading(id: &str, tokens: u64, fast: u64) -> crate::usage::UsageReading {
+        crate::usage::UsageReading {
+            scope: crate::usage::UsageScope {
+                id: id.to_string(),
+                parent_id: None,
+                kind: crate::usage::UsageScopeKind::Exec,
+                label: id.to_string(),
+                repo: None,
+                wave: None,
+                project: None,
+                task: None,
+                exec_id: Some(id.to_string()),
+                invocation_id: None,
+            },
+            intervals: vec![
+                crate::usage::UsageInterval {
+                    window_seconds: 5,
+                    input_tokens: None,
+                    total_input_tokens: None,
+                    output_tokens: fast,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    peak_input_tokens: None,
+                    context_window_tokens: None,
+                    cost_usd: None,
+                    output_tokens_per_second: fast as f64 / 5.0,
+                    measured_turns: 1,
+                    unmeasured_turns: 0,
+                    output_complete: true,
+                },
+                crate::usage::UsageInterval {
+                    window_seconds: 86_400,
+                    input_tokens: None,
+                    total_input_tokens: None,
+                    output_tokens: tokens,
+                    reasoning_tokens: None,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    peak_input_tokens: None,
+                    context_window_tokens: None,
+                    cost_usd: None,
+                    output_tokens_per_second: tokens as f64 / 86_400.0,
+                    measured_turns: 1,
+                    unmeasured_turns: 0,
+                    output_complete: true,
+                },
+            ],
         }
     }
 
     #[test]
-    fn call_tree_folds_completed_tokens_and_exact_rates_once() {
+    fn call_tree_preserves_process_state_and_work_attribution() {
         let now = 10_000;
         let mut completed_launch = launch("launch-finished", "exec-5whys", "codex", 500);
         completed_launch.ended_at = Some(now - 100);
         completed_launch.outcome = "completed".to_string();
+        let mut unattributed_launch =
+            launch("launch-unattributed", "exec-5whys", "claude", now - 30);
+        unattributed_launch.wave = None;
+        unattributed_launch.project = None;
+        unattributed_launch.task = None;
         let data = ActivityData {
             events: vec![
                 run_event("trace", "exec-5whys", None, 1_000, "started", "5whys"),
@@ -1469,6 +1570,7 @@ mod tests {
             launches: vec![
                 launch("launch-5whys", "exec-5whys", "codex", 1_000),
                 launch("launch-implement", "exec-implement", "codex", 2_000),
+                unattributed_launch,
                 completed_launch,
             ],
             turns: vec![
@@ -1482,6 +1584,13 @@ mod tests {
                 ),
                 turn("turn-open", "launch-implement", now - 30, None, None),
                 turn(
+                    "turn-unattributed",
+                    "launch-unattributed",
+                    now - 30,
+                    None,
+                    None,
+                ),
+                turn(
                     "turn-finished",
                     "launch-finished",
                     now - 200,
@@ -1489,6 +1598,7 @@ mod tests {
                     Some(5_000),
                 ),
             ],
+            usage: crate::usage::empty_snapshot(now),
         };
         let processes = ProcessSnapshot {
             processes: vec![
@@ -1496,6 +1606,7 @@ mod tests {
                 process(11, 10, 1_001, "codex app-server"),
                 process(20, 10, 2_000, "lf implement"),
                 process(30, 20, 2_001, "codex app-server"),
+                process(40, 1, 9_000, "codex app-server"),
             ],
             receipts: vec![
                 receipt("exec-5whys", 10, 1_000),
@@ -1510,10 +1621,6 @@ mod tests {
             .iter()
             .find(|node| node.id == "exec:exec-5whys")
             .unwrap();
-        assert_eq!(root.cumulative.measured_output_tokens, 900);
-        assert_eq!(root.cumulative.output_tokens_fast, 600);
-        assert_eq!(root.cumulative.output_tokens_slow, 900);
-        assert_eq!(root.cumulative.unmeasured_turns, 1);
         assert_eq!(root.state, ActivityState::Working);
         assert_eq!(root.repo.as_deref(), Some("/src/loopflow"));
         assert_eq!(root.wave.as_deref(), Some("product"));
@@ -1524,13 +1631,33 @@ mod tests {
             .unwrap();
         assert_eq!(provider.project.as_deref(), Some("loopflow-api"));
         assert_eq!(provider.task.as_deref(), Some("W2-144"));
-        assert_eq!(snapshot.aggregate.measured_output_tokens, 900);
-        assert_eq!(snapshot.aggregate.unmeasured_turns, 1);
+        let unattributed = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == "launch:launch-unattributed")
+            .unwrap();
+        assert_eq!(unattributed.pid, None);
+        assert_eq!(unattributed.wave, None);
+        assert_eq!(unattributed.project, None);
+        assert_eq!(unattributed.task, None);
+        assert_eq!(
+            unattributed.usage_scope_id,
+            "invocation:launch-unattributed"
+        );
+        assert_eq!(
+            output_tokens(output_windows(&snapshot.usage, "global").day),
+            0
+        );
         assert!(!snapshot
             .nodes
             .iter()
             .any(|node| node.id == "launch:launch-finished"));
-        assert!(snapshot.provider_processes.is_empty());
+        assert_eq!(snapshot.provider_processes.len(), 1);
+        assert_eq!(snapshot.provider_processes[0].pid, 40);
+        assert_eq!(
+            snapshot.provider_processes[0].claim,
+            ProviderClaim::Unclaimed
+        );
         let json = serde_json::to_string(&snapshot).unwrap();
         assert_eq!(
             serde_json::from_str::<ActivitySnapshot>(&json).unwrap(),
@@ -1555,6 +1682,7 @@ mod tests {
             ],
             launches: Vec::new(),
             turns: Vec::new(),
+            usage: crate::usage::empty_snapshot(now),
         };
         let processes = ProcessSnapshot {
             processes: vec![process(99, 1, 1_000, "opencode serve --port 1234")],
@@ -1567,7 +1695,10 @@ mod tests {
 
         let snapshot = collect_activity(data, processes, now).unwrap();
         assert!(snapshot.nodes.is_empty());
-        assert_eq!(snapshot.aggregate.measured_output_tokens, 0);
+        assert_eq!(
+            output_tokens(output_windows(&snapshot.usage, "global").day),
+            0
+        );
         assert_eq!(
             snapshot.provider_processes[0].claim,
             ProviderClaim::Orphaned
@@ -1613,22 +1744,24 @@ mod tests {
 
     #[test]
     fn sibling_sort_uses_the_other_metric_before_stable_id() {
-        let nodes = [
-            sortable_node("a", 100, 20),
-            sortable_node("b", 200, 10),
-            sortable_node("c", 200, 20),
-        ];
+        let nodes = [sortable_node("a"), sortable_node("b"), sortable_node("c")];
+        let mut usage = crate::usage::empty_snapshot(0);
+        usage.readings.extend([
+            sortable_reading("a", 100, 20),
+            sortable_reading("b", 200, 10),
+            sortable_reading("c", 200, 20),
+        ]);
         let index = nodes
             .iter()
             .map(|node| (node.id.as_str(), node))
             .collect::<HashMap<_, _>>();
 
         let mut by_tokens = vec!["a", "b", "c"];
-        sort_node_ids(&mut by_tokens, &index, ActivitySort::Tokens);
+        sort_node_ids(&mut by_tokens, &index, &usage, ActivitySort::Tokens);
         assert_eq!(by_tokens, ["c", "b", "a"]);
 
         let mut by_rate = vec!["a", "b", "c"];
-        sort_node_ids(&mut by_rate, &index, ActivitySort::Rate5m);
+        sort_node_ids(&mut by_rate, &index, &usage, ActivitySort::Rate);
         assert_eq!(by_rate, ["c", "a", "b"]);
     }
 }

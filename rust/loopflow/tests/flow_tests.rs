@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -5,6 +7,7 @@ use std::process::Command;
 use loopflow::engine::flow::{ConcreteStep, Skill, Step};
 use loopflow::engine::{expand_flow, load_flow};
 use loopflow::store::sqlite::SqliteStore;
+use support::codex_app_server_script;
 use tempfile::TempDir;
 
 fn write_skill(repo: &Path, name: &str, content: &str) {
@@ -135,7 +138,10 @@ fn code_flow_records_each_agent_invocation_in_one_trace() {
 
     let home = TempDir::new().unwrap();
     let bin = TempDir::new().unwrap();
-    write_executable(&bin.path().join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("done", ""),
+    );
     let path = std::env::var("PATH")
         .map(|path| format!("{}:{path}", bin.path().display()))
         .unwrap_or_else(|_| bin.path().display().to_string());

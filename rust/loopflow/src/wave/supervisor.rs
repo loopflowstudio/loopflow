@@ -615,7 +615,6 @@ mod tests {
         // And a late wire delta for that turn is dropped, not journaled.
         rt.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         assert_eq!(rt.thread_snapshot().len(), 1);
@@ -827,7 +826,6 @@ mod tests {
         });
         rt.apply_resident_delta(ResidentDelta::TurnFinished {
             status: Lifecycle::Completed,
-            cost_usd: None,
             reason: None,
         });
         // Resident 2's death then respawns on rung 0 (30ms), not rung 1.

@@ -7,23 +7,24 @@
 ./dev xcode        # regenerate and open the Xcode project
 ```
 
-Loopflow opens on The Podium: a closable Wave score on the left, machine-wide
+Loopflow opens on The Podium: a closable Wave hierarchy on the left, machine-wide
 Now/Roadmap Work in the center, and durable Activity on the right. Selecting a
 Wave, Project, or Task preserves the live view and scopes `lf activity --json`
-at the source. Disclose the score from Wave → Project → Task → live Exec. Every
+at the source. Disclose each branch from Wave → Project → Task → live Exec. Every
 level uses the same output meter and the existing `WorkReference`; Exec remains
 process evidence rather than a fourth Work kind. Run facts open their exact
 trace; PR facts open GitHub proof.
 
 The compact Podium bar reads live process evidence from `lf ps --json`. Its
-vertical signal meter shows exact five-minute TOK/s, with the 30-minute rate as
-a reference tick. The lamp stays independent from output: black is off, green
+vertical signal meter shows normalized output over five seconds, with the
+60-second rate as a reference tick; completed provider usage stays the exact
+counter. The lamp stays independent from output: black is off, green
 is producing, blue is blocked, and amber is waiting or unknown. Wave count,
 active Runs, and Run-without-listener warnings come from `lf ls --json`.
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
 Each provider node retains its existing repository and Work attribution, so the
-score rolls one process reading up to Task, Project, and Wave without another
+hierarchy rolls one process reading up to Task, Project, and Wave without another
 telemetry store. Authored Waves count even before they have an active Run.
 
 Loading, empty, stale-last-good, and unavailable reads stay distinct. Wave and

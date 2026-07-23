@@ -86,6 +86,29 @@ pub fn with_clean_home<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn codex_app_server_script(output: &str, setup: &str) -> String {
+    let output = serde_json::to_string(output)
+        .expect("encode mock Codex output")
+        .replace('\'', r#"'"'"'"#);
+    r#"#!/bin/sh
+__SETUP__
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+while read -r line; do :; done
+"#
+    .replace("__SETUP__", setup)
+    .replace("__OUTPUT__", &output)
+}
+
 pub struct EnvGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_path: Option<String>,

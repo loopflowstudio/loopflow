@@ -121,6 +121,7 @@ impl Harness for ClaudeHarness {
         // Validate claude binary on PATH.
         let mut version_command = Command::new("claude");
         version_command.arg("--version");
+        super::configure_agent_env(&mut version_command, config);
         if let Some(route) = &self.account_route {
             route.apply_tokio(&mut version_command);
         }
@@ -185,6 +186,7 @@ impl Harness for ClaudeHarness {
         let args = build_claude_session_turn_args(&turn_content, config, resume_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
+        super::configure_agent_env(&mut cmd, config);
         if let Some(route) = &self.account_route {
             route.apply_tokio(&mut cmd);
         }
@@ -390,6 +392,7 @@ mod tests {
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
+            env: Default::default(),
         });
 
         let first = harness

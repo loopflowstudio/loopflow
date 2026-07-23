@@ -35,7 +35,8 @@ APP_NAME = "Loopflow"
 # app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
 SWIFT_APP_PRODUCT = "LoopflowMac"
 BUILD_STAGES = ("cargo", "swift")
-LATEST_RELEASE_BASE = "https://github.com/loopflowstudio/loopflow/releases/latest/download"
+LATEST_RELEASE_URL = "https://github.com/loopflowstudio/loopflow/releases/latest"
+RELEASE_DOWNLOAD_BASE = "https://github.com/loopflowstudio/loopflow/releases/download"
 
 
 # --- Bundle spec (single source of truth for Loopflow.app layout) ---
@@ -275,14 +276,23 @@ def _download_release_asset(url: str, destination: Path) -> str:
         raise StageError(f"download failed: {url}: {exc}") from exc
 
 
-def _release_tag_from_manifest_url(url: str) -> str:
-    marker = "/releases/download/"
+def _release_tag_from_latest_url(url: str) -> str:
+    marker = "/releases/tag/"
     if marker not in url:
         raise StageError(f"latest release did not resolve to a pinned tag: {url}")
     tag = url.split(marker, 1)[1].split("/", 1)[0]
     if not tag.startswith("v") or len(tag) == 1:
         raise StageError(f"latest release resolved to an invalid tag: {tag}")
     return tag
+
+
+def _latest_release_tag() -> str:
+    request = urllib.request.Request(LATEST_RELEASE_URL, method="HEAD")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return _release_tag_from_latest_url(response.geturl())
+    except OSError as exc:
+        raise StageError(f"latest release lookup failed: {exc}") from exc
 
 
 def _manifest_digest(manifest: Path, asset: str) -> str:
@@ -304,14 +314,10 @@ def _verify_release_asset(path: Path, expected: str) -> None:
 def _install_published_release(install_dir: Path) -> str:
     with tempfile.TemporaryDirectory(prefix="loopflow-release-") as temp:
         directory = Path(temp)
+        tag = _latest_release_tag()
+        pinned_base = f"{RELEASE_DOWNLOAD_BASE}/{tag}"
         manifest = directory / "SHA256SUMS"
-        effective = _download_release_asset(
-            f"{LATEST_RELEASE_BASE}/SHA256SUMS", manifest
-        )
-        tag = _release_tag_from_manifest_url(effective)
-        pinned_base = (
-            f"https://github.com/loopflowstudio/loopflow/releases/download/{tag}"
-        )
+        _download_release_asset(f"{pinned_base}/SHA256SUMS", manifest)
         installer = directory / "install.sh"
         _download_release_asset(f"{pinned_base}/install.sh", installer)
         _verify_release_asset(installer, _manifest_digest(manifest, "install.sh"))

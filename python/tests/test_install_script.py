@@ -203,13 +203,11 @@ def test_published_refresh_pins_and_verifies_the_external_installer(
         downloads.append(url)
         if destination.name == "SHA256SUMS":
             destination.write_text(f"{digest}  install.sh\n")
-            return (
-                "https://github.com/loopflowstudio/loopflow/releases/"
-                "download/v9.9.9/SHA256SUMS"
-            )
+            return "https://release-assets.githubusercontent.com/signed-checksums"
         destination.write_bytes(installer_payload)
-        return url
+        return "https://release-assets.githubusercontent.com/signed-installer"
 
+    monkeypatch.setattr(install, "_latest_release_tag", lambda: "v9.9.9")
     monkeypatch.setattr(install, "_download_release_asset", download)
     monkeypatch.setattr(
         install,
@@ -221,8 +219,8 @@ def test_published_refresh_pins_and_verifies_the_external_installer(
 
     assert tag == "v9.9.9"
     assert downloads == [
-        f"{install.LATEST_RELEASE_BASE}/SHA256SUMS",
-        "https://github.com/loopflowstudio/loopflow/releases/download/v9.9.9/install.sh",
+        f"{install.RELEASE_DOWNLOAD_BASE}/v9.9.9/SHA256SUMS",
+        f"{install.RELEASE_DOWNLOAD_BASE}/v9.9.9/install.sh",
     ]
     assert runs[0][0][0] == "sh"
     assert runs[0][0][-2:] == ["--version", "v9.9.9"]
@@ -235,13 +233,11 @@ def test_published_refresh_rejects_an_installer_digest_mismatch(
     def download(url: str, destination: Path) -> str:
         if destination.name == "SHA256SUMS":
             destination.write_text(f"{'0' * 64}  install.sh\n")
-            return (
-                "https://github.com/loopflowstudio/loopflow/releases/"
-                "download/v9.9.9/SHA256SUMS"
-            )
+            return "https://release-assets.githubusercontent.com/signed-checksums"
         destination.write_text("different")
-        return url
+        return "https://release-assets.githubusercontent.com/signed-installer"
 
+    monkeypatch.setattr(install, "_latest_release_tag", lambda: "v9.9.9")
     monkeypatch.setattr(install, "_download_release_asset", download)
     monkeypatch.setattr(
         install,

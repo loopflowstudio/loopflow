@@ -241,7 +241,15 @@ struct DTOFixtureTests {
         #expect(surface.id == "invocation_00000000000000000000000000000001")
         #expect(surface.work.kind == .task)
         #expect(surface.status == .active)
+        #expect(surface.run.runtimeGeneration == 8)
         #expect(surface.run.containment == .tmux(name: "lf-task"))
+        #expect(
+            surface.run.trigger
+                == .homeUpgrade(
+                    upgradeId: "upgrade_00000000000000000000000000000007",
+                    priorRunId: "run_00000000000000000000000000000008"
+                )
+        )
         #expect(surface.run.cwd == "/src/loopflow.task")
         #expect(surface.argv == ["tmux", "attach-session", "-t", "lf-task"])
 

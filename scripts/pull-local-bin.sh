@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # architecture-shim: local-refresh-wrapper
-# Compatibility wrapper for the CLI-only local refresh path.
+# Compatibility wrapper for the published release refresh path.
 # Prefer: uv run python scripts/install.py refresh
 
 set -euo pipefail
 
 usage() {
     cat >&2 <<'USAGE'
-Usage: pull-local-bin.sh [--repo PATH] [--install-dir PATH] [--no-pull]
+Usage: pull-local-bin.sh [--repo PATH] [--install-dir PATH]
 
-Compatibility wrapper around scripts/install.py refresh. Pulls the default branch,
-builds release lf, and installs it into the local bin directory.
+Compatibility wrapper around scripts/install.py refresh. Downloads and promotes
+the latest published release through the external installer.
 USAGE
 }
 
@@ -44,10 +44,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --install-dir=*)
             args+=("--install-dir" "${1#--install-dir=}")
-            shift
-            ;;
-        --no-pull)
-            args+=("--no-pull")
             shift
             ;;
         -h|--help)

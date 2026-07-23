@@ -2191,7 +2191,7 @@ pub(crate) async fn resume_inactive_process(store: &SharedStore, task: &mut Task
     relaunch_inactive_process_with_trigger(store, task, Some(RunTrigger::User)).await
 }
 
-async fn relaunch_inactive_process_with_trigger(
+pub(crate) async fn relaunch_inactive_process_with_trigger(
     store: &SharedStore,
     task: &mut Task,
     trigger: Option<RunTrigger>,

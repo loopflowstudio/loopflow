@@ -1191,6 +1191,11 @@ fn main() -> anyhow::Result<()> {
     // its own preflight.
     if let Some(Commands::Install { cmd }) = &cli.command {
         return match cmd {
+            InstallCommand::Recover {
+                upgrade,
+                parent_pid,
+                parent_started_at,
+            } => loopflow::lf::commands::install::recover(upgrade, *parent_pid, *parent_started_at),
             InstallCommand::Preflight { json } => loopflow::lf::commands::install::preflight(*json),
             InstallCommand::Promote {
                 cli_target,

@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub const LABEL: &str = "com.loopflow.lfd";
 
@@ -40,6 +40,14 @@ pub struct ServiceSpec {
 pub struct ServiceFile {
     pub path: PathBuf,
     pub platform: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeeperMode {
+    None,
+    Launchd,
+    Systemd,
 }
 
 fn xml_escape(value: &str) -> String {
@@ -324,6 +332,118 @@ pub fn status() -> anyhow::Result<String> {
         }
         _ => Ok(format!("lfd not installed (no launchd label {LABEL})")),
     }
+}
+
+#[cfg(target_os = "macos")]
+pub fn configured_mode() -> anyhow::Result<KeeperMode> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    if !path.exists() {
+        return Ok(KeeperMode::None);
+    }
+    Ok(KeeperMode::Launchd)
+}
+
+#[cfg(target_os = "macos")]
+pub fn pause() -> anyhow::Result<KeeperMode> {
+    let mode = configured_mode()?;
+    if mode == KeeperMode::None {
+        return Ok(mode);
+    }
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    let _ = std::process::Command::new("launchctl")
+        .arg("unload")
+        .arg(&path)
+        .status()?;
+    Ok(mode)
+}
+
+#[cfg(target_os = "macos")]
+pub fn resume(mode: KeeperMode) -> anyhow::Result<()> {
+    if mode != KeeperMode::Launchd {
+        return Ok(());
+    }
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    let path = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LABEL}.plist"));
+    if std::process::Command::new("launchctl")
+        .args(["list", LABEL])
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return Ok(());
+    }
+    let status = std::process::Command::new("launchctl")
+        .arg("load")
+        .arg(&path)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("launchctl load failed for {}", path.display());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn configured_mode() -> anyhow::Result<KeeperMode> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory to inspect"))?;
+    if !home.join(".config/systemd/user/lfd.service").exists() {
+        return Ok(KeeperMode::None);
+    }
+    Ok(KeeperMode::Systemd)
+}
+
+#[cfg(target_os = "linux")]
+pub fn pause() -> anyhow::Result<KeeperMode> {
+    let mode = configured_mode()?;
+    if mode == KeeperMode::None {
+        return Ok(mode);
+    }
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "stop", "lfd"])
+        .status()?;
+    Ok(mode)
+}
+
+#[cfg(target_os = "linux")]
+pub fn resume(mode: KeeperMode) -> anyhow::Result<()> {
+    if mode != KeeperMode::Systemd {
+        return Ok(());
+    }
+    if std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", "lfd"])
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return Ok(());
+    }
+    let status = std::process::Command::new("systemctl")
+        .args(["--user", "start", "lfd"])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("systemctl --user start lfd failed");
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn configured_mode() -> anyhow::Result<KeeperMode> {
+    Ok(KeeperMode::None)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn pause() -> anyhow::Result<KeeperMode> {
+    Ok(KeeperMode::None)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn resume(_mode: KeeperMode) -> anyhow::Result<()> {
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]

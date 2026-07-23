@@ -13,21 +13,27 @@ lf cron history --wave infrastructure --days 35
 ```
 
 ```bash
-uv run python scripts/install.py local --use   # full build: lf + Loopflow.app -> local-bin/, make active
-uv run python scripts/install.py refresh       # update/install lf; unchanged main is a no-op
+uv run python scripts/install.py local     # build validation-only artifacts under local-bin/
+uv run python scripts/install.py refresh   # install the latest published release
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
-`install.py` is the local entry point. `local --use` builds this worktree's
-`lf` and `Loopflow.app` into `<worktree>/local-bin/`, then promotes that build.
-`refresh` is the fast CLI-only path: pull the default branch, then rebuild and
-install `lf` only when main moved or the install target is missing.
+`install.py` is the local entry point. `local` builds this worktree's `lf`,
+`lfd`, and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
+migration authority. It cannot activate the production Home. `refresh`
+resolves one published tag, verifies its installer from `SHA256SUMS`, then runs
+the same release installer an external user receives.
 
 Promotion stops before compilation while draft migrations remain. Cut the
 release first so the binary embeds the schema its runtime code expects.
 Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
+On an active Home, promotion fences the old runtime generation, checkpoints and
+drains exact Wave/Project/Task containment, advances the store, restarts the
+same keeper, then reconciles every enabled open Work onto a new Run. `refresh`
+prints the terminal upgrade result directly; no manual zero-Run window is
+required.
 
 Use `release/` to keep the rationale and notes for each shipped version close
 to the code.
@@ -59,6 +65,7 @@ the app is not a side artifact.
 |----------|-------|--------------|
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
 | `Loopflow-<version>.dmg`, `Loopflow-latest.dmg` | R2 `downloads/` + GitHub Release | tag |
+| `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
 
 `Loopflow.app`'s `CFBundleShortVersionString`/`CFBundleVersion` are stamped from
@@ -72,8 +79,8 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local --use` | Build this worktree's `lf` and `Loopflow.app` into `local-bin/`, then promote it active | Local only |
-| Local | `scripts/install.py refresh` | Pull, release-build `lf`, and atomically copy it into the local bin dir | Local only |
+| Local | `scripts/install.py local` | Build validation-only `lf`, `lfd`, and `Loopflow.app` into `local-bin/` | No |
+| Local | `scripts/install.py refresh` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Home |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,

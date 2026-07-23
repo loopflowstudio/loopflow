@@ -45,6 +45,7 @@ class ReleaseArtifacts:
     native_archives: tuple[Path, ...]
     dmg: Path
     installer: Path
+    checksums: Path
 
 
 @dataclass(frozen=True)
@@ -142,12 +143,31 @@ def _extract_arm_binaries(archives: tuple[Path, ...], output_dir: Path) -> tuple
     return binaries[0], binaries[1]
 
 
+def _validate_release_candidate(binary: Path, scratch: Path) -> None:
+    result = _run(
+        [str(binary), "install", "preflight", "--json"],
+        capture=True,
+        env={**os.environ, "LF_CONTROL_DB_PATH": str(scratch / "uninitialized.db")},
+    )
+    try:
+        candidate = json.loads(result.stdout)["candidate"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("release candidate did not emit a promotion identity") from exc
+    if candidate.get("authority") != "published":
+        raise RuntimeError("release candidate has validation-only migration authority")
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _write_checksums(paths: tuple[Path, ...], destination: Path) -> None:
+    lines = [f"{_sha256(path)}  {path.name}" for path in paths]
+    destination.write_text("\n".join(lines) + "\n")
 
 
 def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
@@ -159,7 +179,12 @@ def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
         "--notes",
         str(ROOT / "RELEASE_NOTES.md"),
     ]
-    for asset in (*artifacts.native_archives, artifacts.dmg, artifacts.installer):
+    for asset in (
+        *artifacts.native_archives,
+        artifacts.dmg,
+        artifacts.installer,
+        artifacts.checksums,
+    ):
         command.extend(["--asset", str(asset)])
     _run(command)
 
@@ -217,7 +242,9 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
 
     stages: list[str] = ["artifacts_verified"]
     with tempfile.TemporaryDirectory() as temp:
-        arm_binary, _arm_daemon = _extract_arm_binaries(archives, Path(temp))
+        scratch = Path(temp)
+        arm_binary, _arm_daemon = _extract_arm_binaries(archives, scratch)
+        _validate_release_candidate(arm_binary, scratch)
         env = {
             **os.environ,
             "LF_RELEASE_BINARY": str(arm_binary),
@@ -232,7 +259,9 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
         raise RuntimeError(f"DMG builder did not produce {dmg}")
     stages.append("dmg_notarized")
 
-    artifacts = ReleaseArtifacts(tag, archives, dmg, installer)
+    checksums = artifact_dir / "SHA256SUMS"
+    _write_checksums((*archives, dmg, installer), checksums)
+    artifacts = ReleaseArtifacts(tag, archives, dmg, installer, checksums)
     _stage_github_release(artifacts)
     stages.append("github_draft_staged")
 
@@ -261,7 +290,7 @@ def publish_release(tag: str, artifact_dir: Path) -> PublishReceipt:
     _run(["lf", "release", "publish", tag, "--finalize"])
     stages.append("github_release_published")
 
-    paths = (*archives, dmg, installer)
+    paths = (*archives, dmg, installer, checksums)
     receipt = PublishReceipt(
         tag=tag,
         source_commit=source_commit,

@@ -1751,11 +1751,19 @@ async fn finish_command_stop(
         capture,
         match stop {
             CommandStop::Interrupted => "interrupted",
+            CommandStop::Quiesced => "completed",
             _ => "completed",
         },
     );
     match stop {
         CommandStop::Interrupted => {
+            let _ = harness.stop().await;
+            store
+                .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)
+                .await?;
+            Ok(())
+        }
+        CommandStop::Quiesced => {
             let _ = harness.stop().await;
             store
                 .finish_task_run(task, lease, crate::durable::BoundaryState::Interrupted)

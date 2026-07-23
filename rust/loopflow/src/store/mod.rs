@@ -140,6 +140,13 @@ pub enum StoreError {
         run_id: crate::durable::RunId,
         state: crate::durable::RunState,
     },
+    #[error(
+        "Home upgrade {upgrade_id} fences Run reservation for runtime generation {runtime_generation:?}"
+    )]
+    HomeUpgradeFenced {
+        upgrade_id: String,
+        runtime_generation: Option<u64>,
+    },
     #[error("{target} generation {generation} no longer holds its write lease")]
     LeaseRevoked { target: String, generation: u32 },
     #[error("stale Basis: expected {expected}, current {current}")]
@@ -3230,13 +3237,32 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn task_and_project_reservations_wait_for_promotion() {
+    async fn task_and_project_reservations_defer_during_promotion() {
         let dir = tempfile::tempdir().unwrap();
+        let database = dir.path().join("registry.db");
         let store = Arc::new(
-            super::open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
+            super::open_store(&StorageConfig::sqlite(database.clone()))
                 .await
                 .unwrap(),
         );
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        let enablement_is_materialized = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM pragma_table_info('work_placements') WHERE name='enabled'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        if !enablement_is_materialized {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "work_enablement",
+                ))
+                .unwrap();
+        }
+        drop(connection);
         let wave = make_wave("/repo");
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
@@ -3249,55 +3275,30 @@ mod tests {
             .unwrap();
 
         let promotion = crate::promotion_lock::acquire_exclusive().unwrap();
-        let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let task_store = Arc::clone(&store);
-        let task_started = started_tx.clone();
-        let mut task_reservation = tokio::spawn(async move {
-            task_started.send(()).unwrap();
-            task_store
-                .reserve_task_process(&task, WorkStatus::Ready)
-                .await
-        });
-
-        let project_store = Arc::clone(&store);
-        let mut project_reservation = tokio::spawn(async move {
-            started_tx.send(()).unwrap();
-            project_store
-                .reserve_project_process(&project, WorkStatus::Ready)
-                .await
-        });
-
-        started_rx.recv().await.unwrap();
-        started_rx.recv().await.unwrap();
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), &mut task_reservation)
-                .await
-                .is_err(),
-            "Task reservation crossed the exclusive promotion fence"
-        );
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                &mut project_reservation
-            )
+        let task_error = store
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
-            .is_err(),
-            "Project reservation crossed the exclusive promotion fence"
-        );
+            .unwrap_err();
+        let project_error = store
+            .reserve_project_process(&project, WorkStatus::Ready)
+            .await
+            .unwrap_err();
+        for error in [task_error, project_error] {
+            assert!(
+                error.to_string().contains("promotion lock"),
+                "reservation returned the wrong promotion deferral: {error}"
+            );
+        }
 
         drop(promotion);
-        let task_lease = tokio::time::timeout(std::time::Duration::from_secs(2), task_reservation)
+        let task_lease = store
+            .reserve_task_process(&task, WorkStatus::Ready)
             .await
-            .unwrap()
-            .unwrap()
             .unwrap();
-        let project_lease =
-            tokio::time::timeout(std::time::Duration::from_secs(2), project_reservation)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap();
+        let project_lease = store
+            .reserve_project_process(&project, WorkStatus::Ready)
+            .await
+            .unwrap();
         assert!(task_lease.is_some());
         assert!(project_lease.is_some());
     }

@@ -8,8 +8,8 @@ on:
   workflow_call:
 
 env:
-  LOOPFLOW_BUILD_PROVENANCE: release
-  LOOPFLOW_MIGRATION_AUTHORITY: published
+  LOOPFLOW_BUILD_PROVENANCE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'development' }}
+  LOOPFLOW_MIGRATION_AUTHORITY: ${{ startsWith(github.ref, 'refs/tags/v') && 'published' || 'validation_only' }}
 
 jobs:
   release-acceptance:

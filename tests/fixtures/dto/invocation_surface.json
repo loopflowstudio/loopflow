@@ -21,9 +21,12 @@
     },
     "epoch_id": "epoch_00000000000000000000000000000004",
     "home_id": "home_00000000000000000000000000000003",
+    "runtime_generation": 8,
     "state": "active",
     "trigger": {
-      "kind": "user"
+      "kind": "home_upgrade",
+      "upgrade_id": "upgrade_00000000000000000000000000000007",
+      "prior_run_id": "run_00000000000000000000000000000008"
     },
     "retry_of": null,
     "containment": {

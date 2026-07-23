@@ -16,6 +16,10 @@ def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
 
     assert workflow["name"] == "Packages (nightly)"
     assert workflow["on"]["schedule"] == [{"cron": "0 9 * * *"}]
+    assert "refs/tags/v" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
+    assert "development" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
+    assert "published" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
+    assert "validation_only" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
 
     native = workflow["jobs"]["native-packages"]
     assert "needs" not in native
@@ -118,46 +122,22 @@ def test_bump_patch_version_groups_long_commit_lists_without_dropping_commits(tm
             assert subject in notes
 
 
-def test_pull_local_bin_builds_and_installs_lf(tmp_path: Path):
+def test_pull_local_bin_forwards_to_published_refresh(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "Cargo.toml").write_text("[workspace]\nmembers = []\n")
     scripts = repo / "scripts"
     scripts.mkdir()
-    (scripts / "install.py").write_text((ROOT / "scripts/install.py").read_text())
-    (scripts / "bundle_version.py").write_text((ROOT / "scripts/bundle_version.py").read_text())
-    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
-
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    cargo_log = tmp_path / "cargo.log"
-    cargo = fake_bin / "cargo"
-    cargo.write_text(
-        f"""#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" > {cargo_log}
-repo="$PWD"
-mkdir -p "$repo/target/release"
-cat > "$repo/target/release/lf" <<'LF'
-#!/usr/bin/env bash
-if [ "$1" = "install" ] && [ "$2" = "promote" ]; then
-    shift 2
-    while [ "$#" -gt 0 ]; do
-        if [ "$1" = "--cli-target" ]; then mkdir -p "$(dirname "$2")"; ln -sf "$0" "$2"; fi
-        shift
-    done
-    exit 0
-fi
-echo lf fake
-LF
-chmod +x "$repo/target/release/lf"
-"""
+    invocation = tmp_path / "invocation.txt"
+    (scripts / "install.py").write_text(
+        "import os, pathlib, sys\n"
+        "pathlib.Path(os.environ['LFTEST_INVOCATION']).write_text(' '.join(sys.argv[1:]))\n"
+        "print('installed: published release')\n"
     )
-    cargo.chmod(cargo.stat().st_mode | stat.S_IXUSR)
+    subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
 
     install_dir = tmp_path / "local-bin"
     env = os.environ.copy()
-    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["LFTEST_INVOCATION"] = str(invocation)
 
     result = subprocess.run(
         [
@@ -166,7 +146,6 @@ chmod +x "$repo/target/release/lf"
             str(repo),
             "--install-dir",
             str(install_dir),
-            "--no-pull",
         ],
         check=True,
         text=True,
@@ -175,9 +154,7 @@ chmod +x "$repo/target/release/lf"
     )
 
     assert "installed:" in result.stdout
-    assert "lf fake" in result.stdout
-    assert (install_dir / "lf").read_text().startswith("#!/usr/bin/env bash")
-    assert "build --release -p loopflow --bin lf" in cargo_log.read_text()
+    assert invocation.read_text() == f"refresh --install-dir {install_dir}"
     assert "scripts/install.py refresh" in (ROOT / "scripts/pull-local-bin.sh").read_text()
 
 

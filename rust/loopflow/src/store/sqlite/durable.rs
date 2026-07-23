@@ -224,11 +224,13 @@ impl SqliteStore {
             prior_run_id: prior.id.clone(),
         };
         let token = RunLeaseToken::new();
+        let runtime_generation = runtime_generation_in(&tx, &prior.home_id)?;
         let run = Run {
             id: RunId::new(),
             work: prior.work.clone(),
             epoch_id: prior.epoch_id.clone(),
             home_id: prior.home_id,
+            runtime_generation,
             state: RunState::Reserved,
             trigger: trigger.clone(),
             retry_of: Some(prior.id),
@@ -238,23 +240,46 @@ impl SqliteStore {
             started_at: None,
             ended_at: None,
         };
-        tx.execute(
-            "INSERT INTO runs (
-                id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
-                lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
-             ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
-            params![
-                run.id.as_str(),
-                run.epoch_id.as_str(),
-                run.home_id.as_str(),
-                serde_json::to_string(&trigger).expect("Run trigger must serialize"),
-                run.retry_of.as_ref().map(RunId::as_str),
-                token.hash(),
-                run.work.kind(),
-                run.work.id(),
-                run.created_at.unix_timestamp(),
-            ],
-        )?;
+        if run.runtime_generation.is_some() {
+            let runtime_generation = runtime_generation_sql(run.runtime_generation)?;
+            tx.execute(
+                "INSERT INTO runs (
+                    id, epoch_id, home_id, runtime_generation, state, trigger_json, retry_of,
+                    lease_hash, lease_generation, source_kind, source_id, created_at, ended_at,
+                    stop_reason
+                 ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7, NULL, ?8, ?9, ?10, NULL, NULL)",
+                params![
+                    run.id.as_str(),
+                    run.epoch_id.as_str(),
+                    run.home_id.as_str(),
+                    runtime_generation,
+                    serde_json::to_string(&trigger).expect("Run trigger must serialize"),
+                    run.retry_of.as_ref().map(RunId::as_str),
+                    token.hash(),
+                    run.work.kind(),
+                    run.work.id(),
+                    run.created_at.unix_timestamp(),
+                ],
+            )?;
+        } else {
+            tx.execute(
+                "INSERT INTO runs (
+                    id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+                    lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
+                 ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
+                params![
+                    run.id.as_str(),
+                    run.epoch_id.as_str(),
+                    run.home_id.as_str(),
+                    serde_json::to_string(&trigger).expect("Run trigger must serialize"),
+                    run.retry_of.as_ref().map(RunId::as_str),
+                    token.hash(),
+                    run.work.kind(),
+                    run.work.id(),
+                    run.created_at.unix_timestamp(),
+                ],
+            )?;
+        }
         let recovery_lease = RunLease::new(
             run.id.clone(),
             run.work.clone(),
@@ -631,6 +656,23 @@ impl SqliteStore {
             return Ok(Some(crate::durable::RunControl::Abandon { reason }));
         }
         if run.state == RunState::Stopping {
+            let cause = conn
+                .query_row(
+                    "SELECT stop_reason FROM runs WHERE id=?1",
+                    [run.id.as_str()],
+                    |row| row.get::<_, Option<String>>(0),
+                )?
+                .and_then(|value| serde_json::from_str::<StopCause>(&value).ok());
+            if let Some(StopCause::HomeUpgrade {
+                upgrade_id,
+                deadline,
+            }) = cause
+            {
+                return Ok(Some(crate::durable::RunControl::Quiesce {
+                    upgrade_id,
+                    deadline,
+                }));
+            }
             return Ok(Some(crate::durable::RunControl::Interrupt));
         }
         let Some(turn_id) = active_turn_id else {
@@ -1920,6 +1962,100 @@ fn write_placement(
     Ok(())
 }
 
+fn has_runtime_generations(conn: &Connection) -> StoreResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='home_runtime_generations'
+         )",
+        [],
+        |row| row.get::<_, bool>(0),
+    )
+    .map_err(StoreError::from)
+}
+
+fn runtime_generation_in(conn: &Connection, home_id: &HomeId) -> StoreResult<Option<u64>> {
+    if !has_runtime_generations(conn)? {
+        return Ok(None);
+    }
+    let generation = conn.query_row(
+        "SELECT MAX(generation) FROM home_runtime_generations WHERE home_id=?1",
+        [home_id.as_str()],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
+    generation
+        .map(|value| {
+            u64::try_from(value).map_err(|_| {
+                StoreError::InvalidData(format!(
+                    "Home {} has invalid runtime generation {value}",
+                    home_id.as_str()
+                ))
+            })
+        })
+        .transpose()
+}
+
+fn runtime_generation_sql(generation: Option<u64>) -> StoreResult<Option<i64>> {
+    generation
+        .map(|value| {
+            i64::try_from(value).map_err(|_| {
+                StoreError::InvalidData(format!("runtime generation {value} exceeds SQLite"))
+            })
+        })
+        .transpose()
+}
+
+fn validate_upgrade_reservation(
+    tx: &Transaction<'_>,
+    home_id: &HomeId,
+    runtime_generation: Option<u64>,
+) -> StoreResult<()> {
+    let has_upgrades = tx.query_row(
+        "SELECT EXISTS (
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='home_upgrades'
+         )",
+        [],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !has_upgrades {
+        return Ok(());
+    }
+    let active = tx
+        .query_row(
+            "SELECT id, target_generation, artifacts_activated
+             FROM home_upgrades
+             WHERE home_id=?1
+               AND phase NOT IN ('completed', 'failed', 'rolled_back')
+             ORDER BY target_generation DESC, started_at DESC, id DESC
+             LIMIT 1",
+            [home_id.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, bool>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((upgrade_id, target_generation, artifacts_activated)) = active else {
+        return Ok(());
+    };
+    let target_generation = u64::try_from(target_generation).map_err(|_| {
+        StoreError::InvalidData(format!(
+            "Home upgrade {upgrade_id} has invalid target generation {target_generation}"
+        ))
+    })?;
+    if artifacts_activated && runtime_generation == Some(target_generation) {
+        return Ok(());
+    }
+    Err(StoreError::HomeUpgradeFenced {
+        upgrade_id,
+        runtime_generation,
+    })
+}
+
 pub(super) fn reserve_run_in(
     tx: &Transaction<'_>,
     work: &WorkRef,
@@ -1936,11 +2072,14 @@ pub(super) fn reserve_run_in(
     }
     resolve_wait_for_trigger(tx, &epoch, trigger)?;
     let token = RunLeaseToken::new();
+    let runtime_generation = runtime_generation_in(tx, &home_id)?;
+    validate_upgrade_reservation(tx, &home_id, runtime_generation)?;
     let run = Run {
         id: RunId::new(),
         work: work.clone(),
         epoch_id: epoch.id.clone(),
         home_id,
+        runtime_generation,
         state: RunState::Reserved,
         trigger: trigger.clone(),
         retry_of: match trigger {
@@ -1953,23 +2092,46 @@ pub(super) fn reserve_run_in(
         started_at: None,
         ended_at: None,
     };
-    tx.execute(
-        "INSERT INTO runs (
-            id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
-            lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
-         ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
-        params![
-            run.id.as_str(),
-            run.epoch_id.as_str(),
-            run.home_id.as_str(),
-            serde_json::to_string(trigger).expect("Run trigger must serialize"),
-            run.retry_of.as_ref().map(RunId::as_str),
-            token.hash(),
-            work.kind(),
-            work.id(),
-            run.created_at.unix_timestamp(),
-        ],
-    )?;
+    if run.runtime_generation.is_some() {
+        let runtime_generation = runtime_generation_sql(run.runtime_generation)?;
+        tx.execute(
+            "INSERT INTO runs (
+                id, epoch_id, home_id, runtime_generation, state, trigger_json, retry_of,
+                lease_hash, lease_generation, source_kind, source_id, created_at, ended_at,
+                stop_reason
+             ) VALUES (?1, ?2, ?3, ?4, 'reserved', ?5, ?6, ?7, NULL, ?8, ?9, ?10, NULL, NULL)",
+            params![
+                run.id.as_str(),
+                run.epoch_id.as_str(),
+                run.home_id.as_str(),
+                runtime_generation,
+                serde_json::to_string(trigger).expect("Run trigger must serialize"),
+                run.retry_of.as_ref().map(RunId::as_str),
+                token.hash(),
+                work.kind(),
+                work.id(),
+                run.created_at.unix_timestamp(),
+            ],
+        )?;
+    } else {
+        tx.execute(
+            "INSERT INTO runs (
+                id, epoch_id, home_id, state, trigger_json, retry_of, lease_hash,
+                lease_generation, source_kind, source_id, created_at, ended_at, stop_reason
+             ) VALUES (?1, ?2, ?3, 'reserved', ?4, ?5, ?6, NULL, ?7, ?8, ?9, NULL, NULL)",
+            params![
+                run.id.as_str(),
+                run.epoch_id.as_str(),
+                run.home_id.as_str(),
+                serde_json::to_string(trigger).expect("Run trigger must serialize"),
+                run.retry_of.as_ref().map(RunId::as_str),
+                token.hash(),
+                work.kind(),
+                work.id(),
+                run.created_at.unix_timestamp(),
+            ],
+        )?;
+    }
     let lease = RunLease::new(run.id.clone(), work.clone(), epoch.current_basis, token);
     Ok((run, lease))
 }
@@ -2119,37 +2281,48 @@ fn current_run_for_work_in(conn: &Connection, work: &WorkRef) -> StoreResult<Opt
 }
 
 fn run_by_id_in(conn: &Connection, run_id: &RunId) -> StoreResult<Run> {
-    let row = conn.query_row(
+    let generation_column = if has_runtime_generations(conn)? {
+        "r.runtime_generation"
+    } else {
+        "NULL"
+    };
+    let query = format!(
         "SELECT r.epoch_id, r.home_id, r.state, r.trigger_json, r.retry_of,
                 r.created_at, r.ended_at, e.wave_id, e.project_id, e.task_id,
-                r.containment_kind, r.containment_id, r.cwd, r.started_at
-         FROM runs r JOIN epochs e ON e.id=r.epoch_id WHERE r.id=?1",
-        [run_id.as_str()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<i64>>(6)?,
-                row.get::<_, Option<String>>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, Option<String>>(9)?,
-                row.get::<_, Option<String>>(10)?,
-                row.get::<_, Option<String>>(11)?,
-                row.get::<_, Option<String>>(12)?,
-                row.get::<_, Option<i64>>(13)?,
-            ))
-        },
-    )?;
+                r.containment_kind, r.containment_id, r.cwd, r.started_at,
+                {generation_column}
+         FROM runs r JOIN epochs e ON e.id=r.epoch_id WHERE r.id=?1"
+    );
+    let row = conn.query_row(&query, [run_id.as_str()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, Option<i64>>(6)?,
+            row.get::<_, Option<String>>(7)?,
+            row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
+            row.get::<_, Option<String>>(10)?,
+            row.get::<_, Option<String>>(11)?,
+            row.get::<_, Option<String>>(12)?,
+            row.get::<_, Option<i64>>(13)?,
+            row.get::<_, Option<i64>>(14)?,
+        ))
+    })?;
     let work = work_from_parts((row.7, row.8, row.9))?;
     Ok(Run {
         id: run_id.clone(),
         work,
         epoch_id: EpochId::parse(&row.0).map_err(invalid_durable)?,
         home_id: HomeId::parse(&row.1).map_err(invalid_durable)?,
+        runtime_generation: row
+            .14
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| StoreError::InvalidData("Run has a negative runtime generation".into()))?,
         state: RunState::parse(&row.2).map_err(invalid_durable)?,
         trigger: serde_json::from_str(&row.3)?,
         retry_of: row
@@ -3870,6 +4043,28 @@ mod durable_store_tests {
     use std::path::{Path, PathBuf};
     use time::OffsetDateTime;
 
+    fn table_exists(conn: &rusqlite::Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1
+             )",
+            [table],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn column_exists(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info(?1) WHERE name=?2
+             )",
+            rusqlite::params![table, column],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
     /// A registered Wave is the cheapest real Work: `upsert_wave` is the only
     /// public path that mints an Epoch, and Wave Work needs no PM binding.
     fn store_with_wave() -> (tempfile::TempDir, SqliteStore, WorkRef) {
@@ -3878,6 +4073,12 @@ mod durable_store_tests {
         let store = SqliteStore::new(&path).expect("open a fresh store");
         let wave_id = WaveId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
+        if !column_exists(&conn, "work_placements", "enabled") {
+            conn.execute_batch(&crate::store::migrations::migration_sql_for_test(
+                "work_enablement",
+            ))
+            .unwrap();
+        }
         conn.execute(
             "INSERT INTO waves (id, name, repo, created_at, parent_wave_id)
              VALUES (?1, 'probe', '/repo', 1700000000, NULL)",
@@ -4329,6 +4530,141 @@ mod durable_store_tests {
             store.run_by_id(&lease.run_id).unwrap().state,
             RunState::Ended
         );
+    }
+
+    #[test]
+    fn a_home_upgrade_quiesces_at_the_provider_boundary() {
+        let (_directory, store, work) = store_with_wave();
+        let (lease, _) = start_invocation(&store, &work);
+
+        store
+            .stop_run(
+                &lease,
+                &StopCause::HomeUpgrade {
+                    upgrade_id: "upgrade-one".to_string(),
+                    deadline: 1_900_000_000,
+                },
+                crate::durable::ContainmentObservation::Present,
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.run_control(&lease, None).unwrap(),
+            Some(RunControl::Quiesce {
+                upgrade_id: "upgrade-one".to_string(),
+                deadline: 1_900_000_000,
+            })
+        );
+    }
+
+    #[test]
+    fn a_new_run_records_the_active_home_runtime_generation() {
+        let (directory, store, work) = store_with_wave();
+        let connection = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        if !table_exists(&connection, "home_runtime_generations") {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "home_runtime_generation",
+                ))
+                .unwrap();
+        }
+        let home_id: String = connection
+            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO home_runtime_generations (
+                    home_id, generation, build_version, source_revision,
+                    migration_frontier, activated_at
+                 ) VALUES (?1, 12, '0.12.6', 'abc', '0.12.6.001_release', 1)",
+                [home_id],
+            )
+            .unwrap();
+
+        let (run, _) = store.reserve_run(&work, &RunTrigger::User).unwrap();
+
+        assert_eq!(run.runtime_generation, Some(12));
+        assert_eq!(
+            store.run_by_id(&run.id).unwrap().runtime_generation,
+            Some(12)
+        );
+    }
+
+    #[test]
+    fn an_upgrade_fences_old_generations_inside_run_reservation() {
+        let (directory, store, work) = store_with_wave();
+        let connection = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+        if !table_exists(&connection, "home_runtime_generations") {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "home_runtime_generation",
+                ))
+                .unwrap();
+        }
+        let home_id: String = connection
+            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO home_runtime_generations (
+                    home_id, generation, build_version, source_revision,
+                    migration_frontier, activated_at
+                 ) VALUES (?1, 12, '0.12.5', 'old', '0.12.5.001_release', 1)",
+                [&home_id],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO home_upgrades (
+                    id, home_id, source_revision, source_identity,
+                    migration_authority, package_version, latest_known_migration,
+                    prior_generation, target_generation, phase, keeper_mode,
+                    migration_required, started_at, artifacts_activated,
+                    migration_applied, daemon_restarted, drain_timed_out,
+                    coordinator_started_at
+                 ) VALUES (
+                    'upgrade-next', ?1, 'new', 'release', 'published', '0.12.6',
+                    '0.12.6.001_release', 12, 13, 'draining', 'none',
+                    1, 1, 0, 0, 0, 0, 1
+                 )",
+                [&home_id],
+            )
+            .unwrap();
+
+        let error = store.reserve_run(&work, &RunTrigger::User).unwrap_err();
+        assert!(matches!(
+            error,
+            StoreError::HomeUpgradeFenced {
+                runtime_generation: Some(12),
+                ..
+            }
+        ));
+
+        connection
+            .execute(
+                "UPDATE home_upgrades SET artifacts_activated=1, phase='reconciling'
+                 WHERE id='upgrade-next'",
+                [],
+            )
+            .unwrap();
+        let error = store.reserve_run(&work, &RunTrigger::User).unwrap_err();
+        assert!(matches!(error, StoreError::HomeUpgradeFenced { .. }));
+
+        connection
+            .execute(
+                "INSERT INTO home_runtime_generations (
+                    home_id, generation, build_version, source_revision,
+                    migration_frontier, activated_at
+                 ) VALUES (?1, 13, '0.12.6', 'new', '0.12.6.001_release', 2)",
+                [&home_id],
+            )
+            .unwrap();
+        let (run, _) = store.reserve_run(&work, &RunTrigger::User).unwrap();
+        assert_eq!(run.runtime_generation, Some(13));
     }
 
     #[test]

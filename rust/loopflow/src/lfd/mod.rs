@@ -173,6 +173,7 @@ pub fn router(state: LfdState) -> Router {
         .route("/health", get(health_handler))
         .route("/status", get(status_handler))
         .route("/waves/start", post(start_waves_handler))
+        .route("/waves/reconcile", post(reconcile_waves_handler))
         .route("/waves/stop", post(stop_wave_handler))
         .route(
             "/linear/webhook",
@@ -191,12 +192,20 @@ pub fn router(state: LfdState) -> Router {
 struct HealthBody {
     status: String,
     home_id: HomeId,
+    runtime_generation: Option<u64>,
+    build_version: Option<String>,
+    source_revision: Option<String>,
+    migration_frontier: Option<String>,
 }
 
 async fn health_handler(State(state): State<LfdState>) -> Json<HealthBody> {
     Json(HealthBody {
         status: "ok".to_string(),
         home_id: state.wave_host.home_id().clone(),
+        runtime_generation: Some(crate::lf::commands::install::current_runtime_generation()),
+        build_version: Some(crate::build_info::BUILD_VERSION.to_string()),
+        source_revision: Some(crate::build_info::source_revision().to_string()),
+        migration_frontier: Some(crate::store::migrations::latest_known_version()),
     })
 }
 
@@ -224,6 +233,17 @@ async fn start_waves_handler(
 ) -> Result<Json<Vec<WaveStartOutcome>>, (StatusCode, String)> {
     authorize_wave_control(&state, &headers)?;
     Ok(Json(state.wave_host.start_waves(request.wave_ids).await))
+}
+
+async fn reconcile_waves_handler(
+    State(state): State<LfdState>,
+    headers: HeaderMap,
+    Json(request): Json<StartWavesRequest>,
+) -> Result<Json<Vec<WaveStartOutcome>>, (StatusCode, String)> {
+    authorize_wave_control(&state, &headers)?;
+    Ok(Json(
+        state.wave_host.reconcile_waves(request.wave_ids).await,
+    ))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1117,6 +1137,33 @@ pub(crate) async fn start_waves(
     }
 }
 
+pub(crate) async fn reconcile_waves(
+    home_id: &HomeId,
+    wave_ids: Vec<WaveId>,
+) -> anyhow::Result<Vec<WaveStartOutcome>> {
+    let client = live_endpoint(home_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("lfd is not running for Home {home_id}"))?;
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/waves/reconcile", client.endpoint))
+        .bearer_auth(&client.token)
+        .json(&StartWavesRequest { wave_ids })
+        .send()
+        .await?;
+    let status = response.status();
+    if status.is_success() {
+        response
+            .json::<Vec<WaveStartOutcome>>()
+            .await
+            .map_err(anyhow::Error::from)
+    } else {
+        Err(anyhow::anyhow!(
+            "lfd refused Wave reconciliation with HTTP {status}: {}",
+            response.text().await.unwrap_or_default()
+        ))
+    }
+}
+
 pub(crate) async fn stop_wave(home_id: &HomeId, wave_id: &WaveId) -> anyhow::Result<Option<bool>> {
     let Some(client) = live_endpoint(home_id).await else {
         return Ok(None);
@@ -1157,6 +1204,40 @@ async fn live_endpoint(home_id: &HomeId) -> Option<LfdClientEndpoint> {
         .await
         .ok()?;
     (health.home_id == *home_id && health.status == "ok").then_some(client)
+}
+
+pub(crate) async fn home_is_live(home_id: &HomeId) -> bool {
+    live_endpoint(home_id).await.is_some()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HomeHealthIdentity {
+    pub runtime_generation: u64,
+    pub build_version: String,
+    pub source_revision: String,
+    pub migration_frontier: String,
+}
+
+pub(crate) async fn home_health_identity(home_id: &HomeId) -> Option<HomeHealthIdentity> {
+    let client = read_endpoint(home_id)?;
+    let health = reqwest::Client::new()
+        .get(format!("http://{}/health", client.endpoint))
+        .timeout(Duration::from_millis(500))
+        .send()
+        .await
+        .ok()?
+        .json::<HealthBody>()
+        .await
+        .ok()?;
+    if health.home_id != *home_id || health.status != "ok" {
+        return None;
+    }
+    Some(HomeHealthIdentity {
+        runtime_generation: health.runtime_generation?,
+        build_version: health.build_version?,
+        source_revision: health.source_revision?,
+        migration_frontier: health.migration_frontier?,
+    })
 }
 
 fn endpoint_path(home_id: &HomeId) -> PathBuf {
@@ -1333,6 +1414,16 @@ mod tests {
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["status"], "ok");
         assert_eq!(body["home_id"], home_id.as_str());
+        assert!(body["runtime_generation"].is_number());
+        assert_eq!(body["build_version"], crate::build_info::BUILD_VERSION);
+        assert_eq!(
+            body["source_revision"],
+            crate::build_info::source_revision()
+        );
+        assert_eq!(
+            body["migration_frontier"],
+            crate::store::migrations::latest_known_version()
+        );
     }
 
     #[tokio::test]

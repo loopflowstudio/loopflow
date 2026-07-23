@@ -296,7 +296,15 @@ struct ServerState {
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
     discord: Option<DiscordProjection>,
+    run_attach: Option<WaveRunAttach>,
     started_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct WaveRunAttach {
+    pub store: crate::store::SharedStore,
+    pub lease: crate::durable::RunLease,
+    pub cwd: PathBuf,
 }
 
 /// Request-body ceiling for the wave routes. Loopback + token gate this, but
@@ -326,7 +334,9 @@ pub(crate) fn router_with_observer(
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
 ) -> Router {
-    router_with_chat_projection(runtime, resident, observer, supervisor, shutdown, None)
+    router_with_chat_projection(
+        runtime, resident, observer, supervisor, shutdown, None, None,
+    )
 }
 
 pub(crate) fn router_with_chat_projection(
@@ -336,6 +346,7 @@ pub(crate) fn router_with_chat_projection(
     supervisor: Option<SupervisorHandle>,
     shutdown: ShutdownDoor,
     discord: Option<DiscordProjection>,
+    run_attach: Option<WaveRunAttach>,
 ) -> Router {
     let state = ServerState {
         runtime,
@@ -344,6 +355,7 @@ pub(crate) fn router_with_chat_projection(
         supervisor,
         shutdown,
         discord,
+        run_attach,
         started_at: OffsetDateTime::now_utc(),
     };
     Router::new()
@@ -453,6 +465,41 @@ async fn resident_attach_handler(
                     state.runtime.name()
                 ),
             ));
+        }
+    }
+    if let Some(run_attach) = &state.run_attach {
+        let process_group =
+            crate::engine::process::process_group_id(body.pid).ok_or_else(|| {
+                (
+                    StatusCode::CONFLICT,
+                    format!("resident pid {} has no isolated process group", body.pid),
+                )
+            })?;
+        let run = run_attach
+            .store
+            .current_run(&run_attach.lease.work)
+            .await
+            .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+            .ok_or_else(|| {
+                (
+                    StatusCode::CONFLICT,
+                    "Wave Run authority disappeared before resident attach".to_string(),
+                )
+            })?;
+        if run.state == crate::durable::RunState::Reserved {
+            run_attach
+                .store
+                .advance_run(
+                    &run_attach.lease,
+                    crate::durable::RunAdvance::RunStarting {
+                        containment: crate::durable::Containment::ProcessGroup {
+                            id: i64::from(process_group),
+                        },
+                        cwd: run_attach.cwd.clone(),
+                    },
+                )
+                .await
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
         }
     }
     state.resident.record_pid(body.pid);

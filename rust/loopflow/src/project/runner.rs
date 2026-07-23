@@ -621,6 +621,7 @@ async fn run_answer_only_supervisor(
             _ = poll.tick() => {
                 match store.run_control(run_lease, None).await? {
                     Some(crate::durable::RunControl::Interrupt)
+                    | Some(crate::durable::RunControl::Quiesce { .. })
                     | Some(crate::durable::RunControl::Abandon { .. }) => {
                         answer_lane.cancel();
                         store.finish_project_run(
@@ -1223,6 +1224,14 @@ async fn finish_command_stop(
     match stop {
         CommandStop::Interrupted => {
             finish_capture(capture, "interrupted");
+            let _ = harness.stop().await;
+            store
+                .finish_project_run(project, lease, crate::durable::BoundaryState::Interrupted)
+                .await?;
+            Ok(())
+        }
+        CommandStop::Quiesced => {
+            finish_capture(capture, "completed");
             let _ = harness.stop().await;
             store
                 .finish_project_run(project, lease, crate::durable::BoundaryState::Interrupted)

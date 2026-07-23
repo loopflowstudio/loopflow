@@ -169,7 +169,8 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, value_name = "QUESTION|wait [ASK_ID]")]
         args: Vec<String>,
     },
-    /// Authorize global lf promotion against the shared migration frontier
+    /// Internal installer transaction entry point.
+    #[command(hide = true)]
     Install {
         #[command(subcommand)]
         cmd: InstallCommand,
@@ -1075,10 +1076,24 @@ pub enum TaskCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
+    /// Continue one interrupted Home upgrade from its staged candidate.
+    #[command(hide = true)]
+    Recover {
+        /// The durable Home upgrade receipt to continue.
+        #[arg(long)]
+        upgrade: String,
+        /// Wait for the original coordinator before taking over.
+        #[arg(long, hide = true)]
+        parent_pid: Option<u32>,
+        /// Exact start time of the original coordinator process.
+        #[arg(long, hide = true)]
+        parent_started_at: Option<i64>,
+    },
     /// Preview whether this build may replace the global lf (read-only).
     /// Reads the shared store's migration frontier and live-body count against
     /// this binary's own registry; mutates nothing and exits non-zero on a
     /// refusal so a caller can gate on it.
+    #[command(hide = true)]
     Preflight {
         /// Emit the structured PromotionPreview as JSON.
         #[arg(long)]
@@ -1088,6 +1103,7 @@ pub enum InstallCommand {
     /// and atomically repoint the target symlink, under the exclusive promotion
     /// lock. Refuses — leaving every target unchanged — on incompatible or
     /// live-body evidence.
+    #[command(hide = true)]
     Promote {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
@@ -1116,6 +1132,7 @@ pub enum InstallCommand {
     },
     /// Repoint the global CLI at retained prior bytes only after that binary's
     /// own preflight proves it recognizes the current store frontier.
+    #[command(hide = true)]
     Rollback {
         /// The global CLI symlink to replace (e.g. ~/.local/bin/lf).
         #[arg(long)]
@@ -1832,6 +1849,14 @@ mod tests {
             error.to_string(),
             format!("lf {}\n", crate::build_info::BUILD_VERSION)
         );
+    }
+
+    #[test]
+    fn installer_transport_is_hidden_and_has_no_status_surface() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(!help.contains("install"));
+        assert!(Cli::try_parse_from(["lf", "install", "status"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "install", "preflight"]).is_ok());
     }
 
     #[test]

@@ -11,6 +11,14 @@ pub(crate) fn current_process_group_id() -> Option<u32> {
     u32::try_from(process_group).ok().filter(|id| *id > 1)
 }
 
+pub(crate) fn process_group_id(pid: u32) -> Option<u32> {
+    let pid = i32::try_from(pid).ok()?;
+    // SAFETY: getpgid reads kernel process metadata for one numeric pid and
+    // does not dereference memory.
+    let process_group = unsafe { libc::getpgid(pid) };
+    u32::try_from(process_group).ok().filter(|id| *id > 1)
+}
+
 pub(crate) fn process_group_observation(
     process_group: i64,
 ) -> crate::durable::ContainmentObservation {

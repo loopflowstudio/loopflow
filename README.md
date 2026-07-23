@@ -145,8 +145,8 @@ corpus at [/llms-full.txt](https://loopflow.studio/llms-full.txt).
 ## Developing loopflow
 
 ```bash
-uv run python scripts/install.py local --use   # build lf + lfd + Loopflow.app from this checkout, make active
-uv run python scripts/install.py refresh       # fast control-plane rebuild from the default branch
+uv run python scripts/install.py local     # build validation-only lf + lfd + Loopflow.app under local-bin/
+uv run python scripts/install.py refresh   # install the latest published release through the public installer
 ```
 
 `TESTING.md` covers the test suites; `STYLE.md` is the governing style guide;

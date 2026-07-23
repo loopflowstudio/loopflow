@@ -360,7 +360,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 only `lf install promote` from an authorized build initializes the shared store",
+                 install a published release with `uv run python scripts/install.py refresh`",
                 path.display()
             )));
         }
@@ -387,8 +387,8 @@ impl SqliteStore {
             if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \
-                     an ordinary lf must not advance it — run `lf install promote` from an \
-                     authorized build to advance the shared store",
+                     an ordinary lf must not advance it — install a published release with \
+                     `uv run python scripts/install.py refresh`",
                     path.display()
                 )));
             }
@@ -2717,7 +2717,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("only `lf install promote`"),
+            error.to_string().contains("scripts/install.py refresh"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2745,7 +2745,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
         assert!(
-            error.to_string().contains("lf install promote"),
+            error.to_string().contains("scripts/install.py refresh"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(

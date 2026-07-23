@@ -14,6 +14,7 @@ consume this wire.
 AgentInvocation, its supervising Run authority and containment, stable Work and
 Wave identity, Home route, temporary User/parent attention and handback
 evidence, and a generic attach argv.
+
 `task_attention_states.json` pins the Rust-owned desktop attention fold for
 live advancing, live human wait, dead dirty, dead authored commits, clean
 backlog, completed, stale active intent, and unavailable local evidence. Rust

@@ -215,6 +215,10 @@ pub enum RunTrigger {
     Recovery {
         prior_run_id: RunId,
     },
+    HomeUpgrade {
+        upgrade_id: String,
+        prior_run_id: Option<RunId>,
+    },
     User,
 }
 
@@ -224,6 +228,7 @@ pub struct Run {
     pub work: WorkRef,
     pub epoch_id: EpochId,
     pub home_id: HomeId,
+    pub runtime_generation: Option<u64>,
     pub state: RunState,
     pub trigger: RunTrigger,
     pub retry_of: Option<RunId>,
@@ -676,6 +681,7 @@ pub struct RunLease {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunControl {
     Interrupt,
+    Quiesce { upgrade_id: String, deadline: i64 },
     Abandon { reason: String },
 }
 
@@ -793,6 +799,7 @@ pub enum StopCause {
     Interrupted,
     Failed { reason: String },
     Recovery,
+    HomeUpgrade { upgrade_id: String, deadline: i64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -436,10 +436,9 @@ where
         match registry_config.as_ref() {
             Some(config) => {
                 let work = crate::durable::WorkRef::Wave(config.wave.id().clone());
-                let (_, lease) = config
-                    .store
-                    .reserve_run(&work, crate::durable::RunTrigger::User)
-                    .await?;
+                let trigger = crate::lf::commands::install::upgrade_trigger_for_work(&work)
+                    .unwrap_or(crate::durable::RunTrigger::User);
+                let (_, lease) = config.store.reserve_run(&work, trigger).await?;
                 Some((config.store.clone(), lease))
             }
             None => None,
@@ -580,6 +579,13 @@ where
         Some(supervisor_handle),
         shutdown_door,
         discord_projection,
+        wave_run
+            .as_ref()
+            .map(|(store, lease)| server::WaveRunAttach {
+                store: Arc::clone(store),
+                lease: lease.clone(),
+                cwd: repo_root.clone(),
+            }),
     );
     let result = axum::serve(listener, app)
         .with_graceful_shutdown(graceful_shutdown)

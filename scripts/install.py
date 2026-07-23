@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""Build and install loopflow locally.
+"""Install published Loopflow releases or build this worktree locally.
 
     install.py local            # build this worktree into local-bin/
-    install.py local --use      # promote this worktree onto PATH and /Applications
     install.py local --skip swift
     install.py local -n         # dry run
-    install.py refresh          # update lf + lfd when the default branch moves
+    install.py refresh          # install the latest published release
 
 Remote releases happen via `lf release patch` -> merge -> auto-tag -> CI.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,15 +29,13 @@ from bundle_version import read_release_version, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
-APPLICATIONS_DIR = Path("/Applications")
 LOCAL_BIN = ROOT / "local-bin"
 APP_NAME = "Loopflow"
-# Pre-rename bundle name, removed on upgrade so /Applications keeps one copy.
-LEGACY_APP_NAME = "Concerto"
 # SwiftPM executable product; the library owns the bare `Loopflow` name, so the
 # app binary is built as `LoopflowMac` and renamed to APP_NAME inside the bundle.
 SWIFT_APP_PRODUCT = "LoopflowMac"
 BUILD_STAGES = ("cargo", "swift")
+LATEST_RELEASE_BASE = "https://github.com/loopflowstudio/loopflow/releases/latest/download"
 
 
 # --- Bundle spec (single source of truth for Loopflow.app layout) ---
@@ -133,74 +133,14 @@ def _run_or_raise(
         raise StageError(f"{label} exited {code}")
 
 
-# --- Git refresh ---
-
-
-def _git_stdout(args: list[str], repo: Path = ROOT, check: bool = True) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        text=True,
-        check=check,
-    )
-    if check:
-        result.check_returncode()
-    if result.returncode != 0:
-        return ""
-    return result.stdout.strip()
-
-
-def _refresh_default_branch(repo: Path = ROOT) -> bool:
-    default_branch = _git_stdout(
-        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
-        repo=repo,
-        check=False,
-    ).removeprefix("origin/")
-    current_branch = _git_stdout(["branch", "--show-current"], repo=repo)
-    if default_branch and current_branch != default_branch:
-        raise StageError(
-            f"refusing to pull {current_branch}; checkout {default_branch} or pass --no-pull"
-        )
-
-    before = _git_stdout(["rev-parse", "HEAD"], repo=repo)
-    typer.echo(f"Pulling {repo}...")
-    if default_branch:
-        _run_or_raise(["git", "fetch", "origin", default_branch], "git", cwd=repo)
-        _run_or_raise(["git", "merge", "--ff-only", f"origin/{default_branch}"], "git", cwd=repo)
-    else:
-        _run_or_raise(["git", "fetch"], "git", cwd=repo)
-        _run_or_raise(["git", "merge", "--ff-only", "@{upstream}"], "git", cwd=repo)
-    return _git_stdout(["rev-parse", "HEAD"], repo=repo) != before
-
-
 # --- Builds ---
 
 
-def _migration_authority(repo: Path = ROOT) -> str:
-    """Only a canonical main or tagged checkout may advance the release store."""
-    head = _git_stdout(["rev-parse", "HEAD"], repo=repo, check=False)
-    if not head:
-        return "published"
-    default_ref = _git_stdout(
-        ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
-        repo=repo,
-        check=False,
-    )
-    canonical = (
-        _git_stdout(["rev-parse", default_ref], repo=repo, check=False) if default_ref else ""
-    )
-    tagged = bool(_git_stdout(["tag", "--points-at", "HEAD"], repo=repo, check=False))
-    dirty = bool(_git_stdout(["status", "--porcelain"], repo=repo, check=False))
-    return "published" if not dirty and (head == canonical or tagged) else "validation_only"
-
-
-def _release_build_env() -> dict[str, str]:
+def _development_build_env() -> dict[str, str]:
     return {
         **os.environ,
-        "LOOPFLOW_BUILD_PROVENANCE": "release",
-        "LOOPFLOW_MIGRATION_AUTHORITY": os.environ.get(
-            "LOOPFLOW_MIGRATION_AUTHORITY", _migration_authority()
-        ),
+        "LOOPFLOW_BUILD_PROVENANCE": "development",
+        "LOOPFLOW_MIGRATION_AUTHORITY": "validation_only",
     }
 
 
@@ -210,27 +150,7 @@ def _build_binaries() -> None:
         ["cargo", "build", "-p", "loopflow", "--release"],
         "cargo",
         cwd=ROOT,
-        env=_release_build_env(),
-    )
-
-
-def _build_cli_binaries() -> None:
-    typer.echo("Building lf + lfd (cargo release)...")
-    _run_or_raise(
-        [
-            "cargo",
-            "build",
-            "--release",
-            "-p",
-            "loopflow",
-            "--bin",
-            "lf",
-            "--bin",
-            "lfd",
-        ],
-        "cargo",
-        cwd=ROOT,
-        env=_release_build_env(),
+        env=_development_build_env(),
     )
 
 
@@ -346,53 +266,62 @@ def _stage_binaries(local_bin: Path) -> None:
     _atomic_install(ROOT / "target" / "release" / "lfd", local_bin / "lfd")
 
 
-def _require_complete_schema_for_promotion(repo: Path) -> None:
-    drafts = sorted((repo / "rust/loopflow/src/store/migrations/drafts").glob("*.sql"))
-    if not drafts:
-        return
-    names = ", ".join(path.stem.rsplit("__", 1)[0] for path in drafts)
-    raise StageError(
-        f"refusing to promote with pending draft migrations: {names}; "
-        "cut a release so the binary embeds the schema its runtime code requires"
-    )
+def _download_release_asset(url: str, destination: Path) -> str:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            destination.write_bytes(response.read())
+            return response.geturl()
+    except OSError as exc:
+        raise StageError(f"download failed: {url}: {exc}") from exc
 
 
-def _promote_with_candidate(
-    candidate: Path,
-    install_dir: Path,
-    app_source: Path | None = None,
-    applications_dir: Path | None = None,
-) -> None:
-    """Delegate every Home-global mutation to the freshly built lf."""
-    _require_complete_schema_for_promotion(ROOT)
-    # Resolve the /Applications target at call time so the module global stays
-    # authoritative (a def-time default would freeze the real /Applications).
-    if applications_dir is None:
-        applications_dir = APPLICATIONS_DIR
-    command = [
-        str(candidate),
-        "install",
-        "promote",
-        "--cli-target",
-        str(install_dir / "lf"),
-        "--daemon-source",
-        str(candidate.with_name("lfd")),
-        "--daemon-target",
-        str(install_dir / "lfd"),
-        "--sync-skills",
-    ]
-    if app_source is not None:
-        command.extend(
-            [
-                "--app-source",
-                str(app_source),
-                "--app-target",
-                str(applications_dir / f"{APP_NAME}.app"),
-                "--legacy-app-target",
-                str(applications_dir / f"{LEGACY_APP_NAME}.app"),
-            ]
+def _release_tag_from_manifest_url(url: str) -> str:
+    marker = "/releases/download/"
+    if marker not in url:
+        raise StageError(f"latest release did not resolve to a pinned tag: {url}")
+    tag = url.split(marker, 1)[1].split("/", 1)[0]
+    if not tag.startswith("v") or len(tag) == 1:
+        raise StageError(f"latest release resolved to an invalid tag: {tag}")
+    return tag
+
+
+def _manifest_digest(manifest: Path, asset: str) -> str:
+    for line in manifest.read_text().splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1].removeprefix("*") == asset:
+            return fields[0]
+    raise StageError(f"published SHA256SUMS does not name {asset}")
+
+
+def _verify_release_asset(path: Path, expected: str) -> None:
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected:
+        raise StageError(
+            f"digest mismatch for {path.name}: expected {expected}, downloaded {actual}"
         )
-    _run_or_raise(command, "promote", cwd=ROOT)
+
+
+def _install_published_release(install_dir: Path) -> str:
+    with tempfile.TemporaryDirectory(prefix="loopflow-release-") as temp:
+        directory = Path(temp)
+        manifest = directory / "SHA256SUMS"
+        effective = _download_release_asset(
+            f"{LATEST_RELEASE_BASE}/SHA256SUMS", manifest
+        )
+        tag = _release_tag_from_manifest_url(effective)
+        pinned_base = (
+            f"https://github.com/loopflowstudio/loopflow/releases/download/{tag}"
+        )
+        installer = directory / "install.sh"
+        _download_release_asset(f"{pinned_base}/install.sh", installer)
+        _verify_release_asset(installer, _manifest_digest(manifest, "install.sh"))
+        env = {**os.environ, "LF_INSTALL_DIR": str(install_dir)}
+        _run_or_raise(
+            ["sh", str(installer), "--version", tag],
+            "published release",
+            env=env,
+        )
+        return tag
 
 
 # --- Loopflow bundle ---
@@ -525,24 +454,6 @@ def _verify_bundle_signature(spec: BundleSpec) -> None:
             typer.echo(f"  [codesign] {line}")
 
 
-# --- Reporting ---
-
-
-def _report_path_collisions(install_dir: Path) -> None:
-    found = shutil.which("lf")
-    if not found:
-        return
-    resolved = Path(found)
-    expected = install_dir / "lf"
-    typer.echo(f"lf: {resolved}")
-    if resolved != expected:
-        typer.echo(
-            f"Note: lf resolves to {resolved}, not {expected}. "
-            f"Add {install_dir} to PATH to use the freshly installed binary.",
-            err=True,
-        )
-
-
 # --- Commands ---
 
 
@@ -556,29 +467,21 @@ def _root() -> None:
 
 @app.command()
 def refresh(
-    no_pull: bool = typer.Option(
-        False, "--no-pull", help="Build the current checkout without pulling"
-    ),
     install_dir: Path | None = typer.Option(
         None, "--install-dir", help="Install lf here instead of the resolved local bin dir"
     ),
 ) -> None:
-    """Pull the default branch and install lf when it moves."""
+    """Install the latest published release through the external-user path."""
     resolved_install_dir = install_dir.expanduser() if install_dir else _resolve_install_dir()
 
     try:
-        target = resolved_install_dir / "lf"
-        if not no_pull and not _refresh_default_branch(ROOT) and target.exists():
-            revision = _git_stdout(["rev-parse", "--short", "HEAD"], repo=ROOT)
-            typer.echo(f"already current: {revision}")
-            return
-        _require_complete_schema_for_promotion(ROOT)
-        _build_cli_binaries()
-        _promote_with_candidate(ROOT / "target" / "release" / "lf", resolved_install_dir)
-    except (subprocess.CalledProcessError, StageError) as exc:
+        tag = _install_published_release(resolved_install_dir)
+    except StageError as exc:
         typer.echo(f"refresh failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    target = resolved_install_dir / "lf"
+    typer.echo(f"release: {tag}")
     typer.echo(f"installed: {target}")
     result = subprocess.run([str(target), "--version"], text=True)
     if result.returncode != 0:
@@ -587,22 +490,18 @@ def refresh(
 
 @app.command()
 def local(
-    use: bool = typer.Option(
-        False, "--use", help="Promote this build: symlink lf onto PATH and install the app"
-    ),
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show what would be done"),
     skip: list[str] = typer.Option(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
 ) -> None:
-    """Build this worktree into local-bin/; --use makes it the active build."""
+    """Build this worktree into local-bin/ with validation-only authority."""
     skip_set = set(skip)
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
         raise typer.BadParameter(f"unknown --skip values: {', '.join(sorted(unknown))}")
 
     spec = default_bundle_spec()
-    install_dir = _resolve_install_dir()
     version = read_release_version(ROOT)
 
     if dry_run:
@@ -611,37 +510,18 @@ def local(
         typer.echo(f"Would stage lf + {spec.app_path.name} (v{version}) into {LOCAL_BIN}")
         executable_names = ", ".join(path.name for path in spec.executables)
         typer.echo(f"  Contents/MacOS/: {executable_names}")
-        if use:
-            typer.echo(f"Would promote lf into {install_dir} through the Rust safety boundary")
-            typer.echo(f"Would install {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
-            typer.echo("Would sync skills into ~/.claude/skills and ~/.agents/skills")
-        else:
-            typer.echo("Would not promote (pass --use to install onto PATH and install the app)")
+        typer.echo("Would keep the validation-only build under local-bin/")
         return
 
     total_start = time.monotonic()
     try:
-        if use:
-            _require_complete_schema_for_promotion(ROOT)
         _run_parallel_builds(skip_set)
 
         typer.echo(f"Staging lf + {APP_NAME}.app (v{version}) into {LOCAL_BIN}...")
         _stage_binaries(LOCAL_BIN)
         _install_loopflow(spec, version)
         typer.echo(f"Built {spec.app_path}")
-
-        if use:
-            typer.echo(f"Promoting this worktree through lf install into {install_dir}...")
-            _promote_with_candidate(
-                LOCAL_BIN / "lf",
-                install_dir,
-                app_source=spec.app_path,
-            )
-            typer.echo(f"Installed {APPLICATIONS_DIR / f'{APP_NAME}.app'}")
-            _report_path_collisions(install_dir)
-
-        else:
-            typer.echo(f"\nBuilt into {LOCAL_BIN}. Run with --use to make it the active build.")
+        typer.echo(f"\nBuilt into {LOCAL_BIN}. Development builds cannot become production.")
     except StageError as exc:
         typer.echo(f"install failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

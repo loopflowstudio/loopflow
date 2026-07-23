@@ -11,7 +11,7 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{watch, Mutex};
 
-use crate::durable::{Containment, ContainmentObservation, HomeId, RunState, WorkRef};
+use crate::durable::{Containment, ContainmentObservation, HomeId, WorkRef};
 use crate::id::WaveId;
 use crate::store::SharedStore;
 use crate::wave::{self, registry, Wave};
@@ -137,6 +137,20 @@ impl WaveHost {
                         reason: error.to_string(),
                     },
                 },
+                Err(error) => WaveStartState::Failed {
+                    reason: error.to_string(),
+                },
+            };
+            outcomes.push(WaveStartOutcome { wave_id, state });
+        }
+        outcomes
+    }
+
+    pub(crate) async fn reconcile_waves(&self, wave_ids: Vec<WaveId>) -> Vec<WaveStartOutcome> {
+        let mut outcomes = Vec::with_capacity(wave_ids.len());
+        for wave_id in wave_ids {
+            let state = match self.start_wave(&wave_id).await {
+                Ok(endpoint) => WaveStartState::Live { endpoint },
                 Err(error) => WaveStartState::Failed {
                     reason: error.to_string(),
                 },
@@ -340,12 +354,6 @@ impl WaveHost {
                 crate::engine::process::process_group_observation(*id)
             }
             Some(Containment::Tmux { .. }) => ContainmentObservation::Unprovable,
-            None if run.state == RunState::Reserved
-                && run.created_at + time::Duration::seconds(10)
-                    <= time::OffsetDateTime::now_utc() =>
-            {
-                ContainmentObservation::Absent
-            }
             None => ContainmentObservation::Unprovable,
         };
         if observation != ContainmentObservation::Absent {
@@ -550,6 +558,64 @@ mod tests {
             )
             .await
             .expect("start Wave Run");
+        (
+            directory,
+            WaveHost::new(local.id, store, None),
+            wave,
+            run.id,
+        )
+    }
+
+    async fn wave_host_with_aged_reserved_run(
+    ) -> (tempfile::TempDir, WaveHost, Wave, crate::durable::RunId) {
+        let directory = tempfile::tempdir().expect("create temp directory");
+        let repo = directory.path().join("repo");
+        std::fs::create_dir_all(repo.join("wave/product")).expect("create Wave directory");
+        std::fs::write(repo.join("wave/product/GOAL.md"), "Product Wave.\n")
+            .expect("write Wave goal");
+        let database = directory.path().join("registry.db");
+        let store = Arc::new(
+            open_store(&StorageConfig::sqlite(database.clone()))
+                .await
+                .expect("open store"),
+        );
+        let connection = rusqlite::Connection::open(&database).expect("open raw store");
+        let enablement_is_materialized = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM pragma_table_info('work_placements') WHERE name='enabled'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .expect("inspect Work enablement schema");
+        if !enablement_is_materialized {
+            connection
+                .execute_batch(&crate::store::migrations::migration_sql_for_test(
+                    "work_enablement",
+                ))
+                .expect("apply Work enablement draft");
+        }
+        drop(connection);
+        let local = store.local_home().await.expect("read local Home");
+        let locator = WaveLocator::discover(&repo, "product").expect("discover Wave locator");
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            locator.repo().to_string(),
+        );
+        store.create_wave(&wave).await.expect("create Wave");
+        let (run, _) = store
+            .reserve_run(&WorkRef::Wave(wave.id().clone()), RunTrigger::User)
+            .await
+            .expect("reserve Wave Run");
+        rusqlite::Connection::open(database)
+            .expect("open raw store")
+            .execute(
+                "UPDATE runs SET created_at=1 WHERE id=?1",
+                [run.id.as_str()],
+            )
+            .expect("age reserved Run");
         (
             directory,
             WaveHost::new(local.id, store, None),
@@ -816,6 +882,27 @@ mod tests {
             .await
             .expect("reserve replacement Wave Run");
         assert_eq!(next.retry_of, Some(prior_run_id));
+    }
+
+    #[tokio::test]
+    async fn elapsed_time_never_releases_a_reserved_wave_without_containment() {
+        let (_directory, host, wave, run_id) = wave_host_with_aged_reserved_run().await;
+
+        let error = host
+            .reconcile_run_slot(&wave)
+            .await
+            .expect_err("age is not containment-absence evidence");
+
+        assert!(error.to_string().contains(run_id.as_str()));
+        assert!(error.to_string().contains("Unprovable"));
+        let current = host
+            .store
+            .current_run(&WorkRef::Wave(wave.id().clone()))
+            .await
+            .unwrap()
+            .expect("reserved Run remains current");
+        assert_eq!(current.id, run_id);
+        assert_eq!(current.state, RunState::Reserved);
     }
 
     #[tokio::test]

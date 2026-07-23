@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::child::ChildRef;
 use crate::durable::{
     AgentInvocation, AuthenticatedRequest, Author, Containment, ContainmentObservation, ControlCtx,
-    RunState, WorkStatus,
+    RunState, RunTrigger, WorkRef, WorkStatus,
 };
 use crate::engine::config::{load_config_or_default, parse_agent};
 use crate::engine::git::{current_branch, get_default_branch, is_clean, worktree_root};
@@ -348,6 +348,19 @@ pub(crate) async fn launch_project_process(
     store: &SharedStore,
     project: &mut Project,
 ) -> OpsResult<()> {
+    let basis = store
+        .current_epoch(&WorkRef::Project(project.id.clone()))
+        .await
+        .map_err(|error| project_error(error.to_string()))?
+        .current_basis;
+    launch_project_process_with_trigger(store, project, RunTrigger::Input { basis }).await
+}
+
+pub(crate) async fn launch_project_process_with_trigger(
+    store: &SharedStore,
+    project: &mut Project,
+    trigger: RunTrigger,
+) -> OpsResult<()> {
     // Re-check at the launch boundary: commands and observations can wake a
     // stopped Project long after its initial reservation.
     let wave = owning_wave(store, project).await?;
@@ -364,13 +377,8 @@ pub(crate) async fn launch_project_process(
     {
         return Ok(());
     }
-    let basis = store
-        .current_epoch(&work)
-        .await
-        .map_err(|error| project_error(error.to_string()))?
-        .current_basis;
     let (run, lease) = store
-        .reserve_run(&work, crate::durable::RunTrigger::Input { basis })
+        .reserve_run(&work, trigger)
         .await
         .map_err(|error| project_error(format!("failed to reserve Project Run: {error}")))?;
     let tmux_name = format!(

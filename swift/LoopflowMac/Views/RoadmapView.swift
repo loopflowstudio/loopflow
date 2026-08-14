@@ -106,16 +106,6 @@ struct RoadmapView: View {
         self.onOpenWave = onOpenWave
     }
 
-    init(
-        model: PodiumModel,
-        selection: Binding<WorkReference?>,
-        onOpenWave: @escaping (WaveSnapshot) -> Void = { _ in }
-    ) {
-        _model = State(initialValue: model)
-        _selection = selection
-        self.onOpenWave = onOpenWave
-    }
-
     private var repoPath: String? { model.repoPath }
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -629,7 +619,7 @@ struct RoadmapView: View {
 /// placement, including to remote Homes. Probed once per
 /// Wave card on appear (local reads are instant; a remote Home costs one routed
 /// probe), never once per row and never on the 15s roadmap poll.
-private struct HomeControl: View {
+struct HomeControl: View {
     let wave: WaveSnapshot
     let onOpen: () -> Void
     let onRefresh: () async -> Void
@@ -958,7 +948,7 @@ private struct RoadmapProjectCard: View {
     }
 }
 
-private struct RoadmapTaskRow: View {
+struct RoadmapTaskRow: View {
     let task: RoadmapTask
     let isSelected: Bool
     let activeControlId: String?
@@ -1028,7 +1018,7 @@ private struct RoadmapTaskRow: View {
 /// The shared attention fold plus its orthogonal raw facts: PM completion,
 /// Work status and process liveness. `runtime == nil` means Work has not started — an
 /// Available Task, distinct from a dead process.
-private struct WorkChannelChips: View {
+struct WorkChannelChips: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
@@ -1087,7 +1077,7 @@ private struct WorkChannelChips: View {
 /// The one contextual action plus the always-available Worktree/PR affordances,
 /// shared by the ROADMAP tree and the NOW list so both drive the exact same
 /// audited lifecycle verbs.
-private struct TaskActionCluster: View {
+struct TaskActionCluster: View {
     let task: RoadmapTask
     let isActing: Bool
     let controlsDisabled: Bool
@@ -1125,7 +1115,7 @@ private struct TaskActionCluster: View {
     }
 }
 
-private struct NowSectionView: View {
+struct NowSectionView: View {
     let section: NowSection
     let selection: WorkReference?
     let activeControlId: String?
@@ -1243,7 +1233,7 @@ private struct NowRowView: View {
     }
 }
 
-private extension RoadmapSection {
+extension RoadmapSection {
     var label: String {
         switch self {
         case .now: "Now"

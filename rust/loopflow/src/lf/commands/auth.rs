@@ -35,6 +35,9 @@ use crate::store::{
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
+// Authorization-code flows wait on a human finishing a browser login; give
+// them the ~10 minutes the OAuth authorization itself stays valid.
+const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
 #[cfg(test)]
 static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -60,7 +63,12 @@ struct AccountLifecycleUpdate<'a> {
 
 pub fn run(cmd: &AuthCommand) -> Result<()> {
     let rt = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    rt.block_on(run_async(cmd))
+    let result = rt.block_on(run_async(cmd));
+    // Don't wait for lingering blocking tasks: when the browser handoff
+    // completes a login, the backup stdin prompt is still mid-read and would
+    // otherwise hold the process open until the user presses Enter.
+    rt.shutdown_background();
+    result
 }
 
 async fn run_async(cmd: &AuthCommand) -> Result<()> {
@@ -187,9 +195,50 @@ async fn connect(raw_provider: &str) -> Result<()> {
         provider.display_name()
     );
     open_url(&verification_url);
-    println!("Complete authorization in the browser.");
 
-    wait_for_active_status(&service, provider, flow.expires_in).await
+    if service.pending_requires_authorization_code(provider).await {
+        // The browser normally hands the code back to the provider CLI's
+        // localhost listener on approval; the pasted code is the backup for
+        // when that handoff can't reach this machine.
+        println!("Approve authorization in the browser; login completes automatically.");
+        println!("If the browser shows a one-time code instead, paste it here.");
+        let timeout = flow.expires_in.or(Some(AUTH_CODE_FLOW_TIMEOUT_SECS));
+        tokio::select! {
+            result = wait_for_active_status(&service, provider, timeout) => result,
+            code = read_authorization_code_line() => {
+                if let Some(code) = code? {
+                    service.complete_auth(provider, &code).await?;
+                }
+                wait_for_active_status(&service, provider, timeout).await
+            }
+        }
+    } else {
+        println!("Complete authorization in the browser.");
+        wait_for_active_status(&service, provider, flow.expires_in).await
+    }
+}
+
+/// Read a pasted authorization code from stdin; None when stdin closes
+/// without one (headless runs fall back to the browser handoff alone).
+async fn read_authorization_code_line() -> Result<Option<String>> {
+    tokio::task::spawn_blocking(|| {
+        let stdin = std::io::stdin();
+        loop {
+            let mut line = String::new();
+            let read = stdin
+                .read_line(&mut line)
+                .context("read authorization code")?;
+            if read == 0 {
+                return Ok(None);
+            }
+            let code = line.trim();
+            if !code.is_empty() {
+                return Ok(Some(code.to_string()));
+            }
+        }
+    })
+    .await
+    .context("authorization code prompt task failed")?
 }
 
 async fn connect_account(

@@ -8,6 +8,7 @@ struct PodiumView: View {
 
     @Environment(\.palette) private var palette
     @State private var model: PodiumModel
+    @State private var openAsk: AskAttentionRecord?
 
     init(
         portfolioService: PortfolioService,
@@ -27,7 +28,10 @@ struct PodiumView: View {
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
-            PodiumBar(model: model)
+            PodiumBar(
+                model: model,
+                onOpenAsk: { openAsk = $0 }
+            )
             Divider()
             PodiumConsole(model: model) {
                 HSplitView {
@@ -83,11 +87,17 @@ struct PodiumView: View {
                 )
             }
         }
+        .sheet(item: $openAsk) { ask in
+            AskSessionView(initialAsk: ask) {
+                await model.refreshUserAskAttention()
+            }
+        }
     }
 }
 
 private struct PodiumBar: View {
     @Bindable var model: PodiumModel
+    let onOpenAsk: (AskAttentionRecord) -> Void
 
     private var repoTitle: String {
         guard let repoPath = model.repoPath else { return "All repositories" }
@@ -122,6 +132,8 @@ private struct PodiumBar: View {
             }
 
             Spacer(minLength: Spacing.sm)
+
+            UserAskAttentionButton(model: model, onOpen: onOpenAsk)
 
             TokenOutputInstrument(reading: model.processActivity)
                 .accessibilityIdentifier("podium-token-meter")

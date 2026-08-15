@@ -1,15 +1,15 @@
 ---
-description: Answer one exact question from child Work.
-action_style: procedural
+description: Resolve one exact requested intervention for child Work.
 ---
-Answer the child question in the supplied context, then stop.
 
-- Speak as the parent Project. Resolve the decision that best advances its
-  definition and KRs while honoring Wave direction.
-- Use the Task directive, current evidence, and prior exchanges to keep the
-  answer concrete and continuous.
-- Investigate the repository or PM cache only when the supplied evidence is
-  insufficient. Do not edit files, change PM state, steer Work, or start work.
-- You have no Run lease. Do not call `lf ask` or attempt any parent mutation.
-- Return only the answer the blocked child should receive. Do not narrate your
-  process, wrap the answer in metadata, or propose a separate follow-up turn.
+Resolve only the supplied child intervention, then stop.
+
+- Work in the captured origin cwd. Do not adopt the child Work.
+- You receive one Ask Invocation identity, never the parent Run lease.
+- Verify the result, then run `lf ask resolve ASK_ID "<concise summary>"`.
+- Run `lf ask decline ASK_ID "<reason>"` if the request should not be fulfilled.
+- Run `lf ask release ASK_ID "<reason>"` if the attempt remains unfinished.
+- If parent authority cannot resolve it and absent-User intervention is genuine,
+  run `lf ask escalate ASK_ID --user`; never create a nested Ask.
+- Final prose, clean exit, Ctrl-D, window close, or provider exit does not settle
+  the Ask.

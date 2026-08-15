@@ -614,7 +614,7 @@ pub fn trace(
         .collect::<Vec<_>>();
     let turns = store.agent_turns_for_invocations(&invocation_ids)?;
     let turn_ids = turns.iter().map(|turn| turn.id.clone()).collect::<Vec<_>>();
-    let asks = store.ask_exchanges_for_turns(&turn_ids)?;
+    let asks = store.asks_for_turns(&turn_ids)?;
     if content {
         let dto = trace_content(&invocations, &turns, invocation_prefix, turn_prefix)?;
         println!("{}", serde_json::to_string(&dto)?);
@@ -732,14 +732,19 @@ pub fn trace(
                 "      task    {}",
                 crate::trace::resolve_artifact(&turn.task_prompt_path)?.display()
             );
-            for ask in asks.iter().filter(|ask| ask.turn_id.as_str() == turn.id) {
+            for ask in asks.iter().filter(|ask| {
+                ask.origin
+                    .turn_id
+                    .as_ref()
+                    .is_some_and(|turn_id| turn_id.as_str() == turn.id)
+            }) {
                 println!(
                     "      ask     {}  {}",
                     short_id(ask.id.as_str()),
-                    ask.question
+                    ask.request
                 );
-                if let Some(answer) = &ask.answer {
-                    println!("      answer  {}", answer.text);
+                if let Some(result) = &ask.result {
+                    println!("      result  {}", result.text());
                 }
             }
         }
@@ -926,7 +931,7 @@ pub struct TraceDto {
     pub spans: Vec<SpanDto>,
     pub invocations: Vec<crate::trace::AgentInvocationRow>,
     pub turns: Vec<crate::trace::AgentTurnRow>,
-    pub asks: Vec<crate::durable::AskExchange>,
+    pub asks: Vec<crate::durable::Ask>,
     pub assets: Vec<crate::trace::ContextAssetRow>,
     pub decisions: Vec<crate::trace::ContextDecisionRow>,
 }

@@ -135,6 +135,7 @@ A Work names one stable Home authority, whose SSH route may change without
 moving the Work.
 
 ```bash
+lf --as task:DES-123 implement                  # one skill in the Task worktree
 lf home id                                      # this machine's HomeId
 lf work place wave <wave-id> <home-id>          # only while no Run is live
 lf start <wave>                                 # start it on this machine
@@ -142,6 +143,11 @@ lf stop <wave>                                  # stop it on this machine
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> start <wave>                   # start it on that Home
 ```
+
+Use `--as task:...`, `--as project:...`, or `--as wave:...` only with one
+named skill. In a plain terminal it starts a supervised User Run at that
+Work's placement. Inside a Run it is an exact identity assertion; a mismatch
+fails. It never binds a multi-step flow.
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
 are implicit. Foreground commands can choose from origin-forwarded and
@@ -151,8 +157,10 @@ on their machine.
 
 ## Speak
 
-Answer a human message in your turn text. Tasks, Projects, and Waves communicate
-through typed Work observations and targeted Ask/Answer exchanges.
+Answer a human message in your turn text. When a human is present, keep questions
+in that conversation. `lf ask` crosses to the immediate parent Work; headless
+`lf ask --user` requests genuine intervention from an absent User. An Ask is a
+durable Ask session, not a chat message or textual Answer.
 
 When the active skill calls for a durable Wave learning, edit
 `wave/<name>/MEMORY.md` through the ordinary repository workflow. Keep it

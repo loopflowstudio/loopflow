@@ -271,10 +271,12 @@ async fn task_ships_on_one_authority_chain_without_manual_repair() {
         .await
         .unwrap();
 
-    let flow = resume_task_phase(&task).unwrap();
-    let prepared = prepare_task_flow_step(&store, &mut task, &lease, "shipping-proof", &flow, None)
-        .await
-        .unwrap();
+    let mut flow = resume_task_phase(&task).unwrap();
+    let prepared =
+        prepare_task_flow_step(&store, &mut task, &lease, "shipping-proof", &mut flow, None)
+            .await
+            .unwrap()
+            .expect("shipping proof starts on an autonomous step");
     assert_eq!(prepared.turn.config.write_scope, AgentWriteScope::Worktree);
     assert!(!prepared.turn.config.skip_permissions);
     let codex = build_codex_command(

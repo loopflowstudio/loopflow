@@ -44,8 +44,18 @@ Every prompt starts with YAML frontmatter:
 ---
 requires: diff vs main | existing code | none
 produces: scratch/something.md | code changes | verdict
-interactive: true  # optional, default false
 ---
+```
+
+Skill frontmatter configures the work, not its launch surface. Direct TTY
+invocations have a present human; automated and `--batch` invocations are
+headless. Put a required User gate on the exact flow occurrence instead:
+
+```yaml
+- step:
+    id: review_design
+    name: review-design
+    human: true
 ```
 
 Then a one-line summary immediately after the closing `---`. This line captures the essence—what the prompt is for. No preamble, no "This prompt will...". Just state it.

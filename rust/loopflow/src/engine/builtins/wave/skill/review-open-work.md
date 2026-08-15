@@ -1,5 +1,4 @@
 ---
-interactive: true
 requires: none
 produces: scratch/open-work.md, possibly dispatched ship runs and branch prunes
 ---

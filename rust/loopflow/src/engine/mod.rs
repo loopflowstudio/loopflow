@@ -43,9 +43,10 @@ pub use execution::{
     NestedCursor, SkillExecutor, SkillOutcome, TEMP_XOR_ROUTE_STEP_NAME,
 };
 pub use flow::{
-    available_flow_names, expand_flow, find_skill_source_path, load_direction, load_flow,
-    load_goal, load_skill, render_goal, ConcreteOp, ConcreteSkill, ConcreteStep, ConcreteXor,
-    Direction, Flow, Goal, GoalRenderContext, Op, Skill, Step, XorDef, XorPath,
+    available_flow_names, expand_flow, find_skill_source_path, human_occurrence_ids,
+    load_direction, load_flow, load_goal, load_skill, render_goal, ConcreteOp, ConcreteSkill,
+    ConcreteStep, ConcreteXor, Direction, Flow, Goal, GoalRenderContext, OccurrencePolicy, Op,
+    Skill, Step, XorDef, XorPath,
 };
 pub use launch::{
     prepare_launch_prompt, ContextSourceOverrides, LaunchPromptInput, PreparedLaunchPrompt,

@@ -201,29 +201,6 @@ direction:
 }
 
 // =============================================================================
-// Interactive skills
-// =============================================================================
-
-#[test]
-fn config_interactive_skill_list() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-interactive:
-  - design
-  - review
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert!(config.interactive.contains(&"design".to_string()));
-    assert!(config.interactive.contains(&"review".to_string()));
-}
-
-// =============================================================================
 // Session launch
 // =============================================================================
 

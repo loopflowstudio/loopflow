@@ -29,7 +29,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — wave chat, the machine-wide roadmap, every task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; `lf` (bare) opens it.
+It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the terminal control conversation.
 
 Give an external agent harness the Loopflow operating skill:
 
@@ -78,6 +78,13 @@ lf task run INF-123                                   # durable Task Work, own w
 lf task steer INF-123 "take the smaller approach"     # redirect the active turn
 lf task status INF-123 --json                         # inspect durable state
 lf pr land -c                                         # merge the PR, complete the Task
+```
+
+Turn a reviewed design into work without another planning subsystem:
+
+```bash
+lf design                                             # author and review one design
+lf launch-plan                                        # keep the core here; launch independent Tasks
 ```
 
 Watch the whole machine:

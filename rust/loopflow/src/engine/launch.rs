@@ -579,7 +579,6 @@ Test skill body.
                     default_agent: None,
                     directions: vec!["thorough".to_string()],
                     action_style: Some("procedural".to_string()),
-                    interactive: Some(true),
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,

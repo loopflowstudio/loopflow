@@ -17,8 +17,8 @@ renders.
 ## Basic Usage
 
 ```bash
-lf                                 # open or focus Loopflow.app
-lf desktop                         # explicit alias
+lf                                 # terminal-native Loopflow control conversation
+lf desktop                         # explicitly open or focus Loopflow.app
 lf <skill>                        # run a skill file
 lf <skill>: args                  # run with arguments
 lf <namespace>/<skill>            # run a repo-local or installed namespaced skill
@@ -38,6 +38,7 @@ lf team/review                    # run .lf/skills/team/review.md
 lf npx/vercel-labs/deep-research  # fetch a skill from the npx skills catalog
 lf : "fix the typo"               # inline prompt
 lf debug -c                       # paste clipboard, fix the bug
+lf --as task:DES-123 implement    # run one skill as existing Task Work
 lf task run DES-123 --directive "fix the flaky test" # keep one Task through merge
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
@@ -163,6 +164,7 @@ level stays there. Put `--` before literal arguments that look like flags.
 |------|-------------|
 | `--docs PATH[,PATH...]` | Prefetch docs into context—files, globs, or dirs (default: none) |
 | `-w, --wave NAME` | Wave name for wave/ scoping |
+| `--as task\|project\|wave:SELECTOR` | Run one named skill as existing Work. In a plain terminal this starts a supervised User Run in that Work's cwd; inside a Run it asserts the exact ambient Work. Flows are rejected. |
 | `--diff-files / --no-diff-files` | Include files touched by branch (default: off) |
 | `--diff / --no-diff` | Include raw `git diff` output |
 
@@ -230,6 +232,8 @@ Flows are defined in `.lf/flows/`. See [Configuration](config.md).
 | `build` | kickoff → code → review-slice → demo |
 | `code` | implement → compress |
 | `pair` | design → code |
+| `design` | author one exact design at a User gate |
+| `launch-plan` | keep one coherent core here and launch independent follow-up Tasks |
 | `task-design` | kickoff → review-design |
 | `slice` | code → review-slice → publish/refresh Task PR |
 | `ship` | task-gate → record-learnings → op: pr land -c |
@@ -269,8 +273,10 @@ pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
 lf task status DES-123
-lf work asks project proj_...                          # pending questions from owned Tasks
-lf work answer ask_... "keep the public name"       # answer one exact Ask
+lf ask list                                           # parent Ask queue
+lf ask list --outgoing                                # this Work's unresolved requests
+lf ask list --user --json                             # User attention projection
+lf ask open ask_...                                   # sibling Ask terminal
 lf task steer DES-123 "rename the flag"
 lf task interrupt DES-123                            # no replacement direction
 lf task steer DES-123 "take the smaller approach"
@@ -313,17 +319,56 @@ PM binding, Work/Run history, and Home placement. It refuses live Wave,
 Project, or Task Runs and never keeps an old-name alias. UUID-addressed `lf
 work` reads and mutations also verify that the selected Work belongs to the
 invoking repository; a UUID from another repository is not a capability.
+
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
 `--finally` override them only while creating the Task. A skill that needs judgment runs
-`lf ask "<question>"`; the exchange routes to the immediate parent Run, or to
-the User for a supported interactive root. `lf ask wait` recovers the same
-exchange after shell loss.
+`lf ask "<intervention>"`; the Ask routes to the
+immediate parent Run. `--user` is explicit and never inferred for root Work.
+The ordinary command prints its id and request, then blocks without ending the
+provider invocation. `--noblock` returns an id and `lf ask wait` joins it
+later. Bare `wait` selects the newest unresolved Ask from the ambient
+Invocation, then Run, then Work; pass an id when the choice must be exact.
 
-Ask/Answer does not move Work Basis or advance the flow. `lf task steer` and
-`lf project steer` remain unsolicited durable direction, appended before live
-delivery is attempted. Interrupt and replacement direction stay separate:
-interrupt the active boundary, then Steer normally.
+An intervention Ask does not move Work Basis or advance a flow. A human flow
+node uses a `FlowStep` Ask as its authored body: resolve advances that node,
+decline returns to the preceding autonomous step, and release or process exit
+keeps it parked. `lf task steer` and `lf project steer` remain unsolicited
+durable direction.
+
+## Ask sessions
+
+```bash
+lf ask "Choose the proof"                       # ask the parent; block this shell
+lf ask --user "Connect Linear"                  # explicit absent-User intervention
+lf ask --noblock "Check the release"            # queue and print the Ask id
+lf ask wait [ask_...]                            # join newest outgoing or exact Ask
+lf ask list [--user] [--outgoing] [--json]       # attention or outgoing requests
+lf ask open ask_... [--json]                     # open or reattach a sibling session
+lf ask open ask_... --prepare --json             # return its exact attach descriptor
+lf ask presented ask_... invocation_... --json   # confirm that exact presentation
+lf ask resolve ask_... "Verified summary" [--json] # explicit success from its Invocation
+lf ask decline ask_... "Unsafe request" [--json] # explicit refusal
+lf ask release ask_... "Unfinished" [--json]     # close this attempt and requeue
+lf ask escalate ask_... --user [--json]          # transfer one parent Ask
+lf ask cancel ask_... "Withdrawn" [--json]       # requester/User cancellation
+```
+
+Ask Invocations start in the origin Run's captured cwd. An intervention
+Invocation receives no Run lease; a human flow-step Invocation also receives
+the active step's fenced writer lease so it runs the actual authored skill.
+The explicit id selects the Ask; the ambient AgentInvocation id authorizes the
+mutation and must be that Ask's active Invocation. A clean exit, Ctrl-D,
+exiting Ctrl-C, TERM, HUP, or proven local
+disappearance never means success; it requeues the same Ask. Unreachable remote
+liveness stays claimed rather than expiring on time. If the configured external
+terminal fails to open, the attachable attempt remains `not-presented`; repeat
+`open` to present that exact Invocation.
+
+Loopflow.app uses the same two-part presentation boundary: `open --prepare`
+claims or recovers the Ask session without launching a terminal, then `presented`
+records success only after Ghostty or an external target attaches the exact
+returned Invocation. A failed venue launch leaves the Ask `not-presented`.
 
 `--stack-on` places a new Task worktree on another Task's published PR. Its PR
 targets that parent branch automatically, then collapses onto `main` after the
@@ -387,18 +432,11 @@ its identity. The descriptor carries the supervising Run and its stable Work,
 Wave, Home, cwd, and containment alongside provider trace, explicit
 handback evidence, and optional attach argv.
 
-An interactive Task phase advances after one launch attempt. A successful
-surface is read-only and stays reopenable until handback; a failed launch is
-recorded once and does not retry the phase. Handback is advisory evidence, not
-Task input. Use `lf ask` for a dependency that must hold the Task open.
-Advisory launches disable provider hooks, plugins, and MCP integrations that
-could bypass the read-only boundary; a provider without an enforceable
-read-only mode is skipped.
-
 Closing the app or terminal does not supply handback evidence. Record the
 observed boundary result with `handback --outcome
 succeeded|failed|interrupted|unknown`; process exit alone does not claim
-success.
+success. Invocation handback describes opaque surfaces only; it never advances
+a Task flow. Human Task nodes use the durable Ask contract above.
 
 ## Speaking to Waves
 
@@ -639,17 +677,18 @@ mechanical git/PR operations. Tier skills add scoped delegation. Use
 lf debug -c    # include current clipboard text in the prompt
 ```
 
-### Launch Claude, Codex, or OpenCode interactively
+### Launch Claude, Codex, or OpenCode with a present human
 
 ```bash
-lf design                 # interactive skill → uses session.launch (default: tui)
+lf design                 # direct TTY → uses session.launch (default: tui)
 lf gate --tui             # force a terminal handoff for a normally-headless skill
 lf : "fix the bug" --ide -m codex   # force the Codex app instead
 ```
 
 `--tui` opens Claude, Codex, or OpenCode in the terminal. `--ide` opens Claude
 or Codex in its app. Both override the repo default. Set `session.launch: ide`
-in `.lf/config.yaml` to make the app the default for interactive skills.
+in `.lf/config.yaml` to make the app the default for direct human-present
+skills. Automated flow nodes and `--batch` remain headless.
 
 ### External skills
 

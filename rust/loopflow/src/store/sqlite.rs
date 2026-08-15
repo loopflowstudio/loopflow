@@ -2377,10 +2377,7 @@ impl SqliteStore {
         }))
     }
 
-    pub fn ask_exchanges_for_turns(
-        &self,
-        turn_ids: &[String],
-    ) -> StoreResult<Vec<crate::durable::AskExchange>> {
+    pub fn asks_for_turns(&self, turn_ids: &[String]) -> StoreResult<Vec<crate::durable::Ask>> {
         if turn_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -2389,7 +2386,7 @@ impl SqliteStore {
         for turn_ids in turn_ids.chunks(500) {
             let placeholders = in_placeholders(turn_ids.len());
             let sql = format!(
-                "SELECT id FROM ask_exchanges WHERE turn_id IN ({placeholders})
+                "SELECT id FROM ask_exchanges WHERE origin_turn_id IN ({placeholders})
                  ORDER BY asked_at, rowid"
             );
             let mut statement = conn.prepare(&sql)?;

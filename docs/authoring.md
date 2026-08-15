@@ -31,13 +31,16 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Frontmatter can make a directly invoked skill interactive; the body stays prose:
+Direct invocation from a TTY runs with a present human. `--batch` and automated
+flow execution run the same skill headlessly, so write a bounded contract for
+both surfaces when the work involves judgment or conversation:
 
 ```markdown
----
-interactive: true
----
-Explore the problem with the human before writing anything.
+## Reviewer mode
+
+- **Human reviewer:** explore the problem in the current conversation.
+- **Parent reviewer:** answer the assigned question from supplied evidence and
+  return without waiting for a human.
 ```
 
 Skills chain through `scratch/`: a step writes `scratch/<branch>.md`, the
@@ -56,9 +59,24 @@ flow — with commits between them:
 - gate
 ```
 
-Skills that need judgment run `lf ask "<question>"`. The command records the
-exchange under the current Turn, waits for its routed Answer, then returns that
-Answer to the same skill process. Flow YAML needs no interaction flag.
+Skills that need outside authority run `lf ask "<intervention>"`. The command
+creates a durable Ask session under the current Turn, waits for
+its typed result, then returns the verified summary to the same skill process.
+
+Put a mandatory absent-User gate on the exact authored occurrence. `id` is
+stable within the expanded flow and required with `human: true`:
+
+```yaml
+- step:
+    id: review_kickoff
+    name: review-design
+    human: true
+```
+
+A headless Task parks at that node; an attached TUI uses its present User.
+Decline returns to the nearest preceding autonomous occurrence. Flow policy
+does not create a separate review ledger; workflows that are already designed
+can select an existing gate-free first flow when they launch a Task.
 
 Mechanical git/PR operations ride along as `op:` steps:
 

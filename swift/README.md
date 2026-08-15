@@ -21,6 +21,9 @@ vertical signal meter shows normalized output over five seconds, with the
 counter. The lamp stays independent from output: black is off, green
 is producing, blue is blocked, and amber is waiting or unknown. Wave count,
 active Runs, and Run-without-listener warnings come from `lf ls --json`.
+Its User-attention badge reads `lf ask list --user --json`; selecting a request
+claims or recovers the same Ask session used by the CLI, then attaches its exact
+Invocation in embedded Ghostty or an attach-capable external target.
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.
 Each provider node retains its existing repository and Work attribution, so the
@@ -82,7 +85,7 @@ and observation spans.
   override. Waves and Projects remain control-plane processes in main.
 - **Task workspace presentation** reads `lf task changes/diff/file --json`.
   Lifecycle mutations remain `lf task run/resume/interrupt`; routed questions
-  are answered through the explicit `lf work asks/answer` CLI.
+  use the shared `lf ask` queue.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf ls/status/roadmap/ps/activity/usage/doctor/tokens/context/trace --json`; the app
   does not maintain a second roadmap or lifecycle database. Unavailable per-Wave

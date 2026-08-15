@@ -4055,7 +4055,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_asks_enforce_complete_answers_and_one_pending_exchange() {
+    fn durable_ask_invocations_enforce_complete_results_and_allow_plural_pending_turns() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
 
@@ -4073,45 +4073,284 @@ mod tests {
             assert!(!task_columns.contains(&deleted.to_string()));
         }
         assert!(!columns(&conn, "work_flow_positions").contains(&"interactive".to_string()));
+        assert!(columns(&conn, "work_flow_positions").contains(&"node_id".to_string()));
+        assert!(columns(&conn, "work_flow_positions").contains(&"human".to_string()));
 
         conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO work_flow_positions (
+                    epoch_id, flow, step, node_id, human,
+                    step_index, iteration, updated_at
+                 ) VALUES ('epoch_human', 'task-design', 'review-design',
+                           NULL, 1, 1, 0, 1)",
+                [],
+            )
+            .is_err());
         conn.execute(
             "INSERT INTO ask_exchanges (
-                id, turn_id, route_kind, route_work_kind, route_work_id,
-                question, asked_at
-             ) VALUES ('ask_one', 'turn_one', 'parent', 'project', 'ps_parent',
-                       'Which proof?', 1)",
+                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                target_kind, target_work_kind, target_work_id,
+                request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                'ask_one', 'epoch_one', 'task', 'task_one', 'run_one',
+                'turn_one', 'invocation_one', 'home_one', '/repo',
+                'parent', 'project', 'proj_parent',
+                'intervention', 'Which proof?', 'queued', 1
+             )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ask_exchanges (
+                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                target_kind, request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                'ask_two', 'epoch_one', 'task', 'task_one', 'run_one',
+                'turn_one', 'invocation_one', 'home_one', '/repo',
+                'user', 'intervention', 'Which proof?', 'queued', 2
+             )",
             [],
         )
         .unwrap();
         assert!(conn
             .execute(
-                "INSERT INTO ask_exchanges (
-                    id, turn_id, route_kind, question, asked_at
-                 ) VALUES ('ask_two', 'turn_one', 'user', 'Another?', 2)",
-                [],
-            )
-            .is_err());
-        assert!(conn
-            .execute(
-                "UPDATE ask_exchanges SET answer_text='partial' WHERE id='ask_one'",
+                "UPDATE ask_exchanges
+                 SET result_text='partial' WHERE id='ask_one'",
                 [],
             )
             .is_err());
         conn.execute(
             "UPDATE ask_exchanges
-             SET answer_author_kind='user', answer_text='This proof', answered_at=3
+             SET state='resolved', result_kind='resolved', result_text='This proof',
+                 terminal_author_kind='user', terminal_at=3
              WHERE id='ask_one'",
             [],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO ask_exchanges (
-                id, turn_id, route_kind, question, asked_at
-             ) VALUES ('ask_two', 'turn_one', 'user', 'Another?', 4)",
+                id, epoch_id, origin_work_kind, origin_work_id, origin_run_id,
+                origin_turn_id, origin_invocation_id, origin_home_id, origin_cwd,
+                target_kind, request_kind, request_prompt, state, asked_at
+             ) VALUES (
+                'ask_three', 'epoch_one', 'task', 'task_one', 'run_one',
+                'turn_one', 'invocation_one', 'home_one', '/repo',
+                'user', 'intervention', 'Another?', 'queued', 4
+             )",
             [],
         )
         .unwrap();
+        let invocation_columns = columns(&conn, "agent_invocations");
+        for column in ["answer_ask_id", "ask_ready_at", "ask_presented_at"] {
+            assert!(invocation_columns.contains(&column.to_string()));
+        }
+    }
+
+    #[test]
+    fn durable_ask_invocations_migrate_pending_and_answered_history() {
+        let conn = open();
+        apply_before_draft(&conn, "durable_ask_invocations");
+        conn.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             INSERT INTO waves (id, name, repo, created_at)
+             VALUES ('wave_migration', 'migration', '/repo', 10);
+             INSERT INTO epochs (
+                 id, number, wave_id, project_id, task_id, state, current_rev,
+                 created_at, terminal_at
+             ) VALUES (
+                 'epoch_00000000000000000000000000000001', 1, 'wave_migration',
+                 NULL, NULL, 'open', 0, 10, NULL
+             );
+             INSERT INTO runs (
+                 id, epoch_id, home_id, state, trigger_json, retry_of,
+                 lease_hash, lease_generation, source_kind, source_id,
+                 created_at, ended_at, stop_reason, containment_kind,
+                 containment_id, cwd, started_at
+             ) VALUES (
+                 'run_00000000000000000000000000000001',
+                 'epoch_00000000000000000000000000000001',
+                 (SELECT id FROM homes LIMIT 1), 'active', '{\"kind\":\"user\"}',
+                 NULL, 'lease', 1, 'wave', 'wave_migration', 11, NULL, NULL,
+                 'tmux', 'migration', '/repo/worktree', 11
+             );
+             INSERT INTO agent_invocations (
+                 id, run_id, process_id, started_at, ended_at, repo, worktree,
+                 wave, flow, skill, provider, model, surface, capture_status,
+                 incomplete_reason, outcome, artifact_dir, conversation_path,
+                 provider_events_path, provider_session_id, provider_session_path,
+                 conversation_event_count, conversation_bytes, project, task,
+                 supervising_run_id, account_id, resume_token, handback_state,
+                 answer_ask_id
+             ) VALUES (
+                 'invocation_00000000000000000000000000000001', 'trace', 'process',
+                 12, NULL, '/repo', '/repo/worktree', 'migration', NULL, NULL,
+                 'codex', NULL, 'headless', 'capturing', NULL, 'running',
+                 '/tmp/artifacts', '/tmp/conversation', NULL, NULL, NULL,
+                 0, 0, NULL, NULL, 'run_00000000000000000000000000000001',
+                 NULL, NULL, NULL, 'ask_00000000000000000000000000000001'
+             );
+             INSERT INTO agent_turns (
+                 id, invocation_id, ordinal, provider_turn_id, started_at,
+                 ended_at, status, input_op, context_coverage, tokenizer,
+                 system_prompt_path, task_prompt_path, system_tokens, task_tokens,
+                 supplied_context_tokens, context_gather_ms, context_render_ms,
+                 context_persist_ms, first_event_seq, last_event_seq, root_output,
+                 epoch_id, basis_rev
+             ) VALUES
+                 ('turn_00000000000000000000000000000001',
+                  'invocation_00000000000000000000000000000001', 1, NULL, 13,
+                  NULL, 'running', 'initial', 'assembled', 'o200k_base', NULL,
+                  '/tmp/task', 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
+                  'epoch_00000000000000000000000000000001', 0),
+                 ('turn_00000000000000000000000000000002',
+                  'invocation_00000000000000000000000000000001', 2, NULL, 14,
+                  NULL, 'running', 'message', 'assembled', 'o200k_base', NULL,
+                  '/tmp/task', 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
+                  'epoch_00000000000000000000000000000001', 0);
+             INSERT INTO ask_exchanges (
+                 id, turn_id, route_kind, route_work_kind, route_work_id,
+                 question, asked_at, answer_author_kind, answer_author_id,
+                 answer_text, answered_at
+             ) VALUES
+                 ('ask_00000000000000000000000000000001',
+                  'turn_00000000000000000000000000000001', 'parent', 'project',
+                  'proj_00000000000000000000000000000001', 'Pending?', 20,
+                  NULL, NULL, NULL, NULL),
+                 ('ask_00000000000000000000000000000002',
+                 'turn_00000000000000000000000000000002', 'user', NULL, NULL,
+                  'Answered?', 21, 'run',
+                  'run_00000000000000000000000000000001', 'The answer', 22);
+             INSERT INTO ask_linear_comment_outbox (
+                 ask_id, transition, task_id, issue_id, body, created_at,
+                 attempt_count, attempt_started_at, last_error,
+                 linear_comment_id, delivered_at
+             ) VALUES (
+                 'ask_00000000000000000000000000000002', 'answer',
+                 'task_00000000000000000000000000000001', 'ENG-1',
+                 'historical task answer attribution', 22, 1, NULL, NULL,
+                 'comment-1', 23
+             );",
+        )
+        .unwrap();
+
+        apply_draft(&conn, "durable_ask_invocations");
+
+        let pending: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+        ) = conn
+            .query_row(
+                "SELECT state, target_kind, request_prompt, origin_cwd,
+                        origin_turn_id, origin_invocation_id, asked_at, terminal_at
+                 FROM ask_exchanges
+                 WHERE id='ask_00000000000000000000000000000001'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            pending,
+            (
+                "queued".into(),
+                "parent".into(),
+                "Pending?".into(),
+                "/repo/worktree".into(),
+                "turn_00000000000000000000000000000001".into(),
+                "invocation_00000000000000000000000000000001".into(),
+                20,
+                None,
+            )
+        );
+        let answered: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            i64,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT state, target_kind, result_kind, result_text,
+                        terminal_author_kind, terminal_author_id,
+                        origin_turn_id, origin_invocation_id, asked_at, terminal_at
+                 FROM ask_exchanges
+                 WHERE id='ask_00000000000000000000000000000002'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            answered,
+            (
+                "resolved".into(),
+                "user".into(),
+                "resolved".into(),
+                "The answer".into(),
+                "run".into(),
+                Some("run_00000000000000000000000000000001".into()),
+                "turn_00000000000000000000000000000002".into(),
+                "invocation_00000000000000000000000000000001".into(),
+                21,
+                22,
+            )
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT issue_id || ':' || body FROM ask_linear_comment_outbox
+                 WHERE ask_id='ask_00000000000000000000000000000002'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap(),
+            "ENG-1:historical task answer attribution"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT answer_ask_id FROM agent_invocations
+                 WHERE id='invocation_00000000000000000000000000000001'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .unwrap(),
+            None
+        );
     }
 
     #[test]

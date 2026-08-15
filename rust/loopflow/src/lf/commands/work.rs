@@ -3,8 +3,8 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::durable::{
-    Answer, AskExchange, AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt,
-    Placement, ProjectId, Run, SteerReceipt, TaskId, WorkRef, WorkStatus,
+    AuthenticatedRequest, ControlCtx, EpochReceipt, InterruptReceipt, Placement, ProjectId, Run,
+    SteerReceipt, TaskId, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::lf::WorkCommand;
@@ -114,46 +114,13 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             };
             print_receipt(&WorkReceipt::Steer(receipt), *json)?;
         }
-        WorkCommand::Asks { kind, id, json } => {
-            let lease = crate::ops::ambient_run_lease(&store).await?;
-            let asks = match (lease.as_ref(), kind.as_deref(), id.as_deref()) {
-                (Some(lease), None, None) => store.pending_asks_for_parent(&lease.work).await?,
-                (Some(lease), Some(kind), Some(id)) => {
-                    let parent = parse_work(kind, id)?;
-                    require_work_repository(&store, &parent, repo).await?;
-                    if parent != lease.work {
-                        return Err(anyhow!(
-                            "ambient Run owns {} {}, not {} {}",
-                            lease.work.kind(),
-                            lease.work.id(),
-                            parent.kind(),
-                            parent.id()
-                        ));
-                    }
-                    store.pending_asks_for_parent(&parent).await?
-                }
-                (None, None, None) => store.pending_user_asks().await?,
-                (None, Some(_), Some(_)) => {
-                    return Err(anyhow!(
-                        "parent-routed Asks require that parent Work's active Run lease"
-                    ))
-                }
-                (_, _, _) => return Err(anyhow!("pass both Work kind and id, or neither")),
-            };
-            print_asks(&asks, *json)?;
+        WorkCommand::Asks { .. } => {
+            return Err(anyhow!("`lf work asks` retired; use `lf ask list`"));
         }
-        WorkCommand::Answer { ask_id, text, json } => {
-            let answer = if let Some(lease) = crate::ops::ambient_run_lease(&store).await? {
-                store
-                    .answer_ask(&ControlCtx::Run(&lease), ask_id, text)
-                    .await?
-            } else {
-                let request = AuthenticatedRequest::cli();
-                store
-                    .answer_ask(&ControlCtx::User(&request), ask_id, text)
-                    .await?
-            };
-            print_answer(&answer, *json)?;
+        WorkCommand::Answer { ask_id, .. } => {
+            return Err(anyhow!(
+                "`lf work answer` retired; use `lf ask open {ask_id}` and settle from the Ask session"
+            ));
         }
         WorkCommand::Interrupt { kind, id, json } => {
             let work = parse_work(kind, id)?;
@@ -191,28 +158,6 @@ async fn run_async(command: &WorkCommand, repo: &Path) -> anyhow::Result<()> {
             let receipt = store.abandon(&work, reason, &basis).await?;
             print_receipt(&WorkReceipt::Abandoned(receipt), *json)?;
         }
-    }
-    Ok(())
-}
-
-fn print_asks(asks: &[AskExchange], json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(asks)?);
-    } else if asks.is_empty() {
-        println!("No pending Asks.");
-    } else {
-        for ask in asks {
-            println!("{}  {}", ask.id, ask.question);
-        }
-    }
-    Ok(())
-}
-
-fn print_answer(answer: &Answer, json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(answer)?);
-    } else {
-        println!("answered {}", answer.ask_id);
     }
     Ok(())
 }

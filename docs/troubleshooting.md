@@ -26,14 +26,14 @@ Read its durable state before restarting anything:
 
 ```bash
 lf task status INF-123 --json
-lf work asks
+lf ask list --user
 ```
 
 Answer an exact pending question, send unsolicited durable direction through
 Steer, or resume a stopped process through the same Task Work:
 
 ```bash
-lf work answer ask_... "address the failing check first"
+lf ask open ask_...
 lf task steer INF-123 "address the latest feedback"
 lf task interrupt INF-123
 lf task resume INF-123

@@ -172,9 +172,10 @@ journal event or Discord message source.
 
 Loopflow retains source-linked inputs until the resident consumes them,
 execution turns, deterministic send intents, cursors, and provider receipts as
-Run evidence. `home_id` is the binding's durable owner (`lf home id`). Another
-Home fails before contacting Discord, while an OS-held lease prevents another
-checkout on the owner Home from consuming the same channel.
+Run evidence. `home_id` is the portable binding owner (`lf home id`) and must
+match the Wave's durable placement. Another Home fails before contacting
+Discord, while an OS-held lease prevents another checkout on the owner Home
+from consuming the same channel.
 
 Read the active epoch or an earlier one explicitly:
 

@@ -58,14 +58,16 @@ pub enum DiscordError {
     #[error("Discord messages are limited to {limit} characters; this message has {actual}")]
     MessageTooLong { limit: usize, actual: usize },
     #[error("Discord chat binding is owned by Home {owner}; current Home is {current}")]
-    WrongHome { owner: String, current: String },
+    WrongHome { owner: HomeId, current: HomeId },
+    #[error("Discord chat binding Home {configured} does not match Wave placement {placed}")]
+    PlacementMismatch { configured: HomeId, placed: HomeId },
     #[error(
         "Discord chat binding {guild_id}/{channel_id} already has a live listener on Home {home_id}"
     )]
     AlreadyOwned {
         guild_id: String,
         channel_id: String,
-        home_id: String,
+        home_id: HomeId,
     },
     #[error("failed to claim Discord chat binding: {0}")]
     Lease(#[from] std::io::Error),
@@ -80,9 +82,10 @@ impl DiscordError {
 
 /// Process-held ownership for one Discord binding on its configured Home.
 ///
-/// The configured Home prevents a second Home from competing. The advisory
-/// lock prevents a second checkout or store on that Home from competing. The
-/// file may outlive the process; only the held OS lock carries authority.
+/// The authored Home stays portable when another store observes the repo. It
+/// must agree with Wave placement; the advisory lock then prevents a second
+/// checkout or store on that Home from competing. The file may outlive the
+/// process; only the held OS lock carries authority.
 #[derive(Debug)]
 struct DiscordBindingLease {
     _file: File,
@@ -91,13 +94,20 @@ struct DiscordBindingLease {
 impl DiscordBindingLease {
     fn acquire(
         binding: &DiscordChatBinding,
-        owner_home_id: &HomeId,
+        configured_home_id: &HomeId,
+        placed_home_id: &HomeId,
         local_home_id: &HomeId,
     ) -> Result<Self, DiscordError> {
-        if owner_home_id != local_home_id {
+        if configured_home_id != placed_home_id {
+            return Err(DiscordError::PlacementMismatch {
+                configured: configured_home_id.clone(),
+                placed: placed_home_id.clone(),
+            });
+        }
+        if configured_home_id != local_home_id {
             return Err(DiscordError::WrongHome {
-                owner: owner_home_id.to_string(),
-                current: local_home_id.to_string(),
+                owner: configured_home_id.clone(),
+                current: local_home_id.clone(),
             });
         }
         Self::acquire_at(
@@ -131,7 +141,7 @@ impl DiscordBindingLease {
                 Err(DiscordError::AlreadyOwned {
                     guild_id: binding.guild_id.clone(),
                     channel_id: binding.channel_id.clone(),
-                    home_id: local_home_id.to_string(),
+                    home_id: local_home_id.clone(),
                 })
             }
             Err(error) => Err(DiscordError::Lease(error)),
@@ -266,11 +276,17 @@ pub(crate) struct DiscordProjection {
 impl DiscordAdapter {
     pub async fn preflight(
         binding: DiscordChatBinding,
-        owner_home_id: &HomeId,
+        configured_home_id: &HomeId,
+        placed_home_id: &HomeId,
         local_home_id: &HomeId,
         token: Option<SecretString>,
     ) -> Result<Self, DiscordError> {
-        let lease = DiscordBindingLease::acquire(&binding, owner_home_id, local_home_id)?;
+        let lease = DiscordBindingLease::acquire(
+            &binding,
+            configured_home_id,
+            placed_home_id,
+            local_home_id,
+        )?;
         let client = match token {
             Some(token) => DiscordClient::from_secret(Some(token), API_BASE)?,
             None => DiscordClient::from_env()?,
@@ -503,7 +519,7 @@ impl DiscordAdapter {
             if delivery
                 .confirmed
                 .values()
-                .any(|provider_id| provider_id == &message.id)
+                .any(|provider_message_id| provider_message_id == &message.id)
             {
                 return Ok(true);
             }
@@ -1240,11 +1256,23 @@ mod tests {
         let local = HomeId::new();
         let owner = HomeId::new();
 
-        let error = DiscordAdapter::preflight(binding(), &owner, &local, None)
+        let error = DiscordAdapter::preflight(binding(), &owner, &owner, &local, None)
             .await
             .expect_err("another Home must not reach token or Discord preflight");
 
         assert!(matches!(error, DiscordError::WrongHome { .. }));
+    }
+
+    #[tokio::test]
+    async fn discord_chat_rejects_binding_placement_drift_before_provider_access() {
+        let configured = HomeId::new();
+        let placed = HomeId::new();
+
+        let error = DiscordAdapter::preflight(binding(), &configured, &placed, &configured, None)
+            .await
+            .expect_err("binding ownership and Wave placement must agree");
+
+        assert!(matches!(error, DiscordError::PlacementMismatch { .. }));
     }
 
     #[tokio::test]
@@ -1342,6 +1370,89 @@ mod tests {
             "self echo is not input"
         );
         server.abort();
+    }
+
+    #[test]
+    fn discord_chat_reconciliation_does_not_reuse_a_confirmed_echo() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let runtime = WaveRuntime::open_with_backing(
+            "ship".into(),
+            temp.path().to_path_buf(),
+            crate::wave::chat::ChatBacking::discord(&binding()),
+        )
+        .expect("runtime");
+        runtime
+            .try_attach_discord(binding(), "bot".into(), None)
+            .expect("attach");
+        runtime
+            .try_deliver_discord(
+                "question".into(),
+                DiscordMessageSource {
+                    binding: binding(),
+                    message_id: "101".into(),
+                    author_id: "human".into(),
+                },
+            )
+            .expect("deliver");
+        let answer = runtime.pending_messages()[0].id.0.clone();
+        runtime.apply_resident_delta(ResidentDelta::TurnOpened {
+            answers: vec![answer],
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnText {
+            text: "x".repeat(4_000),
+        });
+        runtime.apply_resident_delta(ResidentDelta::TurnFinished {
+            status: Lifecycle::Completed,
+            reason: None,
+        });
+        let delivery = runtime.discord_snapshot().deliveries[0].clone();
+        assert_eq!(delivery.parts.len(), 2);
+        assert_eq!(delivery.parts[0].content, delivery.parts[1].content);
+        runtime
+            .try_confirm_discord_part(
+                &delivery.delivery_id,
+                &delivery.parts[0].part_id,
+                "provider-1".into(),
+            )
+            .expect("confirm first part");
+
+        let client = DiscordClient::from_token(Some("fixture-token".into()), "http://unused")
+            .expect("fixture client");
+        let (health, _) = watch::channel(ChatBackingHealth::Ready);
+        let adapter = DiscordAdapter {
+            client,
+            binding: binding(),
+            bot_user_id: "bot".into(),
+            initial_head: None,
+            health,
+            _lease: None,
+        };
+        let echo = |id: &str| Message {
+            id: id.into(),
+            author: User {
+                id: "bot".into(),
+                bot: Some(true),
+            },
+            content: delivery.parts[1].content.clone(),
+            kind: 0,
+            webhook_id: None,
+            message_reference: Some(ReturnedMessageReference {
+                message_id: Some("101".into()),
+            }),
+        };
+
+        adapter
+            .reconcile_echo(&runtime, &echo("provider-1"))
+            .expect("ignore already confirmed echo");
+        assert_eq!(runtime.discord_snapshot().deliveries[0].confirmed.len(), 1);
+        adapter
+            .reconcile_echo(&runtime, &echo("provider-2"))
+            .expect("confirm second echo");
+        let resumed = &runtime.discord_snapshot().deliveries[0];
+        assert_eq!(
+            resumed.confirmed.get(&delivery.parts[1].part_id),
+            Some(&"provider-2".to_string())
+        );
     }
 
     #[tokio::test]

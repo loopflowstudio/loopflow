@@ -240,30 +240,23 @@ struct DTOFixtureTests {
         #expect(decoded == surface)
     }
 
-    @Test("Turn and Ask fixtures preserve the targeted exchange")
-    func askExchangeFixturesRoundTrip() throws {
-        let turn = try JSONDecoder().decode(
-            TurnRecord.self,
-            from: loadFixtureData("turn.json")
+    @Test("User Ask attention fixture preserves the durable queue projection")
+    func askAttentionFixtureRoundTrips() throws {
+        let attention = try JSONDecoder().decode(
+            [AskAttentionRecord].self,
+            from: loadFixtureData("ask_attention.json")
         )
-        #expect(turn.state == .active)
-        #expect(turn.basis.revision == 4)
+        let ask = try #require(attention.first)
+        #expect(ask.attention == .queued)
+        #expect(ask.ask.origin.work == .task(
+            id: "task_00000000000000000000000000000001"
+        ))
+        #expect(ask.ask.request == .intervention(prompt: "Connect Linear for this worktree"))
+        #expect(ask.surface == nil)
 
-        let ask = try JSONDecoder().decode(
-            AskExchangeRecord.self,
-            from: loadFixtureData("ask_exchange.json")
-        )
-        #expect(ask.turnId == turn.id)
-        #expect(ask.route == .parent(WorkReference(
-            kind: .project,
-            id: "proj_00000000000000000000000000000001"
-        )))
-        #expect(ask.answer?.author == .run(id: "run_00000000000000000000000000000001"))
-        #expect(ask.answer?.text == "The live blocking exchange.")
-
-        let encoded = try JSONEncoder().encode(ask)
-        let decoded = try JSONDecoder().decode(AskExchangeRecord.self, from: encoded)
-        #expect(decoded == ask)
+        let encoded = try JSONEncoder().encode(attention)
+        let decoded = try JSONDecoder().decode([AskAttentionRecord].self, from: encoded)
+        #expect(decoded == attention)
     }
 
     @Test("Work status fixture preserves every status and wait kind")

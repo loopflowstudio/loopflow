@@ -1,5 +1,4 @@
 ---
-interactive: false
 requires: Task design, implementation diff, and runnable behavior
 produces: repaired reviewable change | precise direction for the next slice
 default_agent: claude

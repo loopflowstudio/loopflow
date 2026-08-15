@@ -366,7 +366,6 @@ pub async fn run_loop(
 struct WaveControl {
     store: Arc<Store>,
     lease: RunLease,
-    wave: crate::wave::Wave,
 }
 
 async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
@@ -394,11 +393,7 @@ async fn wave_control(wave: &str) -> Result<Option<WaveControl>> {
             registered.name()
         ));
     }
-    Ok(Some(WaveControl {
-        store,
-        lease,
-        wave: registered,
-    }))
+    Ok(Some(WaveControl { store, lease }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -412,8 +407,8 @@ async fn run_loop_with(
     backend: BodyBackend,
     control: Option<WaveControl>,
 ) -> Result<()> {
-    let answer_lane = control.as_ref().map(|control| {
-        crate::project::answer::AnswerLane::new(control.lease.work.clone(), control.lease.clone())
+    let ask_lane = control.as_ref().map(|control| {
+        crate::ops::ask::AskLane::new(control.lease.work.clone(), control.lease.clone())
     });
     let mut wave_loop = WaveLoop {
         client,
@@ -430,14 +425,14 @@ async fn run_loop_with(
         cron_last_fired: HashMap::new(),
         provider_session: None,
         control,
-        answer_lane,
+        ask_lane,
         end: None,
     };
-    let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
-    answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
+    ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     while wave_loop.end.is_none() {
-        wave_loop.service_answers().await;
+        wave_loop.service_resolvers().await;
         if !wave_loop.queue.is_empty() {
             wave_loop.start_queued_pass(&mut inbox_rx).await;
             continue;
@@ -462,12 +457,8 @@ async fn run_loop_with(
             _ = sleep_until_opt(Some(heartbeat_at)) => {
                 wave_loop.on_heartbeat(&mut inbox_rx).await;
             }
-            _ = answer_poll.tick(), if wave_loop.answer_lane.is_some() => {}
+            _ = ask_poll.tick(), if wave_loop.ask_lane.is_some() => {}
         }
-    }
-
-    if let Some(answer_lane) = wave_loop.answer_lane.as_mut() {
-        answer_lane.cancel();
     }
 
     match wave_loop.end {
@@ -491,25 +482,17 @@ struct WaveLoop {
     cron_last_fired: HashMap<String, DateTime<Utc>>,
     provider_session: Option<ProviderSessionRef>,
     control: Option<WaveControl>,
-    answer_lane: Option<crate::project::answer::AnswerLane>,
+    ask_lane: Option<crate::ops::ask::AskLane>,
     end: Option<LoopEnd>,
 }
 
 impl WaveLoop {
-    async fn service_answers(&mut self) {
-        let (Some(control), Some(answer_lane)) = (&self.control, self.answer_lane.as_mut()) else {
+    async fn service_resolvers(&mut self) {
+        let (Some(control), Some(ask_lane)) = (&self.control, self.ask_lane.as_mut()) else {
             return;
         };
-        if let Some(attempt) = answer_lane.try_receive() {
-            if let Err(error) = answer_lane.settle(&control.store, attempt).await {
-                tracing::warn!(%error, "failed to settle Wave answer attempt");
-            }
-        }
-        if let Err(error) = answer_lane
-            .reconcile_wave(&control.store, &control.wave)
-            .await
-        {
-            tracing::warn!(%error, "failed to reconcile Wave answer lane");
+        if let Err(error) = ask_lane.reconcile(&control.store).await {
+            tracing::warn!(%error, "failed to reconcile Wave Ask lane");
         }
     }
 
@@ -792,8 +775,8 @@ impl WaveLoop {
         };
         let mut wait_task = tokio::spawn(async move { child.wait_with_output().await });
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
-        answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
+        ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -823,8 +806,8 @@ impl WaveLoop {
                         }
                     }
                 }
-                _ = answer_poll.tick(), if self.answer_lane.is_some() => {
-                    self.service_answers().await;
+                _ = ask_poll.tick(), if self.ask_lane.is_some() => {
+                    self.service_resolvers().await;
                 }
                 result = &mut wait_task => {
                     match result {
@@ -1009,8 +992,8 @@ impl WaveLoop {
         }
 
         let mut timeout = Box::pin(tokio::time::sleep(self.config.pass_timeout));
-        let mut answer_poll = tokio::time::interval(Duration::from_millis(200));
-        answer_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut ask_poll = tokio::time::interval(Duration::from_millis(200));
+        ask_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 biased;
@@ -1139,8 +1122,8 @@ impl WaveLoop {
                         }
                     }
                 }
-                _ = answer_poll.tick(), if self.answer_lane.is_some() => {
-                    self.service_answers().await;
+                _ = ask_poll.tick(), if self.ask_lane.is_some() => {
+                    self.service_resolvers().await;
                 }
             }
         }

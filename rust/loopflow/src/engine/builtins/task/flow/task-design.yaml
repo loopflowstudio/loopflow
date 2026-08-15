@@ -1,4 +1,6 @@
 # Establish the Task design once before autonomous slicing begins.
 - kickoff
 - step:
+    id: review_kickoff
     name: review-design
+    human: true

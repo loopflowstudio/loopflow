@@ -1,5 +1,4 @@
 ---
-interactive: true
 requires: scratch/<slug>.md (elaborated design from kickoff)
 produces: scratch/<slug>.md (revised to match user intent)
 default_agent: claude

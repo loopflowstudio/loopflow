@@ -121,6 +121,10 @@ pub struct Cli {
     #[arg(short = 'w', long = "wave", short_alias = 'W')]
     pub wave: Option<String>,
 
+    /// Bind a direct named skill to existing task, project, or wave Work
+    #[arg(long = "as", value_name = "KIND:SELECTOR")]
+    pub as_work: Option<String>,
+
     /// Exclude loopflow operating guidance
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
@@ -163,11 +167,10 @@ pub enum Commands {
     },
     /// Open or focus Loopflow.app
     Desktop,
-    /// Ask the current Turn's parent and block until its durable Answer arrives
+    /// Request a durable Ask session from the parent or User
     Ask {
-        /// Question text, or `wait [<ask-id>]` to resume an existing exchange
-        #[arg(trailing_var_arg = true, value_name = "QUESTION|wait [ASK_ID]")]
-        args: Vec<String>,
+        #[command(flatten)]
+        ask: AskArgs,
     },
     /// Internal installer transaction entry point.
     #[command(hide = true)]
@@ -678,6 +681,111 @@ pub enum Commands {
     External(Vec<String>),
 }
 
+#[derive(Args, Debug, Default)]
+pub struct AskArgs {
+    /// Route a new Ask to the User instead of the parent Work
+    #[arg(long)]
+    pub user: bool,
+
+    /// Queue a new Ask and return its id without waiting
+    #[arg(long)]
+    pub noblock: bool,
+
+    /// Emit a typed JSON receipt
+    #[arg(long)]
+    pub json: bool,
+
+    /// The intervention requested by this Ask
+    #[arg(trailing_var_arg = true, value_name = "REQUEST")]
+    pub request: Vec<String>,
+
+    #[command(subcommand)]
+    pub command: Option<AskCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AskCommand {
+    /// Join the current or named Ask until it settles
+    Wait {
+        ask_id: Option<crate::durable::AskId>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List parent or User attention from the durable ledger
+    List {
+        #[arg(long)]
+        user: bool,
+        /// List unresolved Asks created by the ambient Work
+        #[arg(long, visible_alias = "mine", conflicts_with = "user")]
+        outgoing: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Claim or reopen an Ask and present its session in a sibling terminal
+    Open {
+        ask_id: crate::durable::AskId,
+        /// Prepare and return the exact Ask surface without presenting it
+        #[arg(long, requires = "json")]
+        prepare: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Confirm that a target presented the exact active Ask Invocation
+    Presented {
+        ask_id: crate::durable::AskId,
+        invocation_id: crate::durable::AgentInvocationId,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve one Ask from its active Invocation
+    Resolve {
+        ask_id: crate::durable::AskId,
+        #[arg(value_name = "SUMMARY")]
+        summary: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Decline one Ask from its active Invocation
+    Decline {
+        ask_id: crate::durable::AskId,
+        #[arg(value_name = "REASON")]
+        reason: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Close one Ask's active Invocation without settling it
+    Release {
+        ask_id: crate::durable::AskId,
+        #[arg(value_name = "REASON")]
+        reason: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Transfer a parent Ask to the User without changing its identity
+    Escalate {
+        ask_id: crate::durable::AskId,
+        #[arg(long, required = true)]
+        user: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Withdraw an Ask as its requester or the User
+    Cancel {
+        ask_id: crate::durable::AskId,
+        #[arg(value_name = "REASON")]
+        reason: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run one Ask provider inside its detached session
+    #[command(hide = true)]
+    Serve {
+        ask_id: crate::durable::AskId,
+        #[arg(long)]
+        headless: bool,
+    },
+}
+
 #[derive(Subcommand, Debug)]
 pub enum RunsCommand {
     /// Tombstone terminal captures whose conversation artifacts are gone, and
@@ -788,7 +896,8 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List pending Asks routed to the User or this parent Work
+    /// Retired: use `lf ask list`
+    #[command(hide = true)]
     Asks {
         #[arg(value_parser = ["wave", "project", "task"])]
         kind: Option<String>,
@@ -796,7 +905,8 @@ pub enum WorkCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Answer one exact Ask; the first authorized Answer wins
+    /// Retired: use `lf ask open` and settle inside the Ask session
+    #[command(hide = true)]
     Answer {
         ask_id: crate::durable::AskId,
         text: String,
@@ -1872,6 +1982,14 @@ mod tests {
     }
 
     #[test]
+    fn direct_work_selector_is_a_global_skill_flag() {
+        let before = Cli::try_parse_from(["lf", "--as", "task:LOO-123", "implement"])
+            .expect("parse selector before skill");
+        assert_eq!(before.as_work.as_deref(), Some("task:LOO-123"));
+        assert!(matches!(before.command, Some(Commands::External(_))));
+    }
+
+    #[test]
     fn ci_report_accepts_machine_wide_filters() {
         let cli = Cli::try_parse_from([
             "lf",
@@ -2868,20 +2986,145 @@ mod tests {
 
     #[test]
     fn cli_parses_ask_and_wait_as_shell_arguments() {
-        let ask =
-            Cli::try_parse_from(["lf", "ask", "Which proof matters?"]).expect("parse Ask question");
+        let ask = Cli::try_parse_from(["lf", "ask", "--user", "--noblock", "Connect Linear"])
+            .expect("parse Ask request");
         assert!(matches!(
             ask.command,
-            Some(Commands::Ask { args }) if args == ["Which proof matters?"]
+            Some(Commands::Ask { ask })
+                if ask.request == ["Connect Linear"]
+                    && ask.user
+                    && ask.noblock
+                    && ask.command.is_none()
         ));
         let wait =
             Cli::try_parse_from(["lf", "ask", "wait", "ask_00000000000000000000000000000001"])
                 .expect("parse Ask wait");
         assert!(matches!(
             wait.command,
-            Some(Commands::Ask { args })
-                if args == ["wait", "ask_00000000000000000000000000000001"]
+            Some(Commands::Ask { ask })
+                if matches!(ask.command, Some(AskCommand::Wait { ask_id: Some(_), .. }))
         ));
+        let outgoing = Cli::try_parse_from(["lf", "ask", "list", "--outgoing", "--json"])
+            .expect("parse outgoing Ask list");
+        assert!(matches!(
+            outgoing.command,
+            Some(Commands::Ask { ask })
+                if matches!(
+                    ask.command,
+                    Some(AskCommand::List {
+                        outgoing: true,
+                        user: false,
+                        json: true
+                    })
+                )
+        ));
+        assert!(Cli::try_parse_from(["lf", "ask", "list", "--outgoing", "--user"]).is_err());
+        let prepare = Cli::try_parse_from([
+            "lf",
+            "ask",
+            "open",
+            "ask_00000000000000000000000000000001",
+            "--prepare",
+            "--json",
+        ])
+        .expect("parse app presentation preparation");
+        assert!(matches!(
+            prepare.command,
+            Some(Commands::Ask { ask })
+                if matches!(
+                    ask.command,
+                    Some(AskCommand::Open {
+                        prepare: true,
+                        json: true,
+                        ..
+                    })
+                )
+        ));
+        assert!(Cli::try_parse_from([
+            "lf",
+            "ask",
+            "open",
+            "ask_00000000000000000000000000000001",
+            "--prepare",
+        ])
+        .is_err());
+        let presented = Cli::try_parse_from([
+            "lf",
+            "ask",
+            "presented",
+            "ask_00000000000000000000000000000001",
+            "invocation_00000000000000000000000000000001",
+            "--json",
+        ])
+        .expect("parse exact presentation confirmation");
+        assert!(matches!(
+            presented.command,
+            Some(Commands::Ask { ask })
+                if matches!(
+                    ask.command,
+                    Some(AskCommand::Presented { json: true, .. })
+                )
+        ));
+
+        for args in [
+            vec!["lf", "ask", "list", "--user", "--json"],
+            vec![
+                "lf",
+                "ask",
+                "open",
+                "ask_00000000000000000000000000000001",
+                "--json",
+            ],
+            vec![
+                "lf",
+                "ask",
+                "resolve",
+                "ask_00000000000000000000000000000001",
+                "--json",
+                "verified",
+            ],
+            vec![
+                "lf",
+                "ask",
+                "decline",
+                "ask_00000000000000000000000000000001",
+                "--json",
+                "unsafe",
+            ],
+            vec![
+                "lf",
+                "ask",
+                "release",
+                "ask_00000000000000000000000000000001",
+                "--json",
+                "unfinished",
+            ],
+            vec![
+                "lf",
+                "ask",
+                "escalate",
+                "ask_00000000000000000000000000000001",
+                "--user",
+                "--json",
+            ],
+            vec![
+                "lf",
+                "ask",
+                "cancel",
+                "ask_00000000000000000000000000000001",
+                "--json",
+            ],
+        ] {
+            Cli::try_parse_from(args).expect("parse Ask command");
+        }
+        for args in [
+            ["lf", "ask", "resolve", "verified"],
+            ["lf", "ask", "decline", "unsafe"],
+            ["lf", "ask", "release", "unfinished"],
+            ["lf", "ask", "escalate", "--user"],
+        ] {
+            Cli::try_parse_from(args).expect_err("Ask mutations require ASK_ID");
+        }
     }
 
     #[test]

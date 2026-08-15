@@ -168,7 +168,7 @@ pub(crate) async fn append_steer(
     }
 }
 
-pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLease>> {
+pub async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLease>> {
     if let Some(value) = std::env::var_os(RUN_LEASE_ENV) {
         let value = value
             .into_string()
@@ -202,9 +202,12 @@ pub(crate) async fn ambient_run_lease(store: &Store) -> OpsResult<Option<RunLeas
 }
 
 pub(crate) async fn required_run_lease(store: &Store) -> OpsResult<RunLease> {
-    ambient_run_lease(store)
-        .await?
-        .ok_or_else(|| child_error("in-Run entrypoint requires LF_RUN_LEASE"))
+    ambient_run_lease(store).await?.ok_or_else(|| {
+        child_error(
+            "this Work-owned entrypoint requires a Run lease; launch a named skill with \
+             `lf --as task:<selector> <skill>` (or project:/wave:)",
+        )
+    })
 }
 
 fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHandoffRequest> {
@@ -241,4 +244,40 @@ fn handoff_request(model: &str, reason: Option<&str>) -> OpsResult<ChildBodyHand
 
 fn child_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::{open_store, StorageConfig};
+
+    #[test]
+    fn run_context_without_a_lease_fails_closed() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let store = runtime
+            .block_on(open_store(&StorageConfig::sqlite(
+                directory.path().join("registry.db"),
+            )))
+            .unwrap();
+        let _lock = crate::journal::test_env_lock();
+        let previous_context = std::env::var_os(RUN_CONTEXT_ENV);
+        let previous_lease = std::env::var_os(RUN_LEASE_ENV);
+        std::env::set_var(RUN_CONTEXT_ENV, "agent");
+        std::env::remove_var(RUN_LEASE_ENV);
+
+        let error = runtime
+            .block_on(ambient_run_lease(&store))
+            .expect_err("stale agent context must not inherit User authority");
+
+        match previous_context {
+            Some(value) => std::env::set_var(RUN_CONTEXT_ENV, value),
+            None => std::env::remove_var(RUN_CONTEXT_ENV),
+        }
+        match previous_lease {
+            Some(value) => std::env::set_var(RUN_LEASE_ENV, value),
+            None => std::env::remove_var(RUN_LEASE_ENV),
+        }
+        assert!(error.to_string().contains("refusing User authority"));
+    }
 }

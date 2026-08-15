@@ -199,6 +199,34 @@ public struct RegistryQuery: Sendable {
         )
     }
 
+    /// User-targeted Ask sessions from the same durable queue as bare `lf`.
+    public func userAskAttention() async throws -> [AskAttentionRecord] {
+        let stdout = try await run(["ask", "list", "--user", "--json"], nil)
+        return try Self.decode([AskAttentionRecord].self, from: stdout)
+    }
+
+    /// Claim or recover one Ask session and return its exact attach descriptor.
+    /// Presentation remains the app's responsibility until `confirmAskPresented`.
+    public func prepareAskOpen(askId: String) async throws -> InvocationSurfaceRecord {
+        let stdout = try await run(
+            ["ask", "open", askId, "--prepare", "--json"],
+            nil
+        )
+        return try Self.decode(InvocationSurfaceRecord.self, from: stdout)
+    }
+
+    /// Confirm presentation only for the exact Invocation returned by prepare.
+    public func confirmAskPresented(
+        askId: String,
+        invocationId: String
+    ) async throws -> AgentInvocationRecord {
+        let stdout = try await run(
+            ["ask", "presented", askId, invocationId, "--json"],
+            nil
+        )
+        return try Self.decode(AgentInvocationRecord.self, from: stdout)
+    }
+
     /// Every active normalized Invocation across the machine.
     public func activeInvocations() async throws -> [InvocationSurfaceRecord] {
         let stdout = try await run(["invocation", "list", "--active", "--json"], nil)

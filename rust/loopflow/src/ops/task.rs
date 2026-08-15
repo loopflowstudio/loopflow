@@ -1539,7 +1539,7 @@ pub(crate) fn request_task_pr_merge(
         publication.merge = Some(PrMergeRequest {
             mode,
             requested_at,
-            head_sha,
+            head_sha: head_sha.clone(),
             after_merge,
             next_slug,
         });
@@ -5329,6 +5329,61 @@ mod tests {
         assert_eq!(plan.first.flow, "incident");
         assert_eq!(plan.loop_.flow, "slice");
         assert_eq!(plan.finally.flow, "ship");
+    }
+
+    #[test]
+    fn default_task_has_one_human_gate_and_incident_lifecycle_has_none() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let defaults = resolve_task_lifecycle(
+            repo.path(),
+            &ProjectFlowPlan::empty(),
+            &TaskFlowOverrides::default(),
+        )
+        .expect("resolve default lifecycle");
+        let default_human = [
+            &defaults.first.flow,
+            &defaults.loop_.flow,
+            &defaults.finally.flow,
+        ]
+        .into_iter()
+        .flat_map(|flow| {
+            let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
+            crate::engine::expand_flow(&flow, repo.path()).unwrap()
+        })
+        .filter(
+            |step| matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(default_human.len(), 1);
+        assert!(matches!(
+            &default_human[0],
+            crate::engine::ConcreteStep::Skill(skill)
+                if skill.policy.id.as_deref() == Some("review_kickoff")
+        ));
+
+        let incident = resolve_task_lifecycle(
+            repo.path(),
+            &ProjectFlowPlan {
+                first: Some("incident".to_string()),
+                loop_: Some("ship-5whys".to_string()),
+                finally: Some("ship".to_string()),
+            },
+            &TaskFlowOverrides::default(),
+        )
+        .expect("resolve incident lifecycle");
+        assert!([
+            &incident.first.flow,
+            &incident.loop_.flow,
+            &incident.finally.flow
+        ]
+        .into_iter()
+        .flat_map(|flow| {
+            let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
+            crate::engine::expand_flow(&flow, repo.path()).unwrap()
+        })
+        .all(|step| {
+            !matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human)
+        }));
     }
 
     #[test]

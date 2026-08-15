@@ -543,13 +543,7 @@ impl SqliteStore {
 
     pub fn active_task_pr(&self, task_id: &TaskId) -> StoreResult<Option<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = format!(
-            "{TASK_PR_COLUMNS}
-             WHERE task_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
-        );
-        conn.query_row(&query, params![task_id.as_str()], map_task_pr_row)
-            .optional()
-            .map_err(StoreError::from)
+        active_task_pr_on(&conn, task_id)
     }
 
     pub fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {
@@ -937,16 +931,7 @@ impl SqliteStore {
 
     pub fn task_events_after(&self, task_id: &TaskId, cursor: i64) -> StoreResult<Vec<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT id, task_id, kind_json, created_at
-             FROM task_events WHERE task_id = ?1 AND id > ?2 ORDER BY id",
-        )?;
-        let rows = statement.query_map(params![task_id.as_str(), cursor], map_task_event_row)?;
-        let mut events = Vec::new();
-        for row in rows {
-            events.push(row?);
-        }
-        Ok(events)
+        task_events_after_in(&conn, task_id, cursor)
     }
 
     pub fn task_event(&self, task_id: &TaskId, event_id: i64) -> StoreResult<Option<TaskEvent>> {
@@ -2203,6 +2188,16 @@ fn task_pr_on(conn: &Connection, pr_id: &TaskPrId) -> StoreResult<Option<TaskPr>
         .map_err(StoreError::from)
 }
 
+fn active_task_pr_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<TaskPr>> {
+    let query = format!(
+        "{TASK_PR_COLUMNS}
+         WHERE task_id=?1 AND merge_commit IS NULL AND abandoned_at IS NULL"
+    );
+    conn.query_row(&query, [task_id.as_str()], map_task_pr_row)
+        .optional()
+        .map_err(StoreError::from)
+}
+
 fn settle_task_pr_on(conn: &Connection, settled: &TaskPr) -> StoreResult<()> {
     let current = task_pr_on(conn, &settled.id)?.ok_or(StoreError::NotFound)?;
     if current.is_settled() {
@@ -2536,6 +2531,20 @@ fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
         kind,
         created_at: crate::store::rows::unix_to_datetime(row.get(3)?),
     })
+}
+
+fn task_events_after_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    cursor: i64,
+) -> StoreResult<Vec<TaskEvent>> {
+    let mut statement = conn.prepare(
+        "SELECT id, task_id, kind_json, created_at
+         FROM task_events WHERE task_id=?1 AND id>?2 ORDER BY id",
+    )?;
+    let rows = statement.query_map(params![task_id.as_str(), cursor], map_task_event_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::from)
 }
 
 const PROJECT_INSERT: &str = "INSERT INTO projects (

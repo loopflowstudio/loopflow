@@ -7,7 +7,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
-| Interactive mode | `-i` | frontmatter: `interactive: true` |
+| Human-present TUI | direct TTY or `-i` | `session.launch: tui` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff-files` | `diff_files: true` |
 | Include raw diff | `--diff` | `diff: true` |
@@ -18,6 +18,7 @@ Configure loopflow via CLI flags, global config (`~/.lf/config.yaml`), or repo c
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
+| Detached Ask terminal | `LF_EXTERNAL_TERMINAL=Ghostty` | global-only `session.terminal: Ghostty` |
 
 ## Context Assembly
 
@@ -57,6 +58,8 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 # ~/.lf/config.yaml (global)
 agent: claude:opus
 direction: clarity
+session:
+  terminal: Ghostty       # opens `lf ask` sessions on this Home
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global
@@ -284,23 +287,17 @@ This list is additive across global and repo config.
 
 ### Run Mode
 
-Batch mode runs to completion. Interactive mode allows interruption and chat.
+Direct named invocations use a present-human session when stdin or stdout is a
+TTY. Automated flow nodes and `--batch` invocations run headlessly. Skill
+frontmatter never changes scheduling.
 
 | | |
 |---|---|
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
-| **Default** | batch for all skills |
+| **Default** | present-human for a direct TTY; headless otherwise |
 
-Set a skill's default mode in its frontmatter:
-
-```yaml
----
-interactive: true
----
-# Your skill prompt here
-```
-
-CLI flags override the frontmatter default.
+Flows declare a required User gate on the exact skill occurrence with a stable
+`id` and `human: true`; see [Authoring](authoring.md#flows).
 
 ### Direction
 
@@ -366,7 +363,7 @@ assigned files.
 
 ### Session Launch
 
-Pick where directly invoked interactive skills open.
+Pick where directly invoked human-present skills open.
 
 ```yaml
 session:

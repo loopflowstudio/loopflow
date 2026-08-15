@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::engine::{expand_flow, load_flow, ConcreteStep};
+use crate::engine::{expand_flow, load_flow, ConcreteStep, OccurrencePolicy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,22 +23,29 @@ pub enum StepKind {
 pub struct StepPlan {
     pub name: String,
     pub kind: StepKind,
+    #[serde(flatten)]
+    pub policy: OccurrencePolicy,
 }
 
 impl StepPlan {
     fn from_concrete(step: &ConcreteStep) -> Self {
-        let (name, kind) = match step {
-            ConcreteStep::Skill(skill) => (skill.skill.name.clone(), StepKind::Skill),
-            ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op),
+        let (name, kind, policy) = match step {
+            ConcreteStep::Skill(skill) => (
+                skill.skill.name.clone(),
+                StepKind::Skill,
+                skill.policy.clone(),
+            ),
+            ConcreteStep::Op(op) => (op.item.display_name(), StepKind::Op, Default::default()),
             ConcreteStep::Xor(branch) => (
                 branch
                     .router
                     .clone()
                     .unwrap_or_else(|| "xor-route".to_string()),
                 StepKind::Xor,
+                Default::default(),
             ),
         };
-        Self { name, kind }
+        Self { name, kind, policy }
     }
 }
 
@@ -96,6 +103,8 @@ pub struct StepRef {
     pub flow: String,
     pub step: String,
     pub kind: StepKind,
+    #[serde(flatten)]
+    pub policy: OccurrencePolicy,
     pub index: u32,
     pub total: u32,
     pub iteration: u32,
@@ -452,6 +461,7 @@ fn step_ref(invocation: &InvocationState) -> Option<StepRef> {
         flow: invocation.flow.clone(),
         step: step.name.clone(),
         kind: step.kind,
+        policy: step.policy.clone(),
         index: invocation.cursor,
         total: invocation.steps.len() as u32,
         iteration: invocation.iteration,
@@ -471,6 +481,7 @@ mod tests {
                 .map(|name| StepPlan {
                     name: (*name).to_string(),
                     kind: StepKind::Skill,
+                    policy: OccurrencePolicy::default(),
                 })
                 .collect(),
         }
@@ -521,6 +532,27 @@ mod tests {
         let current = playhead.current().unwrap();
         assert_eq!(current.step, "pursue");
         assert_eq!(current.iteration, 3);
+    }
+
+    #[test]
+    fn playhead_preserves_human_node_identity() {
+        let queued = QueuedInvocation {
+            id: "task-first".to_string(),
+            flow: "task-design".to_string(),
+            steps: vec![StepPlan {
+                name: "review-design".to_string(),
+                kind: StepKind::Skill,
+                policy: OccurrencePolicy {
+                    id: Some("review_kickoff".to_string()),
+                    human: true,
+                },
+            }],
+        };
+        let (playhead, _) = Playhead::new(queued);
+
+        let step = playhead.current().unwrap();
+        assert_eq!(step.policy.id.as_deref(), Some("review_kickoff"));
+        assert!(step.policy.human);
     }
 
     #[test]

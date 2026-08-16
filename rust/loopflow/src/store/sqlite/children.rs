@@ -63,6 +63,17 @@ impl SqliteStore {
         super::durable::validate_control_caller(&transaction, caller, &work)?;
         let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
         let steer = Self::append_steer_in(&transaction, &work, &author, text)?;
+        insert_task_event_in(
+            &transaction,
+            task,
+            &TaskEventKind::WorktreeInitializing {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                branch: pr.branch.clone(),
+                path: task.worktree.display().to_string(),
+                base_commit: pr.base_commit.clone(),
+            },
+        )?;
         let reservation = super::durable::reserve_run_in(
             &transaction,
             &work,

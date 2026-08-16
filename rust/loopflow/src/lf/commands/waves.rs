@@ -1504,7 +1504,17 @@ async fn snapshot_task_detail(
         },
     };
     let process = task_process_evidence(runtime.as_ref(), liveness);
-    let local_progress = task_local_progress(task, runtime.as_ref(), active, &process);
+    let worktree_blocker = match task {
+        Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
+        None => None,
+    };
+    let local_progress = task_local_progress(
+        task,
+        runtime.as_ref(),
+        active,
+        &process,
+        worktree_blocker.as_ref(),
+    );
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
             crate::ops::task::task_completion_gate(store, task)
@@ -1513,9 +1523,14 @@ async fn snapshot_task_detail(
         }
         _ => None,
     };
-    let resume_refusal = task.and_then(|task| {
-        crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
-    });
+    let resume_refusal = worktree_blocker
+        .as_ref()
+        .map(|blocker| blocker.reason.clone())
+        .or_else(|| {
+            task.and_then(|task| {
+                crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
+            })
+        });
     let (action_evidence, user_ask) = match task {
         Some(task) => {
             let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
@@ -1627,6 +1642,7 @@ fn task_local_progress(
     runtime: Option<&TaskRuntimeSnapshot>,
     active_pr: Option<&TaskPr>,
     process: &TaskProcessEvidence,
+    worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
     let Some(task) = task else {
         return LocalProgressEvidence {
@@ -1645,6 +1661,7 @@ fn task_local_progress(
         &task.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
         process,
+        worktree_blocker,
     )
 }
 
@@ -1653,12 +1670,23 @@ fn inspect_task_local_progress(
     worktree: &Path,
     active_pr_base: Option<&str>,
     process: &TaskProcessEvidence,
+    worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
     let recovery_required = if work_status_is_running(status) {
         process.alive.map(|alive| !alive)
     } else {
         Some(false)
     };
+    if let Some(blocker) = worktree_blocker {
+        return LocalProgressEvidence {
+            state: LocalProgressEvidenceState::Missing,
+            unsettled: Some(!blocker.initializing),
+            dirty: None,
+            authored_commits: None,
+            recovery_required: Some(!blocker.initializing),
+            reason: Some(blocker.reason.clone()),
+        };
+    }
     if !worktree.exists() {
         if work_status_is_terminal(status) && active_pr_base.is_none() {
             return LocalProgressEvidence {
@@ -1763,6 +1791,16 @@ fn derive_task_attention(
                 .reason
                 .clone()
                 .unwrap_or_else(|| "Task body evidence is unavailable".into()),
+        )
+    } else if local_progress.state == LocalProgressEvidenceState::Missing
+        && local_progress.recovery_required == Some(false)
+    {
+        (
+            TaskAttentionLevel::Black,
+            local_progress
+                .reason
+                .clone()
+                .unwrap_or_else(|| "Task worktree is initializing".into()),
         )
     } else if local_progress.unsettled == Some(true) {
         let reason = if local_progress.dirty == Some(true) {

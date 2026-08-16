@@ -67,7 +67,8 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     } else {
         phase_action(evidence)
     };
-    apply_predecessor(model, evidence.predecessor_phase)
+    let model = apply_predecessor(model, evidence.predecessor_phase);
+    apply_resume_refusal(model, evidence.resume_refusal)
 }
 
 fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
@@ -162,6 +163,19 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
     }
 }
 
+fn apply_resume_refusal(model: TaskActionModel, refusal: Option<&str>) -> TaskActionModel {
+    if !matches!(
+        model.recommended,
+        Some(TaskAction::Resume | TaskAction::Recover)
+    ) {
+        return model;
+    }
+    match refusal {
+        Some(refusal) => action(TaskAction::NoAction, refusal),
+        None => model,
+    }
+}
+
 fn action(recommended: TaskAction, reason: impl Into<String>) -> TaskActionModel {
     TaskActionModel {
         recommended: Some(recommended),
@@ -236,6 +250,18 @@ mod tests {
 
         assert_eq!(model.recommended, Some(TaskAction::Resume));
         assert_eq!(model.reason, "resume the parked Task");
+    }
+
+    #[test]
+    fn resume_refusal_suppresses_recovery_during_a_working_pr() {
+        let mut evidence = evidence(PrPhase::Working, None, None);
+        evidence.process_alive = Some(false);
+        evidence.resume_refusal = Some("Task worktree is still initializing");
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "Task worktree is still initializing");
     }
 
     #[test]

@@ -2251,6 +2251,21 @@ mod tests {
             store.current_run(&task_work).await.unwrap().unwrap().id,
             child_run.id
         );
+        assert_eq!(
+            store
+                .latest_task_event(&task.id)
+                .await
+                .unwrap()
+                .expect("initial Task publication records placement")
+                .kind,
+            TaskEventKind::WorktreeInitializing {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                branch: pr.branch.clone(),
+                path: task.worktree.display().to_string(),
+                base_commit: pr.base_commit.clone(),
+            }
+        );
         assert_eq!(durable_child_rows(&database_path), (1, 1, 1, 1, 1));
         assert!(!task.worktree.exists());
     }

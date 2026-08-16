@@ -664,6 +664,20 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             Err(error) => return Err(task_error(format!("failed to reserve task: {error}"))),
         };
 
+        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
+            store
+                .fail_task_run(&task.id, &lease, &error.to_string())
+                .await
+                .map_err(|settle_error| {
+                    task_error(format!(
+                        "worktree creation failed ({error}); failed to settle reserved Run: {settle_error}"
+                    ))
+                })?;
+            return Err(task_error(format!(
+                "failed to create task worktree: {error}"
+            )));
+        }
+
         if let Err(error) = store
             .append_task_event(
                 &task.id,
@@ -685,20 +699,6 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                     ))
                 })?;
             return Err(task_error(error.to_string()));
-        }
-
-        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
-            store
-                .fail_task_run(&task.id, &lease, &error.to_string())
-                .await
-                .map_err(|settle_error| {
-                    task_error(format!(
-                        "worktree creation failed ({error}); failed to settle reserved Run: {settle_error}"
-                    ))
-                })?;
-            return Err(task_error(format!(
-                "failed to create task worktree: {error}"
-            )));
         }
 
         launch_reserved_task_process(&store, &mut task, &run, &lease).await?;
@@ -872,6 +872,65 @@ fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
         })?;
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskWorktreeBlocker {
+    pub initializing: bool,
+    pub reason: String,
+}
+
+const TASK_WORKTREE_INITIALIZATION_GRACE: time::Duration = time::Duration::minutes(5);
+
+pub(crate) async fn task_worktree_blocker(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Option<TaskWorktreeBlocker>> {
+    let event = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task worktree state: {error}")))?;
+    if let Some(event) = event {
+        if let TaskEventKind::WorktreeInitializing { branch, path, .. } = &event.kind {
+            let initializing = event.created_at + TASK_WORKTREE_INITIALIZATION_GRACE
+                > time::OffsetDateTime::now_utc();
+            let reason = if initializing {
+                format!(
+                    "Task {} is initializing worktree {path} on branch {branch:?}; no body is expected until placement completes",
+                    task.plan.identifier
+                )
+            } else {
+                format!(
+                    "Task {} worktree initialization did not complete at {path} on branch {branch:?}; finish or restore that exact path before `lf task resume {}`; Task identity and PR history are unchanged",
+                    task.plan.identifier, task.plan.identifier
+                )
+            };
+            return Ok(Some(TaskWorktreeBlocker {
+                initializing,
+                reason,
+            }));
+        }
+    }
+    if task.worktree.exists() {
+        return Ok(None);
+    }
+    let active = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read active Task PR: {error}")))?;
+    let branch = active
+        .as_ref()
+        .map(|pr| format!(" on branch {:?}", pr.branch))
+        .unwrap_or_default();
+    Ok(Some(TaskWorktreeBlocker {
+        initializing: false,
+        reason: format!(
+            "Task {} worktree {} is missing; restore that exact path{branch} before `lf task resume {}`; Task identity and PR history are unchanged",
+            task.plan.identifier,
+            task.worktree.display(),
+            task.plan.identifier,
+        ),
+    }))
 }
 
 fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
@@ -2610,6 +2669,12 @@ pub(crate) async fn reconcile_project_tasks(
         ) {
             continue;
         }
+        if task_worktree_blocker(store, task)
+            .await?
+            .is_some_and(|blocker| blocker.initializing)
+        {
+            continue;
+        }
         if let Err(error) = task_recovery_adoption(store, task).await {
             tracing::warn!(
                 task = %task.plan.identifier,
@@ -3975,9 +4040,11 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        reconcile_task_pr(&store, &mut task).await?;
-        reconcile_process_liveness(&store, &mut task).await?;
-        reconcile_task_completion(&store, &mut task, None).await?;
+        if task_worktree_blocker(&store, &task).await?.is_none() {
+            reconcile_task_pr(&store, &mut task).await?;
+            reconcile_process_liveness(&store, &mut task).await?;
+            reconcile_task_completion(&store, &mut task, None).await?;
+        }
         Ok(task)
     })
 }
@@ -4337,6 +4404,11 @@ pub(crate) async fn task_completion_gate(
         blockers: Vec::new(),
         discardable_successor: None,
     };
+    if let Some(blocker) = task_worktree_blocker(store, task).await? {
+        gate.satisfied = false;
+        gate.blockers.push(blocker.reason);
+        return Ok(gate);
+    }
     let work_done = task_work_status(store, task).await? == WorkStatus::Done;
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
@@ -4566,7 +4638,11 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         };
         let completion_gate = task_completion_gate(&store, &task).await?;
         let completion_refusal = completion_gate.refusal(&task.plan.identifier);
-        let resume_refusal = no_active_pr_resume_refusal(&task.plan.identifier, active, latest);
+        let worktree_blocker = task_worktree_blocker(&store, &task).await?;
+        let resume_refusal = worktree_blocker
+            .as_ref()
+            .map(|blocker| blocker.reason.clone())
+            .or_else(|| no_active_pr_resume_refusal(&task.plan.identifier, active, latest));
         let work_status = store
             .work_status(&work)
             .await

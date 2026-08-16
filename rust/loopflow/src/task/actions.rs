@@ -53,6 +53,7 @@ pub struct TaskActionEvidence<'a> {
     pub latest_pr_presentation_current: Option<bool>,
     pub completion_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
+    pub resume_migration: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
     pub process_alive: Option<bool>,
     pub predecessor_phase: Option<PrPhase>,
@@ -77,7 +78,13 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
         phase_action(evidence)
     };
     let model = apply_predecessor(model, evidence.predecessor_phase);
+<<<<<<< HEAD
     apply_resume_refusal(model, evidence.resume_refusal)
+||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
+    apply_predecessor(model, evidence.predecessor_phase)
+=======
+    apply_resume_preflight(model, evidence)
+>>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
 }
 
 fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
@@ -184,6 +191,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
     }
 }
 
+<<<<<<< HEAD
 fn apply_resume_refusal(model: TaskActionModel, refusal: Option<&str>) -> TaskActionModel {
     if !matches!(
         model.recommended,
@@ -195,6 +203,26 @@ fn apply_resume_refusal(model: TaskActionModel, refusal: Option<&str>) -> TaskAc
         Some(refusal) => action(TaskAction::NoAction, refusal),
         None => model,
     }
+||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
+=======
+fn apply_resume_preflight(
+    model: TaskActionModel,
+    evidence: &TaskActionEvidence,
+) -> TaskActionModel {
+    if !matches!(
+        model.recommended,
+        Some(TaskAction::Resume | TaskAction::Recover)
+    ) {
+        return model;
+    }
+    if let Some(refusal) = evidence.resume_refusal {
+        return action(TaskAction::NoAction, refusal);
+    }
+    if let Some(migration) = evidence.resume_migration {
+        return action(TaskAction::Resume, migration);
+    }
+    model
+>>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
 }
 
 fn action(recommended: TaskAction, reason: impl Into<String>) -> TaskActionModel {
@@ -238,6 +266,7 @@ mod tests {
             latest_pr_presentation_current: Some(true),
             completion_refusal: None,
             resume_refusal: None,
+            resume_migration: None,
             ci,
             process_alive: None,
             predecessor_phase: None,
@@ -334,6 +363,28 @@ mod tests {
 
         assert_eq!(model.recommended, Some(TaskAction::NoAction));
         assert_eq!(model.reason, "Task worktree is still initializing");
+    }
+
+    #[test]
+    fn explicit_lifecycle_migration_is_the_resume_reason() {
+        let mut evidence = evidence(PrPhase::Working, None, None);
+        evidence.resume_migration = Some("resume after migrating task to slice");
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert_eq!(model.reason, "resume after migrating task to slice");
+    }
+
+    #[test]
+    fn lifecycle_refusal_suppresses_resume() {
+        let mut evidence = evidence(PrPhase::Working, None, None);
+        evidence.resume_refusal = Some("restore the pinned flow before resuming");
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(model.reason, "restore the pinned flow before resuming");
     }
 
     #[test]

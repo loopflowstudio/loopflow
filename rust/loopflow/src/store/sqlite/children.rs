@@ -60,6 +60,7 @@ impl SqliteStore {
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, task, pr)?;
         let work = work_for_child_in(&transaction, &ChildRef::Task(task.id.clone()))?;
+<<<<<<< HEAD
         super::durable::validate_control_caller(&transaction, caller, &work)?;
         let author = caller.map_or(Author::User, |lease| Author::Run(lease.run_id.clone()));
         let steer = Self::append_steer_in(&transaction, &work, &author, text)?;
@@ -79,6 +80,20 @@ impl SqliteStore {
             &work,
             &RunTrigger::Input {
                 basis: steer.steer.basis,
+||||||| parent of 5c54f526e (checkpoint: managed Task initialization prototype)
+        Self::append_steer_in(&transaction, &work, author, text)?;
+=======
+        Self::append_steer_in(&transaction, &work, author, text)?;
+        insert_task_event_in(
+            &transaction,
+            task,
+            &TaskEventKind::WorktreeInitializing {
+                pr_id: pr.id.clone(),
+                sequence: pr.sequence,
+                branch: pr.branch.clone(),
+                path: task.worktree.display().to_string(),
+                base_commit: pr.base_commit.clone(),
+>>>>>>> 5c54f526e (checkpoint: managed Task initialization prototype)
             },
         )?;
         transaction.commit()?;
@@ -147,6 +162,19 @@ impl SqliteStore {
             })?;
         Self::append_steer_in(&transaction, &work, &Author::User, text)
             .map_err(|error| StoreError::InvalidData(format!("steer reopened Task: {error}")))?;
+        if let Some(pr) = pr {
+            insert_task_event_in(
+                &transaction,
+                task,
+                &TaskEventKind::WorktreeInitializing {
+                    pr_id: pr.id.clone(),
+                    sequence: pr.sequence,
+                    branch: pr.branch.clone(),
+                    path: task.worktree.display().to_string(),
+                    base_commit: pr.base_commit.clone(),
+                },
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }

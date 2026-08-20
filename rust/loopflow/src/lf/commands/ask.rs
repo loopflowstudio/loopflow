@@ -12,6 +12,7 @@ use crate::engine::wave_home::HomeRoute;
 use crate::lf::{AskArgs, AskCommand};
 use crate::store::{open_store, storage_config_from_env, Store};
 use anyhow::{anyhow, bail, Context};
+use fs2::FileExt;
 
 const WAIT_INTERVAL: Duration = Duration::from_millis(250);
 const TARGET_WAKE_INTERVAL: Duration = Duration::from_secs(5);
@@ -548,8 +549,10 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
 fn present_in_external_terminal(surface: &InvocationSurface) -> anyhow::Result<()> {
     let attach = exact_attach_argv(surface)?;
     let terminal = resolve_external_terminal();
-    if let Some(ask_session) = local_tmux_attach_session(&attach) {
-        return present_in_asks_hub(&ask_session, &terminal);
+    if cfg!(target_os = "macos") && is_ghostty_terminal(&terminal) {
+        if let Some(ask_session) = local_tmux_attach_session(&attach) {
+            return present_in_ghostty(&attach, &ask_session);
+        }
     }
     let presentation = external_terminal_command(&terminal, &attach)?;
     run_presentation(&presentation)
@@ -566,10 +569,6 @@ fn resolve_external_terminal() -> String {
         })
         .unwrap_or_else(default_external_terminal)
 }
-
-/// Session that collects every locally presented Ask as a tmux window, so the
-/// user reviews all Asks from one terminal window instead of one per Ask.
-const ASKS_HUB_SESSION: &str = "lf-asks";
 
 fn local_tmux_attach_session(attach_argv: &[String]) -> Option<String> {
     let program = std::path::Path::new(attach_argv.first()?)
@@ -593,101 +592,140 @@ fn local_tmux_attach_session(attach_argv: &[String]) -> Option<String> {
     None
 }
 
-fn present_in_asks_hub(ask_session: &str, terminal: &str) -> anyhow::Result<()> {
-    let hub = format!("={ASKS_HUB_SESSION}");
-    // Trailing colon targets the session's current window; bare `=session`
-    // resolves to an empty window id for display-message.
-    let ask = format!("={ask_session}:");
-    if !tmux_succeeds(&["has-session", "-t", &hub]) {
-        tmux_output(&["new-session", "-d", "-s", ASKS_HUB_SESSION, "-n", "asks"])?;
-    }
-    let window_id = tmux_output(&["display-message", "-p", "-t", &ask, "#{window_id}"])?
-        .trim()
-        .to_string();
-    // link-window appends the same window again on every call; link only once.
-    let windows = tmux_output(&[
-        "list-windows",
-        "-t",
-        &hub,
-        "-F",
-        "#{window_index} #{window_id}",
-    ])?;
-    let hub_index = windows.lines().find_map(|line| {
-        let (index, id) = line.trim().split_once(' ')?;
-        (id == window_id).then(|| index.to_string())
-    });
-    let hub_index = match hub_index {
-        Some(index) => index,
-        None => {
-            tmux_output(&["link-window", "-s", &ask, "-t", &hub])?;
-            tmux_output(&[
-                "list-windows",
-                "-t",
-                &hub,
-                "-F",
-                "#{window_index} #{window_id}",
-            ])?
-            .lines()
-            .find_map(|line| {
-                let (index, id) = line.trim().split_once(' ')?;
-                (id == window_id).then(|| index.to_string())
-            })
-            .ok_or_else(|| anyhow!("linked Ask window {window_id} missing from hub"))?
-        }
-    };
-    let has_client = !tmux_output(&["list-clients", "-t", &hub, "-F", "#{client_tty}"])?
-        .trim()
-        .is_empty();
-    if !has_client {
-        // Only steer the hub when no one is watching it; never yank an
-        // attached reviewer away from the Ask they are working on.
-        tmux_output(&["select-window", "-t", &format!("{hub}:{hub_index}")])?;
-        let attach = vec![
-            "tmux".to_string(),
-            "attach-session".to_string(),
-            "-t".to_string(),
-            ASKS_HUB_SESSION.to_string(),
-        ];
-        run_presentation(&external_terminal_command(terminal, &attach)?)?;
-    }
-    Ok(())
+fn is_ghostty_terminal(terminal: &str) -> bool {
+    std::path::Path::new(terminal)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("ghostty"))
 }
 
-fn tmux_output(args: &[&str]) -> anyhow::Result<String> {
-    let output = Command::new("tmux")
-        .args(args)
-        .output()
-        .context("run tmux for Ask presentation")?;
-    if !output.status.success() {
-        bail!(
-            "tmux {:?} failed: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+const GHOSTTY_ASK_SCRIPT: &str = r#"
+on run argv
+    set launcherPath to item 1 of argv
+    set tabTitle to item 2 of argv
+    set statePath to item 3 of argv
+    set savedWindowId to ""
+    set removeLauncher to false
+
+    try
+        set savedWindowId to do shell script "/bin/cat " & quoted form of statePath
+    end try
+
+    tell application "Ghostty"
+        set askWindow to missing value
+        if savedWindowId is not "" then
+            repeat with candidateWindow in windows
+                if (id of candidateWindow as text) is savedWindowId then
+                    set askWindow to candidateWindow
+                    exit repeat
+                end if
+            end repeat
+        end if
+
+        set askTab to missing value
+        if askWindow is not missing value then
+            repeat with candidateTab in tabs of askWindow
+                if (name of candidateTab as text) is tabTitle then
+                    set askTab to candidateTab
+                    exit repeat
+                end if
+            end repeat
+        end if
+
+        if askTab is missing value then
+            set surfaceConfig to new surface configuration from {command:launcherPath, wait after command:true}
+            if askWindow is missing value then
+                set askWindow to new window with configuration surfaceConfig
+                set askTab to selected tab of askWindow
+            else
+                set askTab to new tab in askWindow with configuration surfaceConfig
+            end if
+            perform action ("set_tab_title:" & tabTitle) on focused terminal of askTab
+        else
+            set removeLauncher to true
+        end if
+
+        select tab askTab
+        activate window askWindow
+        set askWindowId to id of askWindow as text
+    end tell
+
+    do shell script "/usr/bin/printf %s " & quoted form of askWindowId & " > " & quoted form of statePath
+    if removeLauncher then
+        do shell script "/bin/rm -f -- " & quoted form of launcherPath
+    end if
+end run
+"#;
+
+fn present_in_ghostty(attach_argv: &[String], ask_session: &str) -> anyhow::Result<()> {
+    let lock_path = std::env::temp_dir().join("loopflow-cli-ghostty-asks.lock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("open Ghostty Ask presentation lock {lock_path:?}"))?;
+    FileExt::lock_exclusive(&lock).context("lock Ghostty Ask presentation")?;
+    run_presentation(&ghostty_ask_command(attach_argv, ask_session)?)
 }
 
-fn tmux_succeeds(args: &[&str]) -> bool {
-    Command::new("tmux")
-        .args(args)
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+fn ghostty_ask_command(
+    attach_argv: &[String],
+    ask_session: &str,
+) -> anyhow::Result<PresentationCommand> {
+    let launcher = write_terminal_launcher(attach_argv)?;
+    let state = std::env::temp_dir().join("loopflow-cli-ghostty-asks-window-id");
+    Ok(PresentationCommand {
+        program: "osascript".to_string(),
+        args: vec![
+            "-e".to_string(),
+            GHOSTTY_ASK_SCRIPT.to_string(),
+            "--".to_string(),
+            launcher.display().to_string(),
+            ask_session.to_string(),
+            state.display().to_string(),
+        ],
+        cleanup_on_failure: Some(launcher),
+    })
 }
 
 fn run_presentation(presentation: &PresentationCommand) -> anyhow::Result<()> {
-    let status = Command::new(&presentation.program)
+    let output = Command::new(&presentation.program)
         .args(&presentation.args)
-        .status()
+        .output()
         .with_context(|| format!("launch external terminal {:?}", presentation.program))?;
-    if !status.success() {
+    if !output.status.success() {
         if let Some(path) = presentation.cleanup_on_failure.as_ref() {
             let _ = std::fs::remove_file(path);
         }
-        bail!("external terminal presentation failed with {status}");
+        bail!(
+            "{}",
+            _presentation_failure_message(
+                &presentation.program,
+                &output.status.to_string(),
+                String::from_utf8_lossy(&output.stderr).trim(),
+            )
+        );
     }
     Ok(())
+}
+
+fn _presentation_failure_message(program: &str, status: &str, stderr: &str) -> String {
+    if std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "osascript")
+        && stderr.contains("-1743")
+    {
+        return "Ghostty automation is not authorized; allow your terminal to control Ghostty in System Settings > Privacy & Security > Automation, then retry"
+            .to_string();
+    }
+    if stderr.is_empty() {
+        format!("external terminal presentation failed with {status}")
+    } else {
+        format!("external terminal presentation failed with {status}: {stderr}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -822,7 +860,7 @@ mod tests {
     }
 
     #[test]
-    fn local_tmux_attach_routes_to_the_asks_hub() {
+    fn local_tmux_attach_preserves_the_ask_session() {
         let attach = vec![
             "tmux".to_string(),
             "attach-session".to_string(),
@@ -833,6 +871,58 @@ mod tests {
             super::local_tmux_attach_session(&attach).as_deref(),
             Some("lf-ask-proof")
         );
+    }
+
+    #[test]
+    fn local_ghostty_asks_use_native_tabs_with_distinct_tmux_sessions() {
+        let first_attach = vec![
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            "lf-ask-first".to_string(),
+        ];
+        let second_attach = vec![
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            "lf-ask-second".to_string(),
+        ];
+
+        let first = super::ghostty_ask_command(&first_attach, "lf-ask-first").unwrap();
+        let second = super::ghostty_ask_command(&second_attach, "lf-ask-second").unwrap();
+
+        assert_eq!(first.program, "osascript");
+        assert!(first.args[1].contains("new window with configuration"));
+        assert!(first.args[1].contains("new tab in askWindow"));
+        assert!(first.args[1].contains("name of candidateTab as text"));
+        assert!(first.args[1].contains("select tab askTab"));
+        assert!(!first.args[1].contains("link-window"));
+        assert_eq!(first.args[4], "lf-ask-first");
+        assert_eq!(second.args[4], "lf-ask-second");
+        assert_eq!(first.args[5], second.args[5]);
+
+        std::fs::remove_file(first.cleanup_on_failure.unwrap()).unwrap();
+        std::fs::remove_file(second.cleanup_on_failure.unwrap()).unwrap();
+    }
+
+    #[test]
+    fn ghostty_detection_accepts_app_names_and_paths() {
+        assert!(super::is_ghostty_terminal("Ghostty"));
+        assert!(super::is_ghostty_terminal("Ghostty.app"));
+        assert!(super::is_ghostty_terminal("/Applications/Ghostty.app"));
+        assert!(!super::is_ghostty_terminal("Terminal"));
+    }
+
+    #[test]
+    fn ghostty_automation_denial_explains_the_permission_boundary() {
+        let message = super::_presentation_failure_message(
+            "/usr/bin/osascript",
+            "exit status: 1",
+            "Not authorized to send Apple events to Ghostty. (-1743)",
+        );
+
+        assert!(message.contains("allow your terminal to control Ghostty"));
+        assert!(message.contains("Privacy & Security > Automation"));
     }
 
     #[test]

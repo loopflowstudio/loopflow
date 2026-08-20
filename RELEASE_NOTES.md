@@ -1,42 +1,57 @@
-# v0.12.9
+# v0.12.10
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.12.9 makes Task work easier to observe and safer to hand to a person while it is still in motion. Initialization is now durable before a worktree exists, routine control reads stay focused on the current repository, and human gates preserve both context and progress. The result is a quieter terminal control surface with fewer ambiguous states at the moments when work changes hands.
+v0.12.10 tightens the execution boundaries that keep autonomous work trustworthy. Task runs now prove they can deliver before reserving execution, resident Waves recover safely when their flow definitions change, and browser jobs no longer borrow ownership of a person's Chrome session. The Mac app also runs control activity through the `lf` built and shipped with it, removing another source of runtime drift.
 
-## See Tasks while their worktrees are being placed
+## Stop impossible Task deliveries before execution
 
-A newly published Task no longer disappears into the gap between durable creation and a usable worktree. Loopflow records initialization with the Task, PR, Steer, and reserved Run, then closes that state only after placement completes, so operators can distinguish active setup from stale or missing Git state (#1199).
+Delivery Tasks now carry an explicit outcome contract, and Loopflow validates that the selected lifecycle can converge before it starts. A delivery flow must be able to make autonomous progress, include an implementation-capable skill, and end with `lf pr land -c`; intentionally non-implementing work must opt into `--design-only` (#1207).
 
-- `lf task status <task> --json`, `lf task wait <task> --timeout 0s --json`, and `lf roadmap --wave <wave> --json` keep the Task visible during placement.
-- Status, wait, roadmap, chat, completion, and supervision recognize initialization without trying to inspect an invalid worktree.
-- Stale and genuinely missing worktrees remain distinct from active initialization, preserving the existing recovery paths.
+- `lf task run DES-123` validates the delivery lifecycle, managed provider credentials, writable linked-Git state, and writable control-store state before reserving a Run.
+- `lf task run DES-124 --design-only --loop gate --finally ship` records that implementation is intentionally out of scope instead of weakening delivery checks for every Task.
+- Permission, control-authority, credential, and network failures become durable, user-visible blockers rather than retries or apparent success.
+- Worktree writer authority is bound to the exact live Run, Turn, or Ask, while stale writers can be reclaimed safely.
+- Task completion requires reviewer-facing PR copy for the current head SHA and an armed auto-merge settlement, so an older review state cannot satisfy a newer delivery.
+- `lf task status` and the roadmap DTOs expose whether a Task is a delivery or design-only outcome.
 
-## Keep shared control views local to the repository
+## Continue Waves safely after flow edits
 
-Normal terminal control now shows the work owned by the repository from which `lf` is invoked. This keeps unrelated Waves and User Asks out of everyday navigation while retaining an explicit machine-wide view for operators who need it (#1201).
+A resident Wave now checks its journaled playhead against the current flow definition before opening the next body. If steps were renamed, reordered, reshaped, or given different policies while the resident was idle, Loopflow records one durable reset and resumes from the current root instead of replaying an obsolete cursor (#1202).
 
-- `lf ls`, `lf roadmap`, and `lf ask list --user` default to the current repository.
-- Linked worktrees resolve to their main checkout, so the same repository scope follows work across Loopflow-managed worktrees.
-- Add `--all` to any of those commands to restore the previous machine-wide view.
+- Root, nested, and queued plans are compared by step name, kind, order, policy, and shape.
+- A reset clears stale cursors, iterations, nested invocations, and queued continuations while preserving pending chat and inbox input.
+- A body already in progress remains pinned to the plan that started it; reconciliation waits until that body finishes.
+- Reset events are journaled and narrated, making recovery visible and replayable across restarts.
 
-## Hand work to humans with context intact
+## Capture pages without taking over Chrome
 
-Task cycles now place human attention at a review surface suited to the kind of work. Local Asks collect in one deduplicated terminal hub, design review carries enough context for someone arriving cold, and Task work is checkpointed and pushed around Ask transitions so a parked decision does not strand local progress (#1203).
+`lf screenshot` captures URLs or local HTML through an isolated `chrome-headless-shell` profile. Screenshot work now has a bounded process and output boundary, while provider authentication uses the same explicit ownership model without disturbing the user's foreground browser (#1204).
 
-- `lf task start <project> "Fix broken behavior" --fix` selects a fix cycle that reaches a working demo before landing.
-- `lf task start <project> "Add new behavior" --feature` selects a feature cycle that pauses for design review.
-- Projects can make either cycle the default for their Tasks with `cycle: fix` or `cycle: feature` under `## Flows`.
-- Explicit `--first`, `--loop`, and `--finally` choices still override cycle presets.
-- `lf ask open <ask-id>` presents local Ask sessions through the shared `lf-asks` tmux hub; remote sessions keep their direct presentation path.
-- Checkpoint or push failures at Ask boundaries warn without blocking the Ask transition.
+- Capture a page with `lf screenshot page.html -o page.png`, or set a viewport with `--width` and `--height`.
+- Loopflow validates the PNG before publishing it atomically, preserving an existing output file when capture fails or is interrupted.
+- Screenshot jobs have a 30-second lifetime and reap their complete browser process group when the caller exits.
+- Provider authorization and token refresh processes receive the same descendant-cleanup guarantees.
+- Claude authorization detection is passive: it no longer changes focus or sends synthetic keyboard input.
+- Browser approval waits report progress and end at provider expiry or after ten minutes.
+
+## Keep Mac control activity in lockstep
+
+Generated Mac app builds now bundle and sign validation-only `lf` and `lfd` helpers from the same checkout, then use that exact `lf` for local process activity and agent controls. This removes PATH lookup and capability probing, preventing stale development binaries from causing wire-format mismatches (#1205).
+
+- Local activity queries and agent actions resolve only through the bundled helper.
+- A missing or non-executable bundled `lf` now produces a direct failure instead of falling back to another installation.
+- macOS CI builds the dedicated Rust helper target and verifies that bundled `lf ps --json` activity decodes in the app.
 
 ## Operational notes
 
-- Repository scoping changes the default output of `lf ls`, `lf roadmap`, and `lf ask list --user`; use `--all` in machine-wide automation.
-- Ask boundaries may now create and push checkpoints before parking and after resolution, cancellation, or release.
-- Fix cycles include the new `ship-demo` human gate before landing.
+- Install the screenshot browser once with `playwright install --only-shell chromium` before using `lf screenshot`.
+- Custom Task lifecycle definitions that deliver code must include autonomous progress, an implementation-capable skill, and terminal `lf pr land -c` settlement. Mark intentionally non-implementing Tasks with `--design-only`.
+- Mac development builds now require the Rust toolchain to produce the bundled control helpers; `uv run python scripts/loopflow-dev.py run-debug` builds the configured debug path.
 
 ## Small changes
 
-- Bare terminal-control launches now preserve valid global options. For example, `lf -m claude` opens terminal control with Claude selected instead of dropping the provider choice (#1200).
+- Updated `fancy-regex` from 0.17.0 to 0.18.0.
+- Refreshed 16 Rust dependencies, including `clap`, `serde`, `rusqlite`, and Tokio utilities.
+- Updated the Python development lock to Ruff 0.16.0.
+- Updated the architecture-drift workflow to `actions/upload-artifact` v7.

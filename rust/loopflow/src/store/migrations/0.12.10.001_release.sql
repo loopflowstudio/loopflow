@@ -1,6 +1,4 @@
--- name: task_lifecycle_contract
--- id: cc9d06b00eda4361df856422179d980b
--- depends_on:
+-- draft: task_lifecycle_contract
 ALTER TABLE tasks ADD COLUMN lifecycle_outcome TEXT NOT NULL DEFAULT 'delivery'
     CHECK (lifecycle_outcome IN ('delivery', 'design_only'));
 

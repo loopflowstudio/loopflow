@@ -153,6 +153,10 @@ xcodebuild -project LoopflowSwift.xcodeproj \
   build
 ```
 
+The generated app target builds validation-only `lf` and `lfd` helpers from
+the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
+borrows a different `lf` from PATH.
+
 Keep `Package.swift` and `project.yml` in sync.
 
 ## Shared-library boundary

@@ -249,6 +249,7 @@ pub(crate) async fn settle(
     result: AskResult,
 ) -> Result<Ask> {
     let ask = store.settle_ask(ask_id, invocation_id, result).await?;
+    checkpoint_origin_task(store, &ask, "settle").await;
     resume_flow_step(store, &ask).await?;
     Ok(ask)
 }
@@ -260,8 +261,30 @@ pub(crate) async fn cancel(
     reason: &str,
 ) -> Result<Ask> {
     let ask = store.cancel_ask(context, ask_id, reason).await?;
+    checkpoint_origin_task(store, &ask, "cancel").await;
     resume_flow_step(store, &ask).await?;
     Ok(ask)
+}
+
+/// Push whatever the Ask session left in the origin Task worktree before the
+/// Task resumes or the session's product waits for another machine.
+pub(crate) async fn checkpoint_origin_task(store: &SharedStore, ask: &Ask, action: &str) {
+    let WorkRef::Task(task_id) = &ask.origin.work else {
+        return;
+    };
+    let task = match store.get_task(task_id).await {
+        Ok(Some(task)) => task,
+        _ => return,
+    };
+    if let Err(error) = crate::ops::checkpoint_task_worktree(
+        task.worktree.clone(),
+        task.plan.identifier.clone(),
+        format!("checkpoint: {action} Ask {}", ask.id),
+    )
+    .await
+    {
+        tracing::warn!(ask = %ask.id, action, %error, "Ask settled without a pushed checkpoint");
+    }
 }
 
 async fn resume_flow_step(store: &SharedStore, ask: &Ask) -> Result<()> {

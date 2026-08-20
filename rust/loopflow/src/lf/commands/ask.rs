@@ -34,7 +34,8 @@ async fn run_async(args: &AskArgs) -> anyhow::Result<()> {
             user,
             outgoing,
             json,
-        }) => list_command(&store, *user, *outgoing, *json).await,
+            all,
+        }) => list_command(&store, *user, *outgoing, *json, *all).await,
         Some(AskCommand::Open {
             ask_id,
             prepare,
@@ -193,11 +194,31 @@ fn select_default_wait(
         .cloned()
 }
 
+/// Keep only Asks whose origin cwd resolves to the current repository,
+/// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
+/// repo, where there is nothing to scope to) returns every Ask unchanged.
+fn scope_attention_to_repo(
+    attention: Vec<crate::ops::ask::AskAttention>,
+    all: bool,
+) -> Vec<crate::ops::ask::AskAttention> {
+    if all {
+        return attention;
+    }
+    let Some(scope) = crate::repository::CanonicalRepo::current() else {
+        return attention;
+    };
+    attention
+        .into_iter()
+        .filter(|item| scope.contains(&item.ask.origin.cwd))
+        .collect()
+}
+
 async fn list_command(
     store: &Arc<Store>,
     user: bool,
     outgoing: bool,
     json: bool,
+    all: bool,
 ) -> anyhow::Result<()> {
     if outgoing {
         let lease = crate::ops::required_run_lease(store)
@@ -231,8 +252,13 @@ async fn list_command(
     }
     let attention = if user {
         let request = AuthenticatedRequest::cli();
-        crate::ops::ask::pending_attention(store, &ControlCtx::User(&request), &AskTarget::User)
-            .await?
+        let attention = crate::ops::ask::pending_attention(
+            store,
+            &ControlCtx::User(&request),
+            &AskTarget::User,
+        )
+        .await?;
+        scope_attention_to_repo(attention, all)
     } else {
         let lease = crate::ops::required_run_lease(store)
             .await
@@ -363,6 +389,7 @@ async fn release_command(
 ) -> anyhow::Result<()> {
     let invocation_id = ambient_invocation_id()?;
     let ask = store.release_ask(ask_id, &invocation_id, reason).await?;
+    crate::ops::ask::checkpoint_origin_task(store, &ask, "release").await;
     if json {
         println!("{}", serde_json::to_string_pretty(&ask)?);
     } else {
@@ -520,7 +547,16 @@ async fn open_shared_store() -> anyhow::Result<Arc<Store>> {
 
 fn present_in_external_terminal(surface: &InvocationSurface) -> anyhow::Result<()> {
     let attach = exact_attach_argv(surface)?;
-    let terminal = std::env::var("LF_EXTERNAL_TERMINAL")
+    let terminal = resolve_external_terminal();
+    if let Some(ask_session) = local_tmux_attach_session(&attach) {
+        return present_in_asks_hub(&ask_session, &terminal);
+    }
+    let presentation = external_terminal_command(&terminal, &attach)?;
+    run_presentation(&presentation)
+}
+
+fn resolve_external_terminal() -> String {
+    std::env::var("LF_EXTERNAL_TERMINAL")
         .ok()
         .or_else(|| {
             crate::engine::config::load_global_config()
@@ -528,9 +564,116 @@ fn present_in_external_terminal(surface: &InvocationSurface) -> anyhow::Result<(
                 .flatten()
                 .and_then(|config| config.session.terminal)
         })
-        .unwrap_or_else(default_external_terminal);
-    let presentation = external_terminal_command(&terminal, &attach)?;
-    run_presentation(&presentation)
+        .unwrap_or_else(default_external_terminal)
+}
+
+/// Session that collects every locally presented Ask as a tmux window, so the
+/// user reviews all Asks from one terminal window instead of one per Ask.
+const ASKS_HUB_SESSION: &str = "lf-asks";
+
+fn local_tmux_attach_session(attach_argv: &[String]) -> Option<String> {
+    let program = std::path::Path::new(attach_argv.first()?)
+        .file_name()?
+        .to_str()?;
+    if program != "tmux" {
+        return None;
+    }
+    if !matches!(
+        attach_argv.get(1)?.as_str(),
+        "attach-session" | "attach" | "a"
+    ) {
+        return None;
+    }
+    let mut args = attach_argv[2..].iter();
+    while let Some(arg) = args.next() {
+        if arg == "-t" {
+            return args.next().cloned();
+        }
+    }
+    None
+}
+
+fn present_in_asks_hub(ask_session: &str, terminal: &str) -> anyhow::Result<()> {
+    let hub = format!("={ASKS_HUB_SESSION}");
+    // Trailing colon targets the session's current window; bare `=session`
+    // resolves to an empty window id for display-message.
+    let ask = format!("={ask_session}:");
+    if !tmux_succeeds(&["has-session", "-t", &hub]) {
+        tmux_output(&["new-session", "-d", "-s", ASKS_HUB_SESSION, "-n", "asks"])?;
+    }
+    let window_id = tmux_output(&["display-message", "-p", "-t", &ask, "#{window_id}"])?
+        .trim()
+        .to_string();
+    // link-window appends the same window again on every call; link only once.
+    let windows = tmux_output(&[
+        "list-windows",
+        "-t",
+        &hub,
+        "-F",
+        "#{window_index} #{window_id}",
+    ])?;
+    let hub_index = windows.lines().find_map(|line| {
+        let (index, id) = line.trim().split_once(' ')?;
+        (id == window_id).then(|| index.to_string())
+    });
+    let hub_index = match hub_index {
+        Some(index) => index,
+        None => {
+            tmux_output(&["link-window", "-s", &ask, "-t", &hub])?;
+            tmux_output(&[
+                "list-windows",
+                "-t",
+                &hub,
+                "-F",
+                "#{window_index} #{window_id}",
+            ])?
+            .lines()
+            .find_map(|line| {
+                let (index, id) = line.trim().split_once(' ')?;
+                (id == window_id).then(|| index.to_string())
+            })
+            .ok_or_else(|| anyhow!("linked Ask window {window_id} missing from hub"))?
+        }
+    };
+    let has_client = !tmux_output(&["list-clients", "-t", &hub, "-F", "#{client_tty}"])?
+        .trim()
+        .is_empty();
+    if !has_client {
+        // Only steer the hub when no one is watching it; never yank an
+        // attached reviewer away from the Ask they are working on.
+        tmux_output(&["select-window", "-t", &format!("{hub}:{hub_index}")])?;
+        let attach = vec![
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            ASKS_HUB_SESSION.to_string(),
+        ];
+        run_presentation(&external_terminal_command(terminal, &attach)?)?;
+    }
+    Ok(())
+}
+
+fn tmux_output(args: &[&str]) -> anyhow::Result<String> {
+    let output = Command::new("tmux")
+        .args(args)
+        .output()
+        .context("run tmux for Ask presentation")?;
+    if !output.status.success() {
+        bail!(
+            "tmux {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn tmux_succeeds(args: &[&str]) -> bool {
+    Command::new("tmux")
+        .args(args)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn run_presentation(presentation: &PresentationCommand) -> anyhow::Result<()> {
@@ -560,10 +703,13 @@ fn external_terminal_command(
 ) -> anyhow::Result<PresentationCommand> {
     if cfg!(target_os = "macos") {
         let launcher = write_terminal_launcher(attach_argv)?;
+        // No -n: route the launcher into the running terminal instance so each
+        // Ask presents as a window there instead of spawning a whole new app
+        // instance (which multiplies Cmd-Tab entries and restored windows).
         Ok(PresentationCommand {
             program: "open".to_string(),
             args: vec![
-                "-na".to_string(),
+                "-a".to_string(),
                 terminal.to_string(),
                 launcher.display().to_string(),
             ],
@@ -673,6 +819,42 @@ mod tests {
             assert_eq!(command.args[0], "-e");
             assert_eq!(&command.args[1..], attach);
         }
+    }
+
+    #[test]
+    fn local_tmux_attach_routes_to_the_asks_hub() {
+        let attach = vec![
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            "lf-ask-proof".to_string(),
+        ];
+        assert_eq!(
+            super::local_tmux_attach_session(&attach).as_deref(),
+            Some("lf-ask-proof")
+        );
+    }
+
+    #[test]
+    fn remote_and_non_attach_routes_keep_direct_presentation() {
+        let ssh = vec![
+            "ssh".to_string(),
+            "jack@mini".to_string(),
+            "--".to_string(),
+            "tmux".to_string(),
+            "attach-session".to_string(),
+            "-t".to_string(),
+            "lf-ask-proof".to_string(),
+        ];
+        assert_eq!(super::local_tmux_attach_session(&ssh), None);
+
+        let new_session = vec![
+            "tmux".to_string(),
+            "new-session".to_string(),
+            "-t".to_string(),
+            "lf-ask-proof".to_string(),
+        ];
+        assert_eq!(super::local_tmux_attach_session(&new_session), None);
     }
 
     #[test]

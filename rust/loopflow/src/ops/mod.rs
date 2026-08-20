@@ -29,6 +29,7 @@ pub(crate) use ask_comments::publish_pending_ask_comments;
 #[doc(hidden)]
 pub use child::ambient_run_lease;
 pub(crate) use child::required_run_lease;
+pub(crate) use commit::checkpoint_task_worktree;
 pub use commit::{commit_workflow, commit_workflow_traced, CommitOptions};
 pub(crate) use cron::cron_receipt_ids;
 pub use cron::{

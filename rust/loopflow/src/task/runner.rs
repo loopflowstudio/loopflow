@@ -1024,6 +1024,7 @@ async fn prepare_task_flow_step(
             .node_id
             .clone()
             .ok_or_else(|| anyhow!("human Task flow step has no stable node id"))?;
+        checkpoint_worktree_before_human(task, &node_id).await;
         store
             .set_flow_position(lease, prepared.position.clone())
             .await?;
@@ -1279,6 +1280,21 @@ async fn finish_parked(
     }
     store.finish_task_run(task, lease, outcome).await?;
     Ok(())
+}
+
+/// A human Ask can outlive this machine's uptime; nothing the Task produced
+/// may exist only in the local worktree while it waits. Failure to checkpoint
+/// (offline, no remote) must never block the park itself.
+async fn checkpoint_worktree_before_human(task: &Task, node_id: &str) {
+    if let Err(error) = crate::ops::checkpoint_task_worktree(
+        task.worktree.clone(),
+        task.plan.identifier.clone(),
+        format!("checkpoint: park at human node {node_id}"),
+    )
+    .await
+    {
+        tracing::warn!(task = %task.id, %error, "Task parks at a human node without a pushed checkpoint");
+    }
 }
 
 async fn park_task_at_human(
@@ -2165,6 +2181,31 @@ mod planning_tests {
         let repository =
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
+        // The Task worktree must never be the real checkout: parking at a
+        // human node checkpoint-commits the worktree, and a test must not
+        // commit or push the developer's repo.
+        let worktree = tempfile::tempdir().unwrap().keep();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .current_dir(&worktree)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.email=test@loopflow.dev",
+            "-c",
+            "user.name=Loopflow Test",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            "init",
+        ]);
         let database = tempfile::tempdir().unwrap().keep();
         let store = std::sync::Arc::new(
             open_store(&StorageConfig::sqlite(database.join("registry.db")))
@@ -2209,7 +2250,7 @@ mod planning_tests {
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree: repository.clone(),
+            worktree: worktree.clone(),
             workspace_slug: "human-task-proof".to_string(),
             lifecycle: TaskLifecyclePlan::defaults(),
             lifecycle_phase: TaskLifecyclePhase::First,
@@ -2260,7 +2301,7 @@ mod planning_tests {
                     containment: Containment::Tmux {
                         name: "human-task-proof".to_string(),
                     },
-                    cwd: repository,
+                    cwd: worktree.clone(),
                 },
             )
             .await

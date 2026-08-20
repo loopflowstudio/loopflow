@@ -372,6 +372,7 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
     let mut section = Section::None;
     let mut definition = Vec::new();
     let mut flows = ProjectFlowPlan::empty();
+    let mut cycle = None;
     let mut krs = Vec::new();
     let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
@@ -423,6 +424,11 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
                     "first" => flows.first = value,
                     "loop" => flows.loop_ = value,
                     "finally" => flows.finally = value,
+                    "cycle" => {
+                        cycle = value
+                            .as_deref()
+                            .and_then(crate::ops::task::TaskCycle::parse)
+                    }
                     _ => {}
                 }
             }
@@ -459,6 +465,14 @@ pub fn parse_project_content(content: &str) -> ProjectContent {
     }
     if let Some(kr) = current_kr {
         krs.push(kr);
+    }
+
+    // `cycle:` is sugar for the preset's flows; explicit keys win, and
+    // writeback normalizes the sugar into explicit first/finally lines.
+    if let Some(cycle) = cycle {
+        let (first, finally) = cycle.flows();
+        flows.first = flows.first.or_else(|| Some(first.to_string()));
+        flows.finally = flows.finally.or_else(|| Some(finally.to_string()));
     }
 
     ProjectContent {
@@ -668,6 +682,22 @@ mod tests {
         .expect("legacy project snapshot");
 
         assert_eq!(project.flows, None);
+    }
+
+    #[test]
+    fn project_cycle_is_sugar_for_preset_flows() {
+        let content = parse_project_content(
+            "## Definition\n\nFix things.\n\n## Flows\n\ncycle: fix\n\n## KRs\n\n- [ ] holds\n",
+        );
+        assert_eq!(content.flows.first.as_deref(), Some("incident"));
+        assert_eq!(content.flows.loop_, None);
+        assert_eq!(content.flows.finally.as_deref(), Some("ship-demo"));
+
+        let explicit = parse_project_content(
+            "## Definition\n\nFix things.\n\n## Flows\n\ncycle: fix\nfirst: task-design\n",
+        );
+        assert_eq!(explicit.flows.first.as_deref(), Some("task-design"));
+        assert_eq!(explicit.flows.finally.as_deref(), Some("ship-demo"));
     }
 
     #[test]

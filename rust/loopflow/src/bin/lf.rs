@@ -1015,11 +1015,24 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
     }
 }
 
+fn task_cycle(fix: bool, feature: bool) -> Option<loopflow::ops::task::TaskCycle> {
+    // clap conflicts_with guarantees at most one flag is set.
+    if fix {
+        Some(loopflow::ops::task::TaskCycle::Fix)
+    } else if feature {
+        Some(loopflow::ops::task::TaskCycle::Feature)
+    } else {
+        None
+    }
+}
+
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run {
             issue,
             name,
+            fix,
+            feature,
             first,
             loop_,
             finally,
@@ -1032,11 +1045,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flows: loopflow::ops::task::TaskFlowOverrides {
-                        first: first.clone(),
-                        loop_: loop_.clone(),
-                        finally: finally.clone(),
-                    },
+                    flows: loopflow::ops::task::TaskFlowOverrides::for_cycle(
+                        task_cycle(*fix, *feature),
+                        first.clone(),
+                        loop_.clone(),
+                        finally.clone(),
+                    ),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                 },
@@ -1047,6 +1061,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             project_id,
             title,
             name,
+            fix,
+            feature,
             first,
             loop_,
             finally,
@@ -1061,11 +1077,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 piped_task_report()?,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flows: loopflow::ops::task::TaskFlowOverrides {
-                        first: first.clone(),
-                        loop_: loop_.clone(),
-                        finally: finally.clone(),
-                    },
+                    flows: loopflow::ops::task::TaskFlowOverrides::for_cycle(
+                        task_cycle(*fix, *feature),
+                        first.clone(),
+                        loop_.clone(),
+                        finally.clone(),
+                    ),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                 },
@@ -1219,8 +1236,7 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     // Reorder args so flags can appear after the skill name
-    let raw_args: Vec<String> = std::env::args().collect();
-    let args = reorder_args(normalize_ssh_args(raw_args.clone()));
+    let args = reorder_args(normalize_ssh_args(std::env::args().collect()));
 
     let mut cli = Cli::parse_from(args.clone());
     ctrlc::set_handler(|| {
@@ -1449,9 +1465,9 @@ fn main() -> anyhow::Result<()> {
             }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::home::start(waves, wave_ids, *json, repo)
             }),
-            Some(Commands::Stop { name }) => in_repo_runtime(&args, |repo| {
-                loopflow::lf::commands::home::stop(name, repo)
-            }),
+            Some(Commands::Stop { name }) => {
+                in_repo_runtime(&args, |repo| loopflow::lf::commands::home::stop(name, repo))
+            }
             Some(Commands::Pause { name, json }) => in_repo_runtime(&args, |repo| {
                 loopflow::lf::commands::wave_intent::run(name, true, *json, repo)
             }),
@@ -1473,13 +1489,11 @@ fn main() -> anyhow::Result<()> {
                 )
                 .map(|wave| wave.name().to_string())
                 .map_err(|err| match err {
-                            loopflow::engine::wave_context::WaveResolveError::NoContext => {
-                                anyhow::anyhow!(
-                                    "cannot determine parent wave; pass --wave <name>"
-                                )
-                            }
-                            other => anyhow::Error::from(other),
-                        })?;
+                    loopflow::engine::wave_context::WaveResolveError::NoContext => {
+                        anyhow::anyhow!("cannot determine parent wave; pass --wave <name>")
+                    }
+                    other => anyhow::Error::from(other),
+                })?;
                 let message = format!(
                     "Promote project '{slug}' from parent wave '{parent}'. Complete the authored migration, PM move, parent link, and residency checks."
                 );
@@ -1537,15 +1551,8 @@ fn main() -> anyhow::Result<()> {
                 wave,
                 repo,
                 json,
-            }) => loopflow::lf::commands::ci::run(
-                since,
-                wave.as_deref(),
-                repo.as_deref(),
-                *json,
-            ),
-            Some(Commands::Ps { json, sort }) => {
-                loopflow::lf::commands::top::run_ps(*json, *sort)
-            }
+            }) => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
+            Some(Commands::Ps { json, sort }) => loopflow::lf::commands::top::run_ps(*json, *sort),
             Some(Commands::Top { json, sort }) => {
                 loopflow::lf::commands::top::run_top(*json, *sort)
             }
@@ -1595,12 +1602,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::List) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
             }
-            Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
+            Some(Commands::Ls { json, all }) => loopflow::lf::commands::waves::ls(*json, *all),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }
-            Some(Commands::Roadmap { wave, json }) => {
-                loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json)
+            Some(Commands::Roadmap { wave, json, all }) => {
+                loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json, *all)
             }
             Some(Commands::Activity {
                 since,
@@ -1695,9 +1702,9 @@ fn main() -> anyhow::Result<()> {
             ),
             Some(Commands::Flow { name, args: rest }) => {
                 if matches!(name.as_str(), "show" | "validate") {
-                    let target = rest.first().ok_or_else(|| {
-                        anyhow::anyhow!("usage: lf flow {name} FLOW")
-                    })?;
+                    let target = rest
+                        .first()
+                        .ok_or_else(|| anyhow::anyhow!("usage: lf flow {name} FLOW"))?;
                     if rest.len() != 1 {
                         return Err(anyhow::anyhow!("usage: lf flow {name} FLOW"));
                     }
@@ -1749,12 +1756,9 @@ fn main() -> anyhow::Result<()> {
                     Err(err) => Err(err),
                 }
             }
-            None if raw_args.len() == 1 => in_repo_runtime(&args, |_| {
+            None => in_repo_runtime(&args, |_| {
                 loopflow::lf::commands::run::run(Some("loopflow"), None, &cli)
             }),
-            None => anyhow::bail!(
-                "no command specified; run bare `lf` for terminal control, `lf desktop` for the optional app, or name a skill or flow"
-            ),
         }
     };
 

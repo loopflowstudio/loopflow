@@ -46,6 +46,10 @@ agent. It refuses while another executor is still writing; interrupt that
 boundary first. A Steer is durable before live delivery is attempted. Provider
 acceptance is not incorporation; the Basis of a later successful boundary is.
 
+During new-Task placement, status reports the declared worktree as initializing.
+If creation does not finish, status keeps the Task identity and names the exact
+path and branch to restore before resuming.
+
 ## Rate limits
 
 **Symptom:** Tasks fail with rate limit errors.

@@ -1585,12 +1585,12 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::List) => {
                 in_repo_runtime(&args, |_| loopflow::lf::commands::list::show_all())
             }
-            Some(Commands::Ls { json }) => loopflow::lf::commands::waves::ls(*json),
+            Some(Commands::Ls { json, all }) => loopflow::lf::commands::waves::ls(*json, *all),
             Some(Commands::Status { wave, json }) => {
                 loopflow::lf::commands::waves::status(wave.as_deref(), *json)
             }
-            Some(Commands::Roadmap { wave, json }) => {
-                loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json)
+            Some(Commands::Roadmap { wave, json, all }) => {
+                loopflow::lf::commands::waves::roadmap(wave.as_deref(), *json, *all)
             }
             Some(Commands::Activity {
                 since,

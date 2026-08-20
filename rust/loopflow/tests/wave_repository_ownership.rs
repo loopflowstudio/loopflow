@@ -319,10 +319,23 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         Err(WaveResolveError::RepositoryMismatch { .. })
     ));
 
-    let list = lf(&home, &repo_a, &["ls", "--json"]);
-    let listed = list.as_array().unwrap();
+    // `lf ls` is scoped to the invoking repository: from repo_a only alpha's
+    // infrastructure Wave is listed, not repo_b's same-named beta.
+    let scoped = lf(&home, &repo_a, &["ls", "--json"]);
+    let scoped_infra: Vec<_> = scoped
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|wave| wave["name"] == "infrastructure")
+        .collect();
+    assert_eq!(scoped_infra.len(), 1);
+    assert_eq!(scoped_infra[0]["id"], alpha.id().as_str());
+
+    // `--all` restores the machine-wide view: both same-named Waves appear.
+    let all = lf(&home, &repo_a, &["ls", "--all", "--json"]);
     assert_eq!(
-        listed
+        all.as_array()
+            .unwrap()
             .iter()
             .filter(|wave| wave["name"] == "infrastructure")
             .count(),
@@ -341,7 +354,13 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     assert!(human_list
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("alpha") }));
-    assert!(human_list
+    // repo_b's beta is out of scope from repo_a's checkout.
+    assert!(!human_list
+        .lines()
+        .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
+    // `--all` brings beta's repository back into the human listing.
+    let human_all = String::from_utf8(lf_output(&home, &repo_a, &["ls", "--all"]).stdout).unwrap();
+    assert!(human_all
         .lines()
         .any(|line| { line.contains("infrastructure") && line.contains("beta") }));
 

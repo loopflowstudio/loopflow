@@ -486,6 +486,10 @@ pub enum Commands {
         /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
         #[arg(long)]
         json: bool,
+        /// List Waves from every repository on this machine, not just the
+        /// current repository (worktrees collapse to their main checkout).
+        #[arg(long)]
+        all: bool,
     },
     /// Show one wave's Project/Task hierarchy, runs, attention, and live loop
     /// state from the registry. Defaults to the ambient wave (`LF_WAVE_ID`).
@@ -496,16 +500,20 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show the machine-wide roadmap: every open Task across every Wave, joined
-    /// to live evidence and bucketed into Now / Needs attention / Available /
-    /// Later. Global by default; `--wave` scopes it. Local-only, deterministic.
+    /// Show the current repository's roadmap: every open Task across the repo's
+    /// Waves, joined to live evidence and bucketed into Now / Needs attention /
+    /// Available / Later. `--wave` scopes it; `--all` spans every repository on
+    /// this machine. Local-only, deterministic.
     Roadmap {
-        /// Scope to one Wave (default: every Wave on this machine)
+        /// Scope to one Wave (default: every Wave in the current repository)
         #[arg(long)]
         wave: Option<String>,
         /// Emit the roadmap snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Span every repository on this machine, not just the current one.
+        #[arg(long)]
+        all: bool,
     },
     /// Show one ordered record of durable Work, Run, PR, and Steer facts
     Activity {
@@ -720,6 +728,10 @@ pub enum AskCommand {
         outgoing: bool,
         #[arg(long)]
         json: bool,
+        /// Include Asks from every repository on this machine, not just the
+        /// current repository (worktrees collapse to their main checkout).
+        #[arg(long)]
+        all: bool,
     },
     /// Claim or reopen an Ask and present its session in a sibling terminal
     Open {
@@ -1978,7 +1990,13 @@ mod tests {
         assert!(flag.list);
 
         let waves = Cli::try_parse_from(["lf", "ls", "--json"]).expect("parse wave list");
-        assert!(matches!(waves.command, Some(Commands::Ls { json: true })));
+        assert!(matches!(
+            waves.command,
+            Some(Commands::Ls {
+                json: true,
+                all: false
+            })
+        ));
     }
 
     #[test]
@@ -3014,7 +3032,8 @@ mod tests {
                     Some(AskCommand::List {
                         outgoing: true,
                         user: false,
-                        json: true
+                        json: true,
+                        all: false
                     })
                 )
         ));

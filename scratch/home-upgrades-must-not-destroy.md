@@ -39,11 +39,12 @@ Run the host refresh twice at the same published release. The second log says
 `0.12.x already installed; fleet untouched`; the runtime generation, live Run
 IDs, and containment PIDs do not change.
 
-During a real staged upgrade, keep a TUI manager and a Task body live. The log
-prints a private handoff artifact before the TUI receives graceful termination,
-the AgentInvocation settles as interrupted, and two consecutive upgrades
-produce typed Home-upgrade restart events while the Task's work-failure recovery
-count remains unchanged.
+During a real staged upgrade with no migration, keep a TUI manager and a Task
+body live. The TUI keeps its PID, Invocation, Run authority, and terminal; the
+Home replaces its control plane around it. A migration-bearing upgrade reports
+that it is deferred while a non-resumable session is live instead of stopping
+that session. Two consecutive upgrades leave the Task's work-failure recovery
+count unchanged.
 
 ## Approach
 
@@ -70,7 +71,7 @@ prints one explicit line, creates no `home_upgrades` row, does not increment
 or reconciliation. It may still honor the explicit `--sync-skills` flag after
 the no-op because skill synchronization does not stop or replace the fleet.
 
-### Inventory every invocation before a real drain
+### Inventory every invocation before deciding what may stop
 
 Extend `HomeUpgradeReceipt` with durable invocation receipts and materialize
 them in a new `home_upgrade_invocations` table. The bridge JSON receipt carries
@@ -87,7 +88,7 @@ Each receipt records:
 - invocation ID, trace ID, Exec ID, surface, and optional supervising Run;
 - the exact owning Exec receipt: PID, process start time, and the ancestor Exec
   ID that owns that PID;
-- drain classification (`auto_resumable`, `handoff_required`, or
+- upgrade classification (`auto_resumable`, `preserve_required`, or
   `unprovable`);
 - settlement (`pending`, `preserved`, `interrupted`, or `failed`); and
 - an optional handoff artifact path.
@@ -103,41 +104,34 @@ than being guessed dead.
 This snapshot is the sweep boundary. Invocations created by the new generation
 are absent from it and cannot be accidentally settled. Immediately before
 activation, rescan the old generation for open captures. A capture admitted
-after the fence is an invariant violation: add it durably to the inventory,
-drain it by the same classification, and block activation until an entire scan
-is stable. This rescan is also the rollout bridge for an already-running old
-CLI that predates the transactional fence check.
+after the fence is an invariant violation: add it durably to the inventory and
+repeat the decision until an entire scan is stable. This rescan is also the
+rollout bridge for an already-running old CLI that predates the transactional
+fence check.
 
-### Drain non-resumable interaction before activation
+### Preserve non-resumable interaction
 
-Classify `tui` and `ide` captures without a durable attach-capable containment
-as `handoff_required`. Before signalling their exact, deduplicated owning Exec:
+Classify live `tui` and `ide` captures as `preserve_required`. They are excluded
+from `request_upgrade_stop` and from both forced-drain signals. Replacing the
+installed CLI and daemon does not replace an already-running process image, so
+a schema-compatible promotion can activate the new control plane while the old
+interactive owner, provider child, terminal, Invocation, and Run lease continue
+unchanged. Reconciliation sees the preserved Run as already running and must
+not launch a second writer for its Work.
 
-1. Atomically write
-   `~/.lf/upgrades/<upgrade-id>/handoffs/<invocation-id>.md` with mode `0600`.
-   The artifact names the Work when one exists, provider, surface, worktree,
-   skill, trace artifact, interruption cause, and the ordinary command for
-   starting a fresh session. It contains no prompt body, provider credential,
-   or raw resume token.
-2. Persist the path in the upgrade receipt and print
-   `handoff <invocation-id>: <path>` to the promotion log.
-3. Send SIGTERM to the exact verified owning Exec once. The existing interrupt
-   hook terminates its provider child; no interactive owner is eligible for the
-   later SIGKILL fallback.
+A migration changes the safety result. Interactive capture opens the SQLite
+ledger again when it records or finishes; an old binary intentionally refuses a
+store whose migration frontier it does not recognize. Until interactive writes
+have a generation-neutral protocol, `PromoteAndMigrate` is deferred before
+pausing the Home whenever any `preserve_required` or `unprovable` owner is live.
+The promotion log names each blocking Invocation and exact owner. Scheduled
+refresh may retry after they finish. It never signals them and never consumes
+Task recovery.
 
-Replace interactive `Command::status()` waiting with a controlled
-`spawn`/`try_wait` loop. New TUI wrappers poll the active upgrade fence, finish
-their capture as interrupted, preserve the handoff, terminate their child, and
-return a typed Home-upgrade exit rather than a generic launcher failure. The
-candidate-side SIGTERM remains necessary for the first deployment, whose live
-wrappers do not yet know how to poll the fence.
-
-If a handoff-required owner remains live after the drain grace, fail before
-artifact activation. Preserve its handoff and the old Home rather than escalate
-to SIGKILL. Auto-resumable Run containment retains the existing bounded
-SIGTERM/SIGKILL fallback because its durable Work can be relaunched. An
-attach-capable provider-only containment may be marked `preserved`; an old `lf`
-process may not survive against a migrated store.
+The upgrade retains the old content-addressed CLI and daemon bytes while a
+preserved owner exists. No new attach or handoff abstraction is required merely
+to let a process keep running. A handoff artifact is a recovery fallback for an
+owner already found dead, not the normal upgrade path.
 
 ### Preserve infrastructure causality through Task supervision
 
@@ -153,17 +147,13 @@ Expose an internal typed stop-cause read to Task/Project supervision. When
 coordinator instead of calling ordinary `recover_run`. This removes the race in
 which a Project runner rewrites the cause and appends `task process is missing`.
 
-If a replacement Run whose trigger is `RunTrigger::HomeUpgrade` later disappears
-without its own atomic body-failure receipt, treat the missing receipt as an
-infrastructure restart. Append a concrete
-`TaskEventKind::HomeUpgradeRestarted { upgrade_id, prior_run_id }` and relaunch
-with `RunTrigger::HomeUpgrade`, whose `prior_run_id` carries lineage but whose
-`retry_of` remains `None`. Do not append `TaskEventKind::Failed` and do not count
-the event as durable work progress. Repeated failure to restore the replacement
-marks the upgrade Work receipt failed and surfaces Home attention; it never
-converts into Task abandonment. Provider errors and explicit body failures keep
-the existing `Failed` plus `RunTrigger::Recovery` path and remain bounded at
-three.
+Only Runs captured by the matching active Home-upgrade receipt receive this
+treatment. Relaunch an auto-resumable captured Run with the existing
+`RunTrigger::HomeUpgrade`; it carries lineage without setting `retry_of` or
+emitting `TaskEventKind::Failed`. A preserved interactive Run is not relaunched.
+Once an upgrade completes, `RunTrigger::HomeUpgrade` alone is not an exemption:
+a later process loss may be a genuine work failure and follows the ordinary
+bounded `Failed` plus `RunTrigger::Recovery` path.
 
 ### Sweep the captured invocation boundary before completion
 
@@ -172,8 +162,8 @@ upgrade becomes `Completed`, sweep only the captured invocation inventory.
 
 For each receipt:
 
-- if its exact owner still exists, mark it `preserved` and leave the invocation
-  untouched;
+- if its exact owner still exists, mark it `preserved` and leave the Invocation,
+  Run, and process untouched;
 - if its exact owner is absent, atomically end running Turns as interrupted,
   set `ended_at`, change `outcome=running` to `interrupted`, change
   `capture_status=capturing` to `interrupted` with the upgrade ID in
@@ -183,10 +173,13 @@ For each receipt:
 - leave already-terminal rows unchanged so recovery can repeat the sweep.
 
 Use the same transaction primitive from absent-Run settlement instead of
-keeping lifecycle SQL duplicated in `install.rs`. A sweep write failure keeps
-the upgrade in reconciliation/failure recovery; it cannot print `Completed`
-with zombie records outstanding. The stale-receipt/unsupervised shape of
-`invocation_74115449...` is a permanent fixture.
+keeping lifecycle SQL duplicated in `install.rs`. The ordinary reconciler also
+uses the upgrade inventory to settle a preserved Invocation after its exact
+owner later exits, without the generic 48-hour guard. A sweep write failure
+keeps the upgrade in reconciliation/failure recovery; it cannot print
+`Completed` with a captured dead owner still recorded as running. The
+stale-receipt/unsupervised shape of `invocation_74115449...` is a permanent
+fixture.
 
 ## De-risking
 
@@ -196,38 +189,40 @@ with zombie records outstanding. The stale-receipt/unsupervised shape of
 | Is version text sufficient identity? | No. The runtime already records source revision and migration frontier, and CLI/daemon/app can drift independently. The 2026-08-19 repeats share the full identity and content-addressed CLI. | Require the full candidate plus every requested installed target to match. |
 | Does the Run drain see every killed interaction? | No. The zombie is an unsupervised nested TUI AgentInvocation. Its durable Run join is empty, but its Exec ancestry reaches a stale exact process receipt. | Persist an invocation/Exec inventory in addition to `home_upgrade_work`. |
 | Can the existing capture reconciler settle the zombie at upgrade completion? | No. SIGKILL emitted no terminal `run_events` row, and recent captures are intentionally protected by a 48-hour guard. | Reuse its terminal capture transition, but drive it from the upgrade's pre-drain exact-owner snapshot rather than age. |
-| Why do TUI sessions reach forced drain? | Interactive launch blocks in `Command::status()` and never polls `RunControl::Quiesce` or the Home fence. | Add a controlled wait loop; keep candidate-side SIGTERM as the rollout bridge for older wrappers. |
-| Can graceful drain fall back to SIGKILL? | Not for a non-resumable interaction: that recreates the incident. | Handoff-required liveness aborts activation. Only auto-resumable containment remains forceable. |
-| Why did upgrade churn consume Task recovery? | Task supervision called ordinary `recover_run` after containment disappeared, overwrote the Home-upgrade cause, emitted `Failed`, then linked replacement Runs through `retry_of`. | Preserve typed cause, defer upgrade-owned settlement, and use Home-upgrade triggers/events for receipt-less infrastructure loss. |
+| Why did TUI sessions reach forced drain? | The upgrade inventories Runs rather than Invocation surfaces, then applies one stop/TERM/KILL policy to every Run it sees. Interactive launch already uses `spawn`/`try_wait`; the missing distinction is resumability. | Inventory Invocations first and exclude preserve-required Runs from every stop and signal path. |
+| Can an old interactive session coexist with the new control plane? | Yes when the store frontier is unchanged: replacing a symlink or daemon does not replace an already-running process image, and its existing lease remains valid. A migration is different because trace capture reopens and validates the ledger on later writes. | Preserve interaction across `Promote`; defer `PromoteAndMigrate` while a non-resumable owner is live. |
+| Why did upgrade churn consume Task recovery? | Task supervision called ordinary `recover_run` after containment disappeared, overwrote the Home-upgrade cause, emitted `Failed`, then linked replacement Runs through `retry_of`. | Preserve the typed cause, defer matching upgrade-owned settlement, and relaunch only auto-resumable captured Runs with the existing Home-upgrade trigger. |
 | How can the sweep avoid PID reuse and new-generation races? | Exec receipts already carry PID, start time, trace ID, and Exec ID; the upgrade knows its exact pre-drain invocation set. | Require all exact fields and sweep only snapshot IDs. Missing evidence is `unprovable`, never absent. |
 | Can an invocation start between inventory and activation? | Run reservation already respects the active promotion fence, but interactive capture creation does not check it transactionally. An old CLI can also be alive during the first rollout. | Close admission before inventory, couple the fence check to capture creation, and require a stable old-generation rescan before activation. |
-| Does the handoff create another human-input protocol? | No response is required; it is an immutable interruption receipt and restart guide. Durable Ask remains the only blocking human-input primitive. | Store the artifact on the Home-upgrade receipt instead of minting a synthetic Run or Ask. |
+| Does preservation create another human-input protocol? | No. The session, terminal, Invocation, and Run continue as they were; no response is required. Durable Ask remains the only blocking human-input primitive. | Record preservation on the Home-upgrade receipt; do not mint a synthetic Run or Ask. |
 | Can the inventory survive a migration or coordinator crash? | The upgrade already dual-writes a bridge JSON receipt before migration and a durable receipt when the schema is available. | Add invocation inventory to both representations and make every handoff/sweep transition idempotent. |
 
 ## Alternatives considered
 
 | Approach | Tradeoff | Why not |
 |----------|----------|---------|
-| Refuse every promotion while any Run or TUI is live | Minimal mutation risk, but scheduled upgrades can remain blocked indefinitely and no recovery is exercised. | It defeats headless release maintenance and still leaves stale invocation rows after an external kill. |
-| Put every interactive provider in tmux and let it survive | Excellent interaction continuity once universal, but it needs a new unsupervised-containment model and must prove no old `lf` process can touch the migrated store. | This is as hard as repairing the whole invocation ownership model. The handoff path is complete now; attach-capable containment remains an allowed later optimization. |
-| Keep forced drain, exempt all upgrade-adjacent failures from the counter, then run `lf runs reconcile` | Small diff, but the human session is still destroyed, recent zombies remain age-guarded, and broad temporal exemptions can hide genuine work failures. | It treats symptoms after losing the only evidence needed for an exact handoff. |
+| Refuse every promotion while any Run or TUI is live | Safe but needlessly blocks schema-compatible releases even though Unix can keep old process images running. | Defer only migration-bearing upgrades that cannot prove safe coexistence; preserve sessions across ordinary promotions. |
+| Put every interactive provider in tmux before allowing any upgrade | Makes later attachment explicit, but requires a new containment model and does not help sessions already live during the first rollout. | Process survival is already available without universal tmux. Detachable containment can be separate work if product behavior later requires attachment from another terminal. |
+| Keep forced drain, exempt all upgrade-adjacent failures from the counter, then run `lf runs reconcile` | Small diff, but the human session is still destroyed, recent zombies remain age-guarded, and broad temporal exemptions can hide genuine work failures. | It treats symptoms after destroying work that could have remained live. |
 | Compare only `lf --version` before promote | Meets the narrow happy path but silently accepts replaced release assets, mismatched daemons/apps, or a drifted migration frontier. | Full installed identity is already available and turns a plausible no-op into a proved no-op. |
 
 ## Key decisions
 
 - A real Home upgrade is a durable transaction; an exact reinstall is not an
   upgrade and must create no generation or receipt.
-- Non-resumable interaction is drained before activation and is never forcibly
-  killed. Failure to obtain a clean handoff stops the upgrade.
+- Non-resumable interaction survives schema-compatible activation. It is never
+  stopped or signalled by promotion.
+- A migration-bearing upgrade defers before pausing the Home when a live old
+  writer cannot be proved compatible with the target frontier.
 - An infrastructure interruption is evidence about the Home, not evidence that
-  Task work failed. It has its own typed Task event and Run trigger and never
-  enters `retry_of`.
+  Task work failed. Matching captured Runs retain their Home-upgrade stop cause
+  and use the existing Home-upgrade Run trigger without entering `retry_of`.
 - Invocation cleanup follows exact process ownership. Timestamps and missing
   rows alone never authorize settlement.
 - The promotion fence is an admission barrier as well as a Run-reservation
   barrier. Activation requires a stable inventory after the barrier closes.
-- Handoff artifacts are private, minimal, and immutable. They explain how to
-  restart without copying prompt bodies or provider session material.
+- A handoff artifact is fallback evidence for an owner already found dead, not
+  the normal path for a healthy session.
 - The dangerous failure mode is a false liveness conclusion that interrupts an
   unrelated interactive process. Exact receipt matching, ancestor-cycle
   detection, pre-drain snapshotting, and fail-closed `unprovable` handling are
@@ -239,17 +234,17 @@ with zombie records outstanding. The stale-receipt/unsupervised shape of
 ## Scope
 
 - In scope: installed-target identity and no-op promotion; Home-upgrade receipt
-  schema and bridge persistence; Exec ancestry/liveness inventory; private
-  handoff artifacts and log presentation; controlled TUI fence polling;
-  transactional interactive admission fencing; stable pre-activation rescans;
-  graceful non-resumable drain; typed upgrade-owned Run settlement; Task
+  schema and bridge persistence; Exec ancestry/liveness inventory; preserving
+  interactive Runs across schema-compatible activation; deferring migrations
+  around old writers; transactional interactive admission fencing; stable
+  pre-activation rescans; typed upgrade-owned Run settlement; Task
   liveness/recovery classification; post-reconciliation invocation sweep; and
   focused plus staged behavioral proofs.
-- Out of scope: edits to `studio/hosts/refresh-lf.sh`; automatic reconstruction
-  of an unknown Claude/Codex TUI session token; a general unsupervised Run type;
-  changing the three-attempt work-failure budget; keeping old `lf` processes
-  alive across schema activation; Cadenza parity; and a generic multi-product
-  deployment framework.
+- Out of scope: edits to `studio/hosts/refresh-lf.sh`; moving a live TUI into
+  tmux or reconstructing an unknown Claude/Codex session token; a
+  generation-neutral trace-write protocol; a general unsupervised Run type;
+  changing the three-attempt work-failure budget; Cadenza parity; and a generic
+  multi-product deployment framework.
 
 ## Done when
 
@@ -270,15 +265,18 @@ The staged proof must establish all four outcomes:
    The second invocation logs `already installed; fleet untouched`, creates no
    `home_upgrades` row, leaves the generation unchanged, and preserves the exact
    Run ID and PID.
-2. Upgrade with a trap-recording TUI fixture. The fixture observes SIGTERM, never
-   SIGKILL; the log names a mode-`0600` handoff artifact; the invocation and Turn
-   are terminal/interrupted; and the upgrade receipt records the same path and
-   settlement.
-3. Kill one Task body through each of two distinct staged upgrades. SQL over
-   `task_events` shows two `home_upgrade_restarted` events and no corresponding
-   `Failed { error: "task process is missing" }`; SQL over Runs shows no new
-   `retry_of` link. A subsequent genuine body failure still receives recovery
-   attempt one.
+2. Upgrade without a migration while a TUI fixture is live. The Home generation
+   and control-plane PIDs advance while the TUI owner PID, provider child,
+   Invocation, Run ID, lease, and terminal remain live and unchanged; the
+   fixture observes no signal. After its natural exit, the Invocation and Turn
+   settle and the upgrade receipt remains `preserved`. Repeat with a pending
+   migration and prove promotion defers before pausing the keeper or signalling
+   the TUI.
+3. Kill one auto-resumable Task body through each of two distinct staged
+   upgrades. SQL over `task_events` shows no corresponding
+   `Failed { error: "task process is missing" }`; SQL over Runs shows each
+   replacement has a Home-upgrade trigger and no new `retry_of` link. A
+   subsequent genuine body failure still receives recovery attempt one.
 4. Seed the exact `invocation_74115449...` class: an unsupervised nested TUI
    capture with a stale ancestor Exec receipt and no terminal process event. The
    completion sweep writes its handoff, settles the invocation/Turn as
@@ -304,10 +302,10 @@ Track from `home_upgrades`, `home_upgrade_invocations`, `runs`, and
 `task_events`:
 
 - identical-install upgrades and generation increments: **0**;
-- handoff-required owners receiving SIGKILL: **0**;
+- preserve-required owners receiving any upgrade signal: **0**;
 - completed upgrades with captured dead-owner invocations still open: **0**;
 - Home-upgrade missing-process observations emitted as Task `Failed`: **0**;
 - change in a Task's work-failure recovery count across consecutive upgrades:
   **0**; and
-- handoff-required invocations with either a private artifact or preserved live
-  containment: **100%**.
+- preserve-required invocations remaining live through compatible upgrades or
+  explicitly blocking incompatible migrations: **100%**.

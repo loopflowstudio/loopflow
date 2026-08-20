@@ -21,7 +21,7 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
       - name: Retain the weekly evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: architecture-drift-${{ github.run_id }}
           path: architecture-report.json

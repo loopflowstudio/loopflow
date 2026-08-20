@@ -190,7 +190,11 @@ fn prepare_pr(
     // any failure rollback atomic with respect to other Loopflow PR commands
     // and pushes in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
-    crate::ops::task::request_task_pr_publication(&repo_root)?;
+    crate::ops::task::request_task_pr_publication(
+        &repo_root,
+        pr_title.as_deref().unwrap_or_default(),
+        pr_body.as_deref().unwrap_or_default(),
+    )?;
     let created_pr = ensure_pr(
         &repo_root,
         pr_exists,

@@ -25,8 +25,8 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::task::{
     AfterMerge, CiObservation, GithubObservation, GithubPr, LinearObservationApply,
-    LinearObservationOutcome, PrMergeRequest, PrPhase, PrPublication, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
+    LinearObservationOutcome, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
+    TaskEvent, TaskEventKind, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskLinearObservation,
     TaskPhasePlan, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
@@ -921,6 +921,7 @@ impl SqliteStore {
         task_id: &TaskId,
         lease: &RunLease,
         error: &str,
+        resumable: bool,
     ) -> StoreResult<TaskEvent> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -932,7 +933,7 @@ impl SqliteStore {
             &task,
             &TaskEventKind::Failed {
                 error: error.to_string(),
-                resumable: true,
+                resumable,
             },
         )?;
         end_run_for_lease(&transaction, lease, crate::durable::BoundaryState::Failed)?;
@@ -1848,10 +1849,10 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     iterate_flow, phase_cursor, phase_iteration,
     kickoff_flow, gate_flow,
     lifecycle_phase, phase_epoch, gate_cycle, gate_proposal_json,
-    created_at, updated_at
+    created_at, updated_at, lifecycle_outcome
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
 )";
 const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
@@ -1861,7 +1862,8 @@ const TASK_COLUMNS: &str = "SELECT
     t.abandon_requested_at, t.abandon_reason,
     t.iterate_flow, t.phase_cursor, t.phase_iteration,
     t.kickoff_flow, t.gate_flow,
-    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
+    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json,
+    t.lifecycle_outcome
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_SELECT: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
@@ -1871,7 +1873,8 @@ pub(super) const TASK_SELECT: &str = "SELECT
     t.abandon_requested_at, t.abandon_reason,
     t.iterate_flow, t.phase_cursor, t.phase_iteration,
     t.kickoff_flow, t.gate_flow,
-    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json
+    t.lifecycle_phase, t.phase_epoch, t.gate_cycle, t.gate_proposal_json,
+    t.lifecycle_outcome
     FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1";
 const TASK_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
@@ -1879,7 +1882,7 @@ const TASK_UPDATE: &str = "UPDATE tasks SET
     pm_writeback_json=?8, worktree=?9, workspace_slug=?10, agent=?11, provider=?12,
     provider_session_id=?13, abandon_requested_at=?14, abandon_reason=?15,
     iterate_flow=?16, kickoff_flow=?19, gate_flow=?20,
-    created_at=?25, updated_at=?26
+    created_at=?25, updated_at=?26, lifecycle_outcome=?27
     WHERE id=?1";
 const TASK_LIFECYCLE_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
@@ -1890,7 +1893,7 @@ const TASK_LIFECYCLE_UPDATE: &str = "UPDATE tasks SET
     phase_iteration=?18, kickoff_flow=?19,
     gate_flow=?20, lifecycle_phase=?21,
     phase_epoch=?22, gate_cycle=?23, gate_proposal_json=?24,
-    created_at=?25, updated_at=?26
+    created_at=?25, updated_at=?26, lifecycle_outcome=?27
     WHERE id=?1";
 const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
     project_id=?2, external_issue_id=?3, issue_identifier=?4,
@@ -1914,7 +1917,7 @@ const TASK_RUN_UPDATE: &str = "UPDATE tasks SET
     phase_epoch=MAX(phase_epoch, ?22),
     gate_cycle=CASE WHEN ?22>=phase_epoch THEN ?23 ELSE gate_cycle END,
     gate_proposal_json=CASE WHEN ?22>=phase_epoch THEN ?24 ELSE gate_proposal_json END,
-    created_at=?25, updated_at=?26
+    created_at=?25, updated_at=?26, lifecycle_outcome=?27
     WHERE id=?1";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1922,7 +1925,8 @@ const TASK_PR_COLUMNS: &str = "SELECT
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error,
-    merge_mode, merge_requested_at, merge_head_sha
+    merge_mode, merge_requested_at, merge_head_sha,
+    pr_title, pr_body, pr_copy_head_sha
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1930,7 +1934,8 @@ const TASK_PR_SELECT: &str = "SELECT
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error,
-    merge_mode, merge_requested_at, merge_head_sha
+    merge_mode, merge_requested_at, merge_head_sha,
+    pr_title, pr_body, pr_copy_head_sha
     FROM task_prs WHERE id=?1";
 /// Persist one Linear comment as a Steer exactly once. The insert
 /// into `task_linear_ingested_comments` is the guard — the command is written
@@ -1999,6 +2004,7 @@ fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
         })),
         Box::new(task.created_at.unix_timestamp()),
         Box::new(task.updated_at.unix_timestamp()),
+        Box::new(task.lifecycle.outcome.as_str().to_string()),
     ]
 }
 
@@ -2053,6 +2059,7 @@ fn require_cleanup_run_owns_child(
 fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
     let publication = pr.publication.as_ref();
+    let presentation = publication.and_then(|publication| publication.presentation.as_ref());
     let github = publication.and_then(|publication| publication.github.as_ref());
     let merge = publication.and_then(|publication| publication.merge.as_ref());
     conn.execute(
@@ -2063,8 +2070,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             created_at, updated_at, github_head_sha, ci_observation, parent_pr_id,
             github_observation,
             linear_attachment_id, linear_comment_id, linear_link_error,
-            merge_mode, merge_requested_at, merge_head_sha
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
+            merge_mode, merge_requested_at, merge_head_sha,
+            pr_title, pr_body, pr_copy_head_sha
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
         params![
             pr.id.as_str(),
             pr.task_id.as_str(),
@@ -2091,6 +2099,9 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             merge.map(|request| request.mode.as_str()),
             merge.map(|request| request.requested_at.unix_timestamp()),
             merge.map(|request| request.head_sha.as_str()),
+            presentation.map(|copy| copy.title.as_str()),
+            presentation.map(|copy| copy.body.as_str()),
+            presentation.map(|copy| copy.head_sha.as_str()),
         ],
     )?;
     Ok(())
@@ -2113,6 +2124,7 @@ fn record_task_pr_repair_incident_on(
 fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
     validate_task_pr(pr)?;
     let publication = pr.publication.as_ref();
+    let presentation = publication.and_then(|publication| publication.presentation.as_ref());
     let github = publication.and_then(|publication| publication.github.as_ref());
     let merge = publication.and_then(|publication| publication.merge.as_ref());
     conn.execute(
@@ -2122,7 +2134,8 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             abandoned_at=?13, updated_at=?15, github_head_sha=?16,
             ci_observation=?17, parent_pr_id=?18, github_observation=?19,
             linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22,
-            merge_mode=?23, merge_requested_at=?24, merge_head_sha=?25
+            merge_mode=?23, merge_requested_at=?24, merge_head_sha=?25,
+            pr_title=?26, pr_body=?27, pr_copy_head_sha=?28
          WHERE id=?1 AND task_id=?2 AND sequence=?3 AND slug=?4
            AND branch=?5 AND base_commit=?6 AND created_at=?14",
         params![
@@ -2151,6 +2164,9 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             merge.map(|request| request.mode.as_str()),
             merge.map(|request| request.requested_at.unix_timestamp()),
             merge.map(|request| request.head_sha.as_str()),
+            presentation.map(|copy| copy.title.as_str()),
+            presentation.map(|copy| copy.body.as_str()),
+            presentation.map(|copy| copy.head_sha.as_str()),
         ],
     )
     .map_err(StoreError::from)
@@ -2392,6 +2408,8 @@ pub(super) fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         worktree: PathBuf::from(row.get::<_, String>(6)?),
         workspace_slug: row.get(7)?,
         lifecycle: TaskLifecyclePlan {
+            outcome: crate::task::TaskOutcome::from_storage_str(&row.get::<_, String>(27)?)
+                .map_err(|error| invalid_column(27, error))?,
             first: TaskPhasePlan { flow: row.get(21)? },
             loop_: TaskPhasePlan { flow: row.get(18)? },
             finally: TaskPhasePlan { flow: row.get(22)? },
@@ -2465,9 +2483,31 @@ fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
             ))
         }
     };
+    let presentation = match (
+        row.get::<_, Option<String>>(25)?,
+        row.get::<_, Option<String>>(26)?,
+        row.get::<_, Option<String>>(27)?,
+    ) {
+        (Some(title), Some(body), Some(head_sha)) => Some(PrPresentation {
+            title,
+            body,
+            head_sha,
+        }),
+        (None, None, None) => None,
+        _ => {
+            return Err(invalid_column(
+                25,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "PR presentation fields must all be present or absent",
+                ),
+            ))
+        }
+    };
     let publication = match publication_requested_at {
         Some(requested_at) => Some(PrPublication {
             requested_at: crate::store::rows::unix_to_datetime(requested_at),
+            presentation,
             github: match (github_number, github_url) {
                 (Some(number), Some(url)) => Some(GithubPr {
                     number,

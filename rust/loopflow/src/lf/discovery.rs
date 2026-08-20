@@ -331,6 +331,7 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
         default_agent: None,
         directions: Vec::new(),
         action_style: None,
+        capabilities: Vec::new(),
     })
 }
 

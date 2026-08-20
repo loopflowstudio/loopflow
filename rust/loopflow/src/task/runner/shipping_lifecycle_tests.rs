@@ -12,8 +12,7 @@ use crate::durable::{
     BoundaryState, Containment, InvocationRoute, RunAdvance, RunTrigger, WorkStatus,
 };
 use crate::engine::agent::{
-    build_claude_session_turn_args, build_codex_command, opencode_worktree_config, AgentWriteScope,
-    ProcessConfig,
+    build_claude_session_turn_args, build_codex_command, AgentWriteScope, ProcessConfig,
 };
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
@@ -21,8 +20,8 @@ use crate::project::{Project, ProjectId};
 use crate::store::{open_store, SharedStore, StorageConfig};
 use crate::task::{
     AfterMerge, CiCheck, CiObservation, CiState, GithubPr, Observation, PmWritebackState,
-    PrMergeMode, PrMergeRequest, PrPublication, Task, TaskEventKind, TaskGateProposal,
-    TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
+    PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, Task, TaskEventKind,
+    TaskGateProposal, TaskLifecyclePhase, TaskLifecyclePlan, TaskPr, TaskPrId,
 };
 use crate::wave::Wave;
 
@@ -174,7 +173,12 @@ async fn registry(
         project_id: project.id.clone(),
         worktree: fixture.worktree.clone(),
         workspace_slug: "shipping-proof".to_string(),
-        lifecycle: TaskLifecyclePlan::standard("task-kickoff", "slice", "ship"),
+        lifecycle: TaskLifecyclePlan::new(
+            crate::task::TaskOutcome::Delivery,
+            "task-kickoff",
+            "slice",
+            "ship",
+        ),
         lifecycle_phase: TaskLifecyclePhase::First,
         phase_epoch: 1,
         phase_cursor: 0,
@@ -213,6 +217,11 @@ async fn registry(
     store.create_task(&task, &pr).await.unwrap();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(PrPresentation {
+            title: "Ship without repair".to_string(),
+            body: "Proves autonomous Task settlement.".to_string(),
+            head_sha: fixture.failed_head.clone(),
+        }),
         github: Some(GithubPr {
             number: 55,
             url: "https://github.com/loopflowstudio/loopflow/pull/55".to_string(),
@@ -234,7 +243,9 @@ async fn registry(
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
 async fn task_ships_on_one_authority_chain_without_manual_repair() {
+    let _lf_bin = super::TestLfBinGuard::pin();
     let fixture = GitFixture::new();
     let (store, _database, _wave, project, mut task, _pr) = registry(&fixture).await;
     let work = store
@@ -278,7 +289,7 @@ async fn task_ships_on_one_authority_chain_without_manual_repair() {
             .unwrap()
             .expect("shipping proof starts on an autonomous step");
     assert_eq!(prepared.turn.config.write_scope, AgentWriteScope::Worktree);
-    assert!(!prepared.turn.config.skip_permissions);
+    assert!(prepared.turn.config.skip_permissions);
     let codex = build_codex_command(
         &prepared.turn.config,
         &ProcessConfig {
@@ -287,24 +298,22 @@ async fn task_ships_on_one_authority_chain_without_manual_repair() {
         },
         None,
     );
-    assert!(
-        codex
-            .windows(2)
-            .any(|pair| pair == ["--sandbox", "workspace-write"]),
-        "managed Codex must keep writes inside the Task worktree"
-    );
-    assert!(!codex.iter().any(|arg| arg == "--add-dir"));
-    assert!(!codex
+    assert!(codex
         .iter()
         .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox"));
+    let boundary = prepared
+        .turn
+        .config
+        .execution_boundary
+        .as_ref()
+        .expect("Task delivery boundary");
+    assert!(boundary
+        .writable_roots
+        .contains(&fixture.main.join(".git").canonicalize().unwrap()));
     let claude = build_claude_session_turn_args("ship", &prepared.turn.config, None);
-    assert!(!claude.iter().any(|arg| arg == "--add-dir"));
-    assert!(!claude
+    assert!(claude
         .iter()
         .any(|arg| arg == "--dangerously-skip-permissions"));
-    let opencode: serde_json::Value = serde_json::from_str(&opencode_worktree_config()).unwrap();
-    assert_eq!(opencode["permission"]["external_directory"], "deny");
-
     crate::ops::task::verify_task_pr_range_with_authority(
         &store,
         &task,
@@ -414,6 +423,14 @@ async fn task_ships_on_one_authority_chain_without_manual_repair() {
         failing_checks: Vec::new(),
         observed_at: now,
     });
+    repaired_pr
+        .publication
+        .as_mut()
+        .unwrap()
+        .presentation
+        .as_mut()
+        .unwrap()
+        .head_sha = repaired_head.clone();
     repaired_pr.publication.as_mut().unwrap().merge = Some(PrMergeRequest {
         mode: PrMergeMode::Auto,
         requested_at: now,

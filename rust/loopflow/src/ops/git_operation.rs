@@ -87,6 +87,8 @@ struct WorktreeWriterOwner {
     pid: u32,
     run_id: Option<String>,
     process_id: Option<String>,
+    #[serde(default)]
+    invocation_id: Option<String>,
     worktree: PathBuf,
 }
 
@@ -411,7 +413,28 @@ fn establish_writer(
     worktree: &Path,
     inherited: Option<WorktreeWriterId>,
 ) -> OpsResult<(WorktreeWriterId, Option<WorktreeWriterLease>)> {
-    let id = inherited.unwrap_or_else(WorktreeWriterId::new);
+    if let Some(id) = inherited {
+        let path = writer_path(worktree, &id)?;
+        if !path.exists() {
+            return Err(revoked_writer_error(&id));
+        }
+        let mut file = open_existing_record(&path)?;
+        return match FileExt::try_lock_exclusive(&file) {
+            Err(error) if is_contended(&error) => {
+                let owner = read_json::<WorktreeWriterOwner>(&mut file)
+                    .map_err(|_| revoked_writer_error(&id))?;
+                if owner.id != id || !writer_owner_is_authoritative(&owner)? {
+                    Err(revoked_writer_error(&id))
+                } else {
+                    Ok((id, None))
+                }
+            }
+            Err(error) => Err(error.into()),
+            Ok(()) => Err(revoked_writer_error(&id)),
+        };
+    }
+
+    let id = WorktreeWriterId::new();
     let path = writer_path(worktree, &id)?;
     let mut file = create_record(&path)?;
     match FileExt::try_lock_exclusive(&file) {
@@ -423,6 +446,7 @@ fn establish_writer(
                 pid: std::process::id(),
                 run_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
                 process_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
+                invocation_id: std::env::var(crate::durable::AGENT_INVOCATION_ENV).ok(),
                 worktree: worktree.to_path_buf(),
             };
             write_json(&mut file, &owner)?;
@@ -447,14 +471,19 @@ fn refuse_other_writers(worktree: &Path, own_id: &WorktreeWriterId) -> OpsResult
         let mut file = open_record(&path)?;
         match FileExt::try_lock_exclusive(&file) {
             Err(error) if is_contended(&error) => {
-                let owner = read_json::<WorktreeWriterOwner>(&mut file).ok();
-                let label = owner
-                    .as_ref()
-                    .map(|owner| format!("{} (pid {})", owner.id.as_str(), owner.pid))
-                    .unwrap_or_else(|| path.display().to_string());
-                return Err(OpsError::Message(format!(
-                    "refusing to rebase while independent writer {label} is live in this worktree"
-                )));
+                let owner = read_json::<WorktreeWriterOwner>(&mut file).map_err(|_| {
+                    OpsError::Message(format!(
+                        "refusing to reclaim unreadable writer authority at {}",
+                        path.display()
+                    ))
+                })?;
+                if writer_owner_is_authoritative(&owner)? {
+                    return Err(OpsError::Message(format!(
+                        "refusing to rebase while independent writer {} (pid {}) has live durable authority in this worktree",
+                        owner.id.as_str(), owner.pid
+                    )));
+                }
+                fs::remove_file(&path)?;
             }
             Err(error) => return Err(error.into()),
             Ok(()) => {
@@ -463,6 +492,34 @@ fn refuse_other_writers(worktree: &Path, own_id: &WorktreeWriterId) -> OpsResult
         }
     }
     Ok(())
+}
+
+fn writer_owner_is_authoritative(owner: &WorktreeWriterOwner) -> OpsResult<bool> {
+    if let Some(invocation_id) = owner.invocation_id.as_deref() {
+        let db_path = crate::store::observability_database_path().map_err(|error| {
+            OpsError::Message(format!(
+                "cannot resolve durable writer authority for {invocation_id}: {error}"
+            ))
+        })?;
+        return crate::store::writer_invocation_is_authoritative(&db_path, invocation_id).map_err(
+            |error| {
+                OpsError::Message(format!(
+                    "cannot read durable writer authority for {invocation_id}: {error}"
+                ))
+            },
+        );
+    }
+    // A Loopflow agent writer created before invocation identity was recorded
+    // has provenance but no durable owner. Its surviving PID is evidence only.
+    // A direct host Git operation has neither and retains its ordinary file lock.
+    Ok(owner.run_id.is_none() && owner.process_id.is_none())
+}
+
+fn revoked_writer_error(id: &WorktreeWriterId) -> OpsError {
+    OpsError::Message(format!(
+        "worktree writer {} was revoked because its durable Run, Turn, or Ask no longer owns mutation authority; start a fresh authorized operation",
+        id.as_str()
+    ))
 }
 
 fn refuse_intervention(worktree: &Path) -> OpsResult<()> {
@@ -495,6 +552,10 @@ fn open_record(path: &Path) -> io::Result<File> {
         .read(true)
         .write(true)
         .open(path)
+}
+
+fn open_existing_record(path: &Path) -> io::Result<File> {
+    OpenOptions::new().read(true).write(true).open(path)
 }
 
 fn create_record(path: &Path) -> OpsResult<File> {
@@ -572,4 +633,137 @@ fn validate_id(value: &str, label: &str) -> OpsResult<()> {
         return Err(OpsError::Message(format!("invalid {label} id")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{begin_rebase_operation, establish_writer, prepare_agent_writer, writer_path};
+    use std::collections::BTreeMap;
+    use std::ffi::OsString;
+    use std::path::Path;
+    use std::process::Command;
+
+    struct EnvRestore(Vec<(&'static str, Option<OsString>)>);
+
+    impl EnvRestore {
+        fn capture(names: &[&'static str]) -> Self {
+            Self(
+                names
+                    .iter()
+                    .map(|name| (*name, std::env::var_os(name)))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in &self.0 {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn settled_ask_writer_is_reclaimed_and_its_token_stays_revoked() {
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "LF_CONTROL_DB_PATH",
+            "LF_AGENT_INVOCATION_ID",
+            "LF_TRACE_ID",
+            "LF_PROCESS_ID",
+            "LF_WORKTREE_WRITER_ID",
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "Loopflow Test"]);
+        std::fs::write(repo.join("README.md"), "proof\n").unwrap();
+        git(&repo, &["add", "."]);
+        git(&repo, &["commit", "-m", "proof"]);
+
+        let database = directory.path().join("authority.db");
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE runs (id TEXT PRIMARY KEY, state TEXT NOT NULL);
+                 CREATE TABLE agent_invocations (
+                    id TEXT PRIMARY KEY,
+                    ended_at INTEGER,
+                    supervising_run_id TEXT,
+                    answer_ask_id TEXT
+                 );
+                 CREATE TABLE agent_turns (
+                    id TEXT PRIMARY KEY,
+                    invocation_id TEXT NOT NULL,
+                    status TEXT NOT NULL
+                 );
+                 CREATE TABLE ask_exchanges (
+                    id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    active_invocation_id TEXT
+                 );
+                 INSERT INTO runs VALUES ('run_stale', 'active');
+                 INSERT INTO agent_invocations
+                    VALUES ('invocation_stale', NULL, 'run_stale', 'ask_stale');
+                 INSERT INTO agent_turns
+                    VALUES ('turn_stale', 'invocation_stale', 'running');
+                 INSERT INTO ask_exchanges
+                    VALUES ('ask_stale', 'claimed', 'invocation_stale');",
+            )
+            .unwrap();
+        std::env::set_var("LF_CONTROL_DB_PATH", &database);
+        std::env::set_var("LF_AGENT_INVOCATION_ID", "invocation_stale");
+        std::env::set_var("LF_TRACE_ID", "trace_stale");
+        std::env::set_var("LF_PROCESS_ID", "process_stale");
+        let guard = prepare_agent_writer(&repo, &BTreeMap::new())
+            .unwrap()
+            .expect("Git repo gets a writer");
+        let stale_id = guard.writer_id.clone();
+        let stale_path = writer_path(&repo, &stale_id).unwrap();
+        assert!(stale_path.exists());
+
+        connection
+            .execute_batch(
+                "UPDATE agent_turns SET status='completed' WHERE id='turn_stale';
+                 UPDATE ask_exchanges
+                 SET state='resolved', active_invocation_id=NULL
+                 WHERE id='ask_stale';",
+            )
+            .unwrap();
+        drop(connection);
+        std::env::remove_var("LF_AGENT_INVOCATION_ID");
+        std::env::remove_var("LF_TRACE_ID");
+        std::env::remove_var("LF_PROCESS_ID");
+
+        let operation = begin_rebase_operation(&repo, "main").unwrap();
+        assert!(
+            !stale_path.exists(),
+            "terminal owner is reclaimed even while its PID lives"
+        );
+        let error = establish_writer(&repo, Some(stale_id))
+            .expect_err("a stale process cannot recreate its revoked writer token");
+        assert!(error.to_string().contains("was revoked"));
+        operation.complete().unwrap();
+        drop(guard);
+    }
 }

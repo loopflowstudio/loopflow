@@ -272,6 +272,7 @@ lf task start <linear-project-id> "fix the flaky chord-timeout test"
 pbpaste | lf task start incident-management
 lf task run DES-123 --directive "fix the parser before the docs"
 lf task run DES-124 --stack-on DES-123
+lf task run DES-125 --design-only --loop gate --finally ship
 lf task status DES-123
 lf ask list                                           # parent Ask queue
 lf ask list --outgoing                                # this Work's unresolved requests
@@ -322,7 +323,36 @@ invoking repository; a UUID from another repository is not a capability.
 
 Every Task runs `first → loop N → finally`. Its Project supplies those three
 flows; Task launch pins their resolved names. `--first`, `--loop`, and
-`--finally` override them only while creating the Task. A skill that needs judgment runs
+`--finally` override them only while creating the Task. Task launch expands the
+three flows as one lifecycle: the loop must make autonomous progress, delivery
+must include a skill with `task_implementation` in first or loop, and the final
+flow must end with `op: pr land -c`. `--design-only` explicitly waives only the
+implementation requirement. Invalid persisted lifecycles remain visible in
+status with `no_action`; abandon and replace them with a valid selection.
+
+Task launch also resolves the exact execution boundary the lifecycle needs:
+the linked worktree's shared Git metadata, Loopflow's pinned control store, and
+network access for delivery. Headless Tasks require a managed Codex or Claude
+account with usable credentials. Loopflow probes the linked Git and control
+roots before reserving a Run, then launches the provider inside the trusted
+managed delivery boundary with unrestricted network and filesystem access. A
+supervised Task establishes its active Turn record before provider work begins,
+so `lf ask` always has durable authority while that Turn is live.
+
+If a provider returns normally after a permission, control-authority, or
+network command failure, Loopflow records the exact command blocker as a
+non-resumable Task failure. Status assigns the next move to the User with
+`no_action`; missing-process reconciliation and automatic recovery do not
+replace or repeat it. Correct the capability, then run
+`lf task resume ID --reason "<what changed>"` to create a fresh input boundary.
+
+A worktree writer is authoritative only while its exact Run, Turn, and optional
+Ask are live. Commit, rebase, and land refuse a genuinely concurrent writer but
+atomically reclaim a writer whose durable owner is terminal, absent, or
+superseded. A surviving unclaimed provider PID has no mutation authority and
+cannot block settlement; its revoked writer token prevents later writes.
+
+A skill that needs judgment runs
 `lf ask "<intervention>"`; the Ask routes to the
 immediate parent Run. `--user` is explicit and never inferred for root Work.
 The ordinary command prints its id and request, then blocks without ending the
@@ -760,6 +790,12 @@ On Task PRs, land records the same head-and-disposition request with Auto as
 the operator. `--match-head-commit` fences the arming command; Loopflow revokes
 Auto before its own later head mutation. Concurrent Loopflow finalization and
 push commands in one worktree are refused rather than interleaved.
+
+Task publication persists a non-empty reviewer-facing title and body for the
+current head. A published PR with missing or stale copy remains actionable, as
+does a PR whose auto-merge settlement is not armed. Only a current-head Auto
+merge request with Complete disposition records the terminal `lf pr land -c`
+intent.
 
 If a Task reaches `finally` after its work already merged and rotation left a
 provably empty unpublished successor, `lf pr land -c` completes over the merged

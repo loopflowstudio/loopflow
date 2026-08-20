@@ -542,7 +542,8 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 mod tests {
     use super::*;
     use crate::task::{
-        AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPublication, TaskId, TaskPrId,
+        AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId,
+        TaskPrId,
     };
 
     #[test]
@@ -752,6 +753,11 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: OffsetDateTime::from_unix_timestamp(20).unwrap(),
+                presentation: Some(PrPresentation {
+                    title: "Activity query".to_string(),
+                    body: "Reviewer context".to_string(),
+                    head_sha: "head".to_string(),
+                }),
                 github: Some(GithubPr {
                     number: 140,
                     url: "https://github.com/loopflowstudio/loopflow/pull/140".to_string(),

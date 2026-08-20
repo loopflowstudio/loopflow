@@ -575,6 +575,7 @@ impl Store {
         task_id: &TaskId,
         lease: &RunLease,
         error: &str,
+        resumable: bool,
     ) -> StoreResult<TaskEvent> {
         let task_id = task_id.clone();
         let lease = lease.clone();
@@ -582,13 +583,10 @@ impl Store {
         let write_task_id = task_id.clone();
         let write_error = error.clone();
         let event = run_sqlite(&self.sqlite, move |store| {
-            store.fail_task_run(&write_task_id, &lease, &write_error)
+            store.fail_task_run(&write_task_id, &lease, &write_error, resumable)
         })
         .await?;
-        let kind = TaskEventKind::Failed {
-            error,
-            resumable: true,
-        };
+        let kind = TaskEventKind::Failed { error, resumable };
         if let Err(error) = self.nudge_task_event(&task_id, &kind, &event).await {
             tracing::debug!(
                 %error,

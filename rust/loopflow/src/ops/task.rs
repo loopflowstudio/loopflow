@@ -19,20 +19,23 @@ use crate::engine::git::{
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::process::{tmux_session_exists, tmux_session_slug};
 use crate::engine::worktrees::{
-    create_from_placement_plan, main_repo_root, plan_placement, PlacementStrategy, WorktreeSegment,
+    create_from_placement_plan, git_common_dir, main_repo_root, plan_placement, PlacementStrategy,
+    WorktreeSegment,
 };
-use crate::engine::{expand_flow, load_flow, ConcreteStep};
+use crate::engine::{expand_flow, load_flow, AgentExecutionBoundary, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::planning::{LinearIssueId, TaskPlan};
+use crate::provider_auth::Provider;
 use crate::store::{
-    open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
-    StoreError,
+    open_existing_store, open_registry_for_authority, ProviderAccountId, RegistryUnavailable,
+    SharedStore, Store, StoreError,
 };
 use crate::task::actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::task::{
     AfterMerge, CiCheck, CiIncident, CiObservation, CiState, GithubObservation,
     GithubObservationResult, GithubPr, Observation, PmWritebackOperation, PmWritebackState,
-    PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
+    PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
+    TaskPr, TaskPrId,
 };
 use crate::wave::Wave;
 use fs2::FileExt;
@@ -50,6 +53,7 @@ pub struct TaskFlowOverrides {
     pub first: Option<String>,
     pub loop_: Option<String>,
     pub finally: Option<String>,
+    pub outcome: Option<crate::task::TaskOutcome>,
 }
 
 /// Named lifecycle presets: where the human gate sits, in one word.
@@ -97,6 +101,7 @@ impl TaskFlowOverrides {
             first: first.or_else(|| cycle_first.map(str::to_string)),
             loop_,
             finally: finally.or_else(|| cycle_finally.map(str::to_string)),
+            outcome: None,
         }
     }
 }
@@ -431,24 +436,34 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             ensure_task_flow_override(
                 &task.worktree,
                 &task.plan.identifier,
-                "first",
+                crate::task::TaskLifecyclePhase::First,
                 flows.first.as_deref(),
                 &task.lifecycle.first.flow,
             )?;
             ensure_task_flow_override(
                 &task.worktree,
                 &task.plan.identifier,
-                "loop",
+                crate::task::TaskLifecyclePhase::Loop,
                 flows.loop_.as_deref(),
                 &task.lifecycle.loop_.flow,
             )?;
             ensure_task_flow_override(
                 &task.worktree,
                 &task.plan.identifier,
-                "finally",
+                crate::task::TaskLifecyclePhase::Finally,
                 flows.finally.as_deref(),
                 &task.lifecycle.finally.flow,
             )?;
+            if flows
+                .outcome
+                .is_some_and(|outcome| outcome != task.lifecycle.outcome)
+            {
+                return Err(task_error(format!(
+                    "Task {} already pins {} outcome",
+                    task.plan.identifier,
+                    task.lifecycle.outcome.as_str()
+                )));
+            }
             if let Some(requested) = stack_on.as_deref() {
                 let active = store
                     .active_task_pr(&task.id)
@@ -490,6 +505,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
         Ok(existing)
     })?;
     if let Some(existing) = existing {
+        validate_task_launch(&existing)?;
         return task_status(existing.plan.id.as_str());
     }
     let main_repo = crate::ops::project::ensure_clean_main(repo, "Task start")
@@ -623,6 +639,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
                 }
             }
         }
+        let account_id = preflight_task_execution(&main_repo, &agent).await?;
         let now = time::OffsetDateTime::now_utc();
         let mut task = Task {
             id: crate::task::TaskId::new(),
@@ -715,7 +732,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
 
         if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
             store
-                .fail_task_run(&task.id, &lease, &error.to_string())
+                .fail_task_run(&task.id, &lease, &error.to_string(), true)
                 .await
                 .map_err(|settle_error| {
                     task_error(format!(
@@ -740,7 +757,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             .await
         {
             store
-                .fail_task_run(&task.id, &lease, &error.to_string())
+                .fail_task_run(&task.id, &lease, &error.to_string(), true)
                 .await
                 .map_err(|settle_error| {
                     task_error(format!(
@@ -750,7 +767,7 @@ pub fn task_run(repo: &Path, issue: &str, options: TaskLaunchOptions) -> OpsResu
             return Err(task_error(error.to_string()));
         }
 
-        launch_reserved_task_process(&store, &mut task, &run, &lease).await?;
+        launch_reserved_task_process(&store, &mut task, &run, &lease, account_id).await?;
         wait_until_running(&store, &task.id).await
     })
 }
@@ -803,6 +820,8 @@ pub fn task_start(
         .clone()
         .unwrap_or_else(crate::pm::ProjectFlowPlan::empty);
     resolve_task_lifecycle(&main, &project_flows, &options.flows)?;
+    let config = load_config_or_default(Some(&main));
+    block_on_task(preflight_task_execution(&main, config.agent()))?;
     let marker = format!(
         "<!-- loopflow-task-start:{} -->",
         hex::encode(Sha256::digest(
@@ -862,18 +881,20 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 fn ensure_task_flow_override(
     repo: &Path,
     issue_identifier: &str,
-    phase: &str,
+    phase: crate::task::TaskLifecyclePhase,
     requested: Option<&str>,
     pinned: &str,
 ) -> OpsResult<()> {
     let Some(requested) = requested else {
         return Ok(());
     };
-    let requested = resolve_task_flow(repo, requested, phase == "finally")?;
+    let (requested, _) = load_task_flow(repo, requested, phase)?;
     if requested != pinned {
         return Err(task_error(format!(
-            "Task {} already pins {phase} flow {:?}",
-            issue_identifier, pinned
+            "Task {} already pins {} flow {:?}",
+            issue_identifier,
+            phase.as_str(),
+            pinned
         )));
     }
     Ok(())
@@ -884,43 +905,312 @@ fn resolve_task_lifecycle(
     project: &crate::pm::ProjectFlowPlan,
     overrides: &TaskFlowOverrides,
 ) -> OpsResult<crate::task::TaskLifecyclePlan> {
-    let first = overrides
-        .first
-        .as_deref()
-        .or(project.first.as_deref())
-        .unwrap_or("task-design");
-    let loop_flow = overrides
-        .loop_
-        .as_deref()
-        .or(project.loop_.as_deref())
-        .unwrap_or("slice");
-    let finally = overrides
-        .finally
-        .as_deref()
-        .or(project.finally.as_deref())
-        .unwrap_or("ship");
-    let first = resolve_task_flow(repo, first, false)?;
-    let loop_flow = resolve_task_flow(repo, loop_flow, false)?;
-    let finally = resolve_task_flow(repo, finally, true)?;
-    Ok(crate::task::TaskLifecyclePlan::standard(
-        first, loop_flow, finally,
+    let (first, first_source) = select_task_flow(
+        overrides.first.as_deref(),
+        project.first.as_deref(),
+        "task-design",
+        "first",
+    );
+    let (loop_flow, loop_source) = select_task_flow(
+        overrides.loop_.as_deref(),
+        project.loop_.as_deref(),
+        "slice",
+        "loop",
+    );
+    let (finally, finally_source) = select_task_flow(
+        overrides.finally.as_deref(),
+        project.finally.as_deref(),
+        "ship",
+        "finally",
+    );
+    let outcome = overrides
+        .outcome
+        .unwrap_or(crate::task::TaskOutcome::Delivery);
+    let outcome_source = if overrides.outcome.is_some() {
+        "Task launch `--design-only`"
+    } else {
+        "default Task outcome"
+    };
+    let (first, first_steps) = load_task_flow(repo, first, crate::task::TaskLifecyclePhase::First)?;
+    let (loop_flow, loop_steps) =
+        load_task_flow(repo, loop_flow, crate::task::TaskLifecyclePhase::Loop)?;
+    let (finally, finally_steps) =
+        load_task_flow(repo, finally, crate::task::TaskLifecyclePhase::Finally)?;
+    validate_task_lifecycle_facts(
+        outcome,
+        outcome_source,
+        [
+            (&first, &first_source, &first_steps),
+            (&loop_flow, &loop_source, &loop_steps),
+            (&finally, &finally_source, &finally_steps),
+        ],
+    )?;
+    Ok(crate::task::TaskLifecyclePlan::new(
+        outcome, first, loop_flow, finally,
     ))
 }
 
 fn validate_task_lifecycle(task: &Task) -> OpsResult<()> {
-    for (phase, flow, allow_ops) in [
-        ("first", &task.lifecycle.first.flow, false),
-        ("loop", &task.lifecycle.loop_.flow, false),
-        ("finally", &task.lifecycle.finally.flow, true),
-    ] {
-        resolve_task_flow(&task.worktree, flow, allow_ops).map_err(|error| {
+    let resolve = |phase: crate::task::TaskLifecyclePhase, flow: &str| {
+        load_task_flow(&task.worktree, flow, phase).map_err(|error| {
             task_error(format!(
-                "Task {} cannot launch: pinned {phase} flow {flow:?} is invalid: {error}",
-                task.plan.identifier
+                "Task {} cannot launch: pinned {} flow {flow:?} is invalid: {error}",
+                task.plan.identifier,
+                phase.as_str(),
             ))
-        })?;
+        })
+    };
+    let (first, first_steps) = resolve(
+        crate::task::TaskLifecyclePhase::First,
+        &task.lifecycle.first.flow,
+    )?;
+    let (loop_flow, loop_steps) = resolve(
+        crate::task::TaskLifecyclePhase::Loop,
+        &task.lifecycle.loop_.flow,
+    )?;
+    let (finally, finally_steps) = resolve(
+        crate::task::TaskLifecyclePhase::Finally,
+        &task.lifecycle.finally.flow,
+    )?;
+    validate_task_lifecycle_facts(
+        task.lifecycle.outcome,
+        "persisted Task lifecycle outcome",
+        [
+            (
+                &first,
+                "persisted Task lifecycle `first` configuration",
+                &first_steps,
+            ),
+            (
+                &loop_flow,
+                "persisted Task lifecycle `loop` configuration",
+                &loop_steps,
+            ),
+            (
+                &finally,
+                "persisted Task lifecycle `finally` configuration",
+                &finally_steps,
+            ),
+        ],
+    )
+    .map_err(|error| {
+        task_error(format!(
+            "Task {} cannot launch: {error}\nPersisted Task lifecycle selection is immutable; abandon {} and start a replacement Task with the corrected flows and outcome",
+            task.plan.identifier, task.plan.identifier
+        ))
+    })
+}
+
+fn validate_task_launch(task: &Task) -> OpsResult<()> {
+    validate_task_lifecycle(task)?;
+    task_execution_boundary(&task.worktree, &task.agent)?;
+    Ok(())
+}
+
+fn task_configuration_refusal(task: &Task) -> Option<String> {
+    validate_task_launch(task)
+        .err()
+        .map(|error| error.to_string())
+}
+
+pub(crate) async fn task_launch_refusal(
+    store: &SharedStore,
+    task: &Task,
+) -> crate::store::StoreResult<Option<String>> {
+    if let Some(refusal) = task_configuration_refusal(task) {
+        return Ok(Some(refusal));
+    }
+    let event = store.latest_task_event(&task.id).await?;
+    Ok(task_event_launch_refusal(event.as_ref()).map(str::to_string))
+}
+
+pub(crate) fn task_event_launch_refusal(event: Option<&crate::task::TaskEvent>) -> Option<&str> {
+    match event.map(|event| &event.kind) {
+        Some(TaskEventKind::Failed {
+            error,
+            resumable: false,
+        }) => Some(error),
+        _ => None,
+    }
+}
+
+pub(crate) fn task_execution_boundary(
+    repo: &Path,
+    agent: &str,
+) -> OpsResult<AgentExecutionBoundary> {
+    let (harness, _) = parse_agent(agent);
+    if !matches!(harness.as_str(), "codex" | "claude") {
+        return Err(task_error(format!(
+            "Task execution cannot converge: agent {agent:?} uses harness {harness:?}, which has no managed account route for the required linked Git, Loopflow control-store, provider credential, and network capabilities; select codex or claude"
+        )));
+    }
+    let common_dir = git_common_dir(repo).map_err(|error| {
+        task_error(format!(
+            "Task execution cannot converge: failed to resolve linked Git metadata from {}: {error}",
+            repo.display()
+        ))
+    })?;
+    let control = crate::engine::process::pinned_execution_context().map_err(|error| {
+        task_error(format!(
+            "Task execution cannot converge: Loopflow control-plane authority is unavailable: {error}"
+        ))
+    })?;
+    let control_store = control.db_path.parent().ok_or_else(|| {
+        task_error(format!(
+            "Task execution cannot converge: Loopflow control database {} has no writable parent",
+            control.db_path.display()
+        ))
+    })?;
+    let mut writable_roots = vec![common_dir, control_store.to_path_buf()];
+    writable_roots.sort();
+    writable_roots.dedup();
+    Ok(AgentExecutionBoundary { writable_roots })
+}
+
+fn probe_task_execution_boundary(boundary: &AgentExecutionBoundary) -> OpsResult<()> {
+    for root in &boundary.writable_roots {
+        let probe = root.join(format!(
+            ".loopflow-task-capability-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let result = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+            .and_then(|file| {
+                file.sync_data()?;
+                std::fs::remove_file(&probe)
+            });
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&probe);
+            return Err(task_error(format!(
+                "Task execution cannot converge: required writable authority for {} is unavailable: {error}. Run the Task from a Loopflow host whose managed execution profile includes linked Git metadata and the Loopflow control store",
+                root.display()
+            )));
+        }
     }
     Ok(())
+}
+
+async fn preflight_task_execution(repo: &Path, agent: &str) -> OpsResult<ProviderAccountId> {
+    let boundary = task_execution_boundary(repo, agent)?;
+    probe_task_execution_boundary(&boundary)?;
+    let (harness, _) = parse_agent(agent);
+    let provider = harness.parse::<Provider>().map_err(|_| {
+        task_error(format!(
+            "Task execution cannot converge: agent {agent:?} has no managed provider-account route; select codex or claude"
+        ))
+    })?;
+    let route = crate::provider_account::resolve_provider_account_exact(provider, None, None)
+        .await
+        .map_err(|error| {
+            task_error(format!(
+                "Task execution cannot converge: provider account capability for {harness} is unavailable: {error}. Connect an eligible managed account and retry"
+            ))
+        })?
+        .ok_or_else(|| {
+            task_error(format!(
+                "Task execution cannot converge: provider account capability for {harness} resolved account_id=null. Configure and connect an eligible managed account before retrying"
+            ))
+        })?;
+    route.verify_ready().await.map_err(|error| {
+        task_error(format!(
+            "Task execution cannot converge: provider credential capability for {}/{} is unavailable: {error}. Reconnect that managed account before retrying",
+            harness,
+            route.account_id()
+        ))
+    })?;
+    Ok(route.account_id().clone())
+}
+
+fn select_task_flow<'a>(
+    task: Option<&'a str>,
+    project: Option<&'a str>,
+    default: &'a str,
+    phase: &str,
+) -> (&'a str, String) {
+    if let Some(flow) = task {
+        return (flow, format!("Task launch `--{phase}`"));
+    }
+    if let Some(flow) = project {
+        return (
+            flow,
+            format!("Linear Project `## Flows` `{phase}` configuration"),
+        );
+    }
+    (default, format!("built-in Task `{phase}` default"))
+}
+
+const TASK_IMPLEMENTATION_CAPABILITY: &str = "task_implementation";
+
+fn validate_task_lifecycle_facts(
+    outcome: crate::task::TaskOutcome,
+    outcome_source: &str,
+    phases: [(&str, &str, &[ConcreteStep]); 3],
+) -> OpsResult<()> {
+    let [(first_flow, first_source, first_steps), (loop_flow, loop_source, loop_steps), (finally_flow, finally_source, finally_steps)] =
+        phases;
+    let mut violations = Vec::new();
+    if loop_steps
+        .iter()
+        .all(|step| matches!(step, ConcreteStep::Skill(skill) if skill.policy.human))
+    {
+        violations.push(format!(
+            "loop phase flow {:?} from {} is human-only; missing capability `autonomous_progress`. Move the human review to `first` or `finally`, or select an autonomous loop such as `slice`",
+            loop_flow, loop_source,
+        ));
+    }
+
+    let implements = |steps: &[ConcreteStep]| {
+        steps.iter().any(|step| {
+            matches!(
+                step,
+                ConcreteStep::Skill(skill)
+                    if skill
+                        .skill
+                        .capabilities
+                        .iter()
+                        .any(|capability| capability == TASK_IMPLEMENTATION_CAPABILITY)
+            )
+        })
+    };
+    if outcome == crate::task::TaskOutcome::Delivery
+        && !implements(first_steps)
+        && !implements(loop_steps)
+    {
+        violations.push(format!(
+            "loop phase flow {:?} from {} has no `{TASK_IMPLEMENTATION_CAPABILITY}` capability, and first phase flow {:?} from {} provides none for the delivery outcome from {}; select an implementation flow such as `slice`, declare that capability on the implementing skill, or launch intentional design work with `--design-only`",
+            loop_flow, loop_source, first_flow, first_source, outcome_source,
+        ));
+    }
+
+    let settles = finally_steps.last().is_some_and(|step| {
+        matches!(
+            step,
+            ConcreteStep::Op(op)
+                if op.item.command == "pr"
+                    && op.item.args.first().is_some_and(|arg| arg == "land")
+                    && op
+                        .item
+                        .args
+                        .iter()
+                        .any(|arg| arg == "-c" || arg == "--complete")
+        )
+    });
+    if !settles {
+        violations.push(format!(
+            "finally phase flow {:?} from {} is missing capability `autonomous_task_settlement` at its terminal step; end the flow with `op: pr land -c` or select `ship`",
+            finally_flow, finally_source,
+        ));
+    }
+
+    if violations.is_empty() {
+        return Ok(());
+    }
+    Err(task_error(format!(
+        "Task lifecycle cannot converge:\n- {}",
+        violations.join("\n- ")
+    )))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -982,7 +1272,11 @@ pub(crate) async fn task_worktree_blocker(
     }))
 }
 
-fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult<String> {
+fn load_task_flow(
+    repo: &Path,
+    requested: &str,
+    phase: crate::task::TaskLifecyclePhase,
+) -> OpsResult<(String, Vec<ConcreteStep>)> {
     let definition = load_flow(requested, repo)
         .map_err(|error| task_error(format!("failed to load Task flow {requested:?}: {error}")))?;
     let steps = expand_flow(&definition, repo).map_err(|error| {
@@ -991,6 +1285,7 @@ fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult
     if steps.is_empty() {
         return Err(task_error(format!("Task flow {requested:?} has no steps")));
     }
+    let allow_ops = phase == crate::task::TaskLifecyclePhase::Finally;
     if allow_ops {
         let first_op = steps
             .iter()
@@ -1015,7 +1310,7 @@ fn resolve_task_flow(repo: &Path, requested: &str, allow_ops: bool) -> OpsResult
             "Task flow {requested:?} contains {step:?}; first/loop require skills and finally permits skills or ops"
         )));
     }
-    Ok(definition.name)
+    Ok((definition.name, steps))
 }
 
 fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
@@ -1381,7 +1676,15 @@ pub(crate) fn record_task_pr_repair(
     })
 }
 
-pub(crate) fn request_task_pr_publication(repo: &Path) -> OpsResult<bool> {
+pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) -> OpsResult<bool> {
+    let title = title.trim();
+    let body = body.trim();
+    if title.is_empty() || body.is_empty() {
+        return Err(task_error(
+            "Task PR settlement requires a non-empty reviewer-facing title and body; supply both or let Loopflow generate them",
+        ));
+    }
+    let head_sha = rev_parse(repo, "HEAD")?;
     block_on_task(async move {
         let TaskAuthority::Authority { store, task, lease } = resolve_task_authority(repo).await?
         else {
@@ -1418,6 +1721,11 @@ pub(crate) fn request_task_pr_publication(repo: &Path) -> OpsResult<bool> {
                 .publication
                 .as_ref()
                 .map_or(now, |publication| publication.requested_at),
+            presentation: Some(PrPresentation {
+                title: title.to_string(),
+                body: body.to_string(),
+                head_sha,
+            }),
             github,
             merge,
         });
@@ -1468,7 +1776,8 @@ pub(crate) fn matching_task_pr_merge_request(
         let Some(request) = pr.merge_request() else {
             return Ok(None);
         };
-        if github.head_sha.as_deref() != Some(head.as_str())
+        if pr.presentation().is_none()
+            || github.head_sha.as_deref() != Some(head.as_str())
             || request.mode != mode
             || request.after_merge != after_merge
             || request.next_slug != next_slug
@@ -1618,6 +1927,16 @@ pub(crate) fn request_task_pr_merge(
             return Err(task_error(format!(
                 "Task {} stored GitHub head {:?}, not requested merge head {}; refusing an unpinned settlement",
                 task.plan.identifier, github_head, head_sha
+            )));
+        }
+        if publication
+            .presentation
+            .as_ref()
+            .is_none_or(|presentation| presentation.head_sha != head_sha)
+        {
+            return Err(task_error(format!(
+                "Task {} has no non-empty reviewer-facing title and body for head {}; refresh PR copy before requesting settlement",
+                task.plan.identifier, head_sha
             )));
         }
         if publication
@@ -2388,6 +2707,9 @@ async fn plan_automatic_task_relaunch(
     else {
         return Ok(AutomaticTaskRelaunch::Launch(RunTrigger::Input { basis }));
     };
+    if !resumable {
+        return Ok(AutomaticTaskRelaunch::Idle);
+    }
     let Some(latest_run) = store
         .latest_run(&work)
         .await
@@ -2488,7 +2810,7 @@ async fn relaunch_inactive_process_automatically(
             task.plan.identifier
         )));
     };
-    validate_task_lifecycle(task)?;
+    validate_task_launch(task)?;
     let Some(trigger) = prepare_automatic_task_relaunch(store, task).await? else {
         return Ok(());
     };
@@ -2526,7 +2848,41 @@ async fn launch_task_process(
     {
         return Ok(());
     }
-    validate_task_lifecycle(task)?;
+    validate_task_launch(task)?;
+    let account_id = match preflight_task_execution(&task.worktree, &task.agent).await {
+        Ok(account_id) => account_id,
+        Err(error) => {
+            let error = error.to_string();
+            if store
+                .latest_task_event(&task.id)
+                .await
+                .map_err(|store_error| task_error(store_error.to_string()))?
+                .as_ref()
+                .is_some_and(|event| {
+                    matches!(
+                        &event.kind,
+                        TaskEventKind::Failed {
+                            error: previous,
+                            resumable: false,
+                        } if previous == &error
+                    )
+                })
+            {
+                return Err(task_error(error));
+            }
+            store
+                .append_task_event(
+                    &task.id,
+                    &TaskEventKind::Failed {
+                        error: error.clone(),
+                        resumable: false,
+                    },
+                )
+                .await
+                .map_err(|store_error| task_error(store_error.to_string()))?;
+            return Err(task_error(error));
+        }
+    };
     let trigger = match trigger {
         Some(trigger) => trigger,
         None => RunTrigger::Input {
@@ -2544,7 +2900,7 @@ async fn launch_task_process(
     };
     let (run, lease) =
         reservation.map_err(|error| task_error(format!("failed to reserve Task Run: {error}")))?;
-    launch_reserved_task_process(store, task, &run, &lease).await
+    launch_reserved_task_process(store, task, &run, &lease, account_id).await
 }
 
 async fn launch_reserved_task_process(
@@ -2552,6 +2908,7 @@ async fn launch_reserved_task_process(
     task: &mut Task,
     run: &Run,
     lease: &RunLease,
+    account_id: ProviderAccountId,
 ) -> OpsResult<()> {
     let tmux_name = format!(
         "lf-task-{}-{}-{}",
@@ -2561,7 +2918,7 @@ async fn launch_reserved_task_process(
     );
     if let Err(error) = store.update_task_for_run(task, lease).await {
         store
-            .fail_task_run(&task.id, lease, &error.to_string())
+            .fail_task_run(&task.id, lease, &error.to_string(), true)
             .await
             .map_err(|settle_error| {
                 task_error(format!(
@@ -2579,7 +2936,7 @@ async fn launch_reserved_task_process(
             cwd: task.worktree.clone(),
             tmux_name,
             agent: task.agent.clone(),
-            account_id: None,
+            account_id: Some(account_id),
             resume_token: task.provider_session_id.clone(),
         },
     )
@@ -2662,6 +3019,13 @@ pub(crate) async fn reconcile_process_liveness(
 }
 
 async fn mark_task_body_lost(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
+    if task_launch_refusal(store, task)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
+        .is_some()
+    {
+        return Ok(());
+    }
     let active = store
         .active_task_pr(&task.id)
         .await
@@ -2716,6 +3080,13 @@ pub(crate) async fn reconcile_project_tasks(
             task_work_status(store, task).await?,
             WorkStatus::Done | WorkStatus::Abandoned
         ) {
+            continue;
+        }
+        if task_launch_refusal(store, task)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?
+            .is_some()
+        {
             continue;
         }
         if task_worktree_blocker(store, task)
@@ -3204,6 +3575,7 @@ async fn reconcile_task_pr_with_authority(
     let previous_pm_writeback = task.pm_writeback.clone();
     let publication = pr.publication.get_or_insert(PrPublication {
         requested_at: now,
+        presentation: None,
         github: None,
         merge: None,
     });
@@ -3797,6 +4169,7 @@ async fn ensure_working_pr_with_authority(
     lease: Option<&RunLease>,
     rotate: RotateOptions,
 ) -> OpsResult<Option<TaskPr>> {
+    validate_task_launch(task)?;
     reconcile_task_pr_with_authority(store, task, lease, crate::ops::pr::PrReadFreshness::Cached)
         .await?;
     if matches!(
@@ -4089,7 +4462,10 @@ pub fn task_status(issue: &str) -> OpsResult<Task> {
             .await
             .map_err(|error| task_error(format!("failed to read task status: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-        if task_worktree_blocker(&store, &task).await?.is_none() {
+        let launch_refusal = task_launch_refusal(&store, &task)
+            .await
+            .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
+        if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
             reconcile_task_pr(&store, &mut task).await?;
             reconcile_process_liveness(&store, &mut task).await?;
             reconcile_task_completion(&store, &mut task, None).await?;
@@ -4696,6 +5072,12 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .work_status(&work)
             .await
             .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
+        let launch_refusal = if worktree_blocker.is_some() {
+            None
+        } else {
+            task_configuration_refusal(&task)
+                .or_else(|| task_event_launch_refusal(latest_event.as_ref()).map(str::to_string))
+        };
         let action_evidence = TaskActionEvidence {
             status: work_status.clone(),
             latest_pr_phase: latest.map(|pr| pr.phase()),
@@ -4703,6 +5085,9 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
                 .filter(|pr| pr.phase() == PrPhase::Merged)
                 .map(TaskPr::after_merge),
             latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
+            latest_pr_presentation_current: latest
+                .filter(|pr| pr.phase() == PrPhase::Open)
+                .map(|pr| pr.presentation().is_some()),
             completion_refusal: completion_refusal.as_deref(),
             resume_refusal: resume_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
@@ -4714,6 +5099,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             predecessor_phase,
             abandon_intent: task.abandon_intent.is_some(),
             local_progress_unsettled: None,
+            launch_refusal: launch_refusal.as_deref(),
         };
         let actions = derive_task_actions(&action_evidence);
         Ok(TaskSnapshot {
@@ -5167,6 +5553,22 @@ pub(crate) async fn resume_task_async(
         .await
         .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    validate_task_launch(&task)?;
+    let latest_event = store
+        .latest_task_event(&task.id)
+        .await
+        .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
+    if let Some(blocker) = task_event_launch_refusal(latest_event.as_ref()) {
+        let intervention = reason
+            .as_deref()
+            .is_some_and(|reason| !reason.trim().is_empty());
+        if !intervention {
+            return Err(task_error(format!(
+                "{blocker}\nThe same execution cannot be resumed. Correct the capability, then use `lf task resume {} --reason \"<what changed>\"` so the new durable input starts a fresh boundary.",
+                task.plan.identifier
+            )));
+        }
+    }
     // Compute every branch/worktree/PR adoption precondition before moving any
     // durable ownership — a no-active-PR recovery must not commit the successor
     // before PR rotation rejects an unrelated branch.
@@ -5269,26 +5671,26 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
     use super::{
-        ensure_task_flow_override, launch_task_process, lock_task_pr_mutation,
-        prepare_automatic_task_relaunch, resolve_task_lifecycle, resolve_task_start_input,
+        ensure_task_flow_override, ensure_working_pr, launch_task_process, lock_task_pr_mutation,
+        preflight_task_execution, prepare_automatic_task_relaunch, probe_task_execution_boundary,
+        reconcile_process_liveness, resolve_task_lifecycle, resolve_task_start_input,
+        task_event_launch_refusal, task_execution_boundary, validate_task_lifecycle,
         TaskFlowOverrides, MAX_AUTOMATIC_TASK_RECOVERY_RUNS,
     };
     use crate::child::ChildRef;
     use crate::durable::{RunTrigger, WorkRef, WorkStatus};
+    use crate::engine::AgentExecutionBoundary;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
     use crate::pm::ProjectFlowPlan;
     use crate::project::{Project, ProjectId};
     use crate::store::{open_store, SharedStore, StorageConfig};
     use crate::task::{
         Observation, PmWritebackState, Task, TaskEventKind, TaskId, TaskLifecyclePhase,
-        TaskLifecyclePlan, TaskPr, TaskPrId,
+        TaskLifecyclePlan, TaskOutcome, TaskPr, TaskPrId,
     };
     use crate::wave::Wave;
+    use std::ffi::OsString;
 
     struct TaskFixture {
         _database: tempfile::TempDir,
@@ -5373,7 +5775,12 @@ mod tests {
             project_id: project.id.clone(),
             worktree: repository,
             workspace_slug: "task-recovery-fixture".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task-design", loop_flow, "ship"),
+            lifecycle: TaskLifecyclePlan::new(
+                TaskOutcome::Delivery,
+                "task-design",
+                loop_flow,
+                "ship",
+            ),
             lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 4,
             phase_cursor: 0,
@@ -5453,6 +5860,54 @@ mod tests {
 
         assert_eq!(plan.first.flow, "incident");
         assert_eq!(plan.loop_.flow, "slice");
+        assert_eq!(plan.finally.flow, "ship");
+    }
+
+    #[test]
+    fn int_10_lifecycle_names_every_missing_capability_and_correction() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let project = ProjectFlowPlan {
+            first: Some("task-kickoff".to_string()),
+            loop_: Some("design".to_string()),
+            finally: Some("task-gate".to_string()),
+        };
+
+        let error = resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default())
+            .expect_err("INT-10 lifecycle must not launch");
+        let message = error.to_string();
+
+        assert!(message.contains(
+            "loop phase flow \"design\" from Linear Project `## Flows` `loop` configuration is human-only"
+        ));
+        assert!(message.contains("missing capability `autonomous_progress`"));
+        assert!(message.contains(
+            "loop phase flow \"design\" from Linear Project `## Flows` `loop` configuration has no `task_implementation` capability"
+        ));
+        assert!(message.contains(
+            "first phase flow \"task-kickoff\" from Linear Project `## Flows` `first` configuration provides none"
+        ));
+        assert!(message.contains("launch intentional design work with `--design-only`"));
+        assert!(message.contains(
+            "finally phase flow \"task-gate\" from Linear Project `## Flows` `finally` configuration"
+        ));
+        assert!(message.contains("missing capability `autonomous_task_settlement`"));
+        assert!(message.contains("`op: pr land -c`"));
+    }
+
+    #[test]
+    fn explicit_design_only_lifecycle_can_settle_without_implementation() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let overrides = TaskFlowOverrides {
+            loop_: Some("gate".to_string()),
+            outcome: Some(TaskOutcome::DesignOnly),
+            ..TaskFlowOverrides::default()
+        };
+
+        let plan = resolve_task_lifecycle(repo.path(), &ProjectFlowPlan::empty(), &overrides)
+            .expect("explicit design-only lifecycle");
+
+        assert_eq!(plan.outcome, TaskOutcome::DesignOnly);
+        assert_eq!(plan.loop_.flow, "gate");
         assert_eq!(plan.finally.flow, "ship");
     }
 
@@ -5576,14 +6031,163 @@ mod tests {
     }
 
     #[test]
+    fn task_settlement_must_be_the_terminal_finally_step() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let flows = repo.path().join(".lf/flows");
+        std::fs::create_dir_all(&flows).expect("create flow directory");
+        std::fs::write(
+            flows.join("parks-after-land.yaml"),
+            "- gate\n- op: pr land -c\n- op: pr publish --title stale\n",
+        )
+        .expect("write flow");
+        let project = ProjectFlowPlan {
+            first: None,
+            loop_: None,
+            finally: Some("parks-after-land".to_string()),
+        };
+
+        let error = resolve_task_lifecycle(repo.path(), &project, &TaskFlowOverrides::default())
+            .expect_err("settlement followed by more work cannot terminate a Task");
+
+        assert!(error
+            .to_string()
+            .contains("missing capability `autonomous_task_settlement` at its terminal step"));
+    }
+
+    #[test]
+    fn execution_boundary_probes_the_actual_required_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("not-a-directory");
+        std::fs::write(&file, "occupied").unwrap();
+
+        let error = probe_task_execution_boundary(&AgentExecutionBoundary {
+            writable_roots: vec![file.clone()],
+        })
+        .expect_err("a descriptive root that cannot accept a file is not a capability");
+
+        assert!(error.to_string().contains(&file.display().to_string()));
+        assert!(error.to_string().contains("required writable authority"));
+    }
+
+    #[test]
+    fn execution_boundary_resolves_linked_git_and_control_roots() {
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "LF_BIN",
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let main = directory.path().join("repo");
+        let worktree = directory.path().join("repo.task");
+        std::fs::create_dir(&main).unwrap();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Loopflow Test"],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&main)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(main.join("README.md"), "proof\n").unwrap();
+        for args in [vec!["add", "."], vec!["commit", "-m", "proof"]] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&main)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+        assert!(std::process::Command::new("git")
+            .current_dir(&main)
+            .args(["worktree", "add", "-b", "task", worktree.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success());
+        let control = directory.path().join("control");
+        std::fs::create_dir(&control).unwrap();
+        let database = control.join("registry.db");
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("LF_HOME", &control);
+        std::env::set_var("LF_DB_PATH", &database);
+        std::env::set_var("LF_CONTROL_HOME", &control);
+        std::env::set_var("LF_CONTROL_DB_PATH", &database);
+
+        let boundary = task_execution_boundary(&worktree, "codex").unwrap();
+
+        assert_eq!(boundary.writable_roots.len(), 2);
+        assert!(boundary
+            .writable_roots
+            .contains(&main.join(".git").canonicalize().unwrap()));
+        assert!(boundary.writable_roots.contains(&control));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock is the test serializer
+    async fn task_preflight_refuses_account_id_null_before_reserving_a_run() {
+        let _env_lock = crate::journal::test_env_lock();
+        let _restore = EnvRestore::capture(&[
+            "LF_BIN",
+            "LF_HOME",
+            "LF_DB_PATH",
+            "LF_CONTROL_HOME",
+            "LF_CONTROL_DB_PATH",
+            "LF_ACCOUNT_LEASE",
+        ]);
+        let directory = tempfile::tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        let output = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["init", "-b", "main"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let home = directory.path().join("lf-home");
+        std::fs::create_dir(&home).unwrap();
+        let database = home.join("missing.db");
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        std::env::set_var("LF_HOME", &home);
+        std::env::set_var("LF_DB_PATH", &database);
+        std::env::set_var("LF_CONTROL_HOME", &home);
+        std::env::set_var("LF_CONTROL_DB_PATH", &database);
+        std::env::remove_var("LF_ACCOUNT_LEASE");
+
+        let error = preflight_task_execution(&repo, "codex")
+            .await
+            .expect_err("headless Task launch requires an explicit account route");
+
+        assert!(error.to_string().contains("account_id=null"));
+        assert!(!database.exists(), "preflight must not create a registry");
+    }
+
+    #[test]
     fn started_task_rejects_a_different_flow_override() {
         let repo = tempfile::tempdir().expect("temp repo");
 
-        ensure_task_flow_override(repo.path(), "INF-123", "loop", Some("slice"), "slice")
-            .expect("same pinned flow is idempotent");
-        let error =
-            ensure_task_flow_override(repo.path(), "INF-123", "loop", Some("ship-5whys"), "slice")
-                .expect_err("different flow must be rejected");
+        ensure_task_flow_override(
+            repo.path(),
+            "INF-123",
+            TaskLifecyclePhase::Loop,
+            Some("slice"),
+            "slice",
+        )
+        .expect("same pinned flow is idempotent");
+        let error = ensure_task_flow_override(
+            repo.path(),
+            "INF-123",
+            TaskLifecyclePhase::Loop,
+            Some("ship-5whys"),
+            "slice",
+        )
+        .expect_err("different flow must be rejected");
 
         assert!(error
             .to_string()
@@ -5615,43 +6219,40 @@ mod tests {
             .is_empty());
     }
 
-    #[cfg(unix)]
-    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn repaired_persisted_task_flows_launch_through_the_generic_path() {
-        let _env_lock = crate::journal::test_env_lock();
-        let _restore = EnvRestore::capture(&[
-            "LF_BIN",
-            "LF_HOME",
-            "LF_DB_PATH",
-            "LF_RUN_CONTEXT",
-            "LF_RUN_ID",
-            "LF_RUN_LEASE",
-            "LF_AGENT_INVOCATION_ID",
-            "PATH",
-        ]);
-        let environment = tempfile::tempdir().unwrap();
-        let bin = environment.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let tmux = bin.join("tmux");
-        std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").unwrap();
-        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        std::env::set_var("LF_HOME", environment.path());
-        std::env::remove_var("LF_DB_PATH");
-        std::env::remove_var("LF_RUN_CONTEXT");
-        std::env::remove_var("LF_RUN_ID");
-        std::env::remove_var("LF_RUN_LEASE");
-        std::env::remove_var("LF_AGENT_INVOCATION_ID");
-        std::env::set_var("PATH", &bin);
+    async fn invalid_persisted_lifecycle_cannot_rotate_a_serial_pr() {
+        let TaskFixture {
+            store, mut task, ..
+        } = task_fixture("INT-10", "slice").await;
+        task.lifecycle =
+            TaskLifecyclePlan::new(TaskOutcome::Delivery, "task-kickoff", "design", "task-gate");
+        store.update_task(&task).await.unwrap();
+        let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
+        pr.abandoned_at = Some(time::OffsetDateTime::now_utc());
+        store.settle_task_pr(&pr, None).await.unwrap();
 
+        let error = ensure_working_pr(&store, &mut task)
+            .await
+            .expect_err("invalid lifecycle must stop before rotation");
+
+        assert!(error
+            .to_string()
+            .contains("Task INT-10 cannot launch: Task lifecycle cannot converge"));
+        assert!(error.to_string().contains(
+            "Persisted Task lifecycle selection is immutable; abandon INT-10 and start a replacement Task with the corrected flows and outcome"
+        ));
+        assert_eq!(store.task_prs(&task.id).await.unwrap().len(), 1);
+        assert!(store.active_task_pr(&task.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn repaired_persisted_task_flows_validate_through_the_generic_path() {
         for identifier in ["LOO-167", "LOO-193", "LOO-195"] {
             let TaskFixture {
                 _database,
                 database_path,
                 store,
                 task,
-                work,
                 ..
             } = task_fixture(identifier, "task").await;
             rusqlite::Connection::open(database_path)
@@ -5660,19 +6261,11 @@ mod tests {
                     "repair_legacy_task_flow",
                 ))
                 .unwrap();
-            let mut repaired = store.get_task(&task.id).await.unwrap().unwrap();
+            let repaired = store.get_task(&task.id).await.unwrap().unwrap();
 
             assert_eq!(repaired.lifecycle.loop_.flow, "slice");
-            launch_task_process(&store, &mut repaired, None)
-                .await
-                .expect("a repaired Task reaches the generic launch boundary");
-            let run = store.current_run(&work).await.unwrap().unwrap();
-            assert!(matches!(run.trigger, RunTrigger::Input { .. }));
-            assert!(store
-                .open_invocation_for_run(&run.id)
-                .await
-                .unwrap()
-                .is_some());
+            validate_task_lifecycle(&repaired)
+                .expect("a repaired Task satisfies the generic lifecycle contract");
         }
     }
 
@@ -5696,7 +6289,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .fail_task_run(&task.id, &initial_lease, "always fails")
+            .fail_task_run(&task.id, &initial_lease, "always fails", true)
             .await
             .unwrap();
 
@@ -5723,6 +6316,7 @@ mod tests {
                     &task.id,
                     &lease,
                     &format!("automatic recovery {recovery} failed"),
+                    true,
                 )
                 .await
                 .unwrap();
@@ -5758,7 +6352,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .fail_task_run(&task.id, &user_lease, "User-started Run failed")
+            .fail_task_run(&task.id, &user_lease, "User-started Run failed", true)
             .await
             .unwrap();
         let trigger = prepare_automatic_task_relaunch(&store, &task)
@@ -5788,7 +6382,12 @@ mod tests {
             .await
             .unwrap();
         store
-            .fail_task_run(&task.id, &progress_lease, "failed after durable progress")
+            .fail_task_run(
+                &task.id,
+                &progress_lease,
+                "failed after durable progress",
+                true,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -5797,6 +6396,47 @@ mod tests {
                 .unwrap(),
             Some(RunTrigger::Input { basis })
         );
+    }
+
+    #[tokio::test]
+    async fn nonresumable_execution_blocker_never_enters_automatic_recovery() {
+        let TaskFixture {
+            store,
+            mut task,
+            work,
+            ..
+        } = task_fixture("TEST-BOUNDARY", "slice").await;
+        let blocker = "Task execution boundary is blocked: linked Git index.lock is not writable";
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::Failed {
+                    error: blocker.to_string(),
+                    resumable: false,
+                },
+            )
+            .await
+            .unwrap();
+        let settled = store.latest_task_event(&task.id).await.unwrap().unwrap();
+
+        for _ in 0..10 {
+            assert!(prepare_automatic_task_relaunch(&store, &task)
+                .await
+                .unwrap()
+                .is_none());
+            assert!(store.latest_run(&work).await.unwrap().is_none());
+        }
+        reconcile_process_liveness(&store, &mut task).await.unwrap();
+        let event = store.latest_task_event(&task.id).await.unwrap().unwrap();
+        assert_eq!(event, settled);
+        assert_eq!(task_event_launch_refusal(Some(&event)), Some(blocker));
+        assert!(matches!(
+            event.kind,
+            TaskEventKind::Failed {
+                resumable: false,
+                ..
+            }
+        ));
     }
 
     #[test]

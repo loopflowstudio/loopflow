@@ -1084,6 +1084,9 @@ pub enum TaskCommand {
         /// Override the Project's finally flow for a new Task
         #[arg(long, value_name = "FLOW")]
         finally: Option<String>,
+        /// Finish one design artifact without requiring implementation
+        #[arg(long)]
+        design_only: bool,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -1115,6 +1118,9 @@ pub enum TaskCommand {
         /// Override the Project's finally flow
         #[arg(long, value_name = "FLOW")]
         finally: Option<String>,
+        /// Finish one design artifact without requiring implementation
+        #[arg(long)]
+        design_only: bool,
         /// Fork this Task's worktree from another Task's active PR
         #[arg(long = "stack-on", value_name = "PARENT_TASK")]
         stack_on: Option<String>,
@@ -2465,6 +2471,7 @@ mod tests {
             "ship-5whys",
             "--finally",
             "ship",
+            "--design-only",
         ])
         .expect("parse task lifecycle overrides");
         let Some(Commands::Task {
@@ -2473,6 +2480,7 @@ mod tests {
                     first,
                     loop_,
                     finally,
+                    design_only,
                     ..
                 },
         }) = cli.command
@@ -2482,6 +2490,7 @@ mod tests {
         assert_eq!(first.as_deref(), Some("incident"));
         assert_eq!(loop_.as_deref(), Some("ship-5whys"));
         assert_eq!(finally.as_deref(), Some("ship"));
+        assert!(design_only);
     }
 
     #[test]

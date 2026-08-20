@@ -346,6 +346,7 @@ lf task start <linear-project-id> "add retry to token refresh"
 pbpaste | lf task start incident-management
 lf task run INF-123
 lf task run INF-124 --stack-on INF-123     # dependent work before the parent merges
+lf task run INF-125 --design-only --loop gate --finally ship
 ```
 
 Task Work advances through zero or more serial PRs to `main`. Its Project
@@ -355,6 +356,11 @@ override one Task at launch. The first flow runs once, the loop repeats, and the
 finally flow gates, records learnings, and lands. After a merge or abandonment,
 Loopflow rotates the worktree onto the next branch. The Task inherits the wave's
 `GOAL.md` and `MEMORY.md` plus its Project definition and KRs.
+
+Loopflow expands the selected lifecycle before launch and refuses a composition
+that cannot make its promised outcome or settle the Task. The
+[`lf` reference](lf.md#running-waves-projects-and-tasks) defines the capability
+contract and recovery behavior.
 
 The wave stays steerable while several independent tasks run — task events
 enter its inbox as typed observations and wake it once. Steering, status,

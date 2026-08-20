@@ -247,6 +247,13 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     sqlite::read_nonterminal_task_worktrees(path)
 }
 
+pub(crate) fn writer_invocation_is_authoritative(
+    path: &Path,
+    invocation_id: &str,
+) -> StoreResult<bool> {
+    sqlite::writer_invocation_is_authoritative(path, invocation_id)
+}
+
 fn default_lf_home_dir() -> PathBuf {
     default_lf_home_dir_for(
         &machine_home_dir(),
@@ -1150,8 +1157,8 @@ mod tests {
     use crate::project::{Project, ProjectId};
     use crate::task::{
         AfterMerge, GithubObservation, GithubObservationResult, GithubPr, PmWritebackState,
-        PrMergeMode, PrMergeRequest, PrPhase, PrPublication, Task, TaskEventKind, TaskId, TaskPr,
-        TaskPrId, TaskPrRepairKind,
+        PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
+        TaskId, TaskPr, TaskPrId, TaskPrRepairKind,
     };
     use crate::wave::Wave;
     use std::env;
@@ -1643,6 +1650,11 @@ mod tests {
             let head = format!("head-{number}");
             pr.publication = Some(PrPublication {
                 requested_at: requested_at - time::Duration::seconds(5),
+                presentation: Some(PrPresentation {
+                    title: "Ship it".to_string(),
+                    body: "Reviewer context".to_string(),
+                    head_sha: head.clone(),
+                }),
                 github: Some(GithubPr {
                     number,
                     url: format!("https://github.com/loopflow/loopflow/pull/{number}"),
@@ -2636,7 +2648,12 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         let mut task = make_task(&wave, &project);
-        task.lifecycle = crate::task::TaskLifecyclePlan::standard("task-design", "code", "ship");
+        task.lifecycle = crate::task::TaskLifecyclePlan::new(
+            crate::task::TaskOutcome::DesignOnly,
+            "task-design",
+            "code",
+            "ship",
+        );
         task.phase_cursor = 2;
         task.phase_iteration = 4;
         store
@@ -2648,6 +2665,10 @@ mod tests {
         assert_eq!(persisted.lifecycle.loop_.flow, "code");
         assert_eq!(persisted.lifecycle.first.flow, "task-design");
         assert_eq!(persisted.lifecycle.finally.flow, "ship");
+        assert_eq!(
+            persisted.lifecycle.outcome,
+            crate::task::TaskOutcome::DesignOnly
+        );
         assert_eq!(persisted.phase_cursor, 2);
         assert_eq!(persisted.phase_iteration, 4);
 
@@ -2841,7 +2862,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_pr_persists_github_and_ci_observations() {
+    async fn task_pr_persists_presentation_github_and_ci_observations() {
         let dir = tempfile::tempdir().unwrap();
         let store = open_store(&StorageConfig::sqlite(dir.path().join("registry.db")))
             .await
@@ -2856,6 +2877,11 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
+            presentation: Some(PrPresentation {
+                title: "Ship the proof".to_string(),
+                body: "Reviewer context".to_string(),
+                head_sha: "sha-abc".to_string(),
+            }),
             github: Some(GithubPr {
                 number: 902,
                 url: "https://github.com/loopflow/loopflow/pull/902".to_string(),
@@ -2883,6 +2909,7 @@ mod tests {
 
         let read = store.active_task_pr(&task.id).await.unwrap().unwrap();
         assert_eq!(read.head_sha(), Some("sha-abc"));
+        assert_eq!(read.presentation().unwrap().title, "Ship the proof");
         let ci = read.fresh_ci().expect("reading matches the current head");
         assert_eq!(ci.state, crate::task::CiState::Failing);
         assert_eq!(ci.failing_checks[0].name, "build");
@@ -2931,6 +2958,7 @@ mod tests {
 
         first.publication = Some(PrPublication {
             requested_at: first.updated_at,
+            presentation: None,
             github: Some(GithubPr {
                 number: 101,
                 url: "https://github.com/loopflowstudio/loopflow/pull/101".to_string(),
@@ -3068,6 +3096,7 @@ mod tests {
         // The parent is published but not merged — the child stacks on it.
         parent.publication = Some(PrPublication {
             requested_at: parent.updated_at,
+            presentation: None,
             github: Some(GithubPr {
                 number: 200,
                 url: "https://github.com/loopflowstudio/loopflow/pull/200".to_string(),
@@ -3170,6 +3199,7 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
+            presentation: None,
             github: None,
             merge: None,
         });

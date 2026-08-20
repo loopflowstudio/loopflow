@@ -61,6 +61,73 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
         .collect()
 }
 
+/// Whether an AgentInvocation still owns mutation authority for its writer.
+///
+/// Process liveness is deliberately absent from this proof. A provider process
+/// may outlive its Run or Ask, but it cannot keep mutation authority after the
+/// durable owner settles.
+pub(crate) fn writer_invocation_is_authoritative(
+    path: &Path,
+    invocation_id: &str,
+) -> StoreResult<bool> {
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
+    let invocation = conn
+        .query_row(
+            "SELECT i.ended_at, i.supervising_run_id, i.answer_ask_id,
+                    EXISTS (
+                        SELECT 1 FROM agent_turns t
+                        WHERE t.invocation_id=i.id AND t.status='running'
+                    )
+             FROM agent_invocations i WHERE i.id=?1",
+            [invocation_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, bool>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((ended_at, run_id, ask_id, turn_active)) = invocation else {
+        return Ok(false);
+    };
+    if ended_at.is_some() || !turn_active {
+        return Ok(false);
+    }
+    let Some(run_id) = run_id else {
+        return Ok(false);
+    };
+    let run_active = conn
+        .query_row(
+            "SELECT state='active' FROM runs WHERE id=?1",
+            [&run_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !run_active {
+        return Ok(false);
+    }
+    let Some(ask_id) = ask_id else {
+        return Ok(true);
+    };
+    Ok(conn
+        .query_row(
+            "SELECT state='claimed' AND active_invocation_id=?2
+             FROM ask_exchanges WHERE id=?1",
+            params![ask_id, invocation_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
 fn migrate_plaintext_provider_tokens(conn: &mut Connection) -> StoreResult<()> {
     let mut scan = conn.prepare(
         "SELECT provider, access_token, refresh_token
@@ -2888,7 +2955,7 @@ fn map_turn_usage(
 
 #[cfg(test)]
 mod frontier_tests {
-    use super::SqliteStore;
+    use super::{writer_invocation_is_authoritative, SqliteStore};
     use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
     use crate::store::migrations::{
         apply_all_but_head, latest_applied_version_sqlite, latest_known_version,
@@ -2929,6 +2996,83 @@ mod frontier_tests {
     fn frontier(path: &Path) -> Option<String> {
         let conn = rusqlite::Connection::open(path).unwrap();
         latest_applied_version_sqlite(&conn).unwrap()
+    }
+
+    #[test]
+    fn writer_authority_follows_the_exact_run_and_ask_not_the_process() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("authority.db");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE runs (id TEXT PRIMARY KEY, state TEXT NOT NULL);
+                 CREATE TABLE agent_invocations (
+                    id TEXT PRIMARY KEY,
+                    ended_at INTEGER,
+                    supervising_run_id TEXT,
+                    answer_ask_id TEXT
+                 );
+                 CREATE TABLE agent_turns (
+                    id TEXT PRIMARY KEY,
+                    invocation_id TEXT NOT NULL,
+                    status TEXT NOT NULL
+                 );
+                 CREATE TABLE ask_exchanges (
+                    id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    active_invocation_id TEXT
+                 );
+                 INSERT INTO runs VALUES ('run_task', 'active');
+                 INSERT INTO agent_invocations
+                    VALUES ('invocation_task', NULL, 'run_task', NULL);
+                 INSERT INTO agent_turns
+                    VALUES ('turn_task', 'invocation_task', 'running');
+                 INSERT INTO runs VALUES ('run_parent', 'active');
+                 INSERT INTO agent_invocations
+                    VALUES ('invocation_ask', NULL, 'run_parent', 'ask_one');
+                 INSERT INTO agent_turns
+                    VALUES ('turn_ask', 'invocation_ask', 'running');
+                 INSERT INTO ask_exchanges
+                    VALUES ('ask_one', 'claimed', 'invocation_ask');",
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(writer_invocation_is_authoritative(&path, "invocation_task").unwrap());
+        assert!(writer_invocation_is_authoritative(&path, "invocation_ask").unwrap());
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE agent_turns SET status='completed' WHERE id='turn_task'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE agent_turns SET status='completed' WHERE id='turn_ask'",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(!writer_invocation_is_authoritative(&path, "invocation_task").unwrap());
+        assert!(!writer_invocation_is_authoritative(&path, "invocation_ask").unwrap());
+
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "UPDATE ask_exchanges
+                 SET state='resolved', active_invocation_id=NULL
+                 WHERE id='ask_one'",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        assert!(!writer_invocation_is_authoritative(&path, "invocation_task").unwrap());
+        assert!(!writer_invocation_is_authoritative(&path, "invocation_ask").unwrap());
+        assert!(!writer_invocation_is_authoritative(&path, "invocation_missing").unwrap());
     }
 
     fn seed_shared_store_at_prior_head(path: &Path) {

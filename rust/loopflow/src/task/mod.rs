@@ -39,6 +39,33 @@ pub enum TaskLifecyclePhase {
     Finally,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TaskOutcome {
+    Delivery,
+    DesignOnly,
+}
+
+impl TaskOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Delivery => "delivery",
+            Self::DesignOnly => "design_only",
+        }
+    }
+
+    pub(crate) fn from_storage_str(value: &str) -> Result<Self, TaskDataError> {
+        match value {
+            "delivery" => Ok(Self::Delivery),
+            "design_only" => Ok(Self::DesignOnly),
+            _ => Err(TaskDataError::InvalidInvariant(format!(
+                "invalid stored Task outcome: {value}"
+            ))),
+        }
+    }
+}
+
 impl TaskLifecyclePhase {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -87,6 +114,7 @@ impl TaskPhasePlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskLifecyclePlan {
+    pub outcome: TaskOutcome,
     pub first: TaskPhasePlan,
     #[serde(rename = "loop")]
     pub loop_: TaskPhasePlan,
@@ -94,12 +122,14 @@ pub struct TaskLifecyclePlan {
 }
 
 impl TaskLifecyclePlan {
-    pub fn standard(
+    pub fn new(
+        outcome: TaskOutcome,
         first_flow: impl Into<String>,
         loop_flow: impl Into<String>,
         finally_flow: impl Into<String>,
     ) -> Self {
         Self {
+            outcome,
             first: TaskPhasePlan {
                 flow: first_flow.into(),
             },
@@ -113,7 +143,7 @@ impl TaskLifecyclePlan {
     }
 
     pub fn defaults() -> Self {
-        Self::standard("task-design", "slice", "ship")
+        Self::new(TaskOutcome::Delivery, "task-design", "slice", "ship")
     }
     pub fn phase(&self, phase: TaskLifecyclePhase) -> &TaskPhasePlan {
         match phase {
@@ -456,8 +486,16 @@ pub struct PrMergeRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrPresentation {
+    pub title: String,
+    pub body: String,
+    pub head_sha: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrPublication {
     pub requested_at: OffsetDateTime,
+    pub presentation: Option<PrPresentation>,
     pub github: Option<GithubPr>,
     pub merge: Option<PrMergeRequest>,
 }
@@ -529,6 +567,12 @@ impl TaskPr {
         self.github().and_then(|github| github.head_sha.as_deref())
     }
 
+    /// Reviewer-facing copy, only while it describes the current published head.
+    pub fn presentation(&self) -> Option<&PrPresentation> {
+        let presentation = self.publication.as_ref()?.presentation.as_ref()?;
+        (self.head_sha() == Some(presentation.head_sha.as_str())).then_some(presentation)
+    }
+
     /// The explicit merge request, only while it names the current PR head.
     pub fn merge_request(&self) -> Option<&PrMergeRequest> {
         let request = self.publication.as_ref()?.merge.as_ref()?;
@@ -590,6 +634,20 @@ impl TaskPr {
                 "task PR requires a branch and base commit".to_string(),
             ));
         }
+        if let Some(presentation) = self
+            .publication
+            .as_ref()
+            .and_then(|publication| publication.presentation.as_ref())
+        {
+            if presentation.title.trim().is_empty()
+                || presentation.body.trim().is_empty()
+                || presentation.head_sha.trim().is_empty()
+            {
+                return Err(TaskDataError::InvalidInvariant(
+                    "PR presentation requires non-empty title, body, and head".to_string(),
+                ));
+            }
+        }
         if let Some(publication) = &self.publication {
             if let Some(github) = &publication.github {
                 if github.number == 0 || github.url.trim().is_empty() {
@@ -599,6 +657,16 @@ impl TaskPr {
                 }
             }
             if let Some(request) = &publication.merge {
+                let presentation = publication.presentation.as_ref().ok_or_else(|| {
+                    TaskDataError::InvalidInvariant(
+                        "merge request requires reviewer-facing PR copy".to_string(),
+                    )
+                })?;
+                if presentation.head_sha != request.head_sha {
+                    return Err(TaskDataError::InvalidInvariant(
+                        "merge request and PR copy must name the same head".to_string(),
+                    ));
+                }
                 if request.next_slug.as_deref().is_some_and(|slug| {
                     slug.split('-').any(|word| {
                         word.is_empty()
@@ -1083,8 +1151,8 @@ pub struct LinearObservationOutcome {
 mod tests {
     use super::{
         AfterMerge, GithubPr, PmWritebackOperation, PmWritebackState, PrPhase, PrPublication, Task,
-        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation, TaskPr,
-        TaskPrId,
+        TaskGateProposal, TaskId, TaskLifecyclePhase, TaskLifecyclePlan, TaskObservation,
+        TaskOutcome, TaskPr, TaskPrId,
     };
     use crate::planning::{LinearIssueId, TaskPlan};
 
@@ -1189,6 +1257,7 @@ mod tests {
 
         pr.publication = Some(PrPublication {
             requested_at: now,
+            presentation: None,
             github: None,
             merge: None,
         });
@@ -1223,6 +1292,11 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
+                presentation: Some(super::PrPresentation {
+                    title: "Ship it".to_string(),
+                    body: "Reviewer context".to_string(),
+                    head_sha: "head".to_string(),
+                }),
                 github: Some(GithubPr {
                     number: 872,
                     url: "https://github.com/loopflowstudio/loopflow/pull/872".to_string(),
@@ -1251,6 +1325,24 @@ mod tests {
         let merge = pr.publication.as_mut().unwrap().merge.as_mut().unwrap();
         merge.next_slug = Some("released-upgrade".to_string());
         assert!(pr.validate().is_ok());
+        assert!(pr.presentation().is_some());
+
+        pr.publication
+            .as_mut()
+            .unwrap()
+            .github
+            .as_mut()
+            .unwrap()
+            .head_sha = Some("new-head".to_string());
+        assert!(pr.presentation().is_none());
+        assert!(pr.merge_request().is_none());
+        pr.publication
+            .as_mut()
+            .unwrap()
+            .github
+            .as_mut()
+            .unwrap()
+            .head_sha = Some("head".to_string());
 
         pr.publication
             .as_mut()
@@ -1274,6 +1366,7 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
+                presentation: None,
                 github: Some(GithubPr {
                     number: 900,
                     url: "https://github.com/loopflow/loopflow/pull/900".to_string(),
@@ -1592,8 +1685,9 @@ mod tests {
     }
 
     #[test]
-    fn standard_lifecycle_pins_each_phase_flow() {
-        let plan = TaskLifecyclePlan::standard("task-design", "code", "ship");
+    fn lifecycle_pins_outcome_and_each_phase_flow() {
+        let plan = TaskLifecyclePlan::new(TaskOutcome::Delivery, "task-design", "code", "ship");
+        assert_eq!(plan.outcome, TaskOutcome::Delivery);
         assert_eq!(plan.first.flow, "task-design");
         assert_eq!(plan.loop_.flow, "code");
         assert_eq!(plan.finally.flow, "ship");

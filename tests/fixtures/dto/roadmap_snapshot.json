@@ -243,6 +243,11 @@
                   "empty": null,
                   "publication": {
                     "requested_at": "2026-07-14T22:05:00Z",
+                    "presentation": {
+                      "title": "Show the all-wave roadmap",
+                      "body": "Explains the intent and proof for this head.",
+                      "head_sha": "abc1234"
+                    },
                     "github": {
                       "number": 899,
                       "url": "https://github.com/loopflow/loopflow/pull/899"

@@ -389,6 +389,7 @@ mod tests {
             resume_token: None,
             authority: crate::engine::agent::AgentAuthority::Inherit,
             write_scope: crate::engine::agent::AgentWriteScope::Configured,
+            execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,

@@ -16,6 +16,12 @@ lf ask list --user --json
 Treat that command as the only current attention state. Never rely on queue
 content remembered from an earlier turn or embedded in the launch prompt.
 
+The list is scoped to the repository this conversation runs in: worktrees
+collapse to their main checkout, and Asks from other repositories are hidden.
+Add `--all` to see every repository's User Asks on this machine. The same
+repository scope governs `lf ls` and `lf roadmap` (both take `--all`); `lf
+status` is already single-Wave and repo-resolved.
+
 When the User selects a queued Ask, run `lf ask open <ask-id>`. It opens or
 reattaches one detached Ask session in a sibling external terminal while
 this control conversation remains open. Explain queued, claimed,

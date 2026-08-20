@@ -34,7 +34,8 @@ async fn run_async(args: &AskArgs) -> anyhow::Result<()> {
             user,
             outgoing,
             json,
-        }) => list_command(&store, *user, *outgoing, *json).await,
+            all,
+        }) => list_command(&store, *user, *outgoing, *json, *all).await,
         Some(AskCommand::Open {
             ask_id,
             prepare,
@@ -193,11 +194,31 @@ fn select_default_wait(
         .cloned()
 }
 
+/// Keep only Asks whose origin cwd resolves to the current repository,
+/// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
+/// repo, where there is nothing to scope to) returns every Ask unchanged.
+fn scope_attention_to_repo(
+    attention: Vec<crate::ops::ask::AskAttention>,
+    all: bool,
+) -> Vec<crate::ops::ask::AskAttention> {
+    if all {
+        return attention;
+    }
+    let Some(scope) = crate::repository::CanonicalRepo::current() else {
+        return attention;
+    };
+    attention
+        .into_iter()
+        .filter(|item| scope.contains(&item.ask.origin.cwd))
+        .collect()
+}
+
 async fn list_command(
     store: &Arc<Store>,
     user: bool,
     outgoing: bool,
     json: bool,
+    all: bool,
 ) -> anyhow::Result<()> {
     if outgoing {
         let lease = crate::ops::required_run_lease(store)
@@ -231,8 +252,13 @@ async fn list_command(
     }
     let attention = if user {
         let request = AuthenticatedRequest::cli();
-        crate::ops::ask::pending_attention(store, &ControlCtx::User(&request), &AskTarget::User)
-            .await?
+        let attention = crate::ops::ask::pending_attention(
+            store,
+            &ControlCtx::User(&request),
+            &AskTarget::User,
+        )
+        .await?;
+        scope_attention_to_repo(attention, all)
     } else {
         let lease = crate::ops::required_run_lease(store)
             .await

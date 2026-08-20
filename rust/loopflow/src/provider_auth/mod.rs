@@ -1815,11 +1815,12 @@ fn kill_auth_process_group(pid: u32) {
     crate::engine::platform::kill_process(pid);
 }
 
-/// Read Claude's one-time handoff from the visible Chrome page on macOS.
+/// Read Claude's one-time handoff from its Chrome page on macOS.
 ///
-/// The human still approves the provider page. Loopflow temporarily copies the
-/// rendered page, restores the clipboard inside the same AppleScript command,
-/// and keeps the handoff only in process memory.
+/// Polling only checks for the matching window. Once it appears, Loopflow
+/// copies the addressed tab without activating Chrome or synthesizing input,
+/// restores the clipboard inside the same AppleScript command, and keeps the
+/// handoff only in process memory.
 ///
 /// # Errors
 ///
@@ -1836,8 +1837,7 @@ pub async fn capture_claude_authorization_code_from_chrome(
         let deadline = Instant::now() + CLAUDE_BROWSER_AUTH_TIMEOUT;
         while Instant::now() < deadline {
             let output = ProcessCommand::new("osascript")
-                .args(["-e", CLAUDE_VISIBLE_PAGE_SCRIPT])
-                .env("LF_CHROME_PROFILE_LABEL", _browser_profile_label)
+                .args(["-e", CLAUDE_AUTH_WINDOW_SCRIPT, _browser_profile_label])
                 .output()
                 .map_err(|source| AuthError::CommandIo {
                     provider: Provider::Claude,
@@ -1846,9 +1846,19 @@ pub async fn capture_claude_authorization_code_from_chrome(
             if !output.status.success() {
                 return Ok(None);
             }
-            let page = String::from_utf8_lossy(&output.stdout);
-            if let Some(code) = claude_authorization_code_from_page(&page) {
-                return Ok(Some(code));
+            if String::from_utf8_lossy(&output.stdout).trim() == "ready" {
+                let output = ProcessCommand::new("osascript")
+                    .args(["-e", CLAUDE_PAGE_HARVEST_SCRIPT, _browser_profile_label])
+                    .output()
+                    .map_err(|source| AuthError::CommandIo {
+                        provider: Provider::Claude,
+                        source,
+                    })?;
+                if !output.status.success() {
+                    return Ok(None);
+                }
+                let page = String::from_utf8_lossy(&output.stdout);
+                return Ok(claude_authorization_code_from_page(&page));
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
@@ -1861,35 +1871,47 @@ pub async fn capture_claude_authorization_code_from_chrome(
 }
 
 #[cfg(target_os = "macos")]
-const CLAUDE_VISIBLE_PAGE_SCRIPT: &str = r#"
-set savedClipboard to the clipboard
-try
-    set profileLabel to system attribute "LF_CHROME_PROFILE_LABEL"
-    tell application "Google Chrome" to activate
+const CLAUDE_AUTH_WINDOW_SCRIPT: &str = r#"
+on run argv
+    set profileLabel to item 1 of argv
     tell application "System Events"
+        if not (exists process "Google Chrome") then return ""
         tell process "Google Chrome"
+            set authWindows to every window whose name contains "Authentication code | Claude Platform"
+            repeat with authWindow in authWindows
+                if name of authWindow contains "(" & profileLabel & ")" then return "ready"
+            end repeat
+        end tell
+    end tell
+    return ""
+end run
+"#;
+
+#[cfg(target_os = "macos")]
+const CLAUDE_PAGE_HARVEST_SCRIPT: &str = r#"
+on run argv
+    set savedClipboard to the clipboard
+    try
+        set profileLabel to item 1 of argv
+        tell application "Google Chrome"
             set authWindows to every window whose name contains "Authentication code | Claude Platform"
             set pageText to ""
             repeat with authWindow in authWindows
                 if name of authWindow contains "(" & profileLabel & ")" then
-                    perform action "AXRaise" of authWindow
-                    delay 0.2
-                    keystroke "a" using command down
-                    delay 0.1
-                    keystroke "c" using command down
-                    delay 0.2
+                    select all active tab of authWindow
+                    copy selection active tab of authWindow
                     set pageText to the clipboard as text
                     exit repeat
                 end if
             end repeat
         end tell
-    end tell
-    set the clipboard to savedClipboard
-    return pageText
-on error
-    set the clipboard to savedClipboard
-    error
-end try
+        set the clipboard to savedClipboard
+        return pageText
+    on error
+        set the clipboard to savedClipboard
+        error
+    end try
+end run
 "#;
 
 #[cfg(any(target_os = "macos", test))]
@@ -3987,6 +4009,42 @@ mod tests {
 
         assert_eq!(code.expose_secret(), expected);
         assert!(claude_authorization_code_from_page("short#code").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn claude_browser_automation_compiles_without_focus_or_keyboard_control() {
+        for script in [CLAUDE_AUTH_WINDOW_SCRIPT, CLAUDE_PAGE_HARVEST_SCRIPT] {
+            assert!(!script.contains("activate"));
+            assert!(!script.contains("AXRaise"));
+            assert!(!script.contains("keystroke"));
+        }
+        assert!(!CLAUDE_AUTH_WINDOW_SCRIPT.contains("clipboard"));
+        assert!(CLAUDE_PAGE_HARVEST_SCRIPT.contains("select all active tab"));
+        assert!(CLAUDE_PAGE_HARVEST_SCRIPT.contains("copy selection active tab"));
+
+        let compiled = tempdir().expect("AppleScript compile output");
+        for (name, script) in [
+            ("window", CLAUDE_AUTH_WINDOW_SCRIPT),
+            ("harvest", CLAUDE_PAGE_HARVEST_SCRIPT),
+        ] {
+            // Resolve the installed app by path so this headless test can load
+            // Chrome's scripting dictionary without launching Chrome.
+            let script = script.replace(
+                "tell application \"Google Chrome\"",
+                "tell application \"/Applications/Google Chrome.app\"",
+            );
+            let output = ProcessCommand::new("/usr/bin/osacompile")
+                .args(["-e", &script, "-o"])
+                .arg(compiled.path().join(format!("{name}.scpt")))
+                .output()
+                .expect("compile Claude Chrome AppleScript");
+            assert!(
+                output.status.success(),
+                "{name} script did not compile: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     #[test]

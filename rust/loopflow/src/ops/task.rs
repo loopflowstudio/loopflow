@@ -52,6 +52,55 @@ pub struct TaskFlowOverrides {
     pub finally: Option<String>,
 }
 
+/// Named lifecycle presets: where the human gate sits, in one word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskCycle {
+    /// Behavior is wrong. Opens with the incident cycle (restore → 5whys)
+    /// and the human gates at the demo, not a design doc.
+    Fix,
+    /// Behavior should change; the human shapes the design before code.
+    Feature,
+}
+
+impl TaskCycle {
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "fix" => Some(Self::Fix),
+            "feature" | "feat" => Some(Self::Feature),
+            _ => None,
+        }
+    }
+
+    /// The (first, finally) flows this cycle stands for.
+    pub fn flows(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Fix => ("incident", "ship-demo"),
+            Self::Feature => ("task-design", "ship"),
+        }
+    }
+}
+
+impl TaskFlowOverrides {
+    /// Expand a cycle preset into flow overrides. Explicit flow flags win
+    /// over the preset; both win over the Project's pinned flows.
+    pub fn for_cycle(
+        cycle: Option<TaskCycle>,
+        first: Option<String>,
+        loop_: Option<String>,
+        finally: Option<String>,
+    ) -> Self {
+        let (cycle_first, cycle_finally) = match cycle.map(TaskCycle::flows) {
+            Some((first, finally)) => (Some(first), Some(finally)),
+            None => (None, None),
+        };
+        Self {
+            first: first.or_else(|| cycle_first.map(str::to_string)),
+            loop_,
+            finally: finally.or_else(|| cycle_finally.map(str::to_string)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskLaunchOptions {
     pub name: Option<String>,
@@ -5460,6 +5509,46 @@ mod tests {
         .all(|step| {
             !matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human)
         }));
+    }
+
+    #[test]
+    fn fix_cycle_moves_the_only_human_gate_to_the_demo() {
+        let repo = tempfile::tempdir().expect("temp repo");
+        let plan = resolve_task_lifecycle(
+            repo.path(),
+            &ProjectFlowPlan::empty(),
+            &TaskFlowOverrides::for_cycle(Some(super::TaskCycle::Fix), None, None, None),
+        )
+        .expect("resolve fix lifecycle");
+        assert_eq!(plan.first.flow, "incident");
+        assert_eq!(plan.loop_.flow, "slice");
+        assert_eq!(plan.finally.flow, "ship-demo");
+
+        let human = [&plan.first.flow, &plan.loop_.flow, &plan.finally.flow]
+            .into_iter()
+            .flat_map(|flow| {
+                let flow = crate::engine::load_flow(flow, repo.path()).unwrap();
+                crate::engine::expand_flow(&flow, repo.path()).unwrap()
+            })
+            .filter(
+                |step| matches!(step, crate::engine::ConcreteStep::Skill(skill) if skill.policy.human),
+            )
+            .collect::<Vec<_>>();
+        assert_eq!(human.len(), 1);
+        assert!(matches!(
+            &human[0],
+            crate::engine::ConcreteStep::Skill(skill)
+                if skill.policy.id.as_deref() == Some("review_demo")
+        ));
+
+        let explicit_wins = TaskFlowOverrides::for_cycle(
+            Some(super::TaskCycle::Fix),
+            Some("task-design".to_string()),
+            None,
+            None,
+        );
+        assert_eq!(explicit_wins.first.as_deref(), Some("task-design"));
+        assert_eq!(explicit_wins.finally.as_deref(), Some("ship-demo"));
     }
 
     #[test]

@@ -1467,9 +1467,11 @@ mod tests {
 
     use crate::chat::turns::{ChatRole, ChatTurn};
     use crate::chat::types::TurnUsage;
+    use crate::engine::OccurrencePolicy;
     use crate::wave::journal::{
         journal_path, DiscordChatBinding, DiscordMessageSource, EventKind, Journal,
     };
+    use crate::wave::playhead::{Playhead, PlayheadEvent, QueuedInvocation, StepPlan};
     use crate::wave::runtime::WaveRuntime;
     use crate::wave::server::{self, ResidentDoor};
     use crate::wave::state::LoopState;
@@ -1741,6 +1743,54 @@ mod tests {
         accepts_current_send: bool,
     }
 
+    struct CompletingHarness {
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        inputs: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl Harness for CompletingHarness {
+        async fn start(&mut self, _config: &crate::engine::AgentConfig) -> Result<()> {
+            Ok(())
+        }
+
+        async fn send_input(&mut self, content: &str) -> Result<()> {
+            self.inputs
+                .lock()
+                .expect("inputs lock")
+                .push(content.into());
+            let turn_id = "recovery-turn".to_string();
+            let _ = self.events.send(ConversationEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            });
+            let _ = self.events.send(ConversationEvent::TextDelta {
+                turn_id: turn_id.clone(),
+                content: "recovered".to_string(),
+            });
+            let _ = self.events.send(ConversationEvent::TurnCompleted {
+                turn_id,
+                status: Lifecycle::Completed,
+            });
+            Ok(())
+        }
+
+        async fn send_current(&mut self, _content: &str) -> SendCurrentOutcome {
+            SendCurrentOutcome::NotSteerable
+        }
+
+        async fn interrupt(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn provider_session_id(&self) -> Option<String> {
+            None
+        }
+    }
+
     #[async_trait]
     impl Harness for SteeringHarness {
         async fn start(&mut self, _config: &crate::engine::AgentConfig) -> Result<()> {
@@ -1808,6 +1858,157 @@ mod tests {
             (!self.inputs.lock().expect("inputs lock").is_empty())
                 .then(|| "vendor-session".to_string())
         }
+    }
+
+    #[tokio::test]
+    async fn stale_wave_definition_resets_before_running_the_fresh_flow() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(tmp.path())
+            .status()
+            .expect("git init");
+        assert!(status.success());
+
+        let (mut journal, _) =
+            Journal::open(&journal_path(tmp.path(), "ship")).expect("open journal");
+        let root = QueuedInvocation {
+            id: "wave-root".to_string(),
+            flow: "wave".to_string(),
+            steps: ["wave_clarify", "wave_pursue", "wave_mutate"]
+                .into_iter()
+                .map(|name| StepPlan {
+                    name: name.to_string(),
+                    kind: StepKind::Skill,
+                    policy: OccurrencePolicy::default(),
+                })
+                .collect(),
+        };
+        let (playhead, event) = Playhead::resume_root(root, 2, 7).expect("legacy playhead");
+        journal.append(|_| EventKind::PlayheadChanged {
+            event,
+            playhead: Box::new(playhead),
+        });
+        drop(journal);
+
+        let attempts = Arc::new(Mutex::new(Vec::new()));
+        let prepare_attempts = attempts.clone();
+        let inputs = Arc::new(Mutex::new(Vec::new()));
+        let harness_inputs = inputs.clone();
+        let backend = BodyBackend::Harness {
+            prepare: Box::new(move |skill, seed, _wave, max_turns| {
+                prepare_attempts
+                    .lock()
+                    .expect("attempts lock")
+                    .push(skill.to_string());
+                Ok(crate::lf::commands::run::PreparedHarnessTurn {
+                    config: crate::engine::AgentConfig {
+                        agent: Some("fake".to_string()),
+                        max_turns,
+                        ..crate::engine::AgentConfig::default()
+                    },
+                    input: format!("{skill}\n{seed}"),
+                    context: crate::trace::PreparedTurnContext::from_prompts(
+                        "",
+                        &format!("{skill}\n{seed}"),
+                    ),
+                    harness: "fake".to_string(),
+                    model: None,
+                    context_gather_ms: 0,
+                    context_render_ms: 0,
+                })
+            }),
+            create: Box::new(move |_name, _approval, events| {
+                Ok(Box::new(CompletingHarness {
+                    events,
+                    inputs: harness_inputs.clone(),
+                }))
+            }),
+        };
+        let loop_ = boot_backend(
+            tmp,
+            test_config(Duration::from_secs(600)),
+            backend,
+            Arc::new(Mutex::new(Vec::new())),
+            mpsc::unbounded_channel().1,
+            None,
+        )
+        .await;
+        let user_turn = loop_
+            .runtime
+            .deliver(MessageOp::Message, "recover".into())
+            .expect("recovery wake");
+
+        wait_for("fresh Wave iteration completed", || {
+            loop_.runtime.thread_snapshot().iter().any(|turn| {
+                turn.role == ChatRole::Assistant
+                    && turn.status == Lifecycle::Completed
+                    && turn.text == "recovered"
+            })
+        })
+        .await;
+        wait_for("next Wave iteration is idle", || {
+            loop_.runtime.loop_state() == LoopState::Idle
+                && loop_
+                    .runtime
+                    .playhead()
+                    .and_then(|playhead| playhead.now)
+                    .is_some_and(|step| step.step == "wave/clarify" && step.iteration == 1)
+        })
+        .await;
+
+        assert_eq!(
+            *attempts.lock().expect("attempts lock"),
+            vec!["wave/clarify", "wave/pursue", "wave/mutate"]
+        );
+        assert_eq!(inputs.lock().expect("inputs lock").len(), 3);
+        let events = loop_.journal_events();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    EventKind::PlayheadChanged {
+                        event: PlayheadEvent::DefinitionReset,
+                        ..
+                    }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    EventKind::PlayheadChanged {
+                        event: PlayheadEvent::StepStarted { .. },
+                        ..
+                    }
+                ))
+                .count(),
+            3,
+            "reset itself never opens a body; the fresh three-step flow does"
+        );
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            EventKind::PlayheadChanged {
+                event: PlayheadEvent::StepFinished {
+                    outcome: StepOutcome::Failed,
+                    ..
+                },
+                ..
+            }
+        )));
+        assert_eq!(
+            started_answers(&events),
+            vec![vec![message_id(&user_turn)], Vec::new(), Vec::new()]
+        );
+        assert!(!loop_
+            .runtime
+            .thread_snapshot()
+            .iter()
+            .any(|turn| turn.role == ChatRole::Assistant && turn.status == Lifecycle::Failed));
     }
 
     #[tokio::test]
@@ -2289,6 +2490,47 @@ mod tests {
             .expect("loop task not cancelled");
         let err = outcome.expect_err("loop failure is an error exit");
         assert!(err.to_string().contains("consecutive wave failures"));
+    }
+
+    #[tokio::test]
+    async fn non_catalog_harness_prepare_failure_counts_toward_cap() {
+        let attempts = Arc::new(Mutex::new(0_u32));
+        let prepare_attempts = attempts.clone();
+        let backend = BodyBackend::Harness {
+            prepare: Box::new(move |_skill, _seed, _wave, _max_turns| {
+                *prepare_attempts.lock().expect("attempts lock") += 1;
+                Err(anyhow!("provider configuration is invalid"))
+            }),
+            create: Box::new(|_name, _approval, _events| {
+                Err(anyhow!("prepare failure must not create a harness"))
+            }),
+        };
+        let mut loop_ = boot_backend(
+            tempfile::tempdir().expect("tempdir"),
+            test_config(Duration::from_millis(30)),
+            backend,
+            Arc::new(Mutex::new(Vec::new())),
+            mpsc::unbounded_channel().1,
+            None,
+        )
+        .await;
+
+        wait_for("prepare failures exhaust the cap", || {
+            matches!(loop_.runtime.loop_state(), LoopState::Failed { .. })
+        })
+        .await;
+        assert_eq!(
+            *attempts.lock().expect("attempts lock"),
+            MAX_CONSECUTIVE_PASS_FAILURES
+        );
+        let outcome = tokio::time::timeout(Duration::from_secs(5), &mut loop_.loop_task)
+            .await
+            .expect("loop task ends")
+            .expect("loop task not cancelled");
+        let error = outcome.expect_err("failure cap ends the resident");
+        assert!(error
+            .to_string()
+            .contains("provider configuration is invalid"));
     }
 
     /// A pass overrunning its timeout is killed and finishes its turn

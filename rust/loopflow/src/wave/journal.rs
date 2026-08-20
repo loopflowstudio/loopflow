@@ -642,6 +642,9 @@ impl Narrator {
                 PlayheadEvent::InvocationCompleted { flow, .. } => {
                     info(format!("playhead completed · {flow}"))
                 }
+                PlayheadEvent::DefinitionReset => {
+                    info("playhead reset · definition changed".to_string())
+                }
                 PlayheadEvent::StepStarted { step, .. } => {
                     info(format!("playhead now · {} / {}", step.flow, step.step))
                 }

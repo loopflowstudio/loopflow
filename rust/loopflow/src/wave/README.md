@@ -43,6 +43,14 @@ The journal rebuilds the thread, playhead, and loop state after restart. The
 endpoint and resident token exist only while the listener owns that boot and
 are removed on shutdown.
 
+Expanded Wave plans stay pinned across restarts while their definitions remain
+unchanged. Before opening a body, the listener compares every journaled stack
+and queued plan with the current catalog. Any name, kind, order, policy, or
+shape change appends one reset snapshot and starts the current root at step
+zero. The reset drops cursors, iterations, nested invocations, and queued flow
+continuations; pending chat and inbox messages remain available to the fresh
+flow. An active body finishes against its pinned plan before this check runs.
+
 Wave Chat is local when `GOAL.md` has no `chat` block. A Discord channel binding
 replaces that backing on the next listener start. Each change appends one
 conversation epoch; reopening the same backing resumes its epoch. The listener

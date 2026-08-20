@@ -792,27 +792,47 @@ impl WaveRuntime {
         self.inner().playhead.as_ref().map(Playhead::view)
     }
 
-    /// Initialize the default wave invocation once. Replay wins over code:
-    /// after restart the journaled cursor is reused even if definitions moved.
+    /// Initialize the default Wave invocation, or reset stale execution state
+    /// once no body is active. Inbox messages live outside the playhead and
+    /// remain pending for the fresh root.
     pub fn ensure_playhead(&self) -> anyhow::Result<PlayheadView> {
         let mut inner = self.inner();
-        if let Some(playhead) = inner.playhead.as_ref() {
-            return Ok(playhead.view());
+        if inner
+            .playhead
+            .as_ref()
+            .is_some_and(|playhead| playhead.active.is_some())
+        {
+            return Ok(inner
+                .playhead
+                .as_ref()
+                .expect("active body belongs to an initialized playhead")
+                .view());
         }
         let root = QueuedInvocation::load(&self.repo_root, "wave")?;
-        let (playhead, event) = Playhead::new(root);
-        let view = playhead.view();
-        inner.journal.append(|_| EventKind::PlayheadChanged {
-            event,
-            playhead: Box::new(playhead.clone()),
-        });
+        if inner
+            .playhead
+            .as_ref()
+            .is_some_and(|playhead| playhead.definitions_match(&self.repo_root, &root))
+        {
+            return Ok(inner
+                .playhead
+                .as_ref()
+                .expect("matching playhead is initialized")
+                .view());
+        }
+        if inner.playhead.is_none() {
+            let (playhead, event) = Playhead::new(root);
+            inner.playhead = Some(playhead);
+            return self.journal_playhead_locked(&mut inner, vec![event]);
+        }
+
+        let (playhead, event) = Playhead::reset(root);
         inner.playhead = Some(playhead);
-        let _ = self.playhead_tx.send(view.clone());
-        Ok(view)
+        self.journal_playhead_locked(&mut inner, vec![event])
     }
 
-    /// Enqueue a flow at the innermost active invocation. The flow is
-    /// resolved now, so the queue carries stable step names and paths.
+    /// Enqueue a flow at the innermost active invocation. The queue keeps the
+    /// expanded plan until a definition change resets the playhead.
     pub fn enqueue_flow(&self, flow: &str) -> anyhow::Result<PlayheadView> {
         self.ensure_playhead()?;
         let invocation = QueuedInvocation::load(&self.repo_root, flow)?;
@@ -1875,6 +1895,9 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    use crate::engine::OccurrencePolicy;
+    use crate::wave::playhead::{StepKind, StepPlan};
+
     /// Parse the sequence out of a `"turn-<n>"` id; panics on a malformed one
     /// (ids are always minted from journal seqs).
     fn turn_seq(id: &str) -> u64 {
@@ -1912,6 +1935,108 @@ mod tests {
             ChatBacking::discord(binding),
         )
         .expect("open Discord runtime")
+    }
+
+    #[test]
+    fn stale_wave_definition_resets_once_and_preserves_pending_input() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = journal_path(tmp.path(), "ship");
+        let (mut journal, _) = Journal::open(&path).expect("open journal");
+        let mut root = QueuedInvocation {
+            id: "wave-root".to_string(),
+            flow: "wave".to_string(),
+            steps: ["wave_clarify", "wave_pursue", "wave_mutate"]
+                .into_iter()
+                .map(|name| StepPlan {
+                    name: name.to_string(),
+                    kind: StepKind::Skill,
+                    policy: OccurrencePolicy::default(),
+                })
+                .collect(),
+        };
+        root.steps[1].kind = StepKind::Op;
+        let (playhead, event) = Playhead::resume_root(root, 2, 7).expect("legacy playhead");
+        journal.append(|_| EventKind::PlayheadChanged {
+            event,
+            playhead: Box::new(playhead),
+        });
+        drop(journal);
+
+        let rt = open_runtime(tmp.path());
+        rt.deliver(MessageOp::Message, "recover".to_string())
+            .expect("pending recovery message");
+        let reset = rt.ensure_playhead().expect("reset stale definition");
+        let current = reset.now.as_ref().expect("fresh root step");
+        assert_eq!(current.step, "wave/clarify");
+        assert_eq!(current.index, 0);
+        assert_eq!(current.iteration, 0);
+        assert_eq!(reset.stack.len(), 1);
+        assert!(reset.stack[0].queue.is_empty());
+        assert_ne!(reset.stack[0].id, "wave-root");
+        assert_eq!(rt.pending_messages().len(), 1);
+
+        let repeated = rt.ensure_playhead().expect("idempotent definition check");
+        assert_eq!(repeated, reset);
+        drop(rt);
+
+        let reopened = open_runtime(tmp.path());
+        let current = reopened
+            .playhead()
+            .expect("replayed reset playhead")
+            .now
+            .expect("selected fresh step");
+        assert_eq!(current.step, "wave/clarify");
+        assert_eq!(current.iteration, 0);
+        assert_eq!(reopened.pending_messages().len(), 1);
+        drop(reopened);
+
+        let (_, events) = Journal::open(&path).expect("read reset journal");
+        let resets = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.kind,
+                    EventKind::PlayheadChanged {
+                        event: PlayheadEvent::DefinitionReset,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(resets, 1);
+    }
+
+    #[test]
+    fn stale_wave_definition_waits_for_the_active_body_to_close() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let rt = open_runtime(tmp.path());
+        let playhead = rt.ensure_playhead().expect("initialize playhead");
+        let body = BodyProvenance::for_step(&playhead.now.expect("current step"), tmp.path());
+        let body_id = body.body_id.clone();
+        rt.start_body(body).expect("start body");
+
+        let flows = tmp.path().join(".lf/flows");
+        std::fs::create_dir_all(&flows).expect("flow directory");
+        std::fs::write(flows.join("wave.yaml"), "- replacement\n").expect("replacement flow");
+
+        assert_eq!(
+            rt.ensure_playhead()
+                .expect("active body stays pinned")
+                .now
+                .expect("original step remains")
+                .step,
+            "wave/clarify"
+        );
+        rt.finish_body(&body_id, StepOutcome::Failed, "body ended")
+            .expect("close active body");
+        assert_eq!(
+            rt.ensure_playhead()
+                .expect("reset after body closes")
+                .now
+                .expect("fresh root")
+                .step,
+            "replacement"
+        );
     }
 
     // -- Wire delta builders (the resident door's vocabulary) --

@@ -83,6 +83,10 @@ impl QueuedInvocation {
             queue: Vec::new(),
         }
     }
+
+    fn matches_definition(&self, flow: &str, steps: &[StepPlan]) -> bool {
+        self.flow == flow && self.steps == steps
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,8 +99,7 @@ pub struct InvocationState {
     pub queue: Vec<QueuedInvocation>,
 }
 
-/// One logical step, keyed by `invocation_id` + `index` — repeated invocations
-/// of the same flow name stay distinguishable, and the name is display only.
+/// One logical step selected from the journaled flow expansion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepRef {
     pub invocation_id: String,
@@ -216,6 +219,7 @@ pub enum PlayheadEvent {
         invocation_id: String,
         flow: String,
     },
+    DefinitionReset,
     StepStarted {
         step: StepRef,
         body_id: String,
@@ -268,6 +272,36 @@ impl Playhead {
         frame.cursor = cursor;
         frame.iteration = iteration;
         Ok((playhead, event))
+    }
+
+    pub fn reset(root: QueuedInvocation) -> (Self, PlayheadEvent) {
+        (
+            Self {
+                stack: vec![root.start()],
+                active: None,
+            },
+            PlayheadEvent::DefinitionReset,
+        )
+    }
+
+    pub fn definitions_match(&self, repo: &Path, root: &QueuedInvocation) -> bool {
+        let Some(root_frame) = self.stack.first() else {
+            return false;
+        };
+        if !root.matches_definition(&root_frame.flow, &root_frame.steps) {
+            return false;
+        }
+        self.stack.iter().skip(1).all(|frame| {
+            QueuedInvocation::load(repo, &frame.flow)
+                .is_ok_and(|current| current.matches_definition(&frame.flow, &frame.steps))
+        }) && self
+            .stack
+            .iter()
+            .flat_map(|frame| &frame.queue)
+            .all(|queued| {
+                QueuedInvocation::load(repo, &queued.flow)
+                    .is_ok_and(|current| current.matches_definition(&queued.flow, &queued.steps))
+            })
     }
 
     pub fn current(&self) -> Option<StepRef> {
@@ -559,6 +593,51 @@ mod tests {
     fn root_rejects_a_cursor_past_its_current_definition() {
         let error = Playhead::resume_root(invocation("task", &["clarify"]), 1, 0).unwrap_err();
         assert!(error.to_string().contains("cannot resume at step 2 of 1"));
+    }
+
+    #[test]
+    fn playhead_definition_comparison_covers_root_and_queued_shape() {
+        let tmp = tempfile::tempdir().unwrap();
+        let flows = tmp.path().join(".lf/flows");
+        std::fs::create_dir_all(&flows).unwrap();
+        std::fs::write(flows.join("wave.yaml"), "- current\n- next\n").unwrap();
+        std::fs::write(flows.join("queued.yaml"), "- queued-current\n").unwrap();
+
+        let root = QueuedInvocation::load(tmp.path(), "wave").unwrap();
+        let (mut playhead, _) = Playhead::new(root.clone());
+        assert!(playhead.definitions_match(tmp.path(), &root));
+
+        let mut renamed = playhead.clone();
+        renamed.stack[0].steps[0].name = "old-name".to_string();
+        assert!(!renamed.definitions_match(tmp.path(), &root));
+
+        let mut changed_kind = playhead.clone();
+        changed_kind.stack[0].steps[0].kind = StepKind::Op;
+        assert!(!changed_kind.definitions_match(tmp.path(), &root));
+
+        let mut changed_policy = playhead.clone();
+        changed_policy.stack[0].steps[0].policy.id = Some("old-policy".to_string());
+        assert!(!changed_policy.definitions_match(tmp.path(), &root));
+
+        let mut reordered = playhead.clone();
+        reordered.stack[0].steps.reverse();
+        assert!(!reordered.definitions_match(tmp.path(), &root));
+
+        let mut shortened = playhead.clone();
+        shortened.stack[0].steps.pop();
+        assert!(!shortened.definitions_match(tmp.path(), &root));
+
+        playhead.stack[0]
+            .queue
+            .push(invocation("queued", &["queued-old"]));
+        assert!(!playhead.definitions_match(tmp.path(), &root));
+
+        let (reset, event) = Playhead::reset(root);
+        assert_eq!(event, PlayheadEvent::DefinitionReset);
+        assert_eq!(reset.stack.len(), 1);
+        assert_eq!(reset.stack[0].cursor, 0);
+        assert_eq!(reset.stack[0].iteration, 0);
+        assert!(reset.stack[0].queue.is_empty());
     }
 
     #[test]

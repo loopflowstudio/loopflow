@@ -346,6 +346,53 @@ struct RegistryQueryTests {
         ))
     }
 
+    @Test("User Ask attention prepares and confirms the exact Invocation")
+    func userAskAttentionUsesDurableCliHandshake() async throws {
+        let attentionJSON = try String(
+            contentsOf: askAttentionFixtureURL(),
+            encoding: .utf8
+        )
+        let attention = try JSONDecoder().decode(
+            [AskAttentionRecord].self,
+            from: Data(attentionJSON.utf8)
+        )
+        let surfaceData = try Data(contentsOf: invocationSurfaceFixtureURL())
+        let surface = try JSONDecoder().decode(InvocationSurfaceRecord.self, from: surfaceData)
+        let ask = try #require(attention.first?.ask)
+        let surfaceJSON = String(
+            data: try JSONEncoder().encode(surface),
+            encoding: .utf8
+        )!
+        let invocationJSON = String(
+            data: try JSONEncoder().encode(surface.invocation),
+            encoding: .utf8
+        )!
+        let query = RegistryQuery { args, cwd in
+            #expect(cwd == nil)
+            switch args {
+            case ["ask", "list", "--user", "--json"]:
+                return attentionJSON
+            case ["ask", "open", ask.id, "--prepare", "--json"]:
+                return surfaceJSON
+            case ["ask", "presented", ask.id, surface.invocation.id, "--json"]:
+                return invocationJSON
+            default:
+                throw RegistryQueryError("unexpected argv: \(args)")
+            }
+        }
+
+        let listed = try await query.userAskAttention()
+        let opened = try await query.prepareAskOpen(askId: ask.id)
+        let presented = try await query.confirmAskPresented(
+            askId: ask.id,
+            invocationId: surface.invocation.id
+        )
+
+        #expect(listed == attention)
+        #expect(opened == surface)
+        #expect(presented.id == surface.invocation.id)
+    }
+
     @Test("A Run without a captured turn stays explicitly unavailable")
     func runWithoutTurnHasNoTraceAddress() async throws {
         let query = RegistryQuery { args, _ in
@@ -540,6 +587,22 @@ private func workActivityFixtureURL(sourceFile: String = #filePath) -> URL {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
         .appendingPathComponent("tests/fixtures/dto/work_activity_snapshot.json")
+}
+
+private func askAttentionFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/ask_attention.json")
+}
+
+private func invocationSurfaceFixtureURL(sourceFile: String = #filePath) -> URL {
+    URL(fileURLWithPath: sourceFile)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("tests/fixtures/dto/invocation_surface.json")
 }
 
 private actor CallCounter {

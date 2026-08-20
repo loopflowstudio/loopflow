@@ -269,6 +269,30 @@ struct PodiumModelTests {
         #expect(model.selection == .task(id: "issue-now"))
         #expect(model.workActivity.value?.items.first?.subject == "W2-144")
     }
+
+    @Test("User attention refresh reads the shared Ask queue")
+    func userAttentionRefreshReadsSharedQueue() async throws {
+        let fixtures = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto")
+        let json = try String(
+            contentsOf: fixtures.appendingPathComponent("ask_attention.json"),
+            encoding: .utf8
+        )
+        let query = RegistryQuery { args, _ in
+            #expect(args == ["ask", "list", "--user", "--json"])
+            return json
+        }
+        let model = PodiumModel(query: query)
+
+        await model.refreshUserAskAttention()
+
+        #expect(model.userAskAttention.value?.map(\.id) == [
+            "ask_00000000000000000000000000000001",
+        ])
+    }
 }
 
 @Suite("Podium output signal")
@@ -369,6 +393,7 @@ private struct PodiumTestFixture {
             case "roadmap": return roadmapJSON
             case "ls": return wavesJSON
             case "ps": return processActivityJSON
+            case "ask": return "[]"
             case "activity":
                 await activityArguments.record(args)
                 return workActivityJSON

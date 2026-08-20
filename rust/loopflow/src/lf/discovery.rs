@@ -19,8 +19,14 @@ pub enum Target {
     Flow(Flow),
 }
 
-/// Discover a skill or flow by name. Tries skill lookup first, falls back to flow.
+/// Discover a skill or flow by name. Authored lifecycle entrypoints win their
+/// exact builtin skill collision; other names keep the reusable-skill default.
 pub fn discover_target(repo: &Path, name: &str) -> Result<Target> {
+    if matches!(name, "design" | "launch-plan") {
+        if let Ok(flow) = crate::engine::load_flow(name, repo) {
+            return Ok(Target::Flow(flow));
+        }
+    }
     let skill_error = match discover_skill(repo, name) {
         Ok(skill) => return Ok(Target::Skill(skill)),
         Err(err) => err,
@@ -60,13 +66,6 @@ pub fn builtin_skills() -> HashSet<String> {
 /// or leading prose.
 pub fn builtin_skill_description(name: &str) -> String {
     crate::engine::builtins::builtin_skill_description(name)
-}
-
-/// Check if a skill is interactive by loading it via the engine.
-pub fn is_skill_interactive(repo: &Path, name: &str) -> bool {
-    crate::engine::load_skill(name, repo)
-        .map(|s| s.interactive.unwrap_or(false))
-        .unwrap_or(false)
 }
 
 // =============================================================================
@@ -332,7 +331,6 @@ fn load_skill_from_path(name: &str, prompt_path: &Path) -> Option<Skill> {
         default_agent: None,
         directions: Vec::new(),
         action_style: None,
-        interactive: Some(true),
     })
 }
 
@@ -761,7 +759,7 @@ fn format_written_steps(steps: &[Step]) -> String {
 
 fn format_written_step(step: &Step) -> String {
     match step {
-        Step::Skill(skill) => skill.name.clone(),
+        Step::Skill(skill) => skill.skill.name.clone(),
         Step::Op(op) => op.to_string(),
         Step::FlowRef(name) => name.clone(),
         Step::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths, format_written_path),
@@ -780,7 +778,7 @@ fn format_written_path(path: &XorPath) -> String {
     }
     path.steps
         .iter()
-        .map(|skill| skill.name.as_str())
+        .map(|skill| skill.skill.name.as_str())
         .collect::<Vec<_>>()
         .join(" → ")
 }
@@ -846,7 +844,6 @@ mod tests {
 
         let skill = discover_skill(tmp.path(), "gstack/office-hours").expect("discover skill");
 
-        assert_eq!(skill.interactive, Some(false));
         assert_eq!(skill.directions, vec!["gstack".to_string()]);
         assert!(skill
             .content
@@ -860,5 +857,27 @@ mod tests {
         let tmp = TempDir::new().expect("tempdir");
         let err = discover_skill(tmp.path(), "gstack:office-hours").unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn reviewed_entrypoints_select_the_human_flows_not_the_reusable_skills() {
+        let tmp = TempDir::new().expect("tempdir");
+
+        let Target::Flow(design) = discover_target(tmp.path(), "design").expect("design flow")
+        else {
+            panic!("design must select its reviewed flow");
+        };
+        assert_eq!(design.name, "design");
+
+        let Target::Flow(launch) = discover_target(tmp.path(), "launch-plan").expect("launch flow")
+        else {
+            panic!("launch-plan must select its reviewed flow");
+        };
+        assert_eq!(launch.name, "launch-plan");
+
+        assert!(matches!(
+            discover_target(tmp.path(), "implement").expect("ordinary skill"),
+            Target::Skill(_)
+        ));
     }
 }

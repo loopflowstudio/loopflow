@@ -281,9 +281,9 @@ impl<E: SkillExecutor> FlowEngine<E> {
                     default_agent: Some("claude:sonnet".to_string()),
                     directions: Vec::new(),
                     action_style: None,
-                    interactive: Some(false),
                     content: Some(prompt.clone()),
                 },
+                policy: crate::engine::OccurrencePolicy::default(),
                 flow_parents: branch.flow_parents.clone(),
             },
             invoke_as: TEMP_XOR_ROUTE_STEP_NAME.to_string(),
@@ -468,6 +468,7 @@ mod tests {
     fn skill(name: &str) -> ConcreteSkill {
         ConcreteSkill {
             skill: Skill::named(name),
+            policy: crate::engine::OccurrencePolicy::default(),
             flow_parents: vec!["test".to_string()],
         }
     }

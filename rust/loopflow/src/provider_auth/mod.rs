@@ -1108,6 +1108,14 @@ impl ProviderAuthService {
         self.pending.lock().await.contains_key(&provider)
     }
 
+    pub async fn pending_requires_authorization_code(&self, provider: Provider) -> bool {
+        self.pending
+            .lock()
+            .await
+            .get(&provider)
+            .is_some_and(|pending| pending.authorization_code_input.is_some())
+    }
+
     async fn pending_providers(&self) -> HashSet<Provider> {
         self.pending.lock().await.keys().copied().collect()
     }
@@ -4270,6 +4278,11 @@ attributes:
 
         let status = service.status(Provider::GitHub).await.expect("status");
         assert_eq!(status.status, AuthStatus::Pending);
+        assert!(
+            !service
+                .pending_requires_authorization_code(Provider::GitHub)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -4313,6 +4326,11 @@ attributes:
             .start_auth(Provider::Claude, no_event_sink())
             .await
             .expect("start auth");
+        assert!(
+            service
+                .pending_requires_authorization_code(Provider::Claude)
+                .await
+        );
         service
             .complete_auth(Provider::Claude, "expected-code")
             .await

@@ -14,7 +14,6 @@ use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::task::{TaskEventKind, TaskId};
 
-pub(crate) mod answer;
 pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

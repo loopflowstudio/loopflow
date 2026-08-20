@@ -935,6 +935,13 @@ impl Task {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
+    WorktreeInitializing {
+        pr_id: TaskPrId,
+        sequence: u32,
+        branch: String,
+        path: String,
+        base_commit: String,
+    },
     Started,
     BodyHandedOff {
         handoff: crate::child::ChildBodyHandoff,
@@ -973,7 +980,10 @@ pub enum TaskEventKind {
 impl TaskEventKind {
     /// Whether the event crosses the required Task → Project boundary.
     pub fn is_project_observable(&self) -> bool {
-        !matches!(self, Self::Started | Self::Progress { .. })
+        !matches!(
+            self,
+            Self::WorktreeInitializing { .. } | Self::Started | Self::Progress { .. }
+        )
     }
 
     /// Whether a Project-observable Task event also belongs in the root Wave.

@@ -16,6 +16,29 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+pub(crate) const SSH_CONNECT_TIMEOUT_SECS: u32 = 10;
+const SSH_SERVER_ALIVE_INTERVAL_SECS: u32 = 10;
+const SSH_SERVER_ALIVE_COUNT_MAX: u32 = 3;
+
+pub(crate) fn bounded_ssh_args(dest: &str, port: Option<u16>) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(port) = port {
+        args.extend(["-p".to_string(), port.to_string()]);
+    }
+    args.extend([
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-o".to_string(),
+        format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
+        "-o".to_string(),
+        format!("ServerAliveInterval={SSH_SERVER_ALIVE_INTERVAL_SECS}"),
+        "-o".to_string(),
+        format!("ServerAliveCountMax={SSH_SERVER_ALIVE_COUNT_MAX}"),
+        dest.to_string(),
+    ]);
+    args
+}
+
 pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> {
     let home = dirs::home_dir().ok_or_else(|| "cannot resolve home directory".to_string())?;
     repo.strip_prefix(&home)

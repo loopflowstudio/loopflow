@@ -1,0 +1,8 @@
+# Prove the result, demo it to the human, then settle the Task.
+- task-gate
+- step:
+    id: review_demo
+    name: demo
+    human: true
+- record-learnings
+- op: pr land -c

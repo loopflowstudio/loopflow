@@ -188,76 +188,16 @@ pub(crate) fn build_session_command(
     }
 }
 
-pub(crate) fn build_advisory_session_command(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-) -> Result<SessionCommand> {
-    let cwd = worktree.to_path_buf();
-    let worktree_arg = worktree.to_string_lossy().to_string();
-
-    match harness {
-        "codex" => {
-            let mut args = vec!["-C".to_string(), worktree_arg];
-            if let Some(model) = model {
-                args.push("-c".to_string());
-                args.push(format!("model=\"{model}\""));
-            }
-            args.extend([
-                "--disable".to_string(),
-                "hooks".to_string(),
-                "--disable".to_string(),
-                "plugins".to_string(),
-                "--disable".to_string(),
-                "apps".to_string(),
-                "-c".to_string(),
-                "mcp_servers={}".to_string(),
-                "--sandbox".to_string(),
-                "read-only".to_string(),
-                "--ask-for-approval".to_string(),
-                "never".to_string(),
-                prompt.to_string(),
-            ]);
-            Ok(SessionCommand {
-                program: "codex".to_string(),
-                args,
-                cwd,
-            })
-        }
-        "claude" => {
-            let mut args = Vec::new();
-            if let Some(model) = model {
-                args.push("--model".to_string());
-                args.push(model.to_string());
-            }
-            args.extend([
-                "--safe-mode".to_string(),
-                "--permission-mode".to_string(),
-                "plan".to_string(),
-                "--tools".to_string(),
-                "Read,Glob,Grep".to_string(),
-                "--strict-mcp-config".to_string(),
-                "--".to_string(),
-                prompt.to_string(),
-            ]);
-            Ok(SessionCommand {
-                program: "claude".to_string(),
-                args,
-                cwd,
-            })
-        }
-        "opencode" => {
-            bail!("OpenCode cannot enforce an immutable read-only TUI; skipping advisory launch")
-        }
-        _ => Err(anyhow!(
-            "unsupported advisory session launcher harness '{}'. Use claude or codex.",
-            harness
-        )),
+pub(crate) fn spawn_session_command(command: &SessionCommand) -> Result<()> {
+    let status = session_command_status(command)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("session launcher exited with status {status}"))
     }
 }
 
-fn spawn_session_command(command: &SessionCommand) -> Result<()> {
+pub(crate) fn session_command_status(command: &SessionCommand) -> Result<std::process::ExitStatus> {
     if !check_cli_available(&command.program) {
         return Err(anyhow!(
             "'{}' CLI not found. Install it and rerun `lf init`.",
@@ -293,13 +233,7 @@ fn spawn_session_command(command: &SessionCommand) -> Result<()> {
         tracing::info!(provider = %command.program, "selected managed provider account");
         route.apply(&mut process);
     }
-    let status = process.status()?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!("session launcher exited with status {status}"))
-    }
+    process.status().map_err(Into::into)
 }
 
 fn absolute_path(path: &Path) -> PathBuf {
@@ -688,68 +622,6 @@ mod tests {
             }
         );
         assert_eq!(launch.ide_url, None);
-    }
-
-    #[test]
-    fn advisory_codex_session_cannot_write_the_task_worktree() {
-        let command =
-            build_advisory_session_command("codex", Some("o3"), &path(), "inspect the result")
-                .expect("build advisory command");
-
-        assert_eq!(command.program, "codex");
-        assert!(command
-            .args
-            .windows(2)
-            .any(|pair| { pair == ["--sandbox".to_string(), "read-only".to_string()] }));
-        assert!(command
-            .args
-            .windows(2)
-            .any(|pair| { pair == ["--ask-for-approval".to_string(), "never".to_string()] }));
-        assert!(!command.args.contains(&"--add-dir".to_string()));
-        assert!(!command
-            .args
-            .contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
-        for feature in ["hooks", "plugins", "apps"] {
-            assert!(command
-                .args
-                .windows(2)
-                .any(|pair| pair == ["--disable".to_string(), feature.to_string()]));
-        }
-        assert!(command
-            .args
-            .windows(2)
-            .any(|pair| pair == ["-c".to_string(), "mcp_servers={}".to_string()]));
-    }
-
-    #[test]
-    fn advisory_claude_session_has_only_read_tools() {
-        let command =
-            build_advisory_session_command("claude", Some("sonnet"), &path(), "inspect the result")
-                .expect("build advisory command");
-
-        assert_eq!(command.program, "claude");
-        assert!(command
-            .args
-            .windows(2)
-            .any(|pair| { pair == ["--permission-mode".to_string(), "plan".to_string()] }));
-        assert!(command
-            .args
-            .windows(2)
-            .any(|pair| { pair == ["--tools".to_string(), "Read,Glob,Grep".to_string()] }));
-        assert!(command.args.contains(&"--strict-mcp-config".to_string()));
-        assert!(command.args.contains(&"--safe-mode".to_string()));
-        assert!(!command.args.contains(&"--add-dir".to_string()));
-        assert!(!command
-            .args
-            .contains(&"--dangerously-skip-permissions".to_string()));
-    }
-
-    #[test]
-    fn advisory_opencode_session_fails_closed() {
-        let error = build_advisory_session_command("opencode", None, &path(), "inspect the result")
-            .unwrap_err();
-
-        assert!(error.to_string().contains("immutable read-only TUI"));
     }
 
     #[test]

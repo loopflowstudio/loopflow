@@ -75,7 +75,7 @@ use anyhow::{anyhow, Result};
 use secrecy::SecretString;
 
 use crate::engine::repo::find_repo_root;
-use crate::engine::wave_config::{try_read_wave_config, WaveChatConfig};
+use crate::engine::wave_config::{try_read_wave_chat_config, WaveChatConfig};
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::util::normalize_wave_name;
 use crate::store::{open_existing_store, SharedStore};
@@ -401,33 +401,35 @@ where
         .then(crate::engine::process::resolve_current_home_lf_binary_checked)
         .transpose()?;
 
-    let (chat_backing, discord_adapter) =
-        match try_read_wave_config(&repo_root, &wave)?.and_then(|config| config.chat) {
-            Some(WaveChatConfig::Discord {
-                home_id,
+    let (chat_backing, discord_adapter) = match try_read_wave_chat_config(&repo_root, &wave)? {
+        Some(WaveChatConfig::Discord {
+            home_id,
+            guild_id,
+            channel_id,
+        }) => {
+            let registry = registry_config.as_ref().ok_or_else(|| {
+                anyhow!("Discord chat requires the local registry to verify its owner Home")
+            })?;
+            let work = crate::durable::WorkRef::Wave(registry.wave.id().clone());
+            let placement = registry.store.placement(&work).await?;
+            let local_home = registry.store.local_home().await?;
+            let binding = journal::DiscordChatBinding {
                 guild_id,
                 channel_id,
-            }) => {
-                let registry = registry_config.as_ref().ok_or_else(|| {
-                    anyhow!("Discord chat requires the local registry to verify its owner Home")
-                })?;
-                let local_home = registry.store.local_home().await?;
-                let binding = journal::DiscordChatBinding {
-                    guild_id,
-                    channel_id,
-                };
-                let backing = ChatBacking::discord(&binding);
-                let adapter = discord::DiscordAdapter::preflight(
-                    binding,
-                    &home_id,
-                    &local_home.id,
-                    discord_token,
-                )
-                .await?;
-                (backing, Some(adapter))
-            }
-            Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
-        };
+            };
+            let backing = ChatBacking::discord(&binding);
+            let adapter = discord::DiscordAdapter::preflight(
+                binding,
+                &home_id,
+                &placement.home_id,
+                &local_home.id,
+                discord_token,
+            )
+            .await?;
+            (backing, Some(adapter))
+        }
+        Some(WaveChatConfig::Local) | None => (ChatBacking::Local, None),
+    };
 
     let registered = registry_config
         .as_ref()

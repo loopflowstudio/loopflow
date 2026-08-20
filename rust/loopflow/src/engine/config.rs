@@ -113,6 +113,9 @@ pub enum LaunchTarget {
 pub struct SessionConfig {
     #[serde(default)]
     pub launch: LaunchTarget,
+    /// Home-local terminal application used to present detached Ask sessions.
+    #[serde(default)]
+    pub terminal: Option<String>,
 }
 
 /// Release configuration.
@@ -207,10 +210,6 @@ pub struct Config {
     #[serde(default)]
     pub session: SessionConfig,
 
-    /// Tasks that default to interactive mode
-    #[serde(default)]
-    pub interactive: Vec<String>,
-
     /// Docs paths, globs, or directories to include by default.
     #[serde(default)]
     pub docs: Vec<String>,
@@ -276,7 +275,6 @@ impl Default for Config {
             context: Vec::new(),
             exclude: Vec::new(),
             session: SessionConfig::default(),
-            interactive: Vec::new(),
             docs: Vec::new(),
             diff: false,
             diff_files: false,
@@ -382,13 +380,7 @@ fn merge_config_values(
 
 /// Load config, merging global (~/.lf/config.yaml) with repo (.lf/config.yaml).
 pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError> {
-    let global_path = if let Ok(home) = std::env::var("LF_HOME") {
-        PathBuf::from(home).join("config.yaml")
-    } else {
-        dirs::home_dir()
-            .map(|h| h.join(".lf").join("config.yaml"))
-            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
-    };
+    let global_path = global_config_path();
 
     let repo_path = repo_root.map(|r| r.join(".lf").join("config.yaml"));
 
@@ -409,6 +401,26 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
         .map_err(|e| LoadError::InvalidFlow(format!("Config validation error: {}", e)))?;
 
     Ok(Some(config))
+}
+
+/// Load only Home-local user configuration.
+pub fn load_global_config() -> Result<Option<Config>, LoadError> {
+    let Some(value) = load_yaml_file(&global_config_path())? else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(value)
+        .map(Some)
+        .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
+}
+
+fn global_config_path() -> PathBuf {
+    if let Ok(home) = std::env::var("LF_HOME") {
+        PathBuf::from(home).join("config.yaml")
+    } else {
+        dirs::home_dir()
+            .map(|home| home.join(".lf/config.yaml"))
+            .unwrap_or_else(|| PathBuf::from(".lf/config.yaml"))
+    }
 }
 
 /// Load only the repository-owned config, without inheriting user-global values.
@@ -536,7 +548,6 @@ linear:
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
         assert_eq!(config.session.launch, LaunchTarget::Tui);
-        assert!(config.interactive.is_empty());
         assert!(config.direction.is_none());
         assert!(config.release.targets.is_empty());
     }
@@ -641,17 +652,6 @@ direction:
     }
 
     #[test]
-    fn config_from_yaml_interactive_list() {
-        let yaml = r#"
-interactive:
-  - design
-  - iterate
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.interactive, vec!["design", "iterate"]);
-    }
-
-    #[test]
     fn config_from_yaml_session_launch_tui() {
         let yaml = r#"
 session:
@@ -669,6 +669,16 @@ session:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.session.launch, LaunchTarget::Ide);
+    }
+
+    #[test]
+    fn config_from_yaml_session_terminal() {
+        let yaml = r#"
+session:
+  terminal: Ghostty
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
+        assert_eq!(config.session.terminal.as_deref(), Some("Ghostty"));
     }
 
     #[test]

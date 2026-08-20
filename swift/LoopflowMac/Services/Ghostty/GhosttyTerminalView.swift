@@ -13,6 +13,7 @@ struct GhosttyTerminalView: View {
     let argv: [String]
     let env: [String: String]
     let sessionId: String?
+    let onSurfaceCreated: () -> Void
     @ObservedObject var manager: GhosttyManager
 
     init(
@@ -20,12 +21,14 @@ struct GhosttyTerminalView: View {
         argv: [String] = [],
         env: [String: String] = [:],
         sessionId: String? = nil,
+        onSurfaceCreated: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
         self.sessionId = sessionId
+        self.onSurfaceCreated = onSurfaceCreated
         self.manager = manager
     }
 
@@ -35,6 +38,7 @@ struct GhosttyTerminalView: View {
                 workingDirectory: workingDirectory,
                 command: shellCommand,
                 sessionId: sessionId,
+                onSurfaceCreated: onSurfaceCreated,
                 size: geo.size,
                 manager: manager
             )
@@ -50,6 +54,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
     let workingDirectory: String
     let command: String?
     let sessionId: String?
+    let onSurfaceCreated: () -> Void
     let size: CGSize
     @ObservedObject var manager: GhosttyManager
 
@@ -58,6 +63,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         view.workingDirectory = workingDirectory
         view.command = command
         view.sessionId = sessionId
+        view.onSurfaceCreated = onSurfaceCreated
 
         if case .uninitialized = manager.state {
             manager.initialize()
@@ -82,6 +88,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
     var workingDirectory: String = ""
     var command: String?
     var sessionId: String?
+    var onSurfaceCreated: () -> Void = {}
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -128,6 +135,7 @@ final class GhosttyMetalView: NSView, GhosttySessionSurfaceOwner, @preconcurrenc
             updateSurfaceSize()
             setupDisplayLink()
             setupTrackingArea()
+            onSurfaceCreated()
         }
     }
 
@@ -632,6 +640,7 @@ struct GhosttyTerminalView: View {
     let argv: [String]
     let env: [String: String]
     let sessionId: String?
+    let onSurfaceCreated: () -> Void
     @ObservedObject var manager: GhosttyManager
 
     init(
@@ -639,12 +648,14 @@ struct GhosttyTerminalView: View {
         argv: [String] = [],
         env: [String: String] = [:],
         sessionId: String? = nil,
+        onSurfaceCreated: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
         self.sessionId = sessionId
+        self.onSurfaceCreated = onSurfaceCreated
         self.manager = manager
     }
 

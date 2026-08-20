@@ -16,7 +16,7 @@ instructions, current worktree, and any existing design note in `scratch/`.
   computable. Preserve a clear existing design.
 - Resolve reversible ambiguity with the simpler path. When a choice changes
   scope, behavior, or authority, run `lf ask "<exact question>"`; continue the
-  same Turn after the parent Answer returns.
+  same Turn after the parent Ask settles.
 - Do not implement beyond a trivial probe that makes the design computable.
 
 ## Computable design contract

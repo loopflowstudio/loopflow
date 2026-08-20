@@ -17,6 +17,21 @@ struct LocalWaveAgentLauncherTests {
         #expect(LaunchTargetLauncher.isRemoteHome("ssh://jack@builder.example:22"))
     }
 
+    @Test("Ask presentation offers only targets that attach the exact Invocation")
+    func askPresentationFiltersWorktreeOnlyTargets() {
+        let capability = LaunchTargetCapability(
+            installedApps: [.warp, .vscode],
+            workspaceProven: true,
+            warpCommandBearing: false,
+            isRemoteHome: false,
+            providerIsClaude: false,
+            providerSessionKnown: false
+        )
+
+        #expect(capability.offeredOptions.map(\.surface) == [.ghostty, .warp, .vscode])
+        #expect(capability.attachOptions.map(\.surface) == [.ghostty])
+    }
+
     @Test("development launcher preserves the selected Home registry")
     func launchEnvironmentPreservesRegistry() {
         let environment = GUIProcessEnvironment.enriched([

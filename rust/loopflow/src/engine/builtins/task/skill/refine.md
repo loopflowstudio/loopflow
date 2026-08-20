@@ -1,5 +1,4 @@
 ---
-interactive: true
 produces: refined text
 action_style: exploratory
 ---

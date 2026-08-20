@@ -17,10 +17,11 @@ User intent
     ├── Steer
     ├── Wait
     └── Epoch / Basis
+        ├── Ask / Result
+        │   └── AgentInvocation
         └── Run / Containment
             └── AgentInvocation
                 └── Turn
-                    └── Ask ── Answer
 ```
 
 ## The map
@@ -37,7 +38,7 @@ User intent
 | **PM projection** — locally readable current planning snapshot | Linear remains authoritative; the Wave UUID keys the projection so locator changes preserve it. Sync atomically replaces the projection and reads never author through it. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_snapshots` | Foreground PM sync or Home webhook reconciliation | `lf pm` | `provider:linear` |
 | **Epoch / Basis** — one attempt at Work truth and its authored-input revision | The Work controller opens/settles Epochs; only committed Steers advance Basis. Terminal Work outranks stale Run observations. | [`Epoch`](../rust/loopflow/src/durable.rs), [`Basis`](../rust/loopflow/src/durable.rs), [`DoneProposal`](../rust/loopflow/src/durable.rs) | `epochs`, `epoch_revisions`, `work_truth`, `work_flow_positions`, `done_proposals` | Current Work controller; active Run proposes completion against an exact Basis | `lf work`, `lf activity` | — |
 | **Steer** — durable authored correction to one Work | User or authorized parent Run writes it; incorporation is proven at a later successful Basis boundary. Live send is latency only. | [`Steer`](../rust/loopflow/src/durable.rs), [`Send`](../rust/loopflow/src/durable.rs) | `steers`, `sends`, `tool_responses` | Store transaction, then best-effort provider delivery | Work-specific `steer` commands and `lf work steer` | Model provider when delivery is live |
-| **Ask / Answer** — one Turn-local blocking question and immutable response | The route is derived from Work ancestry; the first authorized User or parent-Run answer wins. | [`AskExchange`](../rust/loopflow/src/durable.rs), [`Answer`](../rust/loopflow/src/durable.rs) | `ask_exchanges`, `ask_linear_comment_outbox` | Asking Turn blocks; authorized answerer commits; Linear comment outbox publishes later | `lf ask`, `lf work asks`, `lf work answer` | Linear comments for Task exchanges |
+| **Ask** — one durable blocking request, typed result, and replaceable Ask Invocations | The target is explicit; the active AgentInvocation id authorizes the first terminal result. The Ask owns queue state and its active Invocation reference; AgentInvocation owns presentation, provider/process state, and history. | [`Ask`](../rust/loopflow/src/durable.rs), [`AskResult`](../rust/loopflow/src/durable.rs), [`AgentInvocation`](../rust/loopflow/src/durable.rs) | `ask_exchanges`, `ask_linear_comment_outbox` | The asking command blocks without consuming turns; target-authorized Ask Invocations claim and settle it; Linear comments publish later. | `lf ask` | Linear comments for Task exchanges |
 | **Wait** — durable reason Work is not Ready | The Work controller records the unresolved input/time/event/child/capability/effect condition. | [`Wait`](../rust/loopflow/src/durable.rs), [`WaitOn`](../rust/loopflow/src/durable.rs) | `waits` | Home scheduler resolves it and may reserve the next Run | Project/Task wait and status surfaces | — |
 | **Home / Placement / Runtime generation** — stable execution authority, the Work-to-Home decision, and the one installed runtime generation | `HomeId` is identity; its SSH route is mutable evidence. Placement changes only while no Run is live. A published candidate owns one crash-recoverable upgrade receipt and advances the generation only after old containment drains. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`HomeUpgradeReceipt`](../rust/loopflow/src/lf/commands/install.rs) | `homes`, `work_placements`, `home_runtime_generations`, `home_upgrades`, `home_upgrade_work`; Home-local SQLite. `~/.lf/upgrades/*.json` is only the previous-schema compatibility/recovery bridge and is removed after durable settlement. | `lfd` owns eligible Wave listeners on one Home; hidden `lf install` transport lets the staged candidate own an upgrade transaction | `lf home`, `lf ssh`; `lfd GET /health`, `lfd GET /status`, `lfd POST /waves/start`, `lfd POST /waves/stop`, `lfd POST /waves/reconcile`, `lfd POST /linear/webhook`, `lfd POST /github/webhook` | `exec:ssh`, `exec:launchctl`, `exec:systemctl` |
 | **Run / Containment** — one scheduler claim and physical execution boundary for an Epoch | The opaque Run lease is the sole Work-write capability. Run containment, never invocation order, is the interrupt/recovery target. | [`Run`](../rust/loopflow/src/durable.rs), [`Containment`](../rust/loopflow/src/durable.rs), [`RunLease`](../rust/loopflow/src/durable.rs) | `runs` | `lf __work` for Project/Task bodies; tmux or one process group contains the Run | Project/Task lifecycle surfaces | `exec:lf`, `exec:tmux`, `exec:kill`, `exec:lsof`, `exec:ps`, `exec:sh` |
@@ -76,23 +77,102 @@ observed Run and reserves a new Run whose recovery trigger points to it.
 Steer changes authored Work input and advances Basis. Provider injection is a
 best-effort fast path; a later successful boundary is the semantic receipt.
 
-Ask/Answer is Turn-local tool I/O. It does not move Basis, enter the Steer queue,
-or advance a Flow step.
-
-```text
-Ask -> Turn -> AgentInvocation -> Run -> Epoch -> Work
+```bash
+lf task steer INF-123 "keep the public name"
+lf work steer task task_... "show the failing fixture"
 ```
 
-That chain prevents a question from claiming one Work while pointing to another
-Work's Turn. One Turn has at most one unanswered Ask. Answer fields are written
-together, only while unanswered, so concurrent writers cannot replace evidence.
-A child routes to its immediate parent Work; an interactive root may route to
-the User; a headless root with neither route fails instead of waiting forever.
+### Ask creation and terminal result
 
-Interactive Task phases are advisory. They launch once and advance without
-waiting for a window or handback. A successful interactive surface is read-only
-beside the next writable phase. Durable Ask is the sole human-input primitive
-that can hold a Turn open.
+An intervention Ask is Turn-local tool I/O. A `FlowStep` Ask is the durable body
+of an authored human flow node between provider Invocations. Neither enters the
+Steer queue or moves Work Basis.
+
+```bash
+lf ask "Which behavior should this proof cover?"  # blocks in the child Turn
+lf ask wait                                       # recover after shell loss
+
+lf ask list --outgoing                            # this Work's unresolved requests
+lf ask list --user --json                         # User attention projection
+lf ask open ask_...                                # claim or reattach one Ask session
+lf ask open ask_... --prepare --json               # app obtains exact attach route
+lf ask presented ask_... invocation_... --json     # exact presentation fence
+```
+
+The Ask keeps its identity while Invocations come and go:
+
+```text
+Ask(id, origin Work/Run/optional Turn+Invocation/Home/cwd, target, request, state, result)
+AgentInvocation(answer Ask id, route/surface, presentation, outcome)
+```
+
+The Invocation id is the attempt identity. No second Ask lifecycle mirrors
+its route, surface, containment, timing, provider outcome, or handback.
+
+The origin is captured when the Ask is created. Its cwd is the active Run's
+actual execution directory, not a path reconstructed later. A Turn,
+Invocation, Run, or Work may own several unresolved intervention Asks; each
+creation mints an id even when its request text duplicates another Ask.
+Flow-step identity is its expanded flow, stable node id, and skill. Typed
+settlement is first-writer-wins.
+
+The target is selected when the Ask is created:
+
+- a child routes to its immediate parent Work;
+- `--user` routes explicitly to the authenticated User;
+- a root without `--user` fails instead of silently spending User attention.
+
+A Parent Ask accepts only the active Run lease for that exact parent Work. A
+User Ask accepts only User authority. Siblings, children, unrelated Runs, and
+stale parent leases fail closed.
+
+An unresolved Ask remains actionable while its Epoch is open. Completing or
+abandoning the Epoch cancels it without erasing history. Provider, shell,
+waiter, or runner loss never invents success.
+
+`lf ask` commits before it wakes the parent, polls without consuming model
+tokens, retries the wake, and prints the typed terminal result to stdout. The
+provider sees an ordinary long-running shell command; Loopflow needs no
+provider-specific injected tool or mid-turn message transport.
+
+Each Task Ask creation and terminal result also enqueues a Linear issue comment
+in the same transaction. Linear publishes afterward: failures remain in the
+durable outbox for retry and cannot roll back or delay settlement. Ask
+attempts and presentation failures do not create comments.
+
+Opening an Ask claims one attempt, records its AgentInvocation under the origin
+Run, and starts it in the captured cwd. The Ask id selects the request and the
+ambient AgentInvocation id must match the Ask's active Invocation. A flow-step
+Invocation additionally receives the step-scoped Run writer lease;
+intervention Invocations never do. `Ready` means its exact attach route exists;
+presentation moves it to `Active`. Resolve or decline completes it. Release,
+ordinary exit, or an observed signal closes it and requeues the same Ask. Proven
+local disappearance marks it lost and requeues; unreachable remote liveness
+remains claimed.
+
+Loopflow.app is a projection over that same queue. It may prepare an Ask session,
+present the returned `InvocationSurface` in embedded Ghostty or an attach-capable
+external target, and then confirm the exact Ask/Invocation pair. Swift owns no
+Ask lifecycle, session identity, or queue state.
+
+## Flow execution
+
+Task flows run serially. A Turn blocked inside `lf ask` remains the current
+Turn, and the Task remains Running because its Run and containment are still
+live. A headless Task that reaches `human: true` records the playhead, ends its
+provider Invocation, and queues one User `FlowStep` Ask without starting a
+provider merely to wait. Resolve completes that node; decline returns to the
+preceding autonomous step with the reason; release or incomplete exit requeues
+without advancing.
+
+Project and Wave core conversations no longer receive child questions as
+Steers or special control turns. Their Ask lane claims parent-targeted
+Asks and starts narrow, detached AgentInvocations without receiving the parent
+Run lease or disturbing its core conversation.
+
+Direct TTY flows use their present conversation for human nodes. Headless Task
+flows use the detached Ask session above. Skill frontmatter never selects either
+surface, and Invocation handback is not Task flow evidence.
 
 ## Processes
 
@@ -153,6 +233,13 @@ Intentional copies stay read projections:
 | `tests/fixtures/dto/` | Rust `lf --json` DTOs | Rust and Swift fixture tests reject required-field or enum drift. |
 <!-- architecture-projections:end -->
 
+`lf status` and `lf roadmap` derive lifecycle from Epoch, Run, and Wait. Pending
+User attention is a live projection over queued Asks, active Invocations, and
+exact Invocation attach routes rather than stored attention flags. `lf trace
+--json` includes Invocations, Turns, Asks, and typed results. Invocation attach
+DTOs carry attach and handback data only; provider conversation rows no longer
+carry Work attention or reviewer policy.
+
 ## Compatibility seams
 
 Compatibility survives only when it crosses immutable external history. Each
@@ -182,7 +269,7 @@ model.
 | --- | --- | --- |
 | `Project Session`, `Task Session`, `project_sessions`, `task_sessions` | `rust/loopflow/src/store/migrations/`, `rust/loopflow/src/store/migrations.rs`, `rust/loopflow/src/store/tests/fixtures/`, `rust/loopflow/src/lf/commands/install.rs`, `release/` | Project/Task **Work**, Epoch, and Run. |
 | `session context`, `LF_SESSION` | — | Run context and the exact Run lease/invocation variables. |
-| `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, and Ask/Answer. |
+| `lf radio`, `agent bus` | `release/` | Typed Work observations, Steer, and Ask. |
 | `pm.linear_project`, `projects/<slug>.md` | `release/` | `pm.linear_initiative`; Linear Initiative → Project → Issue. |
 | `machine-local host`, `machine-global command`, `machine-global mutation`, `machine-global reservation` | — | Home-local keeper, command, mutation, or reservation. |
 <!-- architecture-vocabulary:end -->
@@ -206,10 +293,15 @@ and current runtime source do not.
   Work.
 - Run containment, not invocation ordering, is the interrupt and recovery
   target.
-- Every Turn belongs to one AgentInvocation; every Ask belongs to one Turn.
+- Every Turn belongs to one AgentInvocation; an intervention Ask captures its
+  Turn.
 - Durable Ask is the only human-input primitive that blocks a Work Turn.
-- Ask/Answer never allocates an Epoch revision or enters Steer delivery.
-- An advisory interactive surface has no Task-worktree write authority.
+- A human flow node runs as a writable Ask Invocation in its Task
+  worktree; presentation or process exit never advances the node.
+- One Turn may own several unresolved intervention Asks; explicit Ask ids select precise mutations.
+- An Ask result is typed, authorized, immutable, and first-writer-wins.
+- Ask never allocates an Epoch revision or enters Steer delivery.
+- Interrupted Turns and terminal Epochs expose no actionable Ask attention.
 - Controller evidence may settle Work without inventing an AgentInvocation or
   Run.
 - DTO fields are required unless their type is explicitly optional.

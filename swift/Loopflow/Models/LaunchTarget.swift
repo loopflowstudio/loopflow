@@ -157,6 +157,10 @@ public struct LaunchTargetCapability: Sendable, Hashable {
             return LaunchTargetOption(surface: surface, reach: reach)
         }
     }
+
+    public var attachOptions: [LaunchTargetOption] {
+        offeredOptions.filter(\.canAttach)
+    }
 }
 
 /// The last surface that successfully presented a launch, remembered per

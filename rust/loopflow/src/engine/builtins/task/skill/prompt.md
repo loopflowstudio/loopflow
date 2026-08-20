@@ -1,6 +1,5 @@
 ---
 description: Author or audit a Loopflow skill, Wave goal, direction, or inline prompt.
-interactive: true
 requires: a prompt idea or existing prompt asset
 produces: .lf/skills/*.md | .lf/directions/*.md | wave/<name>/GOAL.md | reviewed prompt text
 default_agent: claude
@@ -86,7 +85,6 @@ configuration, then one direct opening line:
 ---
 requires: diff vs main
 produces: scratch/security-audit.md
-interactive: false
 ---
 Audit the changed authentication boundary and prove every caller still fails closed.
 
@@ -103,8 +101,8 @@ Write `scratch/security-audit.md` with evidence, severity, and reproduction.
 
 Give procedural skills numbered work and a concrete output. Give exploratory
 skills room to follow evidence without turning “explore” into permission to
-change unrelated code. Interactive skills must define behavior for both a
-present human and a headless parent reviewer.
+change unrelated code. Skills that may run with a present human must also
+define bounded behavior for a headless parent reviewer.
 
 ## Wave goal contract
 

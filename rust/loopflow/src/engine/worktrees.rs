@@ -161,7 +161,7 @@ pub struct CreateWorktreeResult {
     pub base_commit: Option<String>,
 }
 
-pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
+pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -173,17 +173,28 @@ pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
-    let common_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let common_path = PathBuf::from(common_dir);
-    let repo_root =
-        common_path
-            .parent()
-            .map(PathBuf::from)
-            .ok_or_else(|| GitError::CommandFailed {
-                command: "git rev-parse --git-common-dir".to_string(),
-                stderr: "unable to resolve common dir parent".to_string(),
-            })?;
-    Ok(repo_root)
+    let common_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if common_dir.is_absolute() {
+        Ok(common_dir)
+    } else {
+        Err(GitError::CommandFailed {
+            command: "git rev-parse --git-common-dir".to_string(),
+            stderr: format!(
+                "Git reported non-absolute common dir {}",
+                common_dir.display()
+            ),
+        })
+    }
+}
+
+pub fn main_repo_root(repo: &Path) -> Result<PathBuf, GitError> {
+    git_common_dir(repo)?
+        .parent()
+        .map(PathBuf::from)
+        .ok_or_else(|| GitError::CommandFailed {
+            command: "git rev-parse --git-common-dir".to_string(),
+            stderr: "unable to resolve common dir parent".to_string(),
+        })
 }
 
 /// The worktree directory for an identity: `<parent>/<repo>.<dir_component>`.

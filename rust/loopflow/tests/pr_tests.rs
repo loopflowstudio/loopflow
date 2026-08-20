@@ -10,8 +10,12 @@ use loopflow::ops::{
     commit_workflow, create_or_update_pr, current_pr, land, present_pr_review, CommitOptions,
     LandOptions, NullProgress, OpsError, PrOptions,
 };
+use loopflow::profile::{ProviderRoute, RouteScope};
+use loopflow::provider_auth::Provider;
+use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPublication, TaskGateProposal,
+    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
+    TaskGateProposal,
 };
 use loopflow_test_support::TestRepo;
 use support::{
@@ -28,6 +32,24 @@ fn write_gh_script(pr_list: &str, pr_diff: Option<&str>) -> String {
 
 fn noop_script() -> &'static str {
     "#!/bin/sh\nexit 0\n"
+}
+
+fn codex_auth_refresh_script() -> &'static str {
+    r#"#!/bin/sh
+read -r initialize
+echo '{"id":1,"result":{}}'
+read -r initialized
+read -r account_read
+echo '{"id":2,"result":{"account":{}}}'
+"#
+}
+
+fn reviewer_copy(head_sha: &str) -> PrPresentation {
+    PrPresentation {
+        title: "Ship it".to_string(),
+        body: "Reviewer context".to_string(),
+        head_sha: head_sha.to_string(),
+    }
 }
 
 fn agent_script() -> String {
@@ -483,6 +505,7 @@ fn merged_continue_task_rotates_to_a_working_pr_without_review_state() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
+        presentation: None,
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -600,6 +623,7 @@ fn completing_land_requires_an_approved_final_gate_for_an_empty_successor() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: time::OffsetDateTime::now_utc(),
+        presentation: None,
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -773,6 +797,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(reviewer_copy("old-head")),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -810,7 +835,11 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
     let log_path = home.path().join("gh.log");
     let script = gh_open_auto_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::with_lf_home(
-        &[("gh", script.as_str()), ("tmux", noop_script())],
+        &[
+            ("gh", script.as_str()),
+            ("tmux", noop_script()),
+            ("codex", codex_auth_refresh_script()),
+        ],
         home.path(),
     );
     let repo = TestRepo::new();
@@ -824,6 +853,7 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(reviewer_copy(&head)),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -838,6 +868,42 @@ fn task_resume_revokes_auto_merge_before_restarting_authored_work() {
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
+    let account_home = home.path().join("accounts/codex/ready");
+    std::fs::create_dir_all(&account_home).expect("create managed Codex home");
+    std::fs::write(
+        account_home.join("auth.json"),
+        r#"{"access_token":"test-oauth-token"}"#,
+    )
+    .expect("seed managed Codex login");
+    let account_id = ProviderAccountId::parse("ready").expect("account id");
+    let account_now = time::OffsetDateTime::now_utc().unix_timestamp();
+    runtime
+        .block_on(task.store.upsert_provider_account(&ProviderAccount {
+            provider: "codex".to_string(),
+            account_id: account_id.clone(),
+            home: Some(account_home),
+            login_email: None,
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: account_now,
+            updated_at: account_now,
+        }))
+        .expect("seed managed Codex account");
+    runtime
+        .block_on(task.store.set_provider_route(&ProviderRoute {
+            scope: RouteScope::Default,
+            provider: Provider::Codex,
+            accounts: vec![account_id],
+            created_at: account_now,
+            updated_at: account_now,
+        }))
+        .expect("seed default Codex route");
     runtime
         .block_on(task.store.update_task_pr(&pr))
         .expect("store auto merge request");
@@ -872,6 +938,7 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(reviewer_copy(&repo.head_sha())),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -947,6 +1014,7 @@ fn observed_merge_completes_a_pr_marked_to_complete_the_task() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(reviewer_copy(&head)),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -997,6 +1065,7 @@ fn repeated_status_of_merged_task_without_a_boundary_records_completion_once() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(reviewer_copy(&head)),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -1084,6 +1153,7 @@ fn status_does_not_duplicate_an_active_run_while_completion_is_pending() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(reviewer_copy(&head)),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),

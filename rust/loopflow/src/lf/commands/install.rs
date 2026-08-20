@@ -2317,7 +2317,12 @@ mod tests {
             project_id: project.id.clone(),
             worktree: task_worktree,
             workspace_slug: "project-settlement".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task-design", "slice", "removed-task-gate"),
+            lifecycle: TaskLifecyclePlan::new(
+                crate::task::TaskOutcome::Delivery,
+                "task-design",
+                "slice",
+                "removed-task-gate",
+            ),
             lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,

@@ -113,6 +113,16 @@ pub enum AgentWriteScope {
     Worktree,
 }
 
+/// Roots that a managed delivery launch must prove writable before it starts.
+///
+/// Presence marks a trusted Loopflow Task boundary: the provider receives full
+/// delivery access while the durable Run/Invocation lease remains the mutation
+/// authority.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgentExecutionBoundary {
+    pub writable_roots: Vec<PathBuf>,
+}
+
 #[derive(Clone, Default)]
 pub struct AgentConfig {
     /// System/context prompt content.
@@ -131,6 +141,8 @@ pub struct AgentConfig {
     pub authority: AgentAuthority,
     /// Maximum filesystem write scope granted to the provider.
     pub write_scope: AgentWriteScope,
+    /// Exact roots and network access needed beyond `cwd`.
+    pub execution_boundary: Option<AgentExecutionBoundary>,
     /// Skip permission prompts
     pub skip_permissions: bool,
     /// Engine-injected structured replies (rendered via harness prompt guidance).
@@ -170,6 +182,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("resume_token", &self.resume_token)
             .field("authority", &self.authority)
             .field("write_scope", &self.write_scope)
+            .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -370,6 +383,9 @@ fn codex_permission_args_for_scope(
     write_scope: AgentWriteScope,
 ) -> Vec<String> {
     if write_scope == AgentWriteScope::Worktree {
+        if skip_permissions {
+            return vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+        }
         let mut args = vec!["--sandbox".to_string(), "workspace-write".to_string()];
         if auto {
             args.push("--ask-for-approval".to_string());
@@ -609,13 +625,12 @@ pub fn build_claude_session_turn_args(
         model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
         system_prompt: Some(system_prompt_with_structured_replies(config)),
         system_prompt_file: None,
-        add_dirs: (config.write_scope == AgentWriteScope::Configured)
-            .then(|| config.cwd.as_deref().map(workspace_add_dirs))
-            .flatten()
-            .unwrap_or_default(),
-        skip_permissions: config.write_scope == AgentWriteScope::Configured
-            && claude_skip_permissions(config.cwd.as_deref(), true, config.skip_permissions),
-        worktree_isolation: config.write_scope == AgentWriteScope::Worktree,
+        add_dirs: provider_writable_roots(config),
+        skip_permissions: config.execution_boundary.is_some()
+            || (config.write_scope == AgentWriteScope::Configured
+                && claude_skip_permissions(config.cwd.as_deref(), true, config.skip_permissions)),
+        worktree_isolation: config.write_scope == AgentWriteScope::Worktree
+            && config.execution_boundary.is_none(),
         max_turns: config.max_turns,
         stream: true,
         chrome: false,
@@ -704,7 +719,14 @@ pub fn build_codex_thread_start_params(
         );
         params.insert(
             "sandbox".to_string(),
-            serde_json::Value::String("workspace-write".to_string()),
+            serde_json::Value::String(
+                if launch.execution_boundary.is_some() {
+                    "danger-full-access"
+                } else {
+                    "workspace-write"
+                }
+                .to_string(),
+            ),
         );
     } else if launch.skip_permissions {
         params.insert(
@@ -746,6 +768,17 @@ pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
     }
 }
 
+fn provider_writable_roots(launch: &AgentConfig) -> Vec<PathBuf> {
+    if launch.execution_boundary.is_some() || launch.write_scope != AgentWriteScope::Configured {
+        return Vec::new();
+    }
+    launch
+        .cwd
+        .as_deref()
+        .map(workspace_add_dirs)
+        .unwrap_or_default()
+}
+
 fn paths_equal(left: &Path, right: &Path) -> bool {
     match (left.canonicalize(), right.canonicalize()) {
         (Ok(left), Ok(right)) => left == right,
@@ -766,17 +799,16 @@ pub fn build_claude_command(
         model: model_variant.map(str::to_string),
         system_prompt: Some(system_prompt_with_structured_replies(launch)),
         system_prompt_file: process.context_file.clone(),
-        add_dirs: (launch.write_scope == AgentWriteScope::Configured)
-            .then(|| launch.cwd.as_deref().map(workspace_add_dirs))
-            .flatten()
-            .unwrap_or_default(),
-        skip_permissions: launch.write_scope == AgentWriteScope::Configured
-            && claude_skip_permissions(
-                launch.cwd.as_deref(),
-                process.auto,
-                launch.skip_permissions,
-            ),
-        worktree_isolation: launch.write_scope == AgentWriteScope::Worktree,
+        add_dirs: provider_writable_roots(launch),
+        skip_permissions: launch.execution_boundary.is_some()
+            || (launch.write_scope == AgentWriteScope::Configured
+                && claude_skip_permissions(
+                    launch.cwd.as_deref(),
+                    process.auto,
+                    launch.skip_permissions,
+                )),
+        worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
+            && launch.execution_boundary.is_none(),
         max_turns: launch.max_turns,
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
@@ -830,13 +862,10 @@ pub fn build_codex_command(
         cmd.push(cwd.to_string_lossy().to_string());
     }
 
-    if !launch.skip_permissions && launch.write_scope == AgentWriteScope::Configured {
-        for dir in launch
-            .cwd
-            .as_deref()
-            .map(workspace_add_dirs)
-            .unwrap_or_default()
-        {
+    if (launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none())
+        || !launch.skip_permissions
+    {
+        for dir in provider_writable_roots(launch) {
             cmd.push("--add-dir".to_string());
             cmd.push(dir.to_string_lossy().to_string());
         }
@@ -1160,7 +1189,7 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
     if result.exit_code == 0 {
         return None;
     }
-    if _find_provider_error(result, _classify_credential_invalidated).is_some() {
+    if _find_provider_error(result, credential_invalidated_failure).is_some() {
         return Some(AgentFailure::AccountCredentialInvalidated);
     }
     if let Some(signal) = _account_limit_signal(harness, result).filter(|signal| signal.limited) {
@@ -1171,7 +1200,7 @@ fn _classify_agent_failure(harness: &str, result: &LaunchResult) -> Option<Agent
     _find_provider_error(result, classify_retryable_agent_failure)
 }
 
-fn _classify_credential_invalidated(text: &str) -> Option<()> {
+pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
     let text = text.to_ascii_lowercase();
     (text.contains("token_invalidated")
         || text.contains("refresh_token_invalidated")
@@ -1561,7 +1590,7 @@ fn _launch_codex_harness_once(
     });
 
     if let (Some(route), Ok(AgentAttempt::Finished { result, .. })) = (&account_route, &result) {
-        if _find_provider_error(result, _classify_credential_invalidated).is_some() {
+        if _find_provider_error(result, credential_invalidated_failure).is_some() {
             route
                 .record_credential_invalidated_blocking("token_invalidated")
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
@@ -1711,7 +1740,7 @@ fn _launch_agent_once(
     let mut can_failover = account_route.is_some();
     if let (Some(route), Ok(result)) = (&account_route, &result) {
         let credential_invalidated =
-            _find_provider_error(result, _classify_credential_invalidated).is_some();
+            _find_provider_error(result, credential_invalidated_failure).is_some();
         if credential_invalidated {
             if let Err(error) = route.record_credential_invalidated_blocking("token_invalidated") {
                 tracing::warn!(%error, "failed to record invalidated provider credential");
@@ -2409,45 +2438,33 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn managed_task_scope_cannot_be_widened_by_yolo_or_linked_main() {
-        let (_tmp, _main, worktree) = git_worktree_fixture();
+    fn managed_task_scope_carries_exact_delivery_capabilities() {
+        let (_tmp, main, worktree) = git_worktree_fixture();
+        let git_control = main.join(".git");
+        let control_store = worktree.parent().unwrap().join("control-store");
         let launch = AgentConfig {
             agent: Some("codex".to_string()),
             cwd: Some(worktree),
             write_scope: AgentWriteScope::Worktree,
+            execution_boundary: Some(AgentExecutionBoundary {
+                writable_roots: vec![git_control.clone(), control_store.clone()],
+            }),
             skip_permissions: true,
             ..default_launch()
         };
         let process = auto_process();
 
         let codex = build_codex_command(&launch, &process, None);
-        assert_arg_pair(&codex, "--sandbox", "workspace-write");
-        assert_arg_pair(&codex, "--ask-for-approval", "never");
+        assert!(codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(!codex.contains(&"--add-dir".to_string()));
-        assert!(!codex.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         let thread = build_codex_thread_start_params(&launch);
-        assert_eq!(thread["sandbox"], "workspace-write");
+        assert_eq!(thread["sandbox"], "danger-full-access");
         assert_eq!(thread["approvalPolicy"], "never");
+        assert!(thread.get("config").is_none());
 
         let claude = build_claude_command(&launch, &process, &AgentCapabilities::default(), None);
-        assert_arg_pair(&claude, "--permission-mode", "acceptEdits");
-        assert_arg_pair(&claude, "--setting-sources", "");
+        assert!(claude.contains(&"--dangerously-skip-permissions".to_string()));
         assert!(!claude.contains(&"--add-dir".to_string()));
-        assert!(!claude.contains(&"--dangerously-skip-permissions".to_string()));
-        let settings = claude
-            .windows(2)
-            .find_map(|pair| (pair[0] == "--settings").then_some(&pair[1]))
-            .expect("managed Claude settings");
-        let settings: serde_json::Value = serde_json::from_str(settings).unwrap();
-        assert_eq!(settings["sandbox"]["enabled"], true);
-        assert_eq!(settings["sandbox"]["failIfUnavailable"], true);
-        assert_eq!(settings["sandbox"]["allowUnsandboxedCommands"], false);
-
-        let opencode = build_opencode_env_for_scope(&process, AgentWriteScope::Worktree)
-            .expect("managed OpenCode settings");
-        let opencode: serde_json::Value = serde_json::from_str(&opencode).unwrap();
-        assert_eq!(opencode["permission"]["*"], "allow");
-        assert_eq!(opencode["permission"]["external_directory"], "deny");
     }
 
     #[test]
@@ -2828,6 +2845,7 @@ trust_level = "trusted"
             resume_token: None,
             authority: AgentAuthority::Inherit,
             write_scope: AgentWriteScope::Configured,
+            execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2856,6 +2874,7 @@ trust_level = "trusted"
             resume_token: None,
             authority: AgentAuthority::Inherit,
             write_scope: AgentWriteScope::Configured,
+            execution_boundary: None,
             skip_permissions: true,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -2884,6 +2903,7 @@ trust_level = "trusted"
             resume_token: None,
             authority: AgentAuthority::Inherit,
             write_scope: AgentWriteScope::Configured,
+            execution_boundary: None,
             skip_permissions: false,
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".to_string(),

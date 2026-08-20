@@ -2,6 +2,7 @@
 requires: scratch/<branch>.md
 produces: code, tests
 action_style: procedural
+capabilities: [task_implementation]
 ---
 Turn the design doc into working code.
 

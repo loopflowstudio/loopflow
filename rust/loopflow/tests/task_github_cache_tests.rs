@@ -13,6 +13,7 @@ use time::{Duration, OffsetDateTime};
 fn publish_task(task: &mut RegisteredTask) {
     task.pr.publication = Some(PrPublication {
         requested_at: OffsetDateTime::now_utc(),
+        presentation: None,
         github: Some(GithubPr {
             number: 928,
             url: "https://github.com/loopflowstudio/loopflow/pull/928".to_string(),

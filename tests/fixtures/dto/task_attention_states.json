@@ -327,6 +327,11 @@
       "empty": null,
       "publication": {
         "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
         "github": {
           "number": 123,
           "url": "https://github.com/loopflowstudio/loopflow/pull/123"

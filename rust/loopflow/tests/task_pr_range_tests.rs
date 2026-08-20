@@ -20,7 +20,9 @@ use loopflow::ops::{
     create_or_update_pr, land, rebase_with_recovery, submit, LandOptions, NullProgress, PrOptions,
     RebaseOptions,
 };
-use loopflow::task::{AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPublication};
+use loopflow::task::{
+    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 use time::OffsetDateTime;
@@ -52,7 +54,8 @@ if [ "$1" = "--version" ]; then
 fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "pr list" ]; then
-  echo '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null,"headRefOid":"head-925"}}]'
+  head=$(git rev-parse HEAD)
+  printf '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null,"headRefOid":"%s"}}]\n' "$head"
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
@@ -358,6 +361,11 @@ fn rebase_revokes_auto_before_force_pushing_a_new_task_head() {
     let mut pr = task.pr.clone();
     pr.publication = Some(PrPublication {
         requested_at: now,
+        presentation: Some(PrPresentation {
+            title: "Rebase proof".to_string(),
+            body: "Reviewer context".to_string(),
+            head_sha: old_head.clone(),
+        }),
         github: Some(GithubPr {
             number: 912,
             url: "https://example.com/pr/912".to_string(),
@@ -849,6 +857,7 @@ fn submit_refuses_an_empty_range_before_any_gh_call() {
             .expect("active PR exists");
         pr.publication = Some(PrPublication {
             requested_at: OffsetDateTime::now_utc(),
+            presentation: None,
             github: Some(GithubPr {
                 number: 925,
                 url: "https://example.com/pr/925".to_string(),

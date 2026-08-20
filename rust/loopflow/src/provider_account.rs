@@ -215,6 +215,40 @@ impl ProviderAccountRoute {
         matches!(self.authority, AccountRouteAuthority::Local { .. })
     }
 
+    /// Prove that this route can authenticate before durable Work is reserved.
+    ///
+    /// The token is deliberately consumed here and never returned: Task launch
+    /// needs evidence that the configured authority is usable, not another
+    /// secret-bearing representation to persist or log.
+    pub(crate) async fn verify_ready(&self) -> Result<(), ProviderAccountError> {
+        match &self.authority {
+            AccountRouteAuthority::Local { home, .. } => {
+                crate::provider_auth::prepare_provider_account_access_token(self.provider, home)
+                    .await
+                    .map_err(|error| ProviderAccountError::ForwardingCredential {
+                        provider: self.provider,
+                        account_id: self.account_id.clone(),
+                        reason: error.to_string(),
+                    })?
+                    .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
+                        provider: self.provider,
+                        accounts: format!(
+                            "{} (provider CLI reports no active OAuth login)",
+                            self.account_id
+                        ),
+                    })?;
+            }
+            AccountRouteAuthority::Lease { access_token, .. } if access_token.trim().is_empty() => {
+                return Err(ProviderAccountError::NoAuthenticatedAccount {
+                    provider: self.provider,
+                    accounts: format!("{} (forwarded credential is empty)", self.account_id),
+                });
+            }
+            AccountRouteAuthority::Lease { .. } => {}
+        }
+        Ok(())
+    }
+
     pub(crate) fn apply(&self, command: &mut Command) {
         for name in PROVIDER_CREDENTIAL_ENV_VARS {
             command.env_remove(name);

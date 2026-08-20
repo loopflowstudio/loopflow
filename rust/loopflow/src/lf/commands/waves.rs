@@ -359,8 +359,16 @@ pub struct PrSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrPublicationSnapshot {
     pub requested_at: String,
+    pub presentation: Option<PrPresentationSnapshot>,
     pub github: Option<GithubPrSnapshot>,
     pub merge: Option<PrMergeRequestSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrPresentationSnapshot {
+    pub title: String,
+    pub body: String,
+    pub head_sha: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -407,6 +415,13 @@ impl PrSnapshot {
                 .map(|publication| PrPublicationSnapshot {
                     requested_at: format_time(publication.requested_at)
                         .expect("PR publication timestamp formats as RFC 3339"),
+                    presentation: publication.presentation.as_ref().map(|copy| {
+                        PrPresentationSnapshot {
+                            title: copy.title.clone(),
+                            body: copy.body.clone(),
+                            head_sha: copy.head_sha.clone(),
+                        }
+                    }),
                     github: publication.github.as_ref().map(|github| GithubPrSnapshot {
                         number: github.number,
                         url: github.url.clone(),
@@ -1504,16 +1519,31 @@ async fn snapshot_task_detail(
         None => None,
     };
     let reference = task_reference(&item, task, active, &prs);
-    let next_move = match task {
-        Some(_) => next_move_for_task(
+    let worktree_blocker = match task {
+        Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
+        None => None,
+    };
+    let launch_refusal = match (task, worktree_blocker.as_ref()) {
+        (Some(task), None) => crate::ops::task::task_launch_refusal(store, task).await?,
+        (Some(_), Some(_)) | (None, _) => None,
+    };
+    let next_move = task.map(|_| {
+        next_move_for_task(
             &runtime
                 .as_ref()
                 .expect("Task runtime exists when the durable Task exists")
                 .status,
             active.map(TaskPr::phase),
+            active
+                .filter(|pr| pr.phase() == PrPhase::Open)
+                .map(|pr| pr.presentation().is_some()),
             active.and_then(|pr| pr.fresh_ci()),
             active.and_then(TaskPr::merge_request),
-        ),
+            launch_refusal.as_deref(),
+        )
+    });
+    let next_move = match next_move {
+        Some(next_move) => next_move,
         None if item.completed => NextMove {
             owner: NextMoveOwner::Project,
             reason: "Linear Task is complete".to_string(),
@@ -1524,10 +1554,6 @@ async fn snapshot_task_detail(
         },
     };
     let process = task_process_evidence(runtime.as_ref(), liveness);
-    let worktree_blocker = match task {
-        Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
-        None => None,
-    };
     let local_progress = task_local_progress(
         task,
         runtime.as_ref(),
@@ -1570,6 +1596,9 @@ async fn snapshot_task_detail(
                         .filter(|pr| pr.phase() == PrPhase::Merged)
                         .map(TaskPr::after_merge),
                     latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
+                    latest_pr_presentation_current: latest
+                        .filter(|pr| pr.phase() == PrPhase::Open)
+                        .map(|pr| pr.presentation().is_some()),
                     completion_refusal: completion_refusal.as_deref(),
                     resume_refusal: resume_refusal.as_deref(),
                     ci: active.and_then(|pr| pr.fresh_ci()),
@@ -1577,6 +1606,7 @@ async fn snapshot_task_detail(
                     predecessor_phase,
                     abandon_intent: task.abandon_intent.is_some(),
                     local_progress_unsettled: local_progress.unsettled,
+                    launch_refusal: launch_refusal.as_deref(),
                 }),
                 user_ask,
             )
@@ -1980,10 +2010,29 @@ fn next_move_for_project(status: &WorkStatus) -> NextMove {
 fn next_move_for_task(
     status: &WorkStatus,
     pr_phase: Option<PrPhase>,
+    pr_presentation_current: Option<bool>,
     ci: Option<&CiObservation>,
     merge: Option<&PrMergeRequest>,
+    launch_refusal: Option<&str>,
 ) -> NextMove {
+    if let Some(reason) = launch_refusal.filter(|_| !work_status_is_terminal(status)) {
+        return NextMove {
+            owner: NextMoveOwner::User,
+            reason: reason.to_string(),
+        };
+    }
     if pr_phase == Some(PrPhase::Open) {
+        if pr_presentation_current == Some(false) {
+            return NextMove {
+                owner: if work_status_is_running(status) {
+                    NextMoveOwner::Task
+                } else {
+                    NextMoveOwner::Project
+                },
+                reason: "refresh reviewer-facing PR copy for the current head before settlement"
+                    .to_string(),
+            };
+        }
         if let Some(ci) = ci {
             let repairable_failure =
                 ci.state == CiState::Failing && !ci.only_land_time_preconditions();
@@ -2022,6 +2071,14 @@ fn next_move_for_task(
                 },
             };
         }
+        return NextMove {
+            owner: if work_status_is_running(status) {
+                NextMoveOwner::Task
+            } else {
+                NextMoveOwner::Project
+            },
+            reason: "PR is published but settlement is not armed with `lf pr land -c`".to_string(),
+        };
     }
     let owner = match status {
         WorkStatus::Running { .. } => NextMoveOwner::Task,
@@ -2608,6 +2665,21 @@ mod tests {
     }
 
     #[test]
+    fn invalid_task_lifecycle_makes_the_user_the_next_owner() {
+        let next = next_move_for_task(
+            &WorkStatus::Ready,
+            Some(PrPhase::Merged),
+            None,
+            None,
+            None,
+            Some("abandon INT-10 and start a replacement Task"),
+        );
+
+        assert_eq!(next.owner, NextMoveOwner::User);
+        assert_eq!(next.reason, "abandon INT-10 and start a replacement Task");
+    }
+
+    #[test]
     fn only_a_durable_ask_marks_a_running_task_as_waiting_on_the_user() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
@@ -2683,10 +2755,22 @@ mod tests {
             failing_checks: Vec::new(),
             observed_at: OffsetDateTime::now_utc(),
         };
+        let missing_copy = next_move_for_task(
+            &WorkStatus::Ready,
+            Some(PrPhase::Open),
+            Some(false),
+            Some(&passing),
+            None,
+            None,
+        );
+        assert!(missing_copy.reason.contains("reviewer-facing PR copy"));
+
         let published = next_move_for_task(
             &WorkStatus::Ready,
             Some(PrPhase::Open),
+            Some(true),
             Some(&passing),
+            None,
             None,
         );
         assert_eq!(published.owner, NextMoveOwner::Project);
@@ -2705,8 +2789,10 @@ mod tests {
             let next = next_move_for_task(
                 &WorkStatus::Ready,
                 Some(PrPhase::Open),
+                Some(true),
                 Some(&passing),
                 Some(&request),
+                None,
             );
             assert_eq!(next.owner, owner);
             assert!(next.reason.contains("head-1234567"));
@@ -2735,8 +2821,10 @@ mod tests {
         let next = next_move_for_task(
             &WorkStatus::Ready,
             Some(PrPhase::Open),
+            Some(true),
             Some(&ci),
             Some(&request),
+            None,
         );
 
         assert_eq!(next.owner, NextMoveOwner::User);

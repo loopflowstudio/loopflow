@@ -132,7 +132,7 @@ pub fn create_or_update_pr(
     crate::ops::commit::verify_remote_branch_head(repo, &branch, &published_head)?;
     let title = copy.title.trim();
     let body = copy.body.trim();
-    crate::ops::task::request_task_pr_publication(repo)?;
+    crate::ops::task::request_task_pr_publication(repo, title, body)?;
 
     let (result, pr) = if let Some(pr) = find_open_pr(repo)? {
         progress.status("Updating PR...");

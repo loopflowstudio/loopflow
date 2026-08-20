@@ -207,35 +207,56 @@ async fn run_task_with(
     // Record this body's turns the way `flowloop/wave.rs` does. Without it a
     // Task's spend reaches no store at all: the provider runs in this
     // process, so no child `lf` records on its behalf.
-    let capture = flow.current().and_then(|step| {
-        let context = crate::journal::trace_capture_context(
-            Path::new(&task.worktree),
-            Some(step.flow.clone()),
-            Some(step.step.clone()),
-        )?;
-        match crate::trace::CaptureHandle::begin(
-            context,
-            prepared.turn.context.clone(),
-            crate::trace::CaptureStart {
-                provider: prepared.turn.harness.clone(),
-                model: prepared.turn.model.clone(),
-                surface: "headless".to_string(),
-                input_op: "initial".to_string(),
-                gather_ms: prepared.turn.context_gather_ms,
-                render_ms: prepared.turn.context_render_ms,
-                raw_provider: true,
-                basis: Some(prepared.basis.clone()),
-                supervision: Some(supervision.clone()),
-            },
-        ) {
-            Ok(capture) => Some(capture),
-            Err(error) => {
-                // Spend telemetry must never take a Task body down.
-                tracing::warn!(%error, "failed to establish Task trace capture");
-                None
+    let capture = match flow.current() {
+        Some(step) => {
+            let Some(context) = crate::journal::trace_capture_context(
+                Path::new(&task.worktree),
+                Some(step.flow.clone()),
+                Some(step.step.clone()),
+            ) else {
+                return finish_execution_blocked(
+                    &store,
+                    &mut task,
+                    lease,
+                    harness.as_mut(),
+                    &["Loopflow active Turn authority has no Run execution context".to_string()],
+                    None,
+                )
+                .await;
+            };
+            match crate::trace::CaptureHandle::begin(
+                context,
+                prepared.turn.context.clone(),
+                crate::trace::CaptureStart {
+                    provider: prepared.turn.harness.clone(),
+                    model: prepared.turn.model.clone(),
+                    surface: "headless".to_string(),
+                    input_op: "initial".to_string(),
+                    gather_ms: prepared.turn.context_gather_ms,
+                    render_ms: prepared.turn.context_render_ms,
+                    raw_provider: true,
+                    basis: Some(prepared.basis.clone()),
+                    supervision: Some(supervision.clone()),
+                },
+            ) {
+                Ok(capture) => Some(capture),
+                Err(error) => {
+                    return finish_execution_blocked(
+                        &store,
+                        &mut task,
+                        lease,
+                        harness.as_mut(),
+                        &[format!(
+                            "Loopflow active Turn authority could not be established: {error}"
+                        )],
+                        None,
+                    )
+                    .await;
+                }
             }
         }
-    });
+        None => None,
+    };
     if let Some(capture) = &capture {
         capture.set_provider_session_id(task.provider_session_id.clone());
     }
@@ -269,6 +290,7 @@ async fn run_task_with(
     command_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_text = String::new();
     let mut turn_had_durable_side_effect = false;
+    let mut command_failures = Vec::new();
     let mut first_material_recorded = false;
     let mut first_material_warning_emitted = false;
     'runner: loop {
@@ -381,8 +403,28 @@ async fn run_task_with(
                     ConversationEvent::TextDelta { content, .. } => last_text.push_str(&content),
                     ConversationEvent::TurnStarted { .. } => {
                         turn_had_durable_side_effect = false;
+                        command_failures.clear();
                     }
                     ConversationEvent::ItemCompleted { item, .. } => {
+                        if let ConversationItem::Command {
+                            command,
+                            status,
+                            output,
+                            exit_code,
+                            ..
+                        } = &item
+                        {
+                            if let Some(failure) = completed_boundary_failure(
+                                command,
+                                *status,
+                                output.as_deref(),
+                                *exit_code,
+                            ) {
+                                if !command_failures.contains(&failure) {
+                                    command_failures.push(failure);
+                                }
+                            }
+                        }
                         if matches!(
                             item,
                             ConversationItem::Command { .. } | ConversationItem::File { .. }
@@ -416,6 +458,17 @@ async fn run_task_with(
                                 &wave,
                                 &reason,
                                 turn_had_durable_side_effect,
+                                capture.as_ref(),
+                            )
+                            .await;
+                        }
+                        if execution_blocker_at_handoff(status, &command_failures).is_some() {
+                            return finish_execution_blocked(
+                                &store,
+                                &mut task,
+                                lease,
+                                harness.as_mut(),
+                                &command_failures,
                                 capture.as_ref(),
                             )
                             .await;
@@ -985,7 +1038,11 @@ async fn prepare_task_flow_step_once(
         crate::lf::commands::run::prepare_harness_turn(&step.step, &seed, wave_name, None)?;
     prepared.config.agent = Some(task.agent.clone());
     prepared.config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
-    prepared.config.skip_permissions = false;
+    prepared.config.execution_boundary = Some(
+        crate::ops::task::task_execution_boundary(&task.worktree, &task.agent)
+            .map_err(|error| anyhow!(error.to_string()))?,
+    );
+    prepared.config.skip_permissions = true;
     let position = FlowPosition {
         work,
         epoch_id: boundary.basis.epoch_id.clone(),
@@ -1509,8 +1566,11 @@ async fn record_unhandled_failure(
             return;
         }
     }
-    let message = format!("task process failed: {error}");
-    if let Err(persist_error) = store.fail_task_run(task_id, lease, &message).await {
+    let (message, resumable) = unhandled_failure_receipt(&error.to_string());
+    if let Err(persist_error) = store
+        .fail_task_run(task_id, lease, &message, resumable)
+        .await
+    {
         tracing::error!(
             task = %task_id,
             run = %lease.run_id,
@@ -1518,6 +1578,21 @@ async fn record_unhandled_failure(
             "Task failure receipt did not persist; Run remains recoverable"
         );
     }
+}
+
+fn unhandled_failure_receipt(detail: &str) -> (String, bool) {
+    match provider_credential_blocker(detail) {
+        Some(message) => (message, false),
+        None => (format!("task process failed: {detail}"), true),
+    }
+}
+
+fn provider_credential_blocker(detail: &str) -> Option<String> {
+    crate::engine::agent::credential_invalidated_failure(detail).map(|_| {
+        format!(
+            "Task provider credential capability is blocked: {detail}. Reconnect the named managed account before starting a new Run"
+        )
+    })
 }
 
 async fn apply_input(
@@ -1547,8 +1622,85 @@ async fn finish_failed(
     finish_capture(capture, "failed");
     let _ = harness.stop().await;
     store.update_task_for_run(task, lease).await?;
-    store.fail_task_run(&task.id, lease, error).await?;
+    store.fail_task_run(&task.id, lease, error, true).await?;
     anyhow::bail!(error.to_string())
+}
+
+fn completed_boundary_failure(
+    command: &[String],
+    status: Lifecycle,
+    output: Option<&str>,
+    exit_code: Option<i32>,
+) -> Option<String> {
+    if status != Lifecycle::Failed && exit_code.is_none_or(|code| code == 0) {
+        return None;
+    }
+    let output = output?;
+    let lower = output.to_ascii_lowercase();
+    if ![
+        "operation not permitted",
+        "permission denied",
+        "read-only file system",
+        "has no active turn",
+        "network access is disabled",
+        "network is unreachable",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return None;
+    }
+    let command = command.join(" ");
+    let detail = output
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("no command error output");
+    let detail = detail.chars().take(1_000).collect::<String>();
+    let exit = exit_code
+        .map(|code| format!(" (exit {code})"))
+        .unwrap_or_default();
+    Some(format!("`{command}` failed{exit}: {detail}"))
+}
+
+async fn finish_execution_blocked(
+    store: &SharedStore,
+    task: &mut Task,
+    lease: &RunLease,
+    harness: &mut dyn Harness,
+    failures: &[String],
+    capture: Option<&crate::trace::CaptureHandle>,
+) -> Result<()> {
+    let reason = execution_blocked_reason(failures);
+    finish_nonresumable(store, task, lease, harness, &reason, capture).await
+}
+
+async fn finish_nonresumable(
+    store: &SharedStore,
+    task: &mut Task,
+    lease: &RunLease,
+    harness: &mut dyn Harness,
+    reason: &str,
+    capture: Option<&crate::trace::CaptureHandle>,
+) -> Result<()> {
+    finish_capture(capture, "failed");
+    let _ = harness.stop().await;
+    store.update_task_for_run(task, lease).await?;
+    store.fail_task_run(&task.id, lease, reason, false).await?;
+    Ok(())
+}
+
+fn execution_blocked_reason(failures: &[String]) -> String {
+    format!(
+        "Task execution boundary is blocked:\n- {}\nCorrect the named filesystem, control-plane, or network capability before starting a new Run.",
+        failures.join("\n- ")
+    )
+}
+
+fn execution_blocker_at_handoff(status: Lifecycle, failures: &[String]) -> Option<String> {
+    (status == Lifecycle::Completed && !failures.is_empty())
+        .then(|| execution_blocked_reason(failures))
 }
 
 /// The Blocked reason for an infrastructure failure, naming the failing
@@ -1586,7 +1738,7 @@ async fn finish_infra_blocked(
             .await?;
     }
     store.update_task_for_run(task, lease).await?;
-    store.fail_task_run(&task.id, lease, &reason).await?;
+    store.fail_task_run(&task.id, lease, &reason, true).await?;
     Ok(())
 }
 
@@ -1605,6 +1757,11 @@ async fn handle_body_failure(
     turn_had_durable_side_effect: bool,
     capture: Option<&crate::trace::CaptureHandle>,
 ) -> Result<Option<(RunLease, ExactRoute)>> {
+    if let Some(blocker) = provider_credential_blocker(reason) {
+        return finish_nonresumable(store, task, lease, harness, &blocker, capture)
+            .await
+            .map(|_| None);
+    }
     finish_capture(capture, "failed");
     let wave_config = read_wave_config(Path::new(wave.repo()), wave.name());
     let backup_agent = wave_config.as_ref().and_then(|c| c.backup_agent.as_deref());
@@ -2099,11 +2256,43 @@ fn progress_summary(text: &str) -> String {
 }
 
 #[cfg(test)]
+struct TestLfBinGuard {
+    previous: Option<std::ffi::OsString>,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl TestLfBinGuard {
+    fn pin() -> Self {
+        let lock = crate::journal::test_env_lock();
+        let previous = std::env::var_os("LF_BIN");
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        Self {
+            previous,
+            _lock: lock,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestLfBinGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("LF_BIN", value),
+            None => std::env::remove_var("LF_BIN"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod shipping_lifecycle_tests;
 
 #[cfg(test)]
 mod planning_tests {
-    use super::{human_flow_ask_prompt, preceding_autonomous_step, sync_task_state, task_seed};
+    use super::{
+        completed_boundary_failure, execution_blocker_at_handoff, human_flow_ask_prompt,
+        preceding_autonomous_step, sync_task_state, task_seed, unhandled_failure_receipt,
+    };
     use crate::chat::types::Lifecycle;
     use crate::durable::{
         AskBody, AskId, AskResult, AskTarget, AuthenticatedRequest, Basis, BoundarySeed,
@@ -2347,6 +2536,60 @@ mod planning_tests {
             .unwrap();
     }
 
+    #[test]
+    fn normal_task_completion_preserves_delivery_permission_and_ask_authority_failures() {
+        let commit = completed_boundary_failure(
+            &["lf".into(), "commit".into(), "-m".into(), "ship".into(), "-p".into()],
+            Lifecycle::Failed,
+            Some(
+                "fatal: Unable to create '/repo/.git/worktrees/task/index.lock': Operation not permitted",
+            ),
+            Some(128),
+        )
+        .unwrap();
+        let ask = completed_boundary_failure(
+            &[
+                "lf".into(),
+                "ask".into(),
+                "--user".into(),
+                "Need authority".into(),
+            ],
+            Lifecycle::Failed,
+            Some("AgentInvocation invocation_test has no active Turn"),
+            Some(1),
+        )
+        .unwrap();
+        let reason = execution_blocker_at_handoff(Lifecycle::Completed, &[commit, ask])
+            .expect("normal task_complete with unresolved capability failures is blocked");
+
+        assert!(reason.contains(".git/worktrees/task/index.lock"));
+        assert!(reason.contains("Operation not permitted"));
+        assert!(reason.contains("AgentInvocation invocation_test has no active Turn"));
+        assert!(reason.contains("before starting a new Run"));
+    }
+
+    #[test]
+    fn ordinary_failed_probe_is_not_an_execution_boundary_blocker() {
+        assert!(completed_boundary_failure(
+            &["rg".into(), "missing-pattern".into()],
+            Lifecycle::Failed,
+            Some(""),
+            Some(1),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn rejected_provider_auth_is_a_named_nonresumable_capability_blocker() {
+        let (reason, resumable) = unhandled_failure_receipt(
+            "Your authentication token has been invalidated (token_invalidated)",
+        );
+
+        assert!(!resumable);
+        assert!(reason.contains("provider credential capability is blocked"));
+        assert!(reason.contains("Reconnect the named managed account"));
+    }
+
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn pre_provider_failure_ends_prompt_only_invocation_and_records_task_failure() {
@@ -2497,7 +2740,7 @@ mod planning_tests {
         assert!(
             error
                 .to_string()
-                .contains("unsupported session harness: unsupported"),
+                .contains("has no managed account route for the required linked Git"),
             "unexpected startup failure: {error:#}"
         );
 
@@ -2525,7 +2768,8 @@ mod planning_tests {
         assert!(matches!(
             &events[0].kind,
             TaskEventKind::Failed { error, resumable: true }
-                if error.contains("task process failed: unsupported session harness: unsupported")
+                if error.contains("task process failed: Task execution cannot converge")
+                    && error.contains("has no managed account route for the required linked Git")
         ));
         assert_eq!(events[1].kind, TaskEventKind::Started);
         assert!(store.current_run(&work).await.unwrap().is_none());
@@ -2696,7 +2940,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn released_human_task_attempt_keeps_the_same_node_parked() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, mut task, lease, mut flow) = human_task_fixture().await;
         assert!(super::prepare_task_flow_step(
             &store,
@@ -2751,7 +2997,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn restarted_human_task_reuses_the_queued_ask_with_current_run_authority() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, mut task, lease, mut flow) = human_task_fixture().await;
         assert!(super::prepare_task_flow_step(
             &store,
@@ -2834,7 +3082,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn human_task_node_queues_without_starting_a_provider_and_resolve_advances() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, mut task, lease, mut flow) = human_task_fixture().await;
         let prepared = super::prepare_task_flow_step(
             &store,
@@ -2887,7 +3137,9 @@ mod planning_tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the guard serializes LF_BIN for the fixture
     async fn declined_human_task_node_returns_to_preceding_autonomous_step_with_reason() {
+        let _lf_bin = super::TestLfBinGuard::pin();
         let (store, mut task, lease, mut flow) = human_task_fixture().await;
         assert!(super::prepare_task_flow_step(
             &store,
@@ -2972,7 +3224,12 @@ mod planning_tests {
             project_id: ProjectId::new(),
             worktree: "/tmp/incident".into(),
             workspace_slug: "incident".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("incident", "ship-5whys", "ship"),
+            lifecycle: TaskLifecyclePlan::new(
+                crate::task::TaskOutcome::Delivery,
+                "incident",
+                "ship-5whys",
+                "ship",
+            ),
             lifecycle_phase: TaskLifecyclePhase::First,
             phase_epoch: 1,
             phase_cursor: 0,
@@ -3034,7 +3291,12 @@ mod planning_tests {
             project_id: crate::project::ProjectId::new(),
             worktree: "/tmp/task".into(),
             workspace_slug: "ship-it".to_string(),
-            lifecycle: TaskLifecyclePlan::standard("task-design", "task", "ship"),
+            lifecycle: TaskLifecyclePlan::new(
+                crate::task::TaskOutcome::Delivery,
+                "task-design",
+                "task",
+                "ship",
+            ),
             lifecycle_phase: TaskLifecyclePhase::Loop,
             phase_epoch: 1,
             phase_cursor: 0,

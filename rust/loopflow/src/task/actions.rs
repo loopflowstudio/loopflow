@@ -50,6 +50,7 @@ pub struct TaskActionEvidence<'a> {
     pub latest_pr_phase: Option<PrPhase>,
     pub latest_pr_after_merge: Option<AfterMerge>,
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
+    pub latest_pr_presentation_current: Option<bool>,
     pub completion_refusal: Option<&'a str>,
     pub resume_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
@@ -57,9 +58,17 @@ pub struct TaskActionEvidence<'a> {
     pub predecessor_phase: Option<PrPhase>,
     pub abandon_intent: bool,
     pub local_progress_unsettled: Option<bool>,
+    pub launch_refusal: Option<&'a str>,
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
+    if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned)
+        && !evidence.abandon_intent
+    {
+        if let Some(refusal) = evidence.launch_refusal {
+            return action(TaskAction::NoAction, refusal);
+        }
+    }
     let model = if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         action(TaskAction::NoAction, "Task is terminal")
     } else if evidence.abandon_intent {
@@ -73,11 +82,23 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
 
 fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
+        Some(PrPhase::Open) if evidence.latest_pr_presentation_current == Some(false) => action(
+            TaskAction::Resume,
+            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf pr land -c`",
+        ),
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
                 action(TaskAction::Resume, ci_failure_reason(ci))
             }
-            _ if evidence.latest_pr_merge_request.is_none() => body_action(evidence),
+            _ if evidence.latest_pr_merge_request.is_none()
+                && evidence.process_alive == Some(true) =>
+            {
+                action(TaskAction::NoAction, "Task body is preparing settlement")
+            }
+            _ if evidence.latest_pr_merge_request.is_none() => action(
+                TaskAction::Resume,
+                "PR is published but settlement is not armed; run `lf pr land -c`",
+            ),
             Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
                 let request = evidence
                     .latest_pr_merge_request
@@ -214,6 +235,7 @@ mod tests {
             latest_pr_phase: Some(phase),
             latest_pr_after_merge: after_merge,
             latest_pr_merge_request: None,
+            latest_pr_presentation_current: Some(true),
             completion_refusal: None,
             resume_refusal: None,
             ci,
@@ -221,6 +243,7 @@ mod tests {
             predecessor_phase: None,
             abandon_intent: false,
             local_progress_unsettled: Some(false),
+            launch_refusal: None,
         }
     }
 
@@ -237,7 +260,42 @@ mod tests {
     }
 
     #[test]
-    fn passing_published_pr_continues_the_task() {
+    fn invalid_lifecycle_suppresses_serial_pr_continuation() {
+        let mut evidence = evidence(PrPhase::Merged, Some(AfterMerge::ContinueTask), None);
+        evidence.predecessor_phase = Some(PrPhase::Abandoned);
+        evidence.resume_refusal = Some("Task has no active PR to resume");
+        evidence.launch_refusal = Some(
+            "Task INT-10 cannot launch: loop phase is missing autonomous_progress; abandon and replace it with valid flows",
+        );
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(
+            model.reason,
+            "Task INT-10 cannot launch: loop phase is missing autonomous_progress; abandon and replace it with valid flows"
+        );
+    }
+
+    #[test]
+    fn nonresumable_execution_blocker_names_the_user_as_next_owner() {
+        let mut evidence = evidence(PrPhase::Working, None, None);
+        evidence.process_alive = Some(false);
+        evidence.launch_refusal = Some(
+            "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Run",
+        );
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::NoAction));
+        assert_eq!(
+            model.reason,
+            "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Run"
+        );
+    }
+
+    #[test]
+    fn passing_published_pr_requires_settlement_to_be_armed() {
         let ci = CiObservation {
             head_sha: "head".to_string(),
             state: CiState::Passing,
@@ -249,7 +307,21 @@ mod tests {
         let model = derive_task_actions(&evidence);
 
         assert_eq!(model.recommended, Some(TaskAction::Resume));
-        assert_eq!(model.reason, "resume the parked Task");
+        assert_eq!(
+            model.reason,
+            "PR is published but settlement is not armed; run `lf pr land -c`"
+        );
+    }
+
+    #[test]
+    fn stale_or_missing_pr_copy_is_actionable_before_merge_state() {
+        let mut evidence = evidence(PrPhase::Open, Some(AfterMerge::CompleteTask), None);
+        evidence.latest_pr_presentation_current = Some(false);
+
+        let model = derive_task_actions(&evidence);
+
+        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert!(model.reason.contains("reviewer-facing PR title and body"));
     }
 
     #[test]

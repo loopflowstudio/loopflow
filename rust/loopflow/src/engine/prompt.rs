@@ -2346,6 +2346,7 @@ mod tests {
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             ..Default::default()
         };
@@ -2367,6 +2368,7 @@ mod tests {
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             ..Default::default()
         };
@@ -2465,6 +2467,7 @@ mod tests {
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             diff: Some("diff content".to_string()),
             clipboard: Some("clipboard content".to_string()),
@@ -3058,6 +3061,7 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             ..Default::default()
         };
@@ -3092,6 +3096,7 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             ..Default::default()
         };
@@ -3135,6 +3140,7 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             ..Default::default()
         };
@@ -3172,6 +3178,7 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             message: Some("login page crashes".to_string()),
             ..Default::default()
@@ -3191,6 +3198,7 @@ directions:
                 default_agent: None,
                 directions: vec![],
                 action_style: None,
+                capabilities: vec![],
             }),
             ..Default::default()
         };

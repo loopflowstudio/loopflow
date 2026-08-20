@@ -1,6 +1,7 @@
 ---
 description: Implement the next coherent prevention from an incident's 5 Whys.
 action_style: procedural
+capabilities: [task_implementation]
 ---
 Ship one prevention from the incident analysis.
 

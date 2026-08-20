@@ -359,12 +359,24 @@ public struct PrSnapshot: Decodable, Sendable, Identifiable, Hashable {
 
 public struct PrPublicationSnapshot: Decodable, Sendable, Hashable {
     public let requestedAt: String
+    public let presentation: PrPresentationSnapshot?
     public let github: GithubPrSnapshot?
     public let merge: PrMergeRequestSnapshot?
 
     enum CodingKeys: String, CodingKey {
-        case github, merge
+        case presentation, github, merge
         case requestedAt = "requested_at"
+    }
+}
+
+public struct PrPresentationSnapshot: Decodable, Sendable, Hashable {
+    public let title: String
+    public let body: String
+    public let headSha: String
+
+    enum CodingKeys: String, CodingKey {
+        case title, body
+        case headSha = "head_sha"
     }
 }
 

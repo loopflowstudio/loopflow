@@ -237,8 +237,13 @@ enum MockWaveFixture {
                 "phase": "open",
                 "empty": false,
                 "publication": {
-                  "requested_at": "2026-07-13T18:45:00Z",
-                  "github": {
+                    "requested_at": "2026-07-13T18:45:00Z",
+                    "presentation": {
+                        "title": "Ship infrastructure task",
+                        "body": "Explains the intent and proof for this head.",
+                        "head_sha": "3333333333333333333333333333333333333333"
+                    },
+                    "github": {
                     "number": 912,
                     "url": "https://github.com/loopflowstudio/loopflow/pull/912"
                   },

@@ -807,10 +807,11 @@ fn print_task(task: &loopflow::task::Task, json: bool) -> anyhow::Result<()> {
             .unwrap_or("none");
         let body = format_child_body(&task.agent, &task.provider, snapshot.invocation.as_ref());
         println!(
-            "{}  {}\n  task: {}\n  phase: {} cycle {}\n  flow: {} (iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
+            "{}  {}\n  task: {}\n  outcome: {}\n  phase: {} cycle {}\n  flow: {} (iteration {}, step {})\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}\n  reason: {}",
             task.plan.identifier,
             work_status_label(&snapshot.status),
             task.id,
+            task.lifecycle.outcome.as_str(),
             task.lifecycle_phase.as_str(),
             task.lifecycle_cycle(),
             task.phase_plan().flow,
@@ -1036,6 +1037,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             first,
             loop_,
             finally,
+            design_only,
             stack_on,
             directive,
             json,
@@ -1045,12 +1047,15 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flows: loopflow::ops::task::TaskFlowOverrides::for_cycle(
-                        task_cycle(*fix, *feature),
-                        first.clone(),
-                        loop_.clone(),
-                        finally.clone(),
-                    ),
+                    flows: loopflow::ops::task::TaskFlowOverrides {
+                        outcome: design_only.then_some(loopflow::task::TaskOutcome::DesignOnly),
+                        ..loopflow::ops::task::TaskFlowOverrides::for_cycle(
+                            task_cycle(*fix, *feature),
+                            first.clone(),
+                            loop_.clone(),
+                            finally.clone(),
+                        )
+                    },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                 },
@@ -1066,6 +1071,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             first,
             loop_,
             finally,
+            design_only,
             stack_on,
             directive,
             json,
@@ -1077,12 +1083,15 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 piped_task_report()?,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flows: loopflow::ops::task::TaskFlowOverrides::for_cycle(
-                        task_cycle(*fix, *feature),
-                        first.clone(),
-                        loop_.clone(),
-                        finally.clone(),
-                    ),
+                    flows: loopflow::ops::task::TaskFlowOverrides {
+                        outcome: design_only.then_some(loopflow::task::TaskOutcome::DesignOnly),
+                        ..loopflow::ops::task::TaskFlowOverrides::for_cycle(
+                            task_cycle(*fix, *feature),
+                            first.clone(),
+                            loop_.clone(),
+                            finally.clone(),
+                        )
+                    },
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                 },
@@ -1785,6 +1794,7 @@ mod tests {
             parent_pr_id: None,
             publication: Some(PrPublication {
                 requested_at: now,
+                presentation: None,
                 github: Some(GithubPr {
                     number: 931,
                     url: "https://github.com/loopflowstudio/loopflow/pull/931".to_string(),

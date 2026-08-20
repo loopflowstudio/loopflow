@@ -1254,6 +1254,20 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(130);
     })
     .expect("failed to set Ctrl+C handler");
+
+    // Screenshot capture owns no Home, repository, account, or Run state. Its
+    // hidden supervisor must also be able to clean up after its public parent
+    // dies, so both forms dispatch before those unrelated boundaries.
+    match &cli.command {
+        Some(Commands::Screenshot { screenshot }) => {
+            return loopflow::lf::commands::screenshot::run(screenshot);
+        }
+        Some(Commands::ScreenshotSupervisor { screenshot }) => {
+            return loopflow::lf::commands::screenshot::run_supervisor(screenshot);
+        }
+        _ => {}
+    }
+
     let explicit_wave = cli
         .wave
         .as_deref()
@@ -1692,6 +1706,9 @@ fn main() -> anyhow::Result<()> {
             Some(Commands::Install { .. }) => {
                 unreachable!("install dispatches before home routing")
             }
+            Some(Commands::Screenshot { .. } | Commands::ScreenshotSupervisor { .. }) => {
+                unreachable!("screenshot dispatches before home routing")
+            }
             Some(Commands::RetiredOp { .. }) => unreachable!("retired op cannot parse"),
             Some(Commands::Ssh {
                 target,
@@ -1842,9 +1859,29 @@ mod tests {
     fn derived_tables_cover_commands_flags_and_aliases() {
         let tables = arg_tables();
         for command in [
-            ":", "desktop", "pr", "wt", "rebase", "commit", "auth", "release", "pm", "task",
-            "project", "flow", "skill", "chat", "usage", "top", "list", "ls", "status", "runs",
-            "trace", "help",
+            ":",
+            "desktop",
+            "screenshot",
+            "pr",
+            "wt",
+            "rebase",
+            "commit",
+            "auth",
+            "release",
+            "pm",
+            "task",
+            "project",
+            "flow",
+            "skill",
+            "chat",
+            "usage",
+            "top",
+            "list",
+            "ls",
+            "status",
+            "runs",
+            "trace",
+            "help",
         ] {
             assert!(tables.commands.contains_key(command), "command {command}");
         }

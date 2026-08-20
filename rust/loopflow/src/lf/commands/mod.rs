@@ -17,6 +17,7 @@ pub mod ops;
 pub mod profile;
 pub mod run;
 pub mod runs;
+pub mod screenshot;
 pub mod ssh;
 pub mod thread;
 pub mod tokens;

@@ -30,6 +30,13 @@ def browser_context_args(browser_context_args):
     }
 
 
+@pytest.fixture(scope="session", autouse=True)
+def browser_backend_does_not_claim_google_chrome(browser_type) -> None:
+    """Keep unattended website tests off the user's Chrome application."""
+    executable = Path(browser_type.executable_path).resolve()
+    assert "Google Chrome.app" not in executable.as_posix()
+
+
 @pytest.fixture(scope="session")
 def server() -> Generator[str, None, None]:
     """Start the website server for browser tests."""

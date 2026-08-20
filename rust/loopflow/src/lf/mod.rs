@@ -157,6 +157,24 @@ impl Cli {
     }
 }
 
+#[derive(Args, Debug, Clone)]
+pub struct ScreenshotArgs {
+    /// URL or local HTML file to capture
+    pub source: String,
+
+    /// PNG destination
+    #[arg(short = 'o', long = "output")]
+    pub output: PathBuf,
+
+    /// Viewport width in pixels
+    #[arg(long, default_value_t = 1440)]
+    pub width: u32,
+
+    /// Viewport height in pixels
+    #[arg(long, default_value_t = 900)]
+    pub height: u32,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Run an inline prompt
@@ -167,6 +185,17 @@ pub enum Commands {
     },
     /// Open or focus Loopflow.app
     Desktop,
+    /// Capture a URL or local HTML file without claiming the user's browser
+    Screenshot {
+        #[command(flatten)]
+        screenshot: ScreenshotArgs,
+    },
+    /// Internal owner-loss supervisor for one browser capture.
+    #[command(name = "__screenshot-supervisor", hide = true)]
+    ScreenshotSupervisor {
+        #[command(flatten)]
+        screenshot: ScreenshotArgs,
+    },
     /// Request a durable Ask session from the parent or User
     Ask {
         #[command(flatten)]
@@ -1989,6 +2018,29 @@ mod tests {
             error.to_string(),
             format!("lf {}\n", crate::build_info::BUILD_VERSION)
         );
+    }
+
+    #[test]
+    fn screenshot_requires_an_output_and_accepts_a_viewport() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "screenshot",
+            "page.html",
+            "--output",
+            "capture.png",
+            "--width",
+            "390",
+            "--height",
+            "844",
+        ])
+        .expect("parse screenshot");
+        let Some(Commands::Screenshot { screenshot }) = cli.command else {
+            panic!("expected screenshot command");
+        };
+        assert_eq!(screenshot.source, "page.html");
+        assert_eq!(screenshot.output, PathBuf::from("capture.png"));
+        assert_eq!((screenshot.width, screenshot.height), (390, 844));
+        assert!(Cli::try_parse_from(["lf", "screenshot", "page.html"]).is_err());
     }
 
     #[test]

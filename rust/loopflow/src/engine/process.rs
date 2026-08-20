@@ -1,6 +1,61 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+
+/// Owns a child process group until its work is known to be complete.
+///
+/// The child must be spawned into a fresh process group whose id is its pid.
+/// Interrupt cleanup is registered because the CLI signal handler exits the
+/// process without running Rust destructors.
+#[derive(Debug)]
+pub(crate) struct ProcessGroupGuard {
+    pid: Arc<AtomicU32>,
+}
+
+impl ProcessGroupGuard {
+    pub(crate) fn new(pid: u32) -> Self {
+        assert!(pid > 1, "owned process group must have a child pid");
+        let pid = Arc::new(AtomicU32::new(pid));
+        let interrupt_pid = Arc::clone(&pid);
+        crate::engine::agent::register_interrupt_cleanup(move || {
+            terminate_process_group(interrupt_pid.swap(0, Ordering::AcqRel));
+        });
+        Self { pid }
+    }
+
+    pub(crate) fn terminate(&self) {
+        terminate_process_group(self.pid.swap(0, Ordering::AcqRel));
+    }
+
+    pub(crate) fn disarm(&self) {
+        self.pid.store(0, Ordering::Release);
+    }
+}
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
+fn terminate_process_group(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(pid) {
+        // SAFETY: callers spawn the child into a fresh process group whose id
+        // is its pid; a negative pid targets only that owned group.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    crate::engine::platform::kill_process(pid);
+}
 
 pub(crate) fn current_process_group_id() -> Option<u32> {
     // SAFETY: getpgrp has no preconditions and does not dereference memory.
@@ -316,7 +371,7 @@ pub(crate) fn current_home_execution_context() -> Result<crate::child::ChildExec
     })
 }
 
-fn which_on_path(name: &Path) -> Option<PathBuf> {
+pub(crate) fn which_on_path(name: &Path) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))

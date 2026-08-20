@@ -1,5 +1,6 @@
 use std::fs;
 use std::fs::OpenOptions;
+use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -26,7 +27,8 @@ use crate::provider_auth::{
     capture_claude_authorization_code_from_chrome, capture_claude_profile_credentials,
     disconnect_provider_account_auth, import_ambient_claude_profile_credentials, no_event_sink,
     prepare_provider_account_access_token, provider_account_auth_status,
-    start_provider_account_auth, AuthStatus, Provider, ProviderAuthService, ProviderAuthSnapshot,
+    start_provider_account_auth, AuthError, AuthStatus, Provider, ProviderAuthService,
+    ProviderAuthSnapshot,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, ProviderAccount, ProviderAccountId, ProviderToken,
@@ -35,6 +37,7 @@ use crate::store::{
 
 const AUTH_STATUS_POLL_TIMEOUT: Duration = Duration::from_secs(180);
 const AUTH_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(1);
+const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 // Authorization-code flows wait on a human finishing a browser login; give
 // them the ~10 minutes the OAuth authorization itself stays valid.
 const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
@@ -367,7 +370,7 @@ async fn connect_managed_account(
         .await?
         {
             Some(code) => code,
-            None => capture_claude_authorization_code_visibly().await?,
+            None => prompt_for_claude_authorization_code().await?,
         };
         handle
             .submit_authorization_code(code.expose_secret())
@@ -376,15 +379,13 @@ async fn connect_managed_account(
         println!("Complete authorization in the browser.");
         open_chrome_profile(&chrome_profile, &verification_url)?;
     }
-    tokio::time::timeout(AUTH_STATUS_POLL_TIMEOUT, handle.wait())
-        .await
-        .map_err(|_| {
-            anyhow!(
-                "timed out waiting for {} account '{}' browser confirmation",
-                provider.display_name(),
-                account_login(account)
-            )
-        })??;
+    wait_for_browser_confirmation(
+        handle.wait(),
+        flow.expires_in,
+        provider,
+        account_login(account),
+    )
+    .await?;
 
     match provider {
         Provider::Claude => {
@@ -426,6 +427,47 @@ async fn connect_managed_account(
         profile.id
     );
     Ok(())
+}
+
+async fn wait_for_browser_confirmation<F>(
+    confirmation: F,
+    expires_in: Option<u64>,
+    provider: Provider,
+    login: &str,
+) -> Result<()>
+where
+    F: Future<Output = std::result::Result<(), AuthError>>,
+{
+    let timeout = Duration::from_secs(expires_in.unwrap_or(AUTH_CODE_FLOW_TIMEOUT_SECS));
+    let started_at = tokio::time::Instant::now();
+    let deadline = tokio::time::sleep_until(started_at + timeout);
+    let mut heartbeat = tokio::time::interval_at(
+        started_at + AUTH_BROWSER_HEARTBEAT_INTERVAL,
+        AUTH_BROWSER_HEARTBEAT_INTERVAL,
+    );
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    tokio::pin!(confirmation);
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut confirmation => return result.map_err(anyhow::Error::from),
+            _ = &mut deadline => {
+                return Err(anyhow!(
+                    "timed out waiting for {} account '{}' browser confirmation",
+                    provider.display_name(),
+                    login
+                ));
+            }
+            _ = heartbeat.tick() => {
+                println!(
+                    "Still waiting for browser approval ({}s elapsed); the login listener is still running. Press Ctrl-C to cancel.",
+                    started_at.elapsed().as_secs()
+                );
+            }
+        }
+    }
 }
 
 async fn bootstrap_access_profile(
@@ -789,100 +831,15 @@ fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn visible_claude_prompt_script(socket: &Path) -> String {
-    let socket = socket.to_string_lossy().replace('\'', "'\\''");
-    format!(
-        "#!/bin/zsh\n\
-         echo 'Claude authorization needs a visible handoff.'\n\
-         echo 'Approve the Chrome page, then paste its one-time code here.'\n\
-         read -r -s 'code?One-time code: '\n\
-         print\n\
-         if [[ -z \"$code\" ]]; then\n\
-           echo 'No code entered; close this window and rerun lf auth connect.'\n\
-           exit 1\n\
-         fi\n\
-         printf '%s' \"$code\" | /usr/bin/nc -U '{socket}'\n\
-         status=$?\n\
-         unset code\n\
-         if [[ $status -eq 0 ]]; then\n\
-           echo 'Authorization returned to Loopflow. This window can close.'\n\
-         else\n\
-           echo 'Loopflow stopped waiting; rerun lf auth connect.'\n\
-         fi\n\
-         exit $status\n"
-    )
-}
-
-#[cfg(all(target_os = "macos", not(test)))]
-async fn capture_claude_authorization_code_visibly() -> Result<SecretString> {
-    use std::io::{ErrorKind, Read};
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::net::UnixListener;
-
-    let handoff = tempfile::tempdir().context("create private Claude handoff")?;
-    let socket = handoff.path().join("authorization.sock");
-    let listener = UnixListener::bind(&socket).context("open private Claude handoff")?;
-    listener
-        .set_nonblocking(true)
-        .context("make Claude handoff nonblocking")?;
-    let script = handoff.path().join("Claude Authorization.command");
-    fs::write(&script, visible_claude_prompt_script(&socket))
-        .context("write visible Claude handoff")?;
-    fs::set_permissions(&script, fs::Permissions::from_mode(0o700))
-        .context("protect visible Claude handoff")?;
-
-    let status = Command::new("open")
-        .args(["-a", "Terminal"])
-        .arg(&script)
-        .status()
-        .context("open visible Claude authorization handoff")?;
-    if !status.success() {
-        return Err(anyhow!(
-            "could not open the visible Claude authorization handoff; rerun `lf auth connect claude <account>` in Terminal"
-        ));
-    }
-
-    let deadline = std::time::Instant::now() + AUTH_STATUS_POLL_TIMEOUT;
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .context("bound Claude handoff read")?;
-                let mut code = String::new();
-                stream
-                    .take(4097)
-                    .read_to_string(&mut code)
-                    .context("read visible Claude handoff")?;
-                let code = code.trim();
-                if code.is_empty() || code.len() > 4096 {
-                    return Err(anyhow!("visible Claude handoff returned an invalid code"));
-                }
-                return Ok(SecretString::new(code.to_string()));
-            }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    return Err(anyhow!(
-                        "timed out waiting for the visible Claude authorization handoff"
-                    ));
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            Err(error) => return Err(error).context("accept visible Claude handoff"),
-        }
-    }
-}
-
-#[cfg(all(not(target_os = "macos"), not(test)))]
-async fn capture_claude_authorization_code_visibly() -> Result<SecretString> {
+#[cfg(not(test))]
+async fn prompt_for_claude_authorization_code() -> Result<SecretString> {
     Ok(SecretString::new(rpassword::prompt_password(
-        "Browser handoff unavailable; paste the one-time code: ",
+        "Browser handoff unavailable; paste the one-time code in this terminal: ",
     )?))
 }
 
 #[cfg(test)]
-async fn capture_claude_authorization_code_visibly() -> Result<SecretString> {
+async fn prompt_for_claude_authorization_code() -> Result<SecretString> {
     Ok(SecretString::new("test-code".to_string()))
 }
 
@@ -1453,11 +1410,12 @@ fn format_relative_delta(seconds: i64) -> String {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::time::Duration;
 
     use time::OffsetDateTime;
 
     use crate::profile::EmailAddress;
-    use crate::provider_auth::{AuthStatus, Provider, ProviderAuthSnapshot};
+    use crate::provider_auth::{AuthError, AuthStatus, Provider, ProviderAuthSnapshot};
     use crate::store::{
         CredentialState, CredentialType, ProviderAccount, ProviderAccountId, RoutingState,
     };
@@ -1465,16 +1423,60 @@ mod tests {
     use super::{
         acquire_managed_login_lock, format_account, format_relative_delta, format_snapshot,
         import_account, install_claude_login, install_codex_login, parse_paid_through,
-        parse_routing_state,
+        parse_routing_state, wait_for_browser_confirmation,
     };
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn visible_claude_handoff_neither_echoes_nor_embeds_the_code() {
-        let script = super::visible_claude_prompt_script(std::path::Path::new("/tmp/auth.sock"));
-        assert!(script.contains("read -r -s"));
-        assert!(script.contains("/usr/bin/nc -U '/tmp/auth.sock'"));
-        assert!(!script.contains("verification_uri"));
+    #[tokio::test(start_paused = true)]
+    async fn browser_confirmation_survives_old_timeout_boundary() {
+        let started_at = tokio::time::Instant::now();
+        let confirmation = async {
+            tokio::time::sleep(Duration::from_secs(181)).await;
+            Ok::<(), AuthError>(())
+        };
+
+        wait_for_browser_confirmation(confirmation, None, Provider::Codex, "operator@example.com")
+            .await
+            .expect("browser confirmation should outlive the old timeout");
+
+        assert_eq!(started_at.elapsed(), Duration::from_secs(181));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn browser_confirmation_uses_ten_minute_default() {
+        let started_at = tokio::time::Instant::now();
+
+        let error = wait_for_browser_confirmation(
+            std::future::pending::<std::result::Result<(), AuthError>>(),
+            None,
+            Provider::Codex,
+            "operator@example.com",
+        )
+        .await
+        .expect_err("browser confirmation should remain bounded");
+
+        assert_eq!(started_at.elapsed(), Duration::from_secs(600));
+        assert!(error
+            .to_string()
+            .contains("timed out waiting for Codex account 'operator@example.com'"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn browser_confirmation_honors_provider_expiry() {
+        let started_at = tokio::time::Instant::now();
+
+        let error = wait_for_browser_confirmation(
+            std::future::pending::<std::result::Result<(), AuthError>>(),
+            Some(75),
+            Provider::Claude,
+            "operator@example.com",
+        )
+        .await
+        .expect_err("provider expiry should bound browser confirmation");
+
+        assert_eq!(started_at.elapsed(), Duration::from_secs(75));
+        assert!(error
+            .to_string()
+            .contains("timed out waiting for Claude account 'operator@example.com'"));
     }
 
     #[test]

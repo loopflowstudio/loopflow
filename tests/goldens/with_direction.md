@@ -63,6 +63,12 @@ convention (`<repo>.<name>`) is load-bearing, so never use raw `git worktree`.
 The current process and worktree are the default execution surface. Do the
 assigned work here with direct reads, edits, commands, and tests.
 
+## Browser Captures
+
+Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL screenshots.
+Do not invoke a GUI browser executable directly for capture; it can claim the
+user's browser instance and bypass the bounded capture supervisor.
+
 ## Evidence Loop
 
 Make the finish line explicit before acting: the observable result, the proof

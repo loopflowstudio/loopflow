@@ -43,6 +43,19 @@ lf task run DES-123 --directive "fix the flaky test" # keep one Task through mer
 lf task run DES-124 --stack-on DES-123                # dependent Task, separate worktree
 ```
 
+## Browser Captures
+
+```bash
+lf screenshot page.html -o page.png
+lf screenshot https://loopflow.studio -o mobile.png --width 390 --height 844
+```
+
+`lf screenshot` uses the standalone `chrome-headless-shell`, a temporary
+profile, and a fixed 30-second lifetime. It never falls back to the Google
+Chrome app, so unattended capture cannot claim the user's browser instance.
+Failed and interrupted captures leave any existing output unchanged. Install a
+missing backend with `playwright install --only-shell chromium`.
+
 ## Skills
 
 Names resolve in this order:

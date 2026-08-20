@@ -1,123 +1,318 @@
-# Remove Skill Capability Frontmatter From Task Validation
+# Make Task Lifecycles Structural and Preserve Task PR Identity
 
 ## Problem
 
-Task lifecycle validation currently decides whether a delivery Task can launch by
-looking for `capabilities: [task_implementation]` on a skill in its first or loop
-flow. That check adds Task-specific metadata to every custom implementation skill
-without proving that the skill will implement anything: an implementation prompt
-without the label is rejected, while a non-implementing prompt with the label is
-accepted.
+Task lifecycle validation currently predicts delivery from
+`capabilities: [task_implementation]` on a skill in the first or loop flow.
+That declaration is self-attested Markdown metadata: an implementation prompt
+without the label is rejected, while a non-implementing prompt with the label
+passes. The accompanying `delivery` / `design_only` Task outcome exists only to
+switch that semantic check on or off, so the flag, durable state, and DTO surface
+encode a distinction that the runtime cannot prove.
 
-This cuts against the Loopflow API project's endurance KR, which explicitly needs
-real work to run with "zero repo-authored skills added for the work." Repositories
-should be able to compose their existing skills into a Task lifecycle. Loopflow
-should validate properties it can observe from the expanded flow and reserve
-delivery judgment for the branch, review, gate, CI, and settlement evidence that
-exists after execution.
+The default feature lifecycle also stops at the wrong evidence boundary. It
+asks the human to approve the design before implementation, but `ship` can then
+settle without letting the human review the real configured-path behavior.
+Fix work has the opposite and intentional contract: restore first, then ask for
+human judgment only when the working demo exists.
+
+Finally, Task PR copy is persisted per head but is not bound to Task identity.
+Generated, cached, or explicitly supplied copy can replace the Linear Task name
+and omit its link. That makes the PR harder to trace and lets later refreshes or
+serial PRs erase the association.
+
+These are one Task API problem: launch should validate what the expanded graph
+can prove, human gates should sit at the two evidence boundaries that matter,
+and every published result should retain the identity of the Task that owns it.
 
 ## The demo
 
-Create a repo-local implementation skill with plain Markdown and select a loop
-flow containing it for a new Task. `lf task run DES-126 --loop custom-loop`
-accepts the lifecycle without a capability declaration; a human-only loop or a
-final flow that does not end in `op: pr land -c` is still rejected with the
-existing actionable errors.
+Run a feature Task with a repo-local implementation skill that has no capability
+frontmatter. The Task launches, parks once for design review, implements through
+the custom loop, then parks again on `demo` with the changed behavior exercised
+through the repository's real configured path. Accepting that demo is the last
+human action before `pr land -c` settles the Task.
 
-## Approach
+Publish the Task PR with deliberately generic authored copy. GitHub still shows
+the current Linear Task name at the start of the title and a direct Linear Task
+link in the body, while retaining the useful authored context. Refresh the PR
+and rotate to a later serial PR; both retain the same identity anchors.
 
-Remove `capabilities` from the skill model and frontmatter parser, delete the two
-built-in `task_implementation` declarations, and remove the implementation-label
-branch from `validate_task_lifecycle_facts`. A skill remains a prompt plus launch
-configuration (`agent`, `default_agent`, `directions`, and `action_style`), not a
-self-attested Task outcome.
+## Confirmed product contract
 
-Keep the lifecycle checks backed by the expanded graph:
+### One Task model
 
-- every phase must resolve to a non-empty flow with phase-legal step kinds;
-- the loop must contain autonomous agent work rather than only human nodes;
-- the terminal finally step must be `op: pr land -c` (or `--complete`).
+Delete `TaskOutcome` and its `Delivery` / `DesignOnly` variants. Delete
+`--design-only`, `TaskFlowOverrides.outcome`, lifecycle outcome persistence,
+status/JSON output, waiver logic, documentation, and focused tests. Restore
+`TaskLifecyclePlan` to the three pinned phase flows only:
 
-Preserve `TaskOutcome`, including `delivery`, `design_only`, `--design-only`,
-storage, and status output. It is the Task's explicit durable intent and is wider
-than this cleanup. It must no longer select a skill-frontmatter exception or be
-presented as pre-execution proof that a prompt will produce an implementation.
+```rust
+pub struct TaskLifecyclePlan {
+    pub first: TaskPhasePlan,
+    pub loop_: TaskPhasePlan,
+    pub finally: TaskPhasePlan,
+}
 
-Update the authoring and Task lifecycle docs to describe the remaining structural
-contract and the evidence boundary. Remove the capability-specific parser and
-lifecycle tests, and add a behavioral regression proving that an unlabeled
-repo-local skill is accepted in a delivery lifecycle. Existing external skill
-files that still contain `capabilities` need no compatibility code: the parser
-already reads only recognized frontmatter keys, so the retired key becomes inert
-like any other unknown key.
+impl TaskLifecyclePlan {
+    pub fn standard(
+        first_flow: impl Into<String>,
+        loop_flow: impl Into<String>,
+        finally_flow: impl Into<String>,
+    ) -> Self;
+}
+```
 
-## De-risking
+A Task may deliver code, investigation, documentation, or a design artifact.
+Its Linear directive and selected flows express that work; there is no second
+durable outcome label and no compatibility alias.
 
-| Question | Finding | Impact on design |
-|----------|---------|------------------|
-| Does `task_implementation` protect delivery? | No. It is self-attested Markdown metadata. The loader verifies neither the prompt nor the resulting branch, so false labels pass and real unlabeled implementation skills fail. | Delete the semantic check instead of replacing it with another prompt classification heuristic. |
-| Is skill `capabilities` used anywhere else? | Exact-reference search found one behavioral consumer: `validate_task_lifecycle_facts`. The other occurrences are parser plumbing, struct initializers, tests, docs, and the two built-in declarations. Runtime `AgentCapabilities`, typed capability Waits, and execution-boundary capability errors are separate concepts. | Remove the skill field end to end; do not touch provider, filesystem, Run-lease, or Wait capability handling. |
-| Which lifecycle guarantees remain computable before launch? | `load_task_flow` proves non-empty phase-legal composition; occurrence policy proves whether a loop is human-only; the final concrete op proves settlement intent. | Retain those checks and their actionable multi-violation error. |
-| Where can implementation be proved? | Only after execution, from the actual diff, tests, review, CI, PR state, and the final settlement path. The built-in `review-slice`, `gate`, and `pr land -c` path already operate at that evidence boundary. | Do not add a replacement launch-time classifier in this Task. |
-| Will deleting the field require a migration or break serialized DTOs? | No durable record stores skill capabilities. `Skill.capabilities` serializes only when non-empty, and the field was added solely for this check. Frontmatter parsing manually selects known keys and ignores unknown keys. | No schema, DTO, or compatibility migration. Remove stale built-in metadata and source references. |
-| Does removing the check erase `delivery` versus `design_only`? | No. `TaskOutcome` is independently persisted, shown in status, and pinned for Task identity; only its use as a capability-check switch is coupled here. | Preserve the outcome contract, but remove docs claiming that `--design-only` waives a skill-label requirement. |
-| Does the default lifecycle still satisfy the contract? | Yes. `slice` contains autonomous skills and `ship` ends in `op: pr land -c`. `task-design` may retain its authored human review because the loop, not every phase, owns autonomous progress. | Default Task behavior and flow names do not change. |
+The outcome column was introduced in the still-draft
+`task_lifecycle_contract` migration. Remove it from that draft and from all
+explicit Task SQL columns and parameters. Keep the PR presentation columns from
+the same draft. Do not add a compensating migration or retain reads for local
+databases that happened to run the earlier draft; an orphaned draft column is
+ignored by the explicit column lists.
 
-The focused baseline tests currently pass and pin the unwanted behavior:
-`int_10_lifecycle_names_every_missing_capability_and_correction`,
-`flow_steps_cannot_declare_skill_capabilities`, and
-`load_skill_parses_frontmatter_execution_contract`. They identify the exact tests
-to replace rather than a broader runtime regression.
+### Structural lifecycle validation only
 
-## Alternatives considered
+Remove `Skill.capabilities`, `SkillFrontmatter.capabilities`, parsing and
+serialization, the special flow-step rejection, both built-in
+`task_implementation` declarations, and every implementation-presence branch
+from `validate_task_lifecycle_facts`.
 
-| Approach | Tradeoff | Why not |
-|----------|----------|---------|
-| Move `task_implementation` onto a flow-level declaration | Keeps Task policy out of individual skills and makes custom flows declare their promise once. | It remains self-attested metadata with no evidence behind it, adds a second flow schema, and merely moves the false-confidence problem. |
-| Infer implementation from skill or flow names | Requires no new frontmatter and can recognize built-ins. | It hard-codes Loopflow's vocabulary, rejects valid repo-local work, and directly conflicts with the zero-repo-authored-skill operating target. |
-| Parse skill prose or ask a model to classify the flow before launch | Could recognize custom prompts without explicit labels. | Classification is nondeterministic, adds latency and provider dependence before every Task, and still predicts intent rather than observing delivery. |
-| Remove all lifecycle validation | Makes every composition launchable. | Human-only loops and non-settling final flows are structural dead ends that Loopflow can prove before spending a provider turn. Those checks earn their place. |
+Retain only facts computable from the expanded flow:
 
-## Key decisions
+- each phase resolves to a non-empty flow with phase-legal step kinds;
+- first and loop contain skills only;
+- finally contains one or more skills followed by optional ops;
+- the loop contains an autonomous skill occurrence rather than only human
+  nodes;
+- the final concrete step is `op: pr land -c` or `op: pr land --complete`.
 
-- Validate observable graph structure, not claimed prompt semantics.
-- Remove the capability field completely rather than leaving dead parser or DTO
-  plumbing.
-- Treat stale third-party `capabilities` frontmatter as inert through the normal
-  unknown-key behavior; add no migration, warning, alias, or compatibility path.
-- Keep `TaskOutcome` as durable intent. This Task removes its invalid launch-time
-  classifier, not the broader outcome API introduced alongside it.
-- Accept that an autonomous design-like loop can reach the gate. The capability
-  label never prevented that reliably; the final evidence-bearing review and
-  settlement path is the honest enforcement boundary.
+Describe refusals in structural language. A human-only loop "has no autonomous
+skill step"; a non-settling final flow "does not end with `op: pr land -c`."
+Do not describe either property as a declared capability.
 
-Wild success is boring authoring: an existing repo skill drops into a Project's
-Task loop, launches without Loopflow-specific annotations, and is judged by what
-it changed. Wild failure would be replacing the removed label with a name
-allowlist or hidden built-in preference, recreating the same coupling where
-custom flows are harder to see.
+Unknown `capabilities` keys in existing skill frontmatter become inert through
+the parser's ordinary unknown-key behavior. Add no warning, migration, alias,
+name allowlist, prose classifier, or flow-level replacement declaration.
+
+### Two gates for default feature work
+
+Change both the default Task lifecycle and the `--feature` / `--feat` preset to:
+
+```text
+first:   task-design   # kickoff -> human review-design (review_kickoff)
+loop:    slice         # autonomous implementation and review
+finally: ship-demo     # task-gate -> human demo (review_demo) -> land -c
+```
+
+The two gates are distinct and ordered:
+
+1. `review_kickoff` lets the human reshape the design before implementation.
+2. `review_demo` lets the human review real configured-path behavior after
+   implementation and before Task settlement.
+
+Keep the fix preset exactly at its current boundary:
+
+```text
+first:   incident
+loop:    slice
+finally: ship-demo
+```
+
+Fix work has one human gate, `review_demo`. It does not acquire a design-review
+gate.
+
+`TaskCycle` remains a launch-time preset, not persisted Task identity. Project
+flow configuration and explicit `--first`, `--loop`, and `--finally` overrides
+remain composable and may choose other lifecycles when they pass the structural
+checks above. Selecting `--feature` guarantees the two built-in gates unless an
+explicit phase override deliberately replaces part of that preset; no hidden
+"feature Task" state survives launch.
+
+### Task PR identity anchors
+
+Every GitHub PR owned by a Task carries identity derived from the current
+durable Task and cached PM snapshot:
+
+- title anchor: the exact current `task.plan.title` at the start of the GitHub
+  title;
+- body anchor: `Linear Task: [<identifier>](<provider issue URL>)`;
+- URL source: the `PmItem.url` matched by stable Linear issue UUID in the owning
+  Wave's cached PM snapshot.
+
+Do not copy the provider URL into `TaskPlan` or add another persistence field.
+The PM snapshot already owns that fact. Publication is cache-only and performs
+no surprise Linear refresh or network read. If the owning snapshot, issue, or
+valid HTTP(S) issue URL is absent, refuse Task PR publication before push or any
+GitHub mutation with an actionable `lf pm sync --wave <wave>` correction.
+
+Normalize raw copy after generated, cached, and explicit copy converge, but
+before either durable publication intent or GitHub create/update:
+
+```text
+<Task name>
+<Task name> — <authored title>   # when authored title adds distinct context
+
+Linear Task: [LOO-230](https://linear.app/...)
+
+<authored body>
+```
+
+If the authored title already begins with the exact current Task name, preserve
+it rather than duplicating the anchor. If the body already contains the exact
+current canonical link line, preserve one copy. When a title-length boundary
+forces a choice, remove or truncate only the optional authored suffix; never
+truncate the Task-name anchor. If the Task name alone cannot be published,
+refuse before side effects.
+
+Make the normalized copy the single value passed to both Task publication
+persistence and GitHub. Revalidate the anchors at the durable request boundary
+so no alternate caller can persist unanchored Task copy. Non-Task PRs pass
+through unchanged.
+
+Both existing publication routes must use this contract:
+
+- `lf pr publish` / `lf pr open` through `create_or_update_pr`;
+- `lf pr submit` / `lf pr land` through the land finalization path.
+
+Because both routes operate on the active `TaskPr`, the same normalization
+applies to refreshed heads and every successor created by serial PR rotation.
+The stored `PrPresentation` remains head-pinned and contains exactly the copy
+sent to GitHub.
+
+## Integration shape
+
+Keep policy in the Task PR boundary rather than teaching `pr-message`, `gate`,
+or individual agents about identity. Those producers continue to author useful
+review context; the Task-owned publication path adds and validates the durable
+anchors.
+
+The implementation should have three small responsibilities even if exact
+names differ:
+
+```rust
+struct TaskPrIdentity {
+    title: String,
+    identifier: String,
+    issue_url: String,
+}
+
+fn load_task_pr_identity(repo: &Path) -> OpsResult<Option<TaskPrIdentity>>;
+fn anchor_task_pr_copy(identity: Option<&TaskPrIdentity>, copy: PrCopy)
+    -> OpsResult<PrCopy>;
+fn request_task_pr_publication(repo: &Path, copy: &PrCopy) -> OpsResult<bool>;
+```
+
+Load and validate Task identity before a publication path crosses its first
+remote side-effect boundary. Resolve the raw copy through the existing explicit
+/ cached / generated precedence, anchor it once, then use that same copy for
+the stored request and GitHub command. Preserve the existing head and branch
+fences around publication.
+
+## Behavioral proof
+
+### Lifecycle
+
+- A repo-local skill with plain Markdown and no capability annotation can serve
+  as the loop of a structurally valid Task lifecycle.
+- A human-only loop and a finally flow without terminal `pr land -c` are both
+  reported in one actionable refusal.
+- Default and `--feature` expansion contain exactly two human occurrences in
+  order: `review_kickoff`, then `review_demo`.
+- `--fix` expansion contains exactly one human occurrence, `review_demo`, and
+  no `review_kickoff`.
+- Clap rejects the deleted `--design-only` flag.
+- Task JSON and persistence round trips contain only the three lifecycle flows.
+
+### PR copy
+
+- A Task publication given a generic title and body sends anchored copy to the
+  intercepted GitHub create/update command and persists that exact anchored
+  `PrPresentation` for the current head.
+- A refresh with replacement authored copy retains one current title anchor and
+  one current Linear link while preserving the replacement context.
+- The same anchoring helper is exercised against a sequence-2 active Task PR,
+  proving serial PRs do not bypass it.
+- An absent/null/invalid cached issue URL refuses before Git push or a GitHub
+  command and records no publication request.
+- A non-Task PR keeps its authored title and body byte-for-byte.
+
+Prefer extending the existing Task PR integration fixtures and intercepted
+`gh` scripts over tests of helper wiring. Assert the copy visible at the product
+boundary and in durable state.
+
+## Documentation
+
+- Remove capability declarations and guidance from skill authoring docs.
+- Remove `--design-only`, outcome, and waiver examples from Task docs and CLI
+  help.
+- Describe Task validation as structural composition plus evidence-bearing
+  review, CI, demo, and settlement.
+- Add `ship-demo` to the built-in flow reference and describe the default /
+  feature two-gate sequence and fix's single demo gate.
+- Document the Task-name and Linear-link PR invariant where publication and
+  serial PR behavior are explained.
+
+Do not touch provider `AgentCapabilities`, execution-boundary preflight,
+filesystem/network permissions, typed capability Waits, or Run lease authority.
+Those are runtime capabilities with observed failure modes, not skill claims.
+
+## Alternatives rejected
+
+| Approach | Why it loses |
+|----------|--------------|
+| Move `task_implementation` to flow frontmatter | Moves the same unproved claim into a second schema. |
+| Infer implementation from skill/flow names or prose | Rejects legitimate custom work and predicts semantics rather than observing results. |
+| Keep `design_only` as descriptive metadata | Leaves an otherwise behaviorless parallel Task type in storage, DTOs, and CLI. The directive and lifecycle already express the work. |
+| Require both human gates for every custom lifecycle | Breaks the intentional fix contract and turns launch presets into hidden persisted kinds. Structural custom composition remains valuable. |
+| Teach every PR-copy author to include Task identity | Generated, cached, explicit, refreshed, and serial paths can drift. The owning publication boundary is the only complete enforcement point. |
+| Persist the Linear URL again on `TaskPlan` | Duplicates a provider fact already keyed by stable issue UUID in the PM snapshot. |
+| Reject otherwise useful PR copy that omits anchors | Makes authors memorize machine-owned boilerplate. Deterministic normalization preserves their context and the invariant. |
 
 ## Scope
 
-- In scope: remove skill `capabilities` data/parsing/serialization, remove
-  `task_implementation` declarations and lifecycle validation, replace focused
-  tests, and correct authoring/Task lifecycle docs.
-- In scope: preserve and prove human-only-loop and terminal-settlement refusals.
-- Out of scope: provider `AgentCapabilities`, typed capability Waits, Run lease
-  authority, filesystem/network/provider preflight, and their user-facing errors.
-- Out of scope: removing or migrating `TaskOutcome`/`--design-only`, changing
-  built-in flow composition, or adding new post-execution gates.
+In scope:
+
+- remove skill capability schema and semantic lifecycle validation;
+- remove the `design_only` Task distinction end to end;
+- change default / feature gates while preserving fix gates;
+- enforce Task PR title/link identity across all publication paths;
+- update focused behavioral tests, CLI help, and user docs.
+
+Out of scope:
+
+- runtime provider/filesystem/network capabilities and preflight;
+- changing Task phase repetition, gate resolution, CI, merge, or settlement
+  authority;
+- persisting a feature/fix Task kind;
+- requiring the built-in human gates in arbitrary custom lifecycles;
+- fetching Linear during PR publication;
+- changing non-Task PR copy.
 
 ## Done when
 
-- A focused Rust test creates a repo-local implementation skill with no
-  frontmatter capability, selects it in a delivery Task loop, and
-  `resolve_task_lifecycle` succeeds.
-- The lifecycle regression still proves that a human-only loop and a finally
-  flow without terminal `pr land -c` are reported together and rejected.
-- `rg -n 'task_implementation|capabilities: \[task_implementation\]' rust/loopflow docs`
-  returns no matches.
-- `cargo test -p loopflow repo_local_task_flow_needs_no_capability_frontmatter`
-  passes.
-- `cargo test -p loopflow task_lifecycle_rejects_structural_dead_ends` passes.
+- `rg -n 'task_implementation|capabilities: \[task_implementation\]|design_only|design-only' rust/loopflow docs`
+  returns no Task-lifecycle matches.
+- Focused lifecycle tests prove unlabeled custom work, the two default/feature
+  gates, the single fix demo gate, and both retained structural refusals.
+- Focused PR tests prove initial, refreshed, and sequence-2 Task PRs retain the
+  current Task-name/title and Linear-link/body anchors through the real
+  publication boundary.
+- Missing Linear URL evidence fails before remote mutation; non-Task PR behavior
+  is unchanged.
 - `cargo fmt --check` passes.
+- `cargo clippy --all-targets -- -D warnings` passes for the affected crate.
+
+## Human review
+
+Confirmed in the `review_kickoff` session on 2026-08-20:
+
+- one Task model with no design-only outcome;
+- structural lifecycle validation with no skill semantic claims;
+- two gates for default/feature work and only the demo gate for fixes;
+- custom flow overrides remain structurally composable;
+- canonical Task-name and Linear-link PR anchors are inserted centrally while
+  preserving authored reviewer context.

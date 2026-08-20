@@ -1069,6 +1069,12 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         name: Option<String>,
+        /// Fix cycle: first task-fix, finally ship-demo (human gates at the demo)
+        #[arg(long, conflicts_with = "feature")]
+        fix: bool,
+        /// Feature cycle: first task-design, finally ship (human gates at the design)
+        #[arg(long, alias = "feat", conflicts_with = "fix")]
+        feature: bool,
         /// Override the Project's first flow for a new Task
         #[arg(long, value_name = "FLOW")]
         first: Option<String>,
@@ -1094,6 +1100,12 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         name: Option<String>,
+        /// Fix cycle: first task-fix, finally ship-demo (human gates at the demo)
+        #[arg(long, conflicts_with = "feature")]
+        fix: bool,
+        /// Feature cycle: first task-design, finally ship (human gates at the design)
+        #[arg(long, alias = "feat", conflicts_with = "fix")]
+        feature: bool,
         /// Override the Project's first flow
         #[arg(long, value_name = "FLOW")]
         first: Option<String>,

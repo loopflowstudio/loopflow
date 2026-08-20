@@ -1015,11 +1015,24 @@ fn run_project_command(repo: &Path, command: &ProjectCommand) -> anyhow::Result<
     }
 }
 
+fn task_cycle(fix: bool, feature: bool) -> Option<loopflow::ops::task::TaskCycle> {
+    // clap conflicts_with guarantees at most one flag is set.
+    if fix {
+        Some(loopflow::ops::task::TaskCycle::Fix)
+    } else if feature {
+        Some(loopflow::ops::task::TaskCycle::Feature)
+    } else {
+        None
+    }
+}
+
 fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Run {
             issue,
             name,
+            fix,
+            feature,
             first,
             loop_,
             finally,
@@ -1032,11 +1045,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 issue,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flows: loopflow::ops::task::TaskFlowOverrides {
-                        first: first.clone(),
-                        loop_: loop_.clone(),
-                        finally: finally.clone(),
-                    },
+                    flows: loopflow::ops::task::TaskFlowOverrides::for_cycle(
+                        task_cycle(*fix, *feature),
+                        first.clone(),
+                        loop_.clone(),
+                        finally.clone(),
+                    ),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                 },
@@ -1047,6 +1061,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             project_id,
             title,
             name,
+            fix,
+            feature,
             first,
             loop_,
             finally,
@@ -1061,11 +1077,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 piped_task_report()?,
                 loopflow::ops::task::TaskLaunchOptions {
                     name: name.clone(),
-                    flows: loopflow::ops::task::TaskFlowOverrides {
-                        first: first.clone(),
-                        loop_: loop_.clone(),
-                        finally: finally.clone(),
-                    },
+                    flows: loopflow::ops::task::TaskFlowOverrides::for_cycle(
+                        task_cycle(*fix, *feature),
+                        first.clone(),
+                        loop_.clone(),
+                        finally.clone(),
+                    ),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
                 },
